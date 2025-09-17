@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "434943069322",
+    "firebase_url": "https://gmwf-8fc4c-default-rtdb.firebaseio.com",
+    "project_id": "gmwf-8fc4c",
+    "storage_bucket": "gmwf-8fc4c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:434943069322:android:c1fb7c35d322ca19583173",
+        "android_client_info": {
+          "package_name": "com.example.gmwf"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA0DYELVamKSiGZq6OaOa32sQaxmTzyCv8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
