@@ -162,7 +162,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          value: _selectedBranch,
+                          initialValue: _selectedBranch,
                           decoration: const InputDecoration(
                             labelText: "Branch",
                             prefixIcon: Icon(Icons.account_tree),
@@ -178,7 +178,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          value: _selectedRole,
+                          initialValue: _selectedRole,
                           decoration: const InputDecoration(
                             labelText: "Role",
                             prefixIcon: Icon(Icons.badge),

@@ -46,8 +46,7 @@ class LocalStorageService {
         result[key] = value.toIso8601String();
       } else if (value is Map) {
         // recursive sanitize
-        result[key] = _sanitize(
-            Map<String, dynamic>.from(value as Map<dynamic, dynamic>));
+        result[key] = _sanitize(Map<String, dynamic>.from(value));
       } else if (value is List) {
         result[key] = value.map((e) {
           if (e is Timestamp) return e.toDate().toIso8601String();

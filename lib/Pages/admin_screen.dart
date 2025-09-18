@@ -127,7 +127,7 @@ class _AdminScreenState extends State<AdminScreen> {
               decoration: const InputDecoration(labelText: "Password"),
             ),
             DropdownButtonFormField<String>(
-              value: selectedRole,
+              initialValue: selectedRole,
               hint: const Text("Select Role"),
               items: _roles
                   .map((r) =>
@@ -223,7 +223,7 @@ class _AdminScreenState extends State<AdminScreen> {
               decoration: const InputDecoration(labelText: "Email"),
             ),
             DropdownButtonFormField<String>(
-              value: selectedRole,
+              initialValue: selectedRole,
               items: _roles
                   .map((r) =>
                       DropdownMenuItem(value: r, child: Text(r.toUpperCase())))
