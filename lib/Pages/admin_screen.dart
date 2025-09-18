@@ -7,9 +7,7 @@ import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 class AdminScreen extends StatefulWidget {
-  final String? userEmail;
-
-  const AdminScreen({super.key, this.userEmail});
+  const AdminScreen({super.key});
 
   @override
   State<AdminScreen> createState() => _AdminScreenState();
@@ -24,6 +22,13 @@ class _AdminScreenState extends State<AdminScreen> {
   bool _isOnline = true;
 
   final List<String> _roles = ["doctor", "receptionist", "dispensor"];
+
+  final Map<String, String> _defaultBranches = {
+    "gujrat": "Gujrat",
+    "sialkot": "Sialkot",
+    "karachi1": "Karachi-1",
+    "karachi2": "Karachi-2",
+  };
 
   @override
   void initState() {
@@ -56,32 +61,26 @@ class _AdminScreenState extends State<AdminScreen> {
     return results.isNotEmpty && results.first != ConnectivityResult.none;
   }
 
-  /// ✅ Fetch all branches (always shown) and their users grouped by role
+  /// ✅ Fetch all branches and users grouped by role
   Future<Map<String, Map<String, List<Map<String, dynamic>>>>>
       _getBranchesAndUsers() async {
     final result = <String, Map<String, List<Map<String, dynamic>>>>{};
 
+    for (var branchName in _defaultBranches.values) {
+      result[branchName] = {for (var role in _roles) role: []};
+    }
+
     if (await _checkOnline()) {
-      // Fetch all branches
-      final branchSnap = await _firestore.collection("branches").get();
-      final branchMap = {
-        for (var doc in branchSnap.docs) doc.id: doc["name"] ?? doc.id
-      };
-
-      // Init result with empty role maps
-      for (var branchName in branchMap.values) {
-        result[branchName] = {
-          for (var role in _roles) role: [] // ensure every role exists
-        };
-      }
-
-      // Fetch all users
       final usersSnap = await _firestore.collection("users").get();
+
       for (var doc in usersSnap.docs) {
         final data = doc.data();
-        final branchId = data["branchId"] ?? "unknown";
-        final branchName = branchMap[branchId] ?? branchId;
-        final role = (data["role"] ?? "Unknown").toString().toLowerCase();
+        final branchId =
+            data["branchId"]?.toString().toLowerCase() ?? "unknown";
+        final branchName = _defaultBranches[branchId] ??
+            data["branchName"]?.toString() ??
+            branchId;
+        final role = (data["role"] ?? "unknown").toString().toLowerCase();
 
         final user = {
           "uid": doc.id,
@@ -91,63 +90,126 @@ class _AdminScreenState extends State<AdminScreen> {
           "branchName": branchName,
         };
 
-        // Group into branch → role → users
         result.putIfAbsent(branchName, () => {for (var r in _roles) r: []});
-        result[branchName]!.putIfAbsent(role, () => []);
+        result[branchName]![role] ??= [];
         result[branchName]![role]!.add(user);
       }
     }
+
     return result;
   }
 
-  Future<void> _deleteUser(String uid) async {
-    try {
-      if (await _checkOnline()) {
-        await _firestore.collection("users").doc(uid).delete();
-      }
-      await _userBox?.delete(uid);
+  /// ✅ Add new branch with first user
+  void _createBranch() {
+    final branchCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    final passwordCtrl = TextEditingController();
+    String? selectedRole;
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ User deleted successfully")),
-      );
-      setState(() {});
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Error deleting user: $e")),
-      );
-    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Create Branch"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: branchCtrl,
+              decoration: const InputDecoration(labelText: "Branch Name"),
+            ),
+            TextField(
+              controller: emailCtrl,
+              decoration: const InputDecoration(labelText: "User Email"),
+            ),
+            TextField(
+              controller: passwordCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: "Password"),
+            ),
+            DropdownButtonFormField<String>(
+              value: selectedRole,
+              hint: const Text("Select Role"),
+              items: _roles
+                  .map((r) =>
+                      DropdownMenuItem(value: r, child: Text(r.toUpperCase())))
+                  .toList(),
+              onChanged: (v) => selectedRole = v,
+              decoration: const InputDecoration(labelText: "Role"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final branchName = branchCtrl.text.trim();
+              final email = emailCtrl.text.trim();
+              final password = passwordCtrl.text.trim();
+
+              if (branchName.isEmpty ||
+                  email.isEmpty ||
+                  password.isEmpty ||
+                  selectedRole == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("⚠️ Fill all fields")),
+                );
+                return;
+              }
+
+              try {
+                // 1️⃣ Normalize branchId
+                final branchId = _defaultBranches.entries
+                    .firstWhere(
+                      (e) => e.value.toLowerCase() == branchName.toLowerCase(),
+                      orElse: () =>
+                          MapEntry(branchName.toLowerCase(), branchName),
+                    )
+                    .key;
+
+                // 2️⃣ Create user in FirebaseAuth
+                final userCred = await _auth.createUserWithEmailAndPassword(
+                  email: email,
+                  password: password,
+                );
+
+                // 3️⃣ Save user in Firestore
+                await _firestore
+                    .collection("users")
+                    .doc(userCred.user!.uid)
+                    .set({
+                  "email": email,
+                  "role": selectedRole,
+                  "branchId": branchId,
+                  "branchName": branchName,
+                  "createdAt": FieldValue.serverTimestamp(),
+                });
+
+                if (!mounted) return;
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("✅ Branch '$branchName' created")),
+                );
+                setState(() {});
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text("❌ Error: $e")),
+                );
+              }
+            },
+            child: const Text("Create"),
+          ),
+        ],
+      ),
+    );
   }
 
-  Future<void> _updateUser(String uid, Map<String, dynamic> newData) async {
-    try {
-      if (await _checkOnline()) {
-        await _firestore.collection("users").doc(uid).update(newData);
-      }
-
-      final user = _userBox?.get(uid);
-      if (user != null) {
-        final updated = Map<String, dynamic>.from(user)..addAll(newData);
-        await _userBox?.put(uid, updated);
-      }
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ User updated")),
-      );
-      setState(() {});
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Error updating user: $e")),
-      );
-    }
-  }
-
+  /// ✅ Edit user info
   void _editUser(Map<String, dynamic> user) {
     final emailCtrl = TextEditingController(text: user["email"]);
-    final roleCtrl = TextEditingController(text: user["role"]);
+    String selectedRole = user["role"];
 
     showDialog(
       context: context,
@@ -157,23 +219,33 @@ class _AdminScreenState extends State<AdminScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-                controller: emailCtrl,
-                decoration: const InputDecoration(labelText: "Email")),
-            TextField(
-                controller: roleCtrl,
-                decoration: const InputDecoration(labelText: "Role")),
+              controller: emailCtrl,
+              decoration: const InputDecoration(labelText: "Email"),
+            ),
+            DropdownButtonFormField<String>(
+              value: selectedRole,
+              items: _roles
+                  .map((r) =>
+                      DropdownMenuItem(value: r, child: Text(r.toUpperCase())))
+                  .toList(),
+              onChanged: (v) => selectedRole = v ?? selectedRole,
+              decoration: const InputDecoration(labelText: "Role"),
+            ),
           ],
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Cancel"),
+          ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(ctx);
-              _updateUser(user["uid"], {
+              await _firestore.collection("users").doc(user["uid"]).update({
                 "email": emailCtrl.text.trim(),
-                "role": roleCtrl.text.trim(),
+                "role": selectedRole,
               });
+              if (mounted) setState(() {});
             },
             child: const Text("Save"),
           ),
@@ -182,16 +254,30 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  Future<void> _logout() async {
+  /// ✅ Delete user (Firestore only – admin cannot delete FirebaseAuth directly)
+  Future<void> _deleteUser(String uid) async {
     try {
-      await _auth.signOut();
-    } catch (_) {}
-    if (!mounted) return;
-    Navigator.pushReplacementNamed(context, '/login');
+      await _firestore.collection("users").doc(uid).delete();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("✅ User deleted")),
+        );
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("❌ Error deleting user: $e")),
+        );
+      }
+    }
   }
 
-  void _goToRegister() {
-    Navigator.pushNamed(context, '/register');
+  Future<void> _logout() async {
+    await _auth.signOut();
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, "/login");
   }
 
   @override
@@ -203,15 +289,26 @@ class _AdminScreenState extends State<AdminScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: Text("Admin Dashboard ${widget.userEmail ?? ""}"),
         backgroundColor: Colors.green,
+        title: const Text("Admin Dashboard",
+            style: TextStyle(color: Colors.white)),
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
+          TextButton.icon(
+            onPressed: _createBranch,
+            icon: const Icon(Icons.add_business, color: Colors.white),
+            label:
+                const Text("Add Branch", style: TextStyle(color: Colors.white)),
+          ),
+          TextButton.icon(
+            onPressed: _logout,
+            icon: const Icon(Icons.logout, color: Colors.white),
+            label: const Text("Logout", style: TextStyle(color: Colors.white)),
+          ),
         ],
       ),
       body: FutureBuilder<Map<String, Map<String, List<Map<String, dynamic>>>>>(
-        // branch → role → users
         future: _getBranchesAndUsers(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -222,74 +319,90 @@ class _AdminScreenState extends State<AdminScreen> {
           }
 
           final branches = snapshot.data!;
+
           return ListView(
+            padding: const EdgeInsets.all(12),
             children: branches.entries.map((branchEntry) {
               final branchName = branchEntry.key;
               final roleGroups = branchEntry.value;
 
-              return Card(
-                margin: const EdgeInsets.all(12),
-                child: ExpansionTile(
-                  title: Text(
-                    branchName,
-                    style: const TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.bold),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Text(
+                      branchName,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
                   ),
-                  children: roleGroups.entries.map((roleEntry) {
-                    final role = roleEntry.key;
-                    final users = roleEntry.value;
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.green, width: 2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: roleGroups.entries.map((roleEntry) {
+                          final role = roleEntry.key;
+                          final users = roleEntry.value;
 
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(8.0),
-                          child: Text(
-                            role[0].toUpperCase() + role.substring(1),
-                            style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.green),
-                          ),
-                        ),
-                        users.isEmpty
-                            ? const Padding(
-                                padding: EdgeInsets.only(left: 16, bottom: 8),
-                                child: Text(
-                                  "No users yet",
-                                  style: TextStyle(color: Colors.grey),
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                role[0].toUpperCase() + role.substring(1),
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              )
-                            : Column(
-                                children: users.map((user) {
-                                  return ListTile(
-                                    leading: const Icon(Icons.person,
-                                        color: Colors.green),
-                                    title: Text(user["email"] ?? "Unknown"),
-                                    subtitle: Text("Role: ${user["role"]}"),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          icon: const Icon(Icons.edit,
-                                              color: Colors.blue),
-                                          onPressed: () => _editUser(user),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete,
-                                              color: Colors.red),
-                                          onPressed: () =>
-                                              _deleteUser(user["uid"]),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
                               ),
-                      ],
-                    );
-                  }).toList(),
-                ),
+                              users.isEmpty
+                                  ? const Padding(
+                                      padding: EdgeInsets.all(8.0),
+                                      child: Text("No users yet",
+                                          style: TextStyle(color: Colors.grey)),
+                                    )
+                                  : Column(
+                                      children: users.map((user) {
+                                        return ListTile(
+                                          leading: const Icon(Icons.person,
+                                              color: Colors.green),
+                                          title: Text(user["email"] ?? ""),
+                                          subtitle:
+                                              Text("Role: ${user["role"]}"),
+                                          trailing: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              IconButton(
+                                                icon: const Icon(Icons.edit,
+                                                    color: Colors.blue),
+                                                onPressed: () =>
+                                                    _editUser(user),
+                                              ),
+                                              IconButton(
+                                                icon: const Icon(Icons.delete,
+                                                    color: Colors.red),
+                                                onPressed: () =>
+                                                    _deleteUser(user["uid"]),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                            ],
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
               );
             }).toList(),
           );
@@ -297,9 +410,8 @@ class _AdminScreenState extends State<AdminScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.green,
-        onPressed: _goToRegister,
-        tooltip: "Add New User",
-        child: const Icon(Icons.person_add),
+        onPressed: () => Navigator.pushNamed(context, "/register"),
+        child: const Icon(Icons.person_add, color: Colors.white),
       ),
     );
   }
