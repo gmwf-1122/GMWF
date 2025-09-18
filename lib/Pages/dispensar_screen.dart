@@ -1,4 +1,3 @@
-// lib/pages/dispensar_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -32,7 +31,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     _listenConnectivity();
   }
 
-  /// ✅ Open Hive local storage
   Future<void> _initHive() async {
     try {
       _localBox = await Hive.openBox("dispensar_${widget.branchId}");
@@ -42,7 +40,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     }
   }
 
-  /// ✅ Monitor connectivity and trigger sync when back online
   void _listenConnectivity() {
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       final hasNetwork = results.isNotEmpty &&
@@ -55,7 +52,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     });
   }
 
-  /// ✅ Sync cached receipts to Firestore
   Future<void> _syncLocalToFirestore() async {
     if (_localBox == null || !_localBox!.isOpen) return;
 
@@ -77,7 +73,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
             .doc(receiptId)
             .set(receipt, SetOptions(merge: true));
 
-        // ✅ Update patient status
         final patientSerial = receipt["serial"];
         if (patientSerial != null) {
           await _firestore
@@ -88,7 +83,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
               .set({"status": "Dispensed"}, SetOptions(merge: true));
         }
 
-        // ✅ Deduct stock
         if (receipt["medicines"] != null) {
           await _updateInventory(
               List<Map<String, dynamic>>.from(receipt["medicines"]));
@@ -102,7 +96,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     await _localBox!.put("pendingReceipts", unsynced);
   }
 
-  /// ✅ Deduct stock from branch inventory
   Future<void> _updateInventory(List<Map<String, dynamic>> usedMeds) async {
     final branchInventory = _firestore
         .collection("branches")
@@ -134,7 +127,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     }
   }
 
-  /// ✅ Generate receipt for a patient
   Future<void> _generateReceipt(Map<String, dynamic> patient) async {
     if (_localBox == null || !_localBox!.isOpen) return;
 
@@ -183,7 +175,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
         cached.add(receipt);
         await _localBox!.put("pendingReceipts", cached);
 
-        // Update local cache
         final patientsCache = Map<String, dynamic>.from(
           _localBox!.get("patientsCache", defaultValue: {}),
         );
@@ -206,7 +197,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     }
   }
 
-  /// ✅ Logout user
   Future<void> _logout(BuildContext context) async {
     await _auth.signOut();
     if (!mounted) return;
@@ -273,7 +263,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     );
   }
 
-  /// ✅ Patient card widget
   Widget _buildPatientCard(Map<String, dynamic> patient) {
     final patientName = patient["name"] ?? "Unknown";
     final assignedDoctor = patient["assignedDoctor"] ?? "Unknown";
@@ -300,7 +289,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     );
   }
 
-  /// ✅ Load patients with pending prescriptions
   Future<List<Map<String, dynamic>>> _loadPendingPatients() async {
     if (_localBox == null || !_localBox!.isOpen) return [];
 

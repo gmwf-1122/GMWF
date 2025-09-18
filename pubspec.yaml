@@ -22,6 +22,9 @@ dependencies:
   connectivity_plus: ^7.0.0
   http: ^1.2.2
 
+  #windows border 
+  bitsdojo_window: ^0.1.6
+
   # Unique IDs
   uuid: ^4.5.1
 

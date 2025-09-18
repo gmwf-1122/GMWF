@@ -31,7 +31,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
     _listenConnectivity();
   }
 
-  /// Initialize Hive box for local cache
   Future<void> _initHive() async {
     try {
       _localBox = await Hive.openBox("doctorData_${widget.branchId}");
@@ -41,23 +40,19 @@ class _DoctorScreenState extends State<DoctorScreen> {
     }
   }
 
-  /// Listen for connectivity changes (new API returns a List<ConnectivityResult>)
   void _listenConnectivity() {
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
-      final online =
-          results.isNotEmpty && results.first != ConnectivityResult.none;
+      final online = results.isNotEmpty &&
+          results.any((r) => r != ConnectivityResult.none);
 
       if (online && !_isOnline) {
         _syncLocalToFirestore();
       }
 
-      if (mounted) {
-        setState(() => _isOnline = online);
-      }
+      if (mounted) setState(() => _isOnline = online);
     });
   }
 
-  /// Sync offline prescriptions to Firestore
   Future<void> _syncLocalToFirestore() async {
     if (!_localBox.isOpen) return;
 
@@ -83,7 +78,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
     await _localBox.put("pendingPrescriptions", []);
   }
 
-  /// Logout function
   Future<void> _logout() async {
     try {
       await _auth.signOut();
@@ -100,7 +94,6 @@ class _DoctorScreenState extends State<DoctorScreen> {
     super.dispose();
   }
 
-  /// Load patients created by receptionists of the same branch
   Future<List<Map<String, dynamic>>> _loadPatients() async {
     if (!_localBox.isOpen) return [];
 

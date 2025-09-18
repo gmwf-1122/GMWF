@@ -1,3 +1,4 @@
+// lib/services/sync_service.dart
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -6,10 +7,11 @@ import 'local_storage_service.dart';
 class SyncService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  StreamSubscription<List<ConnectivityResult>>? _sub; // OLD version uses List<>
+  StreamSubscription<List<ConnectivityResult>>? _sub; // ✅ old API
   bool _isSyncing = false;
 
   void start() {
+    // ✅ Listen for connectivity changes (old API uses List<ConnectivityResult>)
     _sub = Connectivity()
         .onConnectivityChanged
         .listen((List<ConnectivityResult> results) {
@@ -82,8 +84,11 @@ class SyncService {
       print("✅ Synced user $uid");
     } catch (e, st) {
       print("⚠️ Failed to sync user $uid: $e\n$st");
-      await LocalStorageService.enqueueSync(
-          {'type': 'save_user', 'uid': uid, 'data': data});
+      await LocalStorageService.enqueueSync({
+        'type': 'save_user',
+        'uid': uid,
+        'data': data,
+      });
     }
   }
 
@@ -96,8 +101,10 @@ class SyncService {
       print("🗑️ Deleted user $uid");
     } catch (e, st) {
       print("⚠️ Failed to delete user $uid: $e\n$st");
-      await LocalStorageService.enqueueSync(
-          {'type': 'delete_user', 'uid': uid});
+      await LocalStorageService.enqueueSync({
+        'type': 'delete_user',
+        'uid': uid,
+      });
     }
   }
 }

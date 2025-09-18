@@ -28,6 +28,7 @@ class _RegisterPageState extends State<RegisterPage> {
     "karachi2": "Karachi-2",
   };
 
+  // ✅ Standardize role spelling here
   final List<String> _roles = ["doctor", "receptionist", "dispensor"];
 
   Future<void> _register() async {
@@ -46,17 +47,27 @@ class _RegisterPageState extends State<RegisterPage> {
 
     try {
       final userCred = await _auth.createUserWithEmailAndPassword(
-          email: email, password: password);
-      final uid = userCred.user!.uid;
+        email: email,
+        password: password,
+      );
+      final uid = userCred.user?.uid;
+      if (uid == null) throw Exception("❌ Failed to create user");
 
-      await _firestore.collection("users").doc(uid).set({
+      final normalizedRole = _selectedRole!.toLowerCase().trim();
+      final normalizedBranch = _selectedBranch!.toLowerCase().trim();
+
+      final userData = {
         "uid": uid,
         "email": email,
-        "role": _selectedRole,
-        "branchId": _selectedBranch,
-        "branchName": _branches[_selectedBranch!],
+        "role": normalizedRole,
+        "branchId": normalizedBranch,
+        "branchName": _branches[normalizedBranch],
         "createdAt": FieldValue.serverTimestamp(),
-      });
+      };
+
+      await _firestore.collection("users").doc(uid).set(userData);
+
+      debugPrint("✅ Registered user: $userData");
 
       _showSnack("✅ Registered successfully");
       if (mounted) Navigator.pushReplacementNamed(context, "/login");
@@ -70,6 +81,7 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   void _showSnack(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
@@ -79,9 +91,10 @@ class _RegisterPageState extends State<RegisterPage> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-              colors: [Colors.green, Colors.lightGreen],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight),
+            colors: [Colors.green, Colors.lightGreen],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
         ),
         child: Center(
           child: SizedBox(
@@ -89,17 +102,12 @@ class _RegisterPageState extends State<RegisterPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // Logo on the left
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.all(20),
-                    child: Image.asset(
-                      "assets/logo/gmwf.png",
-                      height: 240, // 50% larger
-                    ),
+                    child: Image.asset("assets/logo/gmwf.png", height: 240),
                   ),
                 ),
-                // Register form on the right
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.all(30),
@@ -108,24 +116,30 @@ class _RegisterPageState extends State<RegisterPage> {
                       borderRadius: BorderRadius.circular(16),
                       boxShadow: const [
                         BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 15,
-                            spreadRadius: 2,
-                            offset: Offset(0, 8)),
+                          color: Colors.black26,
+                          blurRadius: 15,
+                          spreadRadius: 2,
+                          offset: Offset(0, 8),
+                        ),
                       ],
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text("Register",
-                            style: TextStyle(
-                                fontSize: 28, fontWeight: FontWeight.bold)),
+                        const Text(
+                          "Register",
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                         const SizedBox(height: 20),
                         TextField(
                           controller: _emailController,
                           decoration: const InputDecoration(
-                              labelText: "Email",
-                              prefixIcon: Icon(Icons.email)),
+                            labelText: "Email",
+                            prefixIcon: Icon(Icons.email),
+                          ),
                         ),
                         const SizedBox(height: 20),
                         TextField(
@@ -135,36 +149,48 @@ class _RegisterPageState extends State<RegisterPage> {
                             labelText: "Password",
                             prefixIcon: const Icon(Icons.lock),
                             suffixIcon: IconButton(
-                              icon: Icon(_obscurePassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility),
+                              icon: Icon(
+                                _obscurePassword
+                                    ? Icons.visibility_off
+                                    : Icons.visibility,
+                              ),
                               onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword),
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
                             ),
                           ),
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedBranch,
+                          value: _selectedBranch,
                           decoration: const InputDecoration(
-                              labelText: "Branch",
-                              prefixIcon: Icon(Icons.account_tree)),
+                            labelText: "Branch",
+                            prefixIcon: Icon(Icons.account_tree),
+                          ),
                           hint: const Text("Choose Branch"),
                           items: _branches.entries
                               .map((e) => DropdownMenuItem(
-                                  value: e.key, child: Text(e.value)))
+                                    value: e.key,
+                                    child: Text(e.value),
+                                  ))
                               .toList(),
                           onChanged: (v) => setState(() => _selectedBranch = v),
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedRole,
+                          value: _selectedRole,
                           decoration: const InputDecoration(
-                              labelText: "Role", prefixIcon: Icon(Icons.badge)),
+                            labelText: "Role",
+                            prefixIcon: Icon(Icons.badge),
+                          ),
                           hint: const Text("Choose Role"),
                           items: _roles
                               .map((r) => DropdownMenuItem(
-                                  value: r, child: Text(r.capitalize())))
+                                    value: r,
+                                    child: Text(
+                                      '${r[0].toUpperCase()}${r.substring(1)}',
+                                    ),
+                                  ))
                               .toList(),
                           onChanged: (v) => setState(() => _selectedRole = v),
                         ),
@@ -174,16 +200,18 @@ class _RegisterPageState extends State<RegisterPage> {
                             : ElevatedButton(
                                 onPressed: _register,
                                 style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                    minimumSize:
-                                        const Size(double.infinity, 50)),
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                  minimumSize: const Size(double.infinity, 50),
+                                ),
                                 child: const Text("Register"),
                               ),
                         const SizedBox(height: 12),
                         TextButton(
-                          onPressed: () =>
-                              Navigator.pushReplacementNamed(context, "/login"),
+                          onPressed: () => Navigator.pushReplacementNamed(
+                            context,
+                            "/login",
+                          ),
                           child: const Text("Already have an account? Login"),
                         ),
                       ],
@@ -197,9 +225,4 @@ class _RegisterPageState extends State<RegisterPage> {
       ),
     );
   }
-}
-
-extension StringCasingExtension on String {
-  String capitalize() =>
-      length > 0 ? '${this[0].toUpperCase()}${substring(1)}' : '';
 }

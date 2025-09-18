@@ -1,4 +1,3 @@
-// lib/pages/home_router.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +8,7 @@ import 'receptionist_screen.dart';
 import 'doctor_screen.dart';
 import 'dispensar_screen.dart';
 import 'admin_screen.dart';
+import 'unknown_role.dart';
 
 class HomeRouter extends StatefulWidget {
   final User user;
@@ -23,8 +23,6 @@ class _HomeRouterState extends State<HomeRouter> {
   String? _role;
   String? _branchId;
 
-  final Set<String> _adminEmails = {"admin@gmd.com"};
-
   @override
   void initState() {
     super.initState();
@@ -35,7 +33,7 @@ class _HomeRouterState extends State<HomeRouter> {
     final email = widget.user.email?.toLowerCase();
     final uid = widget.user.uid;
 
-    if (email == null) {
+    if (email == null || email.isEmpty) {
       setState(() {
         _role = "unknown";
         _branchId = "unknown";
@@ -43,8 +41,9 @@ class _HomeRouterState extends State<HomeRouter> {
       return;
     }
 
-    // ✅ Admin shortcut
-    if (_adminEmails.contains(email) || uid == "admin_uid") {
+    // Hardcoded admin
+    if (email == "admin@gmd.com" || uid.startsWith("local-")) {
+      await LocalStorageService.seedLocalAdmins();
       setState(() {
         _role = "admin";
         _branchId = "all";
@@ -52,7 +51,6 @@ class _HomeRouterState extends State<HomeRouter> {
       return;
     }
 
-    // Firestore fetch from users collection
     try {
       final userDoc =
           await FirebaseFirestore.instance.collection("users").doc(uid).get();
@@ -81,30 +79,32 @@ class _HomeRouterState extends State<HomeRouter> {
       debugPrint("❌ Firestore fetch error: $e");
     }
 
-    // Fallback to Hive
+    // Fallback to local cache
     final cachedData = LocalStorageService.getLocalUserByEmail(email) ??
         LocalStorageService.getLocalUserByUid(uid);
 
     setState(() {
-      _role = cachedData?['role']?.toString() ?? "unknown";
+      _role = cachedData?['role']?.toString().toLowerCase() ?? "unknown";
       _branchId = cachedData?['branchId']?.toString() ?? "unknown";
     });
   }
 
   Widget _getScreenByRole(String role, String branchId) {
-    switch (role) {
+    final normalized = role.toLowerCase().trim();
+
+    switch (normalized) {
       case "doctor":
         return DoctorScreen(branchId: branchId);
       case "receptionist":
         return ReceptionistScreen(branchId: branchId);
-      case "dispensar":
+      case "dispensor": // ✅ fixed spelling
+      case "dispensar": // fallback if typo already saved
+      case "pharmacist": // optional alias
         return DispensarScreen(branchId: branchId);
       case "admin":
         return const AdminScreen();
       default:
-        return const Scaffold(
-          body: Center(child: Text("❌ Unknown Role")),
-        );
+        return const UnknownRolePage();
     }
   }
 
@@ -116,12 +116,7 @@ class _HomeRouterState extends State<HomeRouter> {
       );
     }
 
-    if (_role == "unknown" || _branchId == "unknown") {
-      return const Scaffold(
-        body: Center(child: Text("❌ Unknown Role")),
-      );
-    }
-
+    debugPrint("🚦 Routing user: role=$_role, branchId=$_branchId");
     return _getScreenByRole(_role!, _branchId!);
   }
 }

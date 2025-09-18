@@ -50,8 +50,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   List<Map<String, String>> branches = [];
 
   late Box<Map> _localBox;
-
-  /// ✅ updated type
   late StreamSubscription<List<ConnectivityResult>> _connectivitySub;
   bool _isOnline = true;
 
@@ -70,7 +68,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
     await _syncLocalPatients();
   }
 
-  /// ✅ updated to use List<ConnectivityResult>
   void _listenConnectivity() {
     _connectivitySub = Connectivity()
         .onConnectivityChanged
@@ -214,40 +211,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
     });
   }
 
-  Future<Map<String, dynamic>?> _fetchPatientBySerial(String serial) async {
-    if (selectedBranchId == null) return null;
-
-    if (_isOnline) {
-      final doc = await _firestore
-          .collection("branches")
-          .doc(selectedBranchId!)
-          .collection("patients")
-          .doc(serial)
-          .get();
-      if (doc.exists) return doc.data();
-    }
-
-    // Fallback offline
-    final box = await Hive.openBox<Map>("patients_$selectedBranchId");
-    final patient = box.get(serial);
-    if (patient != null) return Map<String, dynamic>.from(patient);
-
-    return null;
-  }
-
-  void _populateForm(Map<String, dynamic> data) {
-    setState(() {
-      _patientName.text = data["name"] ?? "";
-      _age.text = data["age"] ?? "";
-      _weight.text = data["weight"] ?? "";
-      _temperature.text = data["temperature"] ?? "";
-      _sugarTest.text = data["sugarTest"] ?? "";
-      selectedGender = data["gender"];
-      selectedBloodType = data["bloodType"];
-      currentSerial = data["serial"];
-    });
-  }
-
   Future<void> _savePatient() async {
     if (!_formKey.currentState!.validate()) return;
     if (selectedBranchId == null) {
@@ -299,6 +262,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
         );
       }
 
+      // ✅ Instead of closing app → just reset form and show next serial
       _formKey.currentState!.reset();
       _patientName.clear();
       _age.clear();
@@ -309,7 +273,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       setState(() {
         selectedBloodType = null;
         selectedGender = null;
-        currentSerial = null;
       });
       FocusScope.of(context).requestFocus(_nameFocus);
     } catch (e) {
@@ -338,39 +301,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
     super.dispose();
   }
 
-  Widget _buildBox(
-      {required Widget child, required String title, String? trailing}) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 3))
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(title,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold)),
-              if (trailing != null)
-                Text("Serial: $trailing",
-                    style: const TextStyle(color: Colors.green)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return WillPopScope(
@@ -383,6 +313,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
           automaticallyImplyLeading: false,
           actions: [
             IconButton(
+              icon: const Icon(Icons.inventory),
+              tooltip: "Inventory",
+              onPressed: () {
+                Navigator.pushNamed(context, "/inventory",
+                    arguments: selectedBranchId);
+              },
+            ),
+            IconButton(
                 icon: const Icon(Icons.logout),
                 tooltip: "Logout",
                 onPressed: _logout),
@@ -394,120 +332,91 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
             key: _formKey,
             child: ListView(
               children: [
-                _buildBox(
-                  title: "🔍 Fetch by Serial",
-                  child: TextFormField(
-                    controller: _serialController,
-                    decoration: const InputDecoration(
-                      labelText: "Enter Serial",
-                      prefixIcon: Icon(Icons.search),
+                // Show current serial prominently
+                if (currentSerial != null)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                        color: Colors.green.shade100,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Text(
+                      "Current Serial: $currentSerial",
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold),
                     ),
-                    onFieldSubmitted: (val) async {
-                      final patient = await _fetchPatientBySerial(val.trim());
-                      if (patient != null) {
-                        _populateForm(patient);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text("Patient data loaded ✅")),
-                        );
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Patient not found ❌")),
-                        );
-                      }
-                    },
                   ),
+
+                // Patient form
+                TextFormField(
+                  controller: _patientName,
+                  focusNode: _nameFocus,
+                  decoration: const InputDecoration(labelText: "Patient Name"),
+                  validator: (val) =>
+                      val!.isEmpty ? "Enter patient name" : null,
                 ),
-                _buildBox(
-                  title: "👨‍⚕️ Patient Info",
-                  trailing: currentSerial,
-                  child: Column(
-                    children: [
-                      TextFormField(
-                        controller: _patientName,
-                        focusNode: _nameFocus,
-                        decoration:
-                            const InputDecoration(labelText: "Patient Name"),
-                        validator: (val) =>
-                            val!.isEmpty ? "Enter patient name" : null,
-                      ),
-                      TextFormField(
-                        controller: _age,
-                        decoration: const InputDecoration(labelText: "Age"),
-                        keyboardType: TextInputType.number,
-                      ),
-                      TextFormField(
-                        controller: _weight,
-                        decoration: const InputDecoration(labelText: "Weight"),
-                        keyboardType: TextInputType.number,
-                      ),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedGender,
-                        items: genders
-                            .map((g) =>
-                                DropdownMenuItem(value: g, child: Text(g)))
-                            .toList(),
-                        onChanged: (val) =>
-                            setState(() => selectedGender = val),
-                        decoration: const InputDecoration(labelText: "Gender"),
-                      ),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedBloodType,
-                        items: bloodTypes
-                            .map((t) =>
-                                DropdownMenuItem(value: t, child: Text(t)))
-                            .toList(),
-                        onChanged: (val) =>
-                            setState(() => selectedBloodType = val),
-                        decoration:
-                            const InputDecoration(labelText: "Blood Type"),
-                      ),
-                      TextFormField(
-                        controller: _temperature,
-                        decoration:
-                            const InputDecoration(labelText: "Temperature"),
-                        keyboardType: TextInputType.number,
-                      ),
-                      TextFormField(
-                        controller: _sugarTest,
-                        decoration:
-                            const InputDecoration(labelText: "Sugar Test"),
-                      ),
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedBranchId,
-                        items: branches
-                            .map((branch) => DropdownMenuItem(
-                                value: branch["id"],
-                                child: Text(branch["name"] ?? branch["id"]!)))
-                            .toList(),
-                        onChanged: (val) async {
-                          if (val == null) return;
-                          final branch =
-                              branches.firstWhere((b) => b["id"] == val);
-                          setState(() {
-                            selectedBranchId = branch["id"];
-                            selectedBranchName = branch["name"];
-                          });
-                          _localBox = await Hive.openBox<Map>(
-                              "patients_${branch["id"]}");
-                          await _fetchCurrentSerial(branch["id"]!);
-                        },
-                        decoration:
-                            const InputDecoration(labelText: "Select Branch"),
-                      ),
-                      const SizedBox(height: 10),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                        onPressed: _savePatient,
-                        child: const Text("Send"),
-                      ),
-                    ],
-                  ),
+                TextFormField(
+                  controller: _age,
+                  decoration: const InputDecoration(labelText: "Age"),
+                  keyboardType: TextInputType.number,
+                ),
+                TextFormField(
+                  controller: _weight,
+                  decoration: const InputDecoration(labelText: "Weight"),
+                  keyboardType: TextInputType.number,
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedGender,
+                  items: genders
+                      .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                      .toList(),
+                  onChanged: (val) => setState(() => selectedGender = val),
+                  decoration: const InputDecoration(labelText: "Gender"),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedBloodType,
+                  items: bloodTypes
+                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                      .toList(),
+                  onChanged: (val) => setState(() => selectedBloodType = val),
+                  decoration: const InputDecoration(labelText: "Blood Type"),
+                ),
+                TextFormField(
+                  controller: _temperature,
+                  decoration: const InputDecoration(labelText: "Temperature"),
+                  keyboardType: TextInputType.number,
+                ),
+                TextFormField(
+                  controller: _sugarTest,
+                  decoration: const InputDecoration(labelText: "Sugar Test"),
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedBranchId,
+                  items: branches
+                      .map((branch) => DropdownMenuItem(
+                          value: branch["id"], child: Text(branch["name"]!)))
+                      .toList(),
+                  onChanged: (val) async {
+                    if (val == null) return;
+                    final branch = branches.firstWhere((b) => b["id"] == val);
+                    setState(() {
+                      selectedBranchId = branch["id"];
+                      selectedBranchName = branch["name"];
+                    });
+                    _localBox =
+                        await Hive.openBox<Map>("patients_${branch["id"]}");
+                    await _fetchCurrentSerial(branch["id"]!);
+                  },
+                  decoration: const InputDecoration(labelText: "Select Branch"),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 50)),
+                  onPressed: _savePatient,
+                  child: const Text("Save & Send"),
                 ),
               ],
             ),
