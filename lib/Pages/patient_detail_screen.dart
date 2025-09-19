@@ -8,6 +8,7 @@ class PatientDetailScreen extends StatefulWidget {
   final bool isOnline;
   final Box localBox;
   final String branchId;
+  final String doctorId; // ✅ doctor ID added
 
   const PatientDetailScreen({
     super.key,
@@ -16,6 +17,7 @@ class PatientDetailScreen extends StatefulWidget {
     required this.isOnline,
     required this.localBox,
     required this.branchId,
+    required this.doctorId,
   });
 
   @override
@@ -33,7 +35,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
   void initState() {
     super.initState();
     prescriptions = List<Map<String, dynamic>>.from(
-      widget.patientData['prescription'] ?? [],
+      widget.patientData['prescriptions'] ?? [], // ✅ fixed key to match model
     );
   }
 
@@ -50,6 +52,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
 
     final newPrescription = {
       "timestamp": DateTime.now().toIso8601String(),
+      "doctorId": widget.doctorId, // ✅ link to doctor
       "note": note,
       "medicines": medicineName.isNotEmpty
           ? [
@@ -66,7 +69,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
       if (widget.isOnline) {
         // ✅ Update Firestore
         await _firestore.collection("patients").doc(widget.patientId).set(
-          {"prescription": prescriptions},
+          {"prescriptions": prescriptions},
           SetOptions(merge: true),
         );
 
@@ -101,6 +104,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
             .get("pendingPrescriptions", defaultValue: []) as List;
         pending.add({
           "patientId": widget.patientId,
+          "doctorId": widget.doctorId, // ✅ offline also saves doctor
           "note": note,
           "medicines": medicineName.isNotEmpty
               ? [
@@ -146,6 +150,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
             "Date: ${date != null ? date.toLocal() : 'Unknown'}",
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
+          if (presc['doctorId'] != null)
+            Text("Doctor ID: ${presc['doctorId']}"),
           if (presc['note'] != null && presc['note'].toString().isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -201,7 +207,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                     Text("Blood Type: ${data['bloodType'] ?? 'N/A'}"),
                     Text("Temperature: ${data['temperature'] ?? 'N/A'}"),
                     Text("Sugar Test: ${data['sugarTest'] ?? 'N/A'}"),
-                    Text("Assigned Doctor: ${data['assignedDoctor'] ?? 'N/A'}"),
+                    Text(
+                        "Assigned Doctor: ${data['assignedDoctorId'] ?? 'N/A'}"),
                   ],
                 ),
               ),

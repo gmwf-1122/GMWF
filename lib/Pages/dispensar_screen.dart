@@ -1,3 +1,4 @@
+// lib/pages/dispensar_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -80,7 +81,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
               .doc(branchId)
               .collection("patients")
               .doc(patientSerial)
-              .set({"status": "Dispensed"}, SetOptions(merge: true));
+              .update({"status": "Completed"}); // ✅ Mark completed
         }
 
         if (receipt["medicines"] != null) {
@@ -164,7 +165,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
               .doc(widget.branchId)
               .collection("patients")
               .doc(patientSerial)
-              .set({"status": "Dispensed"}, SetOptions(merge: true));
+              .update({"status": "Completed"}); // ✅
         }
 
         await _updateInventory(medicines);
@@ -179,7 +180,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
           _localBox!.get("patientsCache", defaultValue: {}),
         );
         if (patientsCache.containsKey(patientSerial)) {
-          patientsCache[patientSerial]["status"] = "Dispensed";
+          patientsCache[patientSerial]["status"] = "Completed";
           await _localBox!.put("patientsCache", patientsCache);
         }
       }
@@ -233,8 +234,13 @@ class _DispensarScreenState extends State<DispensarScreen> {
             ),
           ],
         ),
-        body: FutureBuilder<List<Map<String, dynamic>>>(
-          future: _loadPendingPatients(),
+        body: StreamBuilder<QuerySnapshot>(
+          stream: _firestore
+              .collection("branches")
+              .doc(widget.branchId)
+              .collection("patients")
+              .where("status", isEqualTo: "PrescriptionReady") // ✅ Only ready
+              .snapshots(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -246,16 +252,20 @@ class _DispensarScreenState extends State<DispensarScreen> {
               );
             }
 
-            final pending = snapshot.data ?? [];
-            if (pending.isEmpty) {
+            final patients = snapshot.data?.docs ?? [];
+            if (patients.isEmpty) {
               return const Center(child: Text("🎉 No pending prescriptions"));
             }
 
             return ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: pending.length,
-              itemBuilder: (context, index) =>
-                  _buildPatientCard(pending[index]),
+              itemCount: patients.length,
+              itemBuilder: (context, index) {
+                final patient =
+                    patients[index].data() as Map<String, dynamic>? ?? {};
+                patient["serial"] = patients[index].id;
+                return _buildPatientCard(patient);
+              },
             );
           },
         ),
@@ -265,7 +275,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   Widget _buildPatientCard(Map<String, dynamic> patient) {
     final patientName = patient["name"] ?? "Unknown";
-    final assignedDoctor = patient["assignedDoctor"] ?? "Unknown";
+    final doctorId = patient["doctorId"] ?? "Unknown";
 
     return Card(
       elevation: 3,
@@ -274,7 +284,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
       child: ListTile(
         title: Text("👤 Patient: $patientName",
             style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text("👨‍⚕️ Doctor: $assignedDoctor"),
+        subtitle: Text("👨‍⚕️ Doctor ID: $doctorId"),
         trailing: ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.green,
@@ -287,43 +297,5 @@ class _DispensarScreenState extends State<DispensarScreen> {
         ),
       ),
     );
-  }
-
-  Future<List<Map<String, dynamic>>> _loadPendingPatients() async {
-    if (_localBox == null || !_localBox!.isOpen) return [];
-
-    Map<String, dynamic> data = {};
-
-    try {
-      if (_isOnline) {
-        final snapshot = await _firestore
-            .collection("branches")
-            .doc(widget.branchId)
-            .collection("patients")
-            .get();
-        for (var doc in snapshot.docs) {
-          data[doc.id] = doc.data();
-        }
-        await _localBox!.put("patientsCache", data);
-      } else {
-        final cached = _localBox!.get("patientsCache", defaultValue: {});
-        data = Map<String, dynamic>.from(cached);
-      }
-    } catch (e) {
-      debugPrint("❌ Error loading pending patients: $e");
-    }
-
-    final patients = data.entries.map((entry) {
-      final patient = Map<String, dynamic>.from(entry.value);
-      patient["serial"] = entry.key;
-      return patient;
-    }).toList();
-
-    return patients.where((p) {
-      final hasPrescription =
-          (p["prescription"] != null && (p["prescription"] as List).isNotEmpty);
-      final status = p["status"] ?? "";
-      return hasPrescription && status != "Dispensed";
-    }).toList();
   }
 }

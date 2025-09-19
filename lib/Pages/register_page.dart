@@ -28,8 +28,8 @@ class _RegisterPageState extends State<RegisterPage> {
     "karachi2": "Karachi-2",
   };
 
-  // ✅ Standardize role spelling here
-  final List<String> _roles = ["doctor", "receptionist", "dispensor"];
+  // ✅ Standardized role spellings
+  final List<String> _roles = ["doctor", "receptionist", "dispensar"];
 
   Future<void> _register() async {
     final email = _emailController.text.trim().toLowerCase();
@@ -65,7 +65,19 @@ class _RegisterPageState extends State<RegisterPage> {
         "createdAt": FieldValue.serverTimestamp(),
       };
 
+      // ✅ If doctor, also store doctorId = uid
+      if (normalizedRole == "doctor") {
+        userData["doctorId"] = uid;
+      }
+
+      // Save user
       await _firestore.collection("users").doc(uid).set(userData);
+
+      // ✅ Ensure branch exists
+      await _firestore.collection("branches").doc(normalizedBranch).set({
+        "name": _branches[normalizedBranch],
+        "createdAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       debugPrint("✅ Registered user: $userData");
 
@@ -162,7 +174,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedBranch,
+                          value: _selectedBranch,
                           decoration: const InputDecoration(
                             labelText: "Branch",
                             prefixIcon: Icon(Icons.account_tree),
@@ -178,7 +190,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                         const SizedBox(height: 20),
                         DropdownButtonFormField<String>(
-                          initialValue: _selectedRole,
+                          value: _selectedRole,
                           decoration: const InputDecoration(
                             labelText: "Role",
                             prefixIcon: Icon(Icons.badge),

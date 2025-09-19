@@ -9,8 +9,13 @@ import 'patient_detail_screen.dart';
 
 class DoctorScreen extends StatefulWidget {
   final String branchId;
+  final String doctorId; // ✅ added doctorId
 
-  const DoctorScreen({super.key, required this.branchId});
+  const DoctorScreen({
+    super.key,
+    required this.branchId,
+    required this.doctorId,
+  });
 
   @override
   State<DoctorScreen> createState() => _DoctorScreenState();
@@ -24,6 +29,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   bool _isOnline = true;
 
+  String get doctorId => widget.doctorId; // ✅ convenience getter
+
   @override
   void initState() {
     super.initState();
@@ -33,7 +40,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
   Future<void> _initHive() async {
     try {
-      _localBox = await Hive.openBox("doctorData_${widget.branchId}");
+      _localBox = await Hive.openBox("doctorData_${widget.branchId}_$doctorId");
       if (mounted) setState(() {});
     } catch (e) {
       debugPrint("❌ Hive init error: $e");
@@ -68,7 +75,9 @@ class _DoctorScreenState extends State<DoctorScreen> {
 
       try {
         await _firestore.collection("patients").doc(patientId).set({
-          "doctorNotes": FieldValue.arrayUnion([safeItem])
+          "doctorNotes": FieldValue.arrayUnion([safeItem]),
+          "doctorId": doctorId, // ✅ link doctorId
+          "doctorEmail": _auth.currentUser?.email,
         }, SetOptions(merge: true));
       } catch (e) {
         debugPrint("❌ Failed to sync prescription: $e");
@@ -104,6 +113,8 @@ class _DoctorScreenState extends State<DoctorScreen> {
         final snapshot = await _firestore
             .collection("patients")
             .where("branchId", isEqualTo: widget.branchId)
+            .where("assignedDoctorId",
+                isEqualTo: doctorId) // ✅ filter only my patients
             .get();
 
         for (var doc in snapshot.docs) {
@@ -163,7 +174,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
           final patients = snapshot.data ?? [];
           if (patients.isEmpty) {
             return const Center(
-              child: Text("No patients for this branch yet"),
+              child: Text("No patients assigned to you yet"),
             );
           }
 
@@ -202,6 +213,7 @@ class _DoctorScreenState extends State<DoctorScreen> {
                             isOnline: _isOnline,
                             localBox: _localBox,
                             branchId: widget.branchId,
+                            doctorId: doctorId, // ✅ pass doctorId forward
                           ),
                         ),
                       );

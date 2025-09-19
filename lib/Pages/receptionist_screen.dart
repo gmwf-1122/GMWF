@@ -33,6 +33,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   String? selectedBranchName;
   String? selectedBloodType;
   String? selectedGender;
+  String? selectedDoctorId; // ✅ doctor selection
   String? currentSerial;
 
   final List<String> bloodTypes = [
@@ -48,6 +49,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   final List<String> genders = ["Male", "Female"];
 
   List<Map<String, String>> branches = [];
+  List<Map<String, String>> doctors = []; // ✅ doctors list for dropdown
 
   late Box<Map> _localBox;
   late StreamSubscription<List<ConnectivityResult>> _connectivitySub;
@@ -60,6 +62,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
     _initHive();
     _listenConnectivity();
     _fetchBranches();
+    _fetchDoctors(widget.branchId);
     _fetchCurrentSerial(widget.branchId);
   }
 
@@ -113,6 +116,29 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       }
     } catch (e) {
       debugPrint("❌ Failed to fetch branches: $e");
+    }
+  }
+
+  Future<void> _fetchDoctors(String branchId) async {
+    try {
+      final snapshot = await _firestore
+          .collection("users")
+          .where("branchId", isEqualTo: branchId)
+          .where("role", isEqualTo: "doctor")
+          .get();
+
+      final list = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {"id": doc.id, "name": data["name"] ?? "Unknown Doctor"};
+      }).toList();
+
+      if (mounted) {
+        setState(() {
+          doctors = List<Map<String, String>>.from(list);
+        });
+      }
+    } catch (e) {
+      debugPrint("❌ Failed to fetch doctors: $e");
     }
   }
 
@@ -219,6 +245,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       );
       return;
     }
+    if (selectedDoctorId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Please assign a doctor")),
+      );
+      return;
+    }
 
     String serial = currentSerial ?? await _generateSerial(selectedBranchId!);
 
@@ -233,6 +265,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       "sugarTest": _sugarTest.text,
       "branchId": selectedBranchId!,
       "branchName": selectedBranchName ?? "",
+      "assignedDoctorId": selectedDoctorId, // ✅ save doctor
       "createdAt": DateTime.now().toIso8601String(),
       "status": "New",
       "prescriptions": [],
@@ -262,7 +295,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
         );
       }
 
-      // ✅ Instead of closing app → just reset form and show next serial
+      // Reset form
       _formKey.currentState!.reset();
       _patientName.clear();
       _age.clear();
@@ -273,6 +306,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       setState(() {
         selectedBloodType = null;
         selectedGender = null;
+        selectedDoctorId = null;
       });
       FocusScope.of(context).requestFocus(_nameFocus);
     } catch (e) {
@@ -332,7 +366,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
             key: _formKey,
             child: ListView(
               children: [
-                // Show current serial prominently
                 if (currentSerial != null)
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -366,7 +399,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                   keyboardType: TextInputType.number,
                 ),
                 DropdownButtonFormField<String>(
-                  initialValue: selectedGender,
+                  value: selectedGender,
                   items: genders
                       .map((g) => DropdownMenuItem(value: g, child: Text(g)))
                       .toList(),
@@ -374,7 +407,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                   decoration: const InputDecoration(labelText: "Gender"),
                 ),
                 DropdownButtonFormField<String>(
-                  initialValue: selectedBloodType,
+                  value: selectedBloodType,
                   items: bloodTypes
                       .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                       .toList(),
@@ -390,8 +423,22 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                   controller: _sugarTest,
                   decoration: const InputDecoration(labelText: "Sugar Test"),
                 ),
+
+                // ✅ Doctor selection dropdown
                 DropdownButtonFormField<String>(
-                  initialValue: selectedBranchId,
+                  value: selectedDoctorId,
+                  items: doctors
+                      .map((doc) => DropdownMenuItem(
+                            value: doc["id"],
+                            child: Text(doc["name"]!),
+                          ))
+                      .toList(),
+                  onChanged: (val) => setState(() => selectedDoctorId = val),
+                  decoration: const InputDecoration(labelText: "Assign Doctor"),
+                ),
+
+                DropdownButtonFormField<String>(
+                  value: selectedBranchId,
                   items: branches
                       .map((branch) => DropdownMenuItem(
                           value: branch["id"], child: Text(branch["name"]!)))
@@ -402,13 +449,16 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                     setState(() {
                       selectedBranchId = branch["id"];
                       selectedBranchName = branch["name"];
+                      selectedDoctorId = null;
                     });
                     _localBox =
                         await Hive.openBox<Map>("patients_${branch["id"]}");
                     await _fetchCurrentSerial(branch["id"]!);
+                    await _fetchDoctors(branch["id"]!);
                   },
                   decoration: const InputDecoration(labelText: "Select Branch"),
                 ),
+
                 const SizedBox(height: 20),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(

@@ -17,6 +17,7 @@ import 'pages/admin_screen.dart';
 // Services
 import 'services/local_storage_service.dart';
 import 'services/sync_service.dart';
+import 'services/firestore_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,14 +31,18 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    FirebaseFirestore.instance.settings =
-        const Settings(persistenceEnabled: true);
+    // ✅ Enable Firestore persistence for offline mode
+    FirebaseFirestore.instance.settings = const Settings(
+      persistenceEnabled: true,
+    );
 
+    // ✅ Initialize local storage + seed hardcoded admin
     await LocalStorageService.init();
     await LocalStorageService.seedLocalAdmins();
 
+    // ✅ Desktop window setup
     await windowManager.ensureInitialized();
-    WindowOptions windowOptions = const WindowOptions(
+    const windowOptions = WindowOptions(
       size: Size(1280, 720),
       center: true,
       backgroundColor: Colors.white,
@@ -64,6 +69,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final SyncService _syncService = SyncService();
+  final FirestoreService _firestoreService = FirestoreService();
 
   @override
   void initState() {
@@ -92,19 +98,19 @@ class _MyAppState extends State<MyApp> {
             );
           }
 
+          // ✅ If user is logged in, forward to HomeRouter
           if (snapshot.hasData && snapshot.data != null) {
-            return HomeRouter(
-                user: snapshot.data!); // ✅ handles branchId + role
+            return HomeRouter(user: snapshot.data!);
           }
 
+          // ✅ Otherwise show login page
           return const LoginPage();
         },
       ),
       routes: {
         '/login': (context) => const LoginPage(),
         '/register': (context) => const RegisterPage(),
-        '/admin': (context) =>
-            const AdminScreen(), // ✅ Admin doesn’t need branchId
+        '/admin': (context) => const AdminScreen(),
       },
     );
   }
