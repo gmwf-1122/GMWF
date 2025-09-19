@@ -7,7 +7,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 
 class AdminScreen extends StatefulWidget {
   const AdminScreen({super.key});
@@ -23,10 +22,10 @@ class _AdminScreenState extends State<AdminScreen> {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   bool _isOnline = true;
 
-  // keep consistent role spelling used across the app
-  final List<String> _roles = ["doctor", "receptionist", "dispensar"];
+  // keep consistent role spelling
+  final List<String> _roles = ["doctor", "receptionist", "dispensor"];
 
-  // fixed branch order always shown first (as requested)
+  // fixed branches
   final List<Map<String, String>> _fixedBranches = [
     {"branchId": "gujrat", "branchName": "Gujrat"},
     {"branchId": "sialkot", "branchName": "Sialkot"},
@@ -56,7 +55,7 @@ class _AdminScreenState extends State<AdminScreen> {
     Navigator.pushReplacementNamed(context, "/login");
   }
 
-  /// Create a branch AND require a first user (email/password/role)
+  /// Create a new branch + first user
   void _createBranchWithUser() {
     final branchCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
@@ -144,7 +143,6 @@ class _AdminScreenState extends State<AdminScreen> {
                 };
 
                 if (selectedRole == "doctor") {
-                  // assign doctorId as a readable id (you can adjust format)
                   userData["doctorId"] =
                       "DOC-${DateTime.now().millisecondsSinceEpoch}";
                 }
@@ -153,11 +151,9 @@ class _AdminScreenState extends State<AdminScreen> {
 
                 if (!mounted) return;
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text(
-                          "✅ Branch '$branchName' created with first user")),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(
+                        "✅ Branch '$branchName' created with first user")));
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text("❌ Error: $e")),
@@ -171,7 +167,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Create a user for an existing branch (same as before)
+  /// Create user inside a branch
   void _createUser(String branchId, String branchName) {
     final emailCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
@@ -229,7 +225,7 @@ class _AdminScreenState extends State<AdminScreen> {
                   "uid": userId,
                   "email": email,
                   "role": selectedRole,
-                  "branchId": branchId,
+                  "branchId": branchId.toLowerCase(),
                   "branchName": branchName,
                   "createdAt": FieldValue.serverTimestamp(),
                 };
@@ -257,7 +253,7 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Edit existing user
+  /// Edit user
   void _editUser(Map<String, dynamic> user) {
     final emailCtrl = TextEditingController(text: user["email"]);
     String selectedRole = user["role"] ?? "receptionist";
@@ -325,13 +321,12 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  /// Build a role-specific user list for a branch
+  /// Role-based user list
   Widget _buildRoleList(String branchId, String role) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore
           .collection("users")
-          .where("branchId", isEqualTo: branchId)
-          .where("role", isEqualTo: role)
+          .where("branchId", isEqualTo: branchId.toLowerCase())
           .snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
@@ -339,7 +334,17 @@ class _AdminScreenState extends State<AdminScreen> {
               height: 40, child: Center(child: CircularProgressIndicator()));
         }
 
-        final users = snap.data?.docs ?? [];
+        final allUsers = snap.data?.docs ?? [];
+
+        final users = allUsers.where((doc) {
+          final user = doc.data() as Map<String, dynamic>;
+          final r = (user["role"] ?? "").toString().toLowerCase();
+          if (role == "dispensor") {
+            return r == "dispensor" || r == "dispensar";
+          }
+          return r == role.toLowerCase();
+        }).toList();
+
         if (users.isEmpty) {
           return Text("No $role(s)",
               style: const TextStyle(color: Colors.grey, fontSize: 12));
@@ -375,20 +380,18 @@ class _AdminScreenState extends State<AdminScreen> {
     );
   }
 
-  /// Download receipts for a branch (writes JSON file and opens share dialog)
+  /// Download receipts
   Future<void> _downloadReceipts(String branchId, String branchName) async {
     try {
-      // receipts could be stored under different locations in your project.
-      // This expects a top-level 'receipts' collection with branchId field.
       final snap = await _firestore
           .collection("receipts")
-          .where("branchId", isEqualTo: branchId)
+          .where("branchId", isEqualTo: branchId.toLowerCase())
           .get();
 
       if (snap.docs.isEmpty) {
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text("⚠️ No receipts found for $branchName")));
+              SnackBar(content: Text("⚠️ No receipts for $branchName")));
         return;
       }
 
@@ -404,7 +407,6 @@ class _AdminScreenState extends State<AdminScreen> {
       final file = File("${dir.path}/${safeName}_receipts.json");
       await file.writeAsString(jsonStr);
 
-// Just save and show the file path
       debugPrint("📑 Receipts saved at: ${file.path}");
 
       if (mounted) {
@@ -417,10 +419,6 @@ class _AdminScreenState extends State<AdminScreen> {
           ),
         );
       }
-
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("✅ Receipts exported for $branchName")));
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(context)
@@ -428,82 +426,20 @@ class _AdminScreenState extends State<AdminScreen> {
     }
   }
 
-  /// Show a dialog with branch dropdown (fixed + dynamic) for download selection
-  Future<void> _chooseBranchAndDownload() async {
-    String? selected;
-    List<Map<String, String>> options = List.from(_fixedBranches);
-
-    // Fetch dynamic branches (merge)
-    try {
-      final snap = await _firestore.collection("branches").get();
-      for (var doc in snap.docs) {
-        final d = doc.data();
-        final id = d['branchId']?.toString() ?? doc.id;
-        final name =
-            d['branchName']?.toString() ?? (d['name']?.toString() ?? id);
-        // avoid duplicates
-        if (!options.any((b) => b['branchId'] == id))
-          options.add({"branchId": id, "branchName": name});
-      }
-    } catch (_) {
-      // ignore — at least fixed branches will be available
-    }
-
-    selected = options.isNotEmpty ? options.first['branchId'] : null;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Select branch to download receipts"),
-        content: options.isEmpty
-            ? const Text("No branches available")
-            : StatefulBuilder(
-                builder: (c, setSt) => DropdownButtonFormField<String>(
-                  value: selected,
-                  items: options
-                      .map((b) => DropdownMenuItem(
-                          value: b['branchId'], child: Text(b['branchName']!)))
-                      .toList(),
-                  onChanged: (v) => setSt(() => selected = v),
-                ),
-              ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: selected == null
-                ? null
-                : () {
-                    final branch =
-                        options.firstWhere((b) => b['branchId'] == selected);
-                    Navigator.pop(ctx);
-                    _downloadReceipts(
-                        branch['branchId']!, branch['branchName']!);
-                  },
-            child: const Text("Download"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Build final branch list: fixed first, then dynamic additional branches
+  /// Build branch list (fixed + Firestore)
   Future<List<Map<String, String>>> _buildFinalBranchList() async {
     final result = List<Map<String, String>>.from(_fixedBranches);
     try {
       final snap = await _firestore.collection("branches").get();
       for (var doc in snap.docs) {
         final d = doc.data();
-        final id = d['branchId']?.toString() ?? doc.id;
-        final name =
-            d['branchName']?.toString() ?? (d['name']?.toString() ?? id);
+        final id = (d['branchId'] ?? doc.id).toString().toLowerCase();
+        final name = d['branchName']?.toString() ?? id;
         if (!result.any((b) => b['branchId'] == id)) {
           result.add({"branchId": id, "branchName": name});
         }
       }
-    } catch (_) {
-      // ignore: show fixed only
-    }
+    } catch (_) {}
     return result;
   }
 
@@ -522,18 +458,11 @@ class _AdminScreenState extends State<AdminScreen> {
         title: const Text("Admin Dashboard",
             style: TextStyle(color: Colors.white)),
         actions: [
-          // Add Branch next to logout
           TextButton.icon(
             onPressed: _createBranchWithUser,
             icon: const Icon(Icons.add_business, color: Colors.white),
             label:
                 const Text("Add Branch", style: TextStyle(color: Colors.white)),
-          ),
-          // Download button to select branch & download receipts
-          IconButton(
-            onPressed: _chooseBranchAndDownload,
-            icon: const Icon(Icons.download, color: Colors.white),
-            tooltip: "Download receipts (choose branch)",
           ),
           TextButton.icon(
             onPressed: _logout,
@@ -600,8 +529,7 @@ class _AdminScreenState extends State<AdminScreen> {
                         const Text("Dispensars",
                             style: TextStyle(
                                 fontWeight: FontWeight.bold, fontSize: 16)),
-                        _buildRoleList(branchId,
-                            "dispensor"), // accept older stored role strings
+                        _buildRoleList(branchId, "dispensor"),
                       ]),
                 ),
               );
