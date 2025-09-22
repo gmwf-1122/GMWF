@@ -10,7 +10,6 @@ import 'firebase_options.dart';
 
 // Pages
 import 'pages/login_page.dart';
-import 'pages/register_page.dart';
 import 'pages/home_router.dart';
 import 'pages/admin_screen.dart';
 
@@ -109,7 +108,7 @@ class _MyAppState extends State<MyApp> {
       ),
       routes: {
         '/login': (context) => const LoginPage(),
-        '/register': (context) => const RegisterPage(),
+        // ❌ Removed '/register'
         '/admin': (context) => const AdminScreen(),
       },
     );

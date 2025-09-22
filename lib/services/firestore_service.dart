@@ -15,7 +15,7 @@ class FirestoreService {
         .get();
 
     if (query.docs.isNotEmpty) {
-      return query.docs.first.data() as Map<String, dynamic>;
+      return query.docs.first.data();
     }
     return null;
   }
@@ -25,8 +25,7 @@ class FirestoreService {
         .collection('users')
         .where('branchId', isEqualTo: branchId)
         .snapshots()
-        .map((snap) =>
-            snap.docs.map((d) => d.data() as Map<String, dynamic>).toList());
+        .map((snap) => snap.docs.map((d) => d.data()).toList());
   }
 
   // ---------------------------
@@ -141,8 +140,7 @@ class FirestoreService {
         .where('branchId', isEqualTo: branchId)
         .where('status', isEqualTo: status)
         .snapshots()
-        .map((s) =>
-            s.docs.map((d) => d.data() as Map<String, dynamic>).toList());
+        .map((s) => s.docs.map((d) => d.data()).toList());
   }
 
   // ---------------------------
@@ -168,7 +166,6 @@ class FirestoreService {
         .doc(branchId)
         .collection('inventory')
         .snapshots()
-        .map((s) =>
-            s.docs.map((d) => d.data() as Map<String, dynamic>).toList());
+        .map((s) => s.docs.map((d) => d.data()).toList());
   }
 }

@@ -7,7 +7,7 @@ import '../services/local_storage_service.dart';
 import 'receptionist_screen.dart';
 import 'doctor_screen.dart';
 import 'dispensar_screen.dart';
-import 'admin_screen.dart';
+import 'admin_screen.dart'; // ✅ updated name
 import 'unknown_role.dart';
 
 class HomeRouter extends StatelessWidget {
@@ -59,12 +59,12 @@ class HomeRouter extends StatelessWidget {
         );
       case "receptionist":
         return ReceptionistScreen(branchId: branchId);
-      case "dispensor": // ✅ unify role name
-      case "dispensar":
+      case "dispensor":
+      case "dispenser":
       case "pharmacist":
         return DispensarScreen(branchId: branchId);
       case "admin":
-        return const AdminScreen();
+        return const AdminScreen(); // ✅ updated usage
       default:
         return const UnknownRolePage();
     }
