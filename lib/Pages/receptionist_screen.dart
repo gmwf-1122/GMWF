@@ -1,3 +1,4 @@
+// lib/pages/receptionist_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+
+// ✅ Import InventoryPage (correct path)
+import 'inventory.dart';
 
 class ReceptionistScreen extends StatefulWidget {
   final String branchId;
@@ -45,7 +49,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   final List<String> genders = ["Male", "Female"];
 
   late Box<Map> _localBox;
-  late StreamSubscription<List<ConnectivityResult>> _connectivitySub;
+  late StreamSubscription<dynamic> _connectivitySub;
   bool _isOnline = true;
 
   @override
@@ -62,19 +66,25 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   }
 
   void _listenConnectivity() {
-    _connectivitySub = Connectivity()
-        .onConnectivityChanged
-        .listen((List<ConnectivityResult> results) async {
-      final result =
-          results.isNotEmpty ? results.first : ConnectivityResult.none;
-      final online = result != ConnectivityResult.none;
+    _connectivitySub =
+        Connectivity().onConnectivityChanged.listen((dynamic event) async {
+      List<ConnectivityResult> results;
+      if (event is ConnectivityResult) {
+        results = [event];
+      } else if (event is List<ConnectivityResult>) {
+        results = event;
+      } else {
+        results = [ConnectivityResult.none];
+      }
+
+      final online = results.any((r) => r != ConnectivityResult.none);
 
       if (online && !_isOnline) {
         await _syncLocalPatients();
+        await _fetchCurrentSerial(widget.branchId);
       }
-      if (mounted) {
-        setState(() => _isOnline = online);
-      }
+
+      if (mounted) setState(() => _isOnline = online);
     });
   }
 
@@ -103,8 +113,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
 
       if (mounted) {
         setState(() {
-          currentSerial =
-              "${datePart}-${(count + 1).toString().padLeft(3, '0')}";
+          currentSerial = "$datePart-${(count + 1).toString().padLeft(3, '0')}";
         });
       }
     } catch (e) {
@@ -119,10 +128,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       for (var patient in cachedPatients) {
         final Map<String, dynamic> p = Map<String, dynamic>.from(patient);
         final cnic = p["cnic"];
-        await _firestore.collection("patients").doc(cnic).set(
-              p,
-              SetOptions(merge: true),
-            );
+        await _firestore
+            .collection("branches")
+            .doc(widget.branchId)
+            .collection("patients")
+            .doc(cnic)
+            .set(p, SetOptions(merge: true));
       }
       await _localBox.clear();
     } catch (e) {
@@ -133,7 +144,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
   Future<void> _savePatient() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
     final cnic = _cnicController.text.trim();
+
+    final patientRef = _firestore
+        .collection("branches")
+        .doc(widget.branchId)
+        .collection("patients")
+        .doc(cnic);
+
+    final existing = await patientRef.get();
+
     final visitData = {
       "serial": currentSerial ?? "",
       "age": _age.text,
@@ -141,7 +164,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
       "temperature": _temperature.text,
       "sugarTest": _sugarTest.text,
       "branchId": widget.branchId,
-      "timestamp": DateTime.now().toIso8601String(),
+      "receptionistId": user.uid,
+      "createdAt": FieldValue.serverTimestamp(),
     };
 
     final patientData = {
@@ -155,10 +179,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
 
     try {
       if (_isOnline) {
-        await _firestore
-            .collection("patients")
-            .doc(cnic)
-            .set(patientData, SetOptions(merge: true));
+        if (existing.exists) {
+          await patientRef.update({
+            "visits": FieldValue.arrayUnion([visitData]),
+          });
+        } else {
+          await patientRef.set(patientData, SetOptions(merge: true));
+        }
 
         final today = DateTime.now();
         final datePart =
@@ -243,45 +270,41 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
     return WillPopScope(
       onWillPop: () async => false,
       child: Scaffold(
-        backgroundColor: const Color.fromRGBO(76, 175, 80, 1), // full green
+        backgroundColor: const Color.fromRGBO(76, 175, 80, 1),
         appBar: AppBar(
-          title: const Text(
-            "Receptionist Dashboard",
-            style: TextStyle(color: Colors.white),
-          ),
+          title: const Text("Receptionist Dashboard",
+              style: TextStyle(color: Colors.white)),
           backgroundColor: const Color.fromRGBO(76, 175, 80, 1),
           automaticallyImplyLeading: false,
           actions: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.green,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                ),
-                onPressed: () {
-                  Navigator.pushNamed(context, "/inventory");
-                },
-                icon: const Icon(Icons.inventory),
-                label: const Text("Inventory"),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.green,
               ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        InventoryPage(branchId: widget.branchId),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.inventory),
+              label: const Text("Inventory"),
             ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.green,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30)),
-                ),
-                onPressed: _logout,
-                icon: const Icon(Icons.logout),
-                label: const Text("Logout"),
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
               ),
+              onPressed: _logout,
+              icon: const Icon(Icons.logout),
+              label: const Text("Logout"),
             ),
+            const SizedBox(width: 8),
           ],
         ),
         body: Padding(
@@ -290,16 +313,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
             key: _formKey,
             child: Column(
               children: [
-                // Header Row
                 Row(
                   children: [
-                    const Text(
-                      "Patient Details",
-                      style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white),
-                    ),
+                    const Text("Patient Details",
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white)),
                     const Spacer(),
                     if (currentSerial != null)
                       Container(
@@ -309,41 +329,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(30),
                         ),
-                        child: Text(
-                          currentSerial!,
-                          style: const TextStyle(
-                              color: Colors.green,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold),
-                        ),
+                        child: Text(currentSerial!,
+                            style: const TextStyle(
+                                color: Colors.green,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold)),
                       ),
-                    const Spacer(),
-                    SizedBox(
-                      width: 220,
-                      child: TextField(
-                        controller: _searchController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration:
-                            _roundedInput("Search by CNIC or Serial").copyWith(
-                          hintStyle: const TextStyle(
-                              color: Color.fromARGB(179, 83, 83, 83)),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(30),
-                            borderSide: const BorderSide(color: Colors.white),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(30),
-                            borderSide:
-                                const BorderSide(color: Colors.white, width: 2),
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // Card
                 Expanded(
                   child: SingleChildScrollView(
                     child: Container(
@@ -354,7 +348,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                       ),
                       child: Column(
                         children: [
-                          // First row CNIC + Name
                           Row(
                             children: [
                               Expanded(
@@ -392,8 +385,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-
-                          // Second row Gender + Blood
                           Row(
                             children: [
                               Expanded(
@@ -406,6 +397,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                                       .toList(),
                                   onChanged: (val) =>
                                       setState(() => selectedGender = val),
+                                  validator: (v) =>
+                                      v == null ? "Select gender" : null,
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -419,13 +412,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                                       .toList(),
                                   onChanged: (val) =>
                                       setState(() => selectedBloodType = val),
+                                  validator: (v) =>
+                                      v == null ? "Select blood type" : null,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 12),
-
-                          // Third row Age + Weight
                           Row(
                             children: [
                               Expanded(
@@ -433,10 +426,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                                   controller: _age,
                                   decoration: _roundedInput("Age"),
                                   keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                    LengthLimitingTextInputFormatter(3),
-                                  ],
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -445,17 +434,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                                   controller: _weight,
                                   decoration: _roundedInput("Weight (kg)"),
                                   keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                    LengthLimitingTextInputFormatter(3),
-                                  ],
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 12),
-
-                          // Fourth row Temp + Sugar
                           Row(
                             children: [
                               Expanded(
@@ -463,10 +446,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                                   controller: _temperature,
                                   decoration: _roundedInput("Temperature (°C)"),
                                   keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                    LengthLimitingTextInputFormatter(3),
-                                  ],
                                 ),
                               ),
                               const SizedBox(width: 12),
@@ -479,7 +458,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen> {
                             ],
                           ),
                           const SizedBox(height: 20),
-
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.green,

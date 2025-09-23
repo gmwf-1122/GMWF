@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gmwf/services/auth_service.dart';
 
 class Register extends StatefulWidget {
   const Register({super.key});
@@ -10,209 +9,179 @@ class Register extends StatefulWidget {
 }
 
 class _RegisterState extends State<Register> {
-  final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
-
-  final _emailController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final AuthService _authService = AuthService();
 
   String? _selectedRole;
   String? _selectedBranch;
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
   bool _loading = false;
   bool _obscurePassword = true;
 
-  final Map<String, String> _branches = {
-    "gujrat": "Gujrat",
-    "sialkot": "Sialkot",
-    "karachi1": "Karachi-1",
-    "karachi2": "Karachi-2",
-  };
+  final List<String> roles = ["Doctor", "Receptionist", "Dispenser"];
+  final List<String> branches = ["Gujrat", "Sialkot", "Karachi-1", "Karachi-2"];
 
-  final List<String> _roles = ["doctor", "receptionist", "dispensar"];
-
-  Future<void> _register() async {
-    final email = _emailController.text.trim().toLowerCase();
-    final password = _passwordController.text.trim();
-
-    if (email.isEmpty ||
-        password.isEmpty ||
-        _selectedBranch == null ||
-        _selectedRole == null) {
-      _showSnack("⚠️ Fill all fields and select Branch/Role");
-      return;
-    }
+  Future<void> _registerUser() async {
+    if (!_formKey.currentState!.validate()) return;
 
     setState(() => _loading = true);
 
     try {
-      final userCred = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+      final branchId = _selectedBranch!.toLowerCase().replaceAll(" ", "");
+      final branchName = _selectedBranch!;
+
+      await _authService.signUp(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
+        _selectedRole!,
+        branchId,
+        branchName, // ✅ now passed correctly
       );
-      final uid = userCred.user?.uid;
-      if (uid == null) throw Exception("❌ Failed to create user");
 
-      final normalizedRole = _selectedRole!.toLowerCase().trim();
-      final normalizedBranch = _selectedBranch!.toLowerCase().trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("✅ User registered successfully"),
+          backgroundColor: Colors.green,
+        ),
+      );
 
-      final userData = {
-        "uid": uid,
-        "email": email,
-        "role": normalizedRole,
-        "branchId": normalizedBranch,
-        "branchName": _branches[normalizedBranch],
-        "createdAt": FieldValue.serverTimestamp(),
-      };
-
-      if (normalizedRole == "doctor") {
-        userData["doctorId"] = uid;
-      }
-
-      await _firestore.collection("users").doc(uid).set(userData);
-
-      await _firestore.collection("branches").doc(normalizedBranch).set({
-        "name": _branches[normalizedBranch],
-        "createdAt": FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      _showSnack("✅ Registered successfully");
-      if (mounted) Navigator.pushReplacementNamed(context, "/login");
-    } on FirebaseAuthException catch (e) {
-      _showSnack("❌ ${e.message}");
+      _emailController.clear();
+      _passwordController.clear();
+      setState(() {
+        _selectedRole = null;
+        _selectedBranch = null;
+      });
     } catch (e) {
-      _showSnack("❌ Registration failed: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      setState(() => _loading = false);
     }
-  }
-
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Register", style: TextStyle(color: Colors.white)),
+        title:
+            const Text("Register User", style: TextStyle(color: Colors.white)),
         backgroundColor: Colors.green,
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          child: SizedBox(
-            width: 500,
-            child: Container(
-              padding: const EdgeInsets.all(30),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 15,
-                    spreadRadius: 2,
-                    offset: Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    "Register",
-                    style: TextStyle(
-                      fontSize: 28,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              Image.asset("assets/logo/gmwf.png", height: 100),
+              const SizedBox(height: 20),
+              const Text("Register New User",
+                  style: TextStyle(
+                      fontSize: 20,
                       fontWeight: FontWeight.bold,
-                    ),
+                      color: Colors.green)),
+              const SizedBox(height: 20),
+              _buildTextField(_emailController, "Email", Icons.email, false),
+              const SizedBox(height: 15),
+              _buildTextField(
+                  _passwordController, "Password", Icons.lock, true),
+              const SizedBox(height: 15),
+              _buildDropdown(
+                  value: _selectedRole,
+                  items: roles,
+                  hint: "Select Role",
+                  icon: Icons.admin_panel_settings,
+                  onChanged: (val) => setState(() => _selectedRole = val)),
+              const SizedBox(height: 15),
+              _buildDropdown(
+                  value: _selectedBranch,
+                  items: branches,
+                  hint: "Select Branch",
+                  icon: Icons.location_city,
+                  onChanged: (val) => setState(() => _selectedBranch = val)),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _loading ? null : _registerUser,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.app_registration),
+                  label: Text(_loading ? "Registering..." : "Register User"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(
-                      labelText: "Email",
-                      prefixIcon: Icon(Icons.email),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    decoration: InputDecoration(
-                      labelText: "Password",
-                      prefixIcon: const Icon(Icons.lock),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_off
-                              : Icons.visibility,
-                        ),
-                        onPressed: () => setState(
-                          () => _obscurePassword = !_obscurePassword,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  DropdownButtonFormField<String>(
-                    value: _selectedBranch,
-                    decoration: const InputDecoration(
-                      labelText: "Branch",
-                      prefixIcon: Icon(Icons.account_tree),
-                    ),
-                    hint: const Text("Select Branch"),
-                    items: _branches.entries
-                        .map((e) => DropdownMenuItem(
-                              value: e.key,
-                              child: Text(e.value),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _selectedBranch = v),
-                  ),
-                  const SizedBox(height: 20),
-                  DropdownButtonFormField<String>(
-                    value: _selectedRole,
-                    decoration: const InputDecoration(
-                      labelText: "Role",
-                      prefixIcon: Icon(Icons.badge),
-                    ),
-                    hint: const Text("Select Role"),
-                    items: _roles
-                        .map((r) => DropdownMenuItem(
-                              value: r,
-                              child: Text(
-                                '${r[0].toUpperCase()}${r.substring(1)}',
-                              ),
-                            ))
-                        .toList(),
-                    onChanged: (v) => setState(() => _selectedRole = v),
-                  ),
-                  const SizedBox(height: 20),
-                  _loading
-                      ? const CircularProgressIndicator()
-                      : ElevatedButton(
-                          onPressed: _register,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size(double.infinity, 50),
-                          ),
-                          child: const Text("Register"),
-                        ),
-                  const SizedBox(height: 12),
-                  TextButton(
-                    onPressed: () => Navigator.pushReplacementNamed(
-                      context,
-                      "/login",
-                    ),
-                    child: const Text("Already have an account? Login"),
-                  ),
-                ],
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildTextField(TextEditingController controller, String label,
+      IconData icon, bool obscure) {
+    return TextFormField(
+      controller: controller,
+      obscureText: (label == "Password") ? _obscurePassword : obscure,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        suffixIcon: label == "Password"
+            ? IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscurePassword = !_obscurePassword;
+                  });
+                },
+              )
+            : null,
+      ),
+      validator: (val) {
+        if (val == null || val.isEmpty) return "Enter $label";
+        if (label == "Password" && val.length < 6) {
+          return "Password must be at least 6 chars";
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildDropdown({
+    required String? value,
+    required List<String> items,
+    required String hint,
+    required IconData icon,
+    required Function(String?) onChanged,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      hint: Text(hint),
+      items:
+          items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      validator: (val) => val == null ? "Select $hint" : null,
     );
   }
 }

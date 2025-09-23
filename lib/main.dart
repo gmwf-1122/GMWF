@@ -4,7 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 
 import 'firebase_options.dart';
 
@@ -30,7 +30,7 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // ✅ Enable Firestore persistence for offline mode
+    // ✅ Enable Firestore persistence
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
     );
@@ -39,18 +39,14 @@ Future<void> main() async {
     await LocalStorageService.init();
     await LocalStorageService.seedLocalAdmins();
 
-    // ✅ Desktop window setup
-    await windowManager.ensureInitialized();
-    const windowOptions = WindowOptions(
-      size: Size(1280, 720),
-      center: true,
-      backgroundColor: Colors.white,
-      skipTaskbar: false,
-      titleBarStyle: TitleBarStyle.normal,
-    );
-    windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
+    // ✅ Setup custom window frame
+    doWhenWindowReady(() {
+      const initialSize = Size(1280, 720);
+      appWindow.minSize = initialSize;
+      appWindow.size = initialSize;
+      appWindow.alignment = Alignment.center;
+      appWindow.title = "Gulzar Madina Dispensary";
+      appWindow.show();
     });
 
     runApp(const MyApp());
@@ -92,23 +88,18 @@ class _MyAppState extends State<MyApp> {
         stream: FirebaseAuth.instance.authStateChanges(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
+            return const Center(child: CircularProgressIndicator());
           }
 
-          // ✅ If user is logged in, forward to HomeRouter
           if (snapshot.hasData && snapshot.data != null) {
             return HomeRouter(user: snapshot.data!);
           }
 
-          // ✅ Otherwise show login page
           return const LoginPage();
         },
       ),
       routes: {
         '/login': (context) => const LoginPage(),
-        // ❌ Removed '/register'
         '/admin': (context) => const AdminScreen(),
       },
     );

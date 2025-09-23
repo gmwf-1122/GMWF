@@ -6,73 +6,94 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // Hardcoded admin (predetermined)
   final Map<String, String> _hardcodedAdmins = {
     "admin@gmd.com": "Admin@123",
   };
 
-  /// Sign up user (prevents registering the hardcoded admin)
+  /// Sign up new user → store uid, role, branchId, branchName
   Future<User?> signUp(
-      String email, String password, String role, String branchId) async {
+    String email,
+    String password,
+    String role,
+    String branchId,
+    String branchName,
+  ) async {
     email = email.trim().toLowerCase();
+    branchId = branchId.trim().toLowerCase();
 
     if (_hardcodedAdmins.containsKey(email)) {
-      // ensure admin exists locally
       await LocalStorageService.seedLocalAdmins();
       return null;
     }
 
-    // Always sign out first to clear stale session
-    await _auth.signOut();
+    User? user;
 
-    UserCredential result = await _auth.createUserWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
-    User? user = result.user;
+    try {
+      UserCredential result = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      user = result.user;
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        UserCredential result = await _auth.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        user = result.user;
+      } else {
+        rethrow;
+      }
+    }
 
     if (user != null) {
-      final userData = {
+      final firestoreUserData = {
         "uid": user.uid,
         "email": email,
         "role": role.toLowerCase(),
         "branchId": branchId,
+        "branchName": branchName,
         "passwordHash": LocalStorageService.hashPassword(password),
         "createdAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
       };
 
-      if (role.toLowerCase() == "doctor") {
-        userData["doctorId"] = user.uid;
-      }
+      // ✅ Save to global users collection
+      await _firestore.collection("users").doc(user.uid).set(
+            firestoreUserData,
+            SetOptions(merge: true),
+          );
 
-      try {
-        await _firestore.collection("users").doc(user.uid).set(userData);
+      // ✅ Save inside branch subcollection
+      await _firestore
+          .collection("branches")
+          .doc(branchId)
+          .collection("users")
+          .doc(user.uid)
+          .set(firestoreUserData, SetOptions(merge: true));
 
-        // ✅ Ensure branch exists
-        await _firestore.collection("branches").doc(branchId).set({
-          "name": branchId[0].toUpperCase() + branchId.substring(1),
-          "createdAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-      } catch (_) {
-        // Fallback for offline → enqueue for sync
-        await LocalStorageService.enqueueSync({
-          'type': 'save_user',
-          'uid': user.uid,
-          'data': userData,
-        });
-      }
+      // ✅ Ensure branch doc exists
+      await _firestore.collection("branches").doc(branchId).set({
+        "id": branchId,
+        "name": branchName,
+        "createdAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-      await LocalStorageService.saveLocalUser(userData);
+      // ✅ Mirror to Hive (offline cache)
+      final hiveUserData = Map<String, dynamic>.from(firestoreUserData);
+      hiveUserData["createdAt"] = DateTime.now();
+      hiveUserData["updatedAt"] = DateTime.now();
+
+      await LocalStorageService.saveLocalUser(hiveUserData);
     }
 
     return user;
   }
 
-  /// Login user (null-safe)
+  /// Login
   Future<Map<String, dynamic>?> login(String email, String password) async {
     email = email.trim().toLowerCase();
 
-    // ✅ Hardcoded admin check
     if (_hardcodedAdmins.containsKey(email)) {
       if (_hardcodedAdmins[email] == password) {
         await LocalStorageService.seedLocalAdmins();
@@ -88,9 +109,7 @@ class AuthService {
       }
     }
 
-    // ✅ Try Firebase login
     try {
-      await _auth.signOut(); // force clean session
       UserCredential result = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
@@ -104,22 +123,23 @@ class AuthService {
 
         final role = (data['role']?.toString() ?? 'user').toLowerCase();
         final branchId = data['branchId']?.toString() ?? '';
+        final branchName = data['branchName']?.toString() ?? '';
 
         final userData = {
           "uid": user.uid,
           "email": email,
           "role": role,
           "branchId": branchId,
-          "branchName": data['branchName'] ?? "",
+          "branchName": branchName,
           "passwordHash": LocalStorageService.hashPassword(password),
-          "createdAt": data['createdAt'] ?? FieldValue.serverTimestamp(),
+          "createdAt": data['createdAt'] ?? DateTime.now(),
         };
 
         await LocalStorageService.saveLocalUser(userData);
         return userData;
       }
     } catch (e) {
-      // ✅ Offline/local fallback
+      // 🔄 Offline fallback
       final local = LocalStorageService.getLocalUserByEmail(email);
       final localHash = local?['passwordHash'] as String?;
       if (local != null &&

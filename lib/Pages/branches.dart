@@ -1,161 +1,35 @@
-// lib/pages/branches.dart
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-class Branches extends StatefulWidget {
+class Branches extends StatelessWidget {
   const Branches({super.key});
 
-  @override
-  State<Branches> createState() => _BranchesState();
-}
-
-class _BranchesState extends State<Branches> {
-  final _auth = FirebaseAuth.instance;
-  final _firestore = FirebaseFirestore.instance;
-
-  bool _isAdmin = false;
-
-  final List<String> _roles = ["doctor", "receptionist", "dispensor"];
-
-  final List<Map<String, String>> _fixedBranches = [
-    {"branchId": "gujrat", "branchName": "Gujrat"},
-    {"branchId": "sialkot", "branchName": "Sialkot"},
-    {"branchId": "karachi1", "branchName": "Karachi-1"},
-    {"branchId": "karachi2", "branchName": "Karachi-2"},
+  final List<String> defaultBranches = const [
+    "Gujrat",
+    "Sialkot",
+    "Karachi-1",
+    "Karachi-2",
   ];
 
-  late Future<List<Map<String, String>>> _branchesFuture;
+  final Map<String, IconData> roleIcons = const {
+    "receptionist": Icons.person_add,
+    "doctor": Icons.medical_services,
+    "dispenser": Icons.local_pharmacy,
+  };
 
-  @override
-  void initState() {
-    super.initState();
-    _branchesFuture = _buildFinalBranchList();
-    _checkIfAdmin();
-  }
+  final List<String> roleOrder = const [
+    "receptionist",
+    "doctor",
+    "dispenser",
+  ];
 
-  Future<void> _checkIfAdmin() async {
-    final uid = _auth.currentUser?.uid;
-    if (uid == null) return;
-    try {
-      final snap = await _firestore.collection("users").doc(uid).get();
-      if (snap.exists) {
-        final data = snap.data()!;
-        if (mounted) {
-          setState(() {
-            _isAdmin = (data["role"] == "admin");
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint("⚠️ Error checking admin: $e");
-    }
-  }
-
-  // ✅ Add new user inside a branch
-  void _createUser(String branchId, String branchName) {
-    if (!_isAdmin) return;
-    final emailCtrl = TextEditingController();
-    final passwordCtrl = TextEditingController();
-    String? selectedRole;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(builder: (ctx2, setStateDialog) {
-        return AlertDialog(
-          title: Text("Add User to $branchName"),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: emailCtrl,
-                  decoration: const InputDecoration(labelText: "User Email")),
-              TextField(
-                  controller: passwordCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(labelText: "Password")),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: selectedRole,
-                hint: const Text("Select Role"),
-                items: _roles
-                    .map((r) => DropdownMenuItem(
-                          value: r,
-                          child: Text(r[0].toUpperCase() + r.substring(1)),
-                        ))
-                    .toList(),
-                onChanged: (v) => setStateDialog(() => selectedRole = v),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Cancel")),
-            ElevatedButton(
-              onPressed: () async {
-                final email = emailCtrl.text.trim().toLowerCase();
-                final password = passwordCtrl.text.trim();
-
-                if (email.isEmpty || password.isEmpty || selectedRole == null) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("⚠️ Fill all fields")),
-                    );
-                  }
-                  return;
-                }
-
-                try {
-                  final userCred = await _auth.createUserWithEmailAndPassword(
-                      email: email, password: password);
-                  final userId = userCred.user!.uid;
-
-                  final userData = {
-                    "uid": userId,
-                    "email": email,
-                    "role": selectedRole,
-                    "branchId": branchId.toLowerCase().trim(),
-                    "branchName": branchName,
-                    "createdAt": FieldValue.serverTimestamp(),
-                  };
-
-                  if (selectedRole == "doctor") {
-                    userData["doctorId"] =
-                        "DOC-${DateTime.now().millisecondsSinceEpoch}";
-                  }
-
-                  await _firestore
-                      .collection("users")
-                      .doc(userId)
-                      .set(userData);
-
-                  if (!mounted) return;
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("✅ User added to $branchName")));
-                } catch (e) {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text("❌ Error: $e")));
-                  }
-                }
-              },
-              child: const Text("Create"),
-            ),
-          ],
-        );
-      }),
-    );
-  }
-
-  // ✅ Delete user
-  Future<void> _confirmDeleteUser(String uid, String email) async {
+  Future<void> _deleteUser(BuildContext context, String userId, String email,
+      String branchId) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text("Confirm Delete"),
-        content: Text("Are you sure you want to delete user:\n$email ?"),
+        title: const Text("Delete User"),
+        content: Text("Are you sure you want to delete \"$email\"?"),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -164,7 +38,7 @@ class _BranchesState extends State<Branches> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Delete"),
+            child: const Text("Delete", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -172,186 +46,262 @@ class _BranchesState extends State<Branches> {
 
     if (confirm == true) {
       try {
-        await _firestore.collection("users").doc(uid).delete();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("✅ User $email deleted")),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("❌ Error deleting user: $e")),
-          );
-        }
-      }
-    }
-  }
+        // ✅ Delete from global users
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(userId)
+            .delete();
 
-  // ✅ Role name variations
-  List<String> _roleVariants(String role) {
-    switch (role.toLowerCase()) {
-      case "doctor":
-        return ["doctor", "Doctor"];
-      case "receptionist":
-        return ["receptionist", "Receptionist", "reception"];
-      case "dispensor":
-      case "dispensar":
-        return ["dispensor", "Dispensor", "dispensar", "Dispensar"];
-      default:
-        return [role, role[0].toUpperCase() + role.substring(1)];
-    }
-  }
-
-  // ✅ Role-based list of users
-  Widget _buildRoleList(String branchId, String role) {
-    final normalizedBranchId = branchId.toLowerCase().trim();
-    final variants = _roleVariants(role);
-
-    Stream<QuerySnapshot> stream;
-    if (variants.length == 1) {
-      stream = _firestore
-          .collection("users")
-          .where("branchId", isEqualTo: normalizedBranchId)
-          .where("role", isEqualTo: variants.first)
-          .snapshots();
-    } else {
-      stream = _firestore
-          .collection("users")
-          .where("branchId", isEqualTo: normalizedBranchId)
-          .where("role", whereIn: variants)
-          .snapshots();
-    }
-
-    return StreamBuilder<QuerySnapshot>(
-      stream: stream,
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return const SizedBox(
-            height: 40,
-            child: Center(child: CircularProgressIndicator()),
-          );
+        // ✅ Delete from branch subcollection
+        if (branchId.isNotEmpty) {
+          await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchId)
+              .collection('users')
+              .doc(userId)
+              .delete();
         }
 
-        if (snap.hasError) {
-          return Text("⚠️ Error: ${snap.error}");
-        }
-
-        if (!snap.hasData || snap.data!.docs.isEmpty) {
-          return Text("No $role(s)",
-              style: const TextStyle(color: Colors.grey, fontSize: 12));
-        }
-
-        final docs = snap.data!.docs;
-
-        return Column(
-          children: docs.map((doc) {
-            final user = Map<String, dynamic>.from(doc.data() as Map);
-            user["uid"] = doc.id;
-            return ListTile(
-              dense: true,
-              leading: const Icon(Icons.person, color: Colors.green),
-              title: Text(user["email"] ?? ""),
-              subtitle: Text(role == "doctor" && user.containsKey("doctorId")
-                  ? "Role: ${user["role"]}, ID: ${user["doctorId"]}"
-                  : "Role: ${user["role"]}"),
-              trailing: _isAdmin
-                  ? IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () =>
-                          _confirmDeleteUser(doc.id, user["email"] ?? ""),
-                    )
-                  : null,
-            );
-          }).toList(),
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("User deleted successfully")),
         );
-      },
-    );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error deleting user: $e")),
+        );
+      }
+    }
   }
 
-  // ✅ Merge Firestore + Fixed branches
-  Future<List<Map<String, String>>> _buildFinalBranchList() async {
-    try {
-      final snap = await _firestore.collection("branches").get();
-      final existing =
-          snap.docs.map((d) => Map<String, String>.from(d.data())).toList();
+  Future<void> _deleteBranch(BuildContext context, String branchId) async {
+    if (defaultBranches.contains(branchId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text("⚠ Default branch \"$branchId\" cannot be deleted")),
+      );
+      return;
+    }
 
-      final merged = {
-        ...{for (var b in _fixedBranches) b["branchId"]!: b}
-      };
-      for (var b in existing) {
-        merged[b["branchId"]!] = b;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Delete Branch"),
+        content: Text(
+          "Are you sure you want to delete branch \"$branchId\"?\n\n"
+          "⚠ All users in this branch will be removed.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final batch = FirebaseFirestore.instance.batch();
+
+        // ✅ Delete all users in branch (both global + branch subcollection)
+        final usersSnapshot = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchId)
+            .collection('users')
+            .get();
+
+        for (var doc in usersSnapshot.docs) {
+          batch.delete(
+              FirebaseFirestore.instance.collection('users').doc(doc.id));
+          batch.delete(doc.reference);
+        }
+
+        // ✅ Delete branch doc
+        batch.delete(
+            FirebaseFirestore.instance.collection('branches').doc(branchId));
+
+        await batch.commit();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Branch \"$branchId\" deleted successfully")),
+        );
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error deleting branch: $e")),
+        );
       }
-
-      return merged.values.toList();
-    } catch (e) {
-      debugPrint("⚠️ Error building branch list: $e");
-      return _fixedBranches;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Branches"),
-        backgroundColor: Colors.green,
-      ),
-      body: FutureBuilder<List<Map<String, String>>>(
-        future: _branchesFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData) {
-            return const Center(child: Text("⚠️ No branches found"));
-          }
-
-          final branches = snapshot.data!;
-          return ListView(
-            children: branches.map((branch) {
-              final branchId = branch["branchId"] ?? "";
-              final branchName = branch["branchName"] ?? branchId;
-
-              return Card(
-                margin: const EdgeInsets.all(10),
-                child: ExpansionTile(
-                  title: Text(branchName,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  children: [
-                    if (_isAdmin)
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(left: 12.0),
-                          child: ElevatedButton.icon(
-                            onPressed: () => _createUser(branchId, branchName),
-                            icon: const Icon(Icons.person_add),
-                            label: const Text("Add User"),
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 10),
-                    const Text("Doctors",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                    _buildRoleList(branchId, "doctor"),
-                    const SizedBox(height: 8),
-                    const Text("Receptionists",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                    _buildRoleList(branchId, "receptionist"),
-                    const SizedBox(height: 8),
-                    const Text("Dispensors",
-                        style: TextStyle(
-                            fontWeight: FontWeight.bold, fontSize: 16)),
-                    _buildRoleList(branchId, "dispensor"),
-                  ],
+      backgroundColor: const Color(0xFFFCF8FF),
+      body: Center(
+        child: Container(
+          width: 900,
+          height: 600,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 15,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Manage Branches",
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
                 ),
-              );
-            }).toList(),
-          );
-        },
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+
+                    final users = snapshot.data!.docs;
+
+                    final Map<String, List<Map<String, dynamic>>> branches = {};
+                    for (var user in users) {
+                      final data = user.data() as Map<String, dynamic>;
+                      final branchId = data['branchId'] ?? "unknown";
+                      final branchName =
+                          data['branchName'] ?? branchId.toUpperCase();
+                      data['id'] = user.id;
+
+                      if ((data['role'] ?? "").toLowerCase() == "admin") {
+                        continue;
+                      }
+
+                      branches.putIfAbsent(branchName, () => []);
+                      branches[branchName]!.add(data);
+                    }
+
+                    // Ensure default branches always appear
+                    for (var branch in defaultBranches) {
+                      branches.putIfAbsent(branch, () => []);
+                    }
+
+                    return ListView.separated(
+                      itemCount: branches.keys.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final branchName = branches.keys.elementAt(index);
+                        final branchUsers = branches[branchName]!;
+
+                        return Card(
+                          elevation: 3,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ExpansionTile(
+                            leading: const Icon(Icons.apartment,
+                                color: Colors.green),
+                            title: Text(
+                              branchName,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            ),
+                            trailing: defaultBranches.contains(branchName)
+                                ? null
+                                : IconButton(
+                                    icon: const Icon(Icons.delete,
+                                        color: Colors.red),
+                                    onPressed: () =>
+                                        _deleteBranch(context, branchName),
+                                  ),
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.all(12.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: roleOrder.map((role) {
+                                    final roleUsers = branchUsers
+                                        .where((u) =>
+                                            (u['role'] ?? "").toLowerCase() ==
+                                            role)
+                                        .toList();
+
+                                    if (roleUsers.isEmpty) return Container();
+
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(roleIcons[role],
+                                                color: Colors.black),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              role[0].toUpperCase() +
+                                                  role.substring(1),
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15,
+                                                color: Colors.black,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 6),
+                                        ...roleUsers.map((user) {
+                                          return ListTile(
+                                            leading: const Icon(Icons.person,
+                                                color: Colors.amber),
+                                            title: Text(user['email'] ??
+                                                "Unknown Email"),
+                                            trailing: IconButton(
+                                              icon: const Icon(Icons.delete,
+                                                  color: Colors.red),
+                                              onPressed: () => _deleteUser(
+                                                  context,
+                                                  user['id'],
+                                                  user['email'],
+                                                  user['branchId'] ?? ""),
+                                            ),
+                                          );
+                                        }),
+                                        const Divider(),
+                                      ],
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

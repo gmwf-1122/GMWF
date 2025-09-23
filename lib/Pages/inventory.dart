@@ -1,245 +1,284 @@
+// lib/pages/inventory.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:hive/hive.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'inventory.dart';
 
 class InventoryPage extends StatefulWidget {
-  final String role; // "doctor", "receptionist", "dispensar", "admin"
-  final String branchId; // Branch assigned to this user
+  final String branchId;
 
-  const InventoryPage({super.key, required this.role, required this.branchId});
+  const InventoryPage({super.key, required this.branchId});
 
   @override
   State<InventoryPage> createState() => _InventoryPageState();
 }
 
 class _InventoryPageState extends State<InventoryPage> {
+  final _formKey = GlobalKey<FormState>();
+
+  // Controllers
+  final _nameController = TextEditingController();
+  final _serialController = TextEditingController();
+  final _batchController = TextEditingController();
+  final _strengthController = TextEditingController();
+  final _typeController = TextEditingController();
+  final _expiryController = TextEditingController();
+  final _stockController = TextEditingController();
+  final _priceController = TextEditingController();
+
   final _firestore = FirebaseFirestore.instance;
-  Box? _localBox;
-  bool _isOnline = true;
-  List<Map<String, dynamic>> inventory = [];
 
-  @override
-  void initState() {
-    super.initState();
-    _initHive();
-    _listenConnectivity();
+  /// Add or update medicine permanently (serial ID = permanent key)
+  Future<void> _addMedicine() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    final docRef = _firestore
+        .collection("branches")
+        .doc(widget.branchId)
+        .collection("inventory")
+        .doc(_serialController.text.trim()); // permanent serial ID
+
+    final medicineData = {
+      "serial": _serialController.text.trim(),
+      "name": _nameController.text.trim(),
+      "batchNo": _batchController.text.trim(),
+      "strength": _strengthController.text.trim(),
+      "type": _typeController.text.trim(),
+      "expiry": _expiryController.text.trim(),
+      "stock": int.tryParse(_stockController.text.trim()) ?? 0,
+      "price": num.tryParse(_priceController.text.trim()) ?? 0,
+      "createdBy": uid,
+      "createdAt": FieldValue.serverTimestamp(),
+      "updatedAt": FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(medicineData, SetOptions(merge: true));
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("✅ Medicine saved")),
+    );
+
+    _formKey.currentState!.reset();
+    _nameController.clear();
+    _serialController.clear();
+    _batchController.clear();
+    _strengthController.clear();
+    _typeController.clear();
+    _expiryController.clear();
+    _stockController.clear();
+    _priceController.clear();
   }
 
-  Future<void> _initHive() async {
-    _localBox = await Hive.openBox("inventoryBox_${widget.branchId}");
-    await _loadInventory();
-  }
+  Future<void> _updateStock(String id, int change) async {
+    final docRef = _firestore
+        .collection("branches")
+        .doc(widget.branchId)
+        .collection("inventory")
+        .doc(id);
 
-  void _listenConnectivity() {
-    Connectivity().onConnectivityChanged.listen((result) {
-      final online = result != ConnectivityResult.none;
-      if (mounted) {
-        setState(() => _isOnline = online);
-      }
-      if (online) _syncLocalToFirestore();
+    await docRef.update({
+      "stock": FieldValue.increment(change),
+      "updatedAt": FieldValue.serverTimestamp(),
     });
   }
 
-  Future<void> _loadInventory() async {
-    if (_localBox == null) return;
+  Future<void> _deleteMedicine(String id) async {
+    await _firestore
+        .collection("branches")
+        .doc(widget.branchId)
+        .collection("inventory")
+        .doc(id)
+        .delete();
 
-    if (_isOnline) {
-      try {
-        final snap = await _firestore
-            .collection("branches")
-            .doc(widget.branchId)
-            .collection("inventory")
-            .get();
-
-        inventory = snap.docs.map((d) {
-          final data = d.data();
-          data["id"] = d.id;
-          return data;
-        }).toList();
-
-        await _localBox!.put("inventoryCache", inventory);
-      } catch (e) {
-        debugPrint("❌ Firestore load error: $e");
-      }
-    } else {
-      final cached = _localBox!.get("inventoryCache", defaultValue: []);
-      inventory = List<Map<String, dynamic>>.from(cached);
-    }
-
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _syncLocalToFirestore() async {
-    if (_localBox == null) return;
-
-    final cached = _localBox!.get("pendingInventory", defaultValue: []) as List;
-    for (var item in cached) {
-      final docRef = _firestore
-          .collection("branches")
-          .doc(widget.branchId)
-          .collection("inventory")
-          .doc(item["id"]);
-
-      item["branchId"] = widget.branchId; // always keep branch link
-      await docRef.set(item, SetOptions(merge: true));
-    }
-    await _localBox!.put("pendingInventory", []);
-    await _loadInventory();
-  }
-
-  Future<void> _addOrEditMed({Map<String, dynamic>? med}) async {
-    final nameController = TextEditingController(text: med?["name"] ?? "");
-    final stockController =
-        TextEditingController(text: med?["stock"]?.toString() ?? "0");
-
-    await showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(med == null ? "Add Medicine" : "Edit Medicine"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: "Medicine Name"),
-            ),
-            TextField(
-              controller: stockController,
-              decoration: const InputDecoration(labelText: "Stock"),
-              keyboardType: TextInputType.number,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("Cancel")),
-          ElevatedButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              final stock = int.tryParse(stockController.text.trim()) ?? 0;
-              if (name.isEmpty) return;
-
-              final medData = {
-                "name": name,
-                "stock": stock,
-                "branchId": widget.branchId,
-              };
-
-              if (_isOnline) {
-                final docRef = med != null
-                    ? _firestore
-                        .collection("branches")
-                        .doc(widget.branchId)
-                        .collection("inventory")
-                        .doc(med["id"])
-                    : _firestore
-                        .collection("branches")
-                        .doc(widget.branchId)
-                        .collection("inventory")
-                        .doc();
-
-                medData["id"] = docRef.id;
-                await docRef.set(medData);
-              } else {
-                final pending = _localBox!
-                    .get("pendingInventory", defaultValue: []) as List;
-                if (med != null) {
-                  medData["id"] = med["id"];
-                  pending.removeWhere((e) => e["id"] == med["id"]);
-                } else {
-                  medData["id"] =
-                      DateTime.now().millisecondsSinceEpoch.toString();
-                }
-                pending.add(medData);
-                await _localBox!.put("pendingInventory", pending);
-              }
-
-              await _loadInventory();
-              if (mounted) Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("🗑 Medicine deleted")),
     );
   }
-
-  Future<void> _deleteMed(Map<String, dynamic> med) async {
-    if (_isOnline) {
-      await _firestore
-          .collection("branches")
-          .doc(widget.branchId)
-          .collection("inventory")
-          .doc(med["id"])
-          .delete();
-    } else {
-      final pending =
-          _localBox!.get("pendingInventory", defaultValue: []) as List;
-      pending.removeWhere((e) => e["id"] == med["id"]);
-      await _localBox!.put("pendingInventory", pending);
-    }
-    await _loadInventory();
-  }
-
-  bool get _canEdit => widget.role.toLowerCase() == "receptionist";
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text("Inventory - ${widget.branchId}"),
+        title: const Text("Inventory"),
         backgroundColor: Colors.green,
       ),
-      floatingActionButton: _canEdit
-          ? FloatingActionButton(
-              backgroundColor: Colors.green,
-              onPressed: () => _addOrEditMed(),
-              child: const Icon(Icons.add),
-            )
-          : null,
-      body: inventory.isEmpty
-          ? const Center(
-              child: Text(
-                "📦 No medicines available.\nReceptionist can add stock here.",
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16),
-              ),
-            )
-          : ListView.builder(
-              itemCount: inventory.length,
-              itemBuilder: (context, index) {
-                final med = inventory[index];
-                return Card(
-                  margin:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  child: ListTile(
-                    leading:
-                        const Icon(Icons.medical_services, color: Colors.green),
-                    title: Text(med["name"] ?? "Unnamed"),
-                    subtitle: Text("Stock: ${med["stock"] ?? '-'}"),
-                    trailing: _canEdit
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon:
-                                    const Icon(Icons.edit, color: Colors.blue),
-                                onPressed: () => _addOrEditMed(med: med),
-                              ),
-                              IconButton(
-                                icon:
-                                    const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () => _deleteMed(med),
-                              ),
-                            ],
-                          )
-                        : null,
+      body: Column(
+        children: [
+          // Add medicine form
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(labelText: "Name"),
+                          validator: (v) =>
+                              v == null || v.isEmpty ? "Required" : null,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _serialController,
+                          decoration:
+                              const InputDecoration(labelText: "Serial ID"),
+                          validator: (v) =>
+                              v == null || v.isEmpty ? "Required" : null,
+                        ),
+                      ),
+                    ],
                   ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _batchController,
+                          decoration:
+                              const InputDecoration(labelText: "Batch No."),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _strengthController,
+                          decoration:
+                              const InputDecoration(labelText: "Strength"),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _typeController,
+                          decoration: const InputDecoration(
+                              labelText: "Type (Tablet/Syrup)"),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _expiryController,
+                          decoration: const InputDecoration(
+                              labelText: "Expiry (YYYY-MM-DD)"),
+                        ),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _stockController,
+                          decoration: const InputDecoration(labelText: "Stock"),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _priceController,
+                          decoration: const InputDecoration(labelText: "Price"),
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30)),
+                      minimumSize: const Size(120, 50),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => InventoryPage(
+                              branchId: widget.branchId), // ✅ Pass branchId
+                        ),
+                      );
+                    },
+                    child: const Text("Inventory"),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          const Divider(),
+
+          // Medicine list
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: _firestore
+                  .collection("branches")
+                  .doc(widget.branchId)
+                  .collection("inventory")
+                  .orderBy("name")
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final meds = snapshot.data!.docs;
+
+                if (meds.isEmpty) {
+                  return const Center(child: Text("No medicines found"));
+                }
+
+                return ListView.builder(
+                  itemCount: meds.length,
+                  itemBuilder: (context, index) {
+                    final med = meds[index].data() as Map<String, dynamic>;
+                    final id = meds[index].id;
+
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      child: ListTile(
+                        title: Text("${med["name"]} (${med["strength"]})"),
+                        subtitle: Text(
+                            "Serial: ${med["serial"]}, Batch: ${med["batchNo"]}, Expiry: ${med["expiry"]}, Price: ${med["price"]}\nStock: ${med["stock"] ?? 0}"),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.remove, color: Colors.red),
+                              onPressed: () => _updateStock(id, -1),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.add, color: Colors.green),
+                              onPressed: () => _updateStock(id, 1),
+                            ),
+                            IconButton(
+                              icon:
+                                  const Icon(Icons.delete, color: Colors.grey),
+                              onPressed: () => _deleteMedicine(id),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 );
               },
             ),
+          ),
+        ],
+      ),
     );
   }
 }

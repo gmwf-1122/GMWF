@@ -66,11 +66,13 @@ class SyncService {
     if (uid == null || data.isEmpty) return;
 
     try {
+      // ✅ Save in global users
       await _firestore
           .collection('users')
           .doc(uid)
           .set(data, SetOptions(merge: true));
 
+      // ✅ Save in branch subcollection
       final branchId = data['branchId']?.toString();
       if (branchId != null && branchId.isNotEmpty) {
         await _firestore
@@ -94,16 +96,30 @@ class SyncService {
 
   Future<void> _syncDeleteUser(Map<String, dynamic> action) async {
     final uid = action['uid']?.toString();
+    final branchId = action['branchId']?.toString();
     if (uid == null) return;
 
     try {
+      // ✅ Delete from global users
       await _firestore.collection('users').doc(uid).delete();
+
+      // ✅ Delete from branch subcollection if known
+      if (branchId != null && branchId.isNotEmpty) {
+        await _firestore
+            .collection('branches')
+            .doc(branchId)
+            .collection('users')
+            .doc(uid)
+            .delete();
+      }
+
       print("🗑️ Deleted user $uid");
     } catch (e, st) {
       print("⚠️ Failed to delete user $uid: $e\n$st");
       await LocalStorageService.enqueueSync({
         'type': 'delete_user',
         'uid': uid,
+        'branchId': branchId,
       });
     }
   }
