@@ -1,283 +1,436 @@
 // lib/pages/inventory.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'inventory.dart';
+import 'package:flutter/services.dart';
 
 class InventoryPage extends StatefulWidget {
   final String branchId;
+  final String receptionistId;
 
-  const InventoryPage({super.key, required this.branchId});
+  const InventoryPage({
+    super.key,
+    required this.branchId,
+    required this.receptionistId,
+  });
 
   @override
   State<InventoryPage> createState() => _InventoryPageState();
 }
 
 class _InventoryPageState extends State<InventoryPage> {
-  final _formKey = GlobalKey<FormState>();
-
-  // Controllers
-  final _nameController = TextEditingController();
-  final _serialController = TextEditingController();
-  final _batchController = TextEditingController();
-  final _strengthController = TextEditingController();
-  final _typeController = TextEditingController();
-  final _expiryController = TextEditingController();
-  final _stockController = TextEditingController();
-  final _priceController = TextEditingController();
-
   final _firestore = FirebaseFirestore.instance;
 
-  /// Add or update medicine permanently (serial ID = permanent key)
-  Future<void> _addMedicine() async {
-    if (!_formKey.currentState!.validate()) return;
+  final _nameController = TextEditingController();
+  final _codeController = TextEditingController();
+  final _quantityController = TextEditingController();
+  final _priceController = TextEditingController();
 
-    final uid = FirebaseAuth.instance.currentUser!.uid;
+  String? _editingDocId;
+  String? _selectedType;
+  String _searchQuery = "";
+  String _filterType = "All";
 
-    final docRef = _firestore
-        .collection("branches")
-        .doc(widget.branchId)
-        .collection("inventory")
-        .doc(_serialController.text.trim()); // permanent serial ID
+  final List<String> _medicineTypes = [
+    "Tablet",
+    "Capsule",
+    "Syrup",
+    "Injection",
+    "Other"
+  ];
 
-    final medicineData = {
-      "serial": _serialController.text.trim(),
-      "name": _nameController.text.trim(),
-      "batchNo": _batchController.text.trim(),
-      "strength": _strengthController.text.trim(),
-      "type": _typeController.text.trim(),
-      "expiry": _expiryController.text.trim(),
-      "stock": int.tryParse(_stockController.text.trim()) ?? 0,
-      "price": num.tryParse(_priceController.text.trim()) ?? 0,
-      "createdBy": uid,
-      "createdAt": FieldValue.serverTimestamp(),
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-
-    await docRef.set(medicineData, SetOptions(merge: true));
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("✅ Medicine saved")),
-    );
-
-    _formKey.currentState!.reset();
-    _nameController.clear();
-    _serialController.clear();
-    _batchController.clear();
-    _strengthController.clear();
-    _typeController.clear();
-    _expiryController.clear();
-    _stockController.clear();
-    _priceController.clear();
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _codeController.dispose();
+    _quantityController.dispose();
+    _priceController.dispose();
+    super.dispose();
   }
 
-  Future<void> _updateStock(String id, int change) async {
-    final docRef = _firestore
+  List<String> _generateKeywords(String input) {
+    input = input.toLowerCase();
+    List<String> keywords = [];
+    for (int i = 1; i <= input.length; i++) {
+      keywords.add(input.substring(0, i));
+    }
+    return keywords;
+  }
+
+  Future<void> _saveMedicine() async {
+    if (_nameController.text.isEmpty ||
+        _codeController.text.isEmpty ||
+        _quantityController.text.isEmpty ||
+        _priceController.text.isEmpty ||
+        _selectedType == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("⚠️ Please fill all fields")),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Confirm Save"),
+        content: Text(_editingDocId == null
+            ? "Do you want to add this medicine?"
+            : "Do you want to update this medicine?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel")),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Confirm")),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final data = {
+      "name": _nameController.text.trim(),
+      "code": _codeController.text.trim(),
+      "quantity": int.tryParse(_quantityController.text.trim()) ?? 0,
+      "price": double.tryParse(_priceController.text.trim()) ?? 0.0,
+      "type": _selectedType,
+      "branchId": widget.branchId,
+      "addedBy": widget.receptionistId,
+      "updatedAt": FieldValue.serverTimestamp(),
+      "searchKeywords": [
+        ..._generateKeywords(_nameController.text),
+        ..._generateKeywords(_codeController.text),
+      ],
+    };
+
+    final colRef = _firestore
         .collection("branches")
         .doc(widget.branchId)
-        .collection("inventory")
-        .doc(id);
+        .collection("inventory");
 
-    await docRef.update({
-      "stock": FieldValue.increment(change),
-      "updatedAt": FieldValue.serverTimestamp(),
+    if (_editingDocId == null) {
+      await colRef.add(data);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ Medicine added!")),
+      );
+    } else {
+      await colRef.doc(_editingDocId).update(data);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ Medicine updated!")),
+      );
+    }
+
+    _clearForm();
+  }
+
+  Future<void> _deleteMedicine(String docId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Delete Medicine"),
+        content: const Text("Are you sure you want to delete this medicine?"),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel")),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Delete")),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _firestore
+          .collection("branches")
+          .doc(widget.branchId)
+          .collection("inventory")
+          .doc(docId)
+          .delete();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("🗑️ Medicine deleted")),
+      );
+    }
+  }
+
+  void _clearForm() {
+    setState(() {
+      _nameController.clear();
+      _codeController.clear();
+      _quantityController.clear();
+      _priceController.clear();
+      _editingDocId = null;
+      _selectedType = null;
     });
   }
 
-  Future<void> _deleteMedicine(String id) async {
-    await _firestore
-        .collection("branches")
-        .doc(widget.branchId)
-        .collection("inventory")
-        .doc(id)
-        .delete();
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("🗑 Medicine deleted")),
-    );
+  void _editMedicine(DocumentSnapshot doc) {
+    setState(() {
+      _editingDocId = doc.id;
+      _nameController.text = doc["name"] ?? "";
+      _codeController.text = doc["code"] ?? "";
+      _quantityController.text = (doc["quantity"] ?? "").toString();
+      _priceController.text = (doc["price"] ?? "").toString();
+      _selectedType = doc["type"];
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final colRef = _firestore
+        .collection("branches")
+        .doc(widget.branchId)
+        .collection("inventory");
+
     return Scaffold(
+      backgroundColor: Colors.green.shade700,
       appBar: AppBar(
-        title: const Text("Inventory"),
-        backgroundColor: Colors.green,
+        backgroundColor: Colors.green.shade900,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          "📦 Inventory",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
-      body: Column(
-        children: [
-          // Add medicine form
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  Row(
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Medicine Form
+              Card(
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
                     children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(labelText: "Name"),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? "Required" : null,
+                      TextField(
+                        controller: _nameController,
+                        decoration: const InputDecoration(
+                          labelText: "Medicine Name",
+                          prefixIcon: Icon(Icons.medical_services),
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _serialController,
-                          decoration:
-                              const InputDecoration(labelText: "Serial ID"),
-                          validator: (v) =>
-                              v == null || v.isEmpty ? "Required" : null,
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _codeController,
+                        decoration: const InputDecoration(
+                          labelText: "Medicine Code",
+                          prefixIcon: Icon(Icons.numbers),
                         ),
                       ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: _selectedType,
+                        decoration: const InputDecoration(
+                          labelText: "Medicine Type",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.category),
+                        ),
+                        items: _medicineTypes
+                            .map((type) => DropdownMenuItem(
+                                  value: type,
+                                  child: Text(type),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setState(() => _selectedType = v),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _quantityController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: "Quantity",
+                          prefixIcon: Icon(Icons.confirmation_number),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: _priceController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                              RegExp(r'^\d+\.?\d{0,2}'))
+                        ],
+                        decoration: const InputDecoration(
+                          labelText: "Price",
+                          prefixIcon: Text(
+                            "PKR",
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: _saveMedicine,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green.shade700,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.save),
+                            label: Text(
+                              _editingDocId == null
+                                  ? "Add Medicine"
+                                  : "Update Medicine",
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          if (_editingDocId != null)
+                            ElevatedButton.icon(
+                              onPressed: _clearForm,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.grey,
+                                foregroundColor: Colors.white,
+                              ),
+                              icon: const Icon(Icons.cancel),
+                              label: const Text("Cancel"),
+                            ),
+                        ],
+                      )
                     ],
                   ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _batchController,
-                          decoration:
-                              const InputDecoration(labelText: "Batch No."),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _strengthController,
-                          decoration:
-                              const InputDecoration(labelText: "Strength"),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _typeController,
-                          decoration: const InputDecoration(
-                              labelText: "Type (Tablet/Syrup)"),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _expiryController,
-                          decoration: const InputDecoration(
-                              labelText: "Expiry (YYYY-MM-DD)"),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _stockController,
-                          decoration: const InputDecoration(labelText: "Stock"),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _priceController,
-                          decoration: const InputDecoration(labelText: "Price"),
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(30)),
-                      minimumSize: const Size(120, 50),
-                    ),
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => InventoryPage(
-                              branchId: widget.branchId), // ✅ Pass branchId
-                        ),
-                      );
-                    },
-                    child: const Text("Inventory"),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
+              const SizedBox(height: 20),
 
-          const Divider(),
-
-          // Medicine list
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore
-                  .collection("branches")
-                  .doc(widget.branchId)
-                  .collection("inventory")
-                  .orderBy("name")
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final meds = snapshot.data!.docs;
-
-                if (meds.isEmpty) {
-                  return const Center(child: Text("No medicines found"));
-                }
-
-                return ListView.builder(
-                  itemCount: meds.length,
-                  itemBuilder: (context, index) {
-                    final med = meds[index].data() as Map<String, dynamic>;
-                    final id = meds[index].id;
-
-                    return Card(
-                      margin: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      child: ListTile(
-                        title: Text("${med["name"]} (${med["strength"]})"),
-                        subtitle: Text(
-                            "Serial: ${med["serial"]}, Batch: ${med["batchNo"]}, Expiry: ${med["expiry"]}, Price: ${med["price"]}\nStock: ${med["stock"] ?? 0}"),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.remove, color: Colors.red),
-                              onPressed: () => _updateStock(id, -1),
+              // Inventory Card with Search + Filter
+              Card(
+                elevation: 6,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16)),
+                child: Container(
+                  height: 500,
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      // 🔍 Search + Filter Row inside Card
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              decoration: const InputDecoration(
+                                hintText: "Search medicine",
+                                prefixIcon: Icon(Icons.search),
+                                border: OutlineInputBorder(),
+                              ),
+                              onChanged: (v) => setState(
+                                  () => _searchQuery = v.trim().toLowerCase()),
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.add, color: Colors.green),
-                              onPressed: () => _updateStock(id, 1),
-                            ),
-                            IconButton(
-                              icon:
-                                  const Icon(Icons.delete, color: Colors.grey),
-                              onPressed: () => _deleteMedicine(id),
-                            ),
-                          ],
+                          ),
+                          const SizedBox(width: 8),
+                          DropdownButton<String>(
+                            value: _filterType,
+                            items: ["All", ..._medicineTypes]
+                                .map((type) => DropdownMenuItem(
+                                    value: type, child: Text(type)))
+                                .toList(),
+                            onChanged: (v) =>
+                                setState(() => _filterType = v ?? "All"),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+
+                      // Medicine List
+                      Expanded(
+                        child: StreamBuilder<QuerySnapshot>(
+                          stream: colRef
+                              .orderBy("updatedAt", descending: true)
+                              .snapshots(),
+                          builder: (context, snapshot) {
+                            if (!snapshot.hasData) {
+                              return const Center(
+                                  child: CircularProgressIndicator());
+                            }
+
+                            var docs = snapshot.data!.docs;
+
+                            // Apply search + filter
+                            docs = docs.where((doc) {
+                              final name =
+                                  (doc["name"] ?? "").toString().toLowerCase();
+                              final code =
+                                  (doc["code"] ?? "").toString().toLowerCase();
+                              final type = (doc["type"] ?? "").toString();
+                              final matchesSearch =
+                                  name.contains(_searchQuery) ||
+                                      code.contains(_searchQuery);
+                              final matchesFilter =
+                                  _filterType == "All" || type == _filterType;
+                              return matchesSearch && matchesFilter;
+                            }).toList();
+
+                            if (docs.isEmpty) {
+                              return const Center(
+                                  child: Text("❌ No medicines found."));
+                            }
+
+                            return ListView.builder(
+                              itemCount: docs.length,
+                              itemBuilder: (_, index) {
+                                final doc = docs[index];
+                                return Card(
+                                  margin:
+                                      const EdgeInsets.symmetric(vertical: 6),
+                                  child: ListTile(
+                                    leading: const Icon(Icons.medication,
+                                        color: Colors.green),
+                                    title: Text(
+                                      doc["name"] ?? "Unnamed",
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    subtitle: Text(
+                                      "Code: ${doc["code"] ?? "-"} | "
+                                      "Type: ${doc["type"] ?? "-"} | "
+                                      "Qty: ${doc["quantity"] ?? 0} | "
+                                      "Price: PKR ${doc["price"] ?? 0}",
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.edit,
+                                              color: Colors.blue),
+                                          onPressed: () => _editMedicine(doc),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete,
+                                              color: Colors.red),
+                                          onPressed: () =>
+                                              _deleteMedicine(doc.id),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                          },
                         ),
                       ),
-                    );
-                  },
-                );
-              },
-            ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

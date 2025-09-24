@@ -28,7 +28,7 @@ class InventoryItem {
 
     return InventoryItem(
       id: doc.id,
-      serial: d['serial'] ?? '', // must always exist
+      serial: d['serial'] ?? '',
       name: d['name'] ?? '',
       stock: (d['stock'] ?? 0) as int,
       price: (d['price'] ?? 0) as num,

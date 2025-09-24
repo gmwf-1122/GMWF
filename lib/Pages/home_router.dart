@@ -1,3 +1,4 @@
+// lib/pages/home_router.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,8 +8,9 @@ import '../services/local_storage_service.dart';
 import 'receptionist_screen.dart';
 import 'doctor_screen.dart';
 import 'dispensar_screen.dart';
-import 'admin_screen.dart'; // ✅ updated name
+import 'admin_screen.dart';
 import 'unknown_role.dart';
+import 'inventory.dart'; // ✅ Inventory import
 
 class HomeRouter extends StatelessWidget {
   final User user;
@@ -17,32 +19,26 @@ class HomeRouter extends StatelessWidget {
 
   Future<Map<String, dynamic>?> _fetchUserData(User user) async {
     try {
-      // ✅ Hardcoded admin
-      if (user.email?.toLowerCase() == "admin@gmd.com" ||
-          user.uid.startsWith("local-")) {
+      // ✅ Hardcoded admin fallback
+      if (user.email?.toLowerCase() == 'admin@gmd.com' ||
+          user.uid.startsWith('local-')) {
         await LocalStorageService.seedLocalAdmins();
-        return {
-          "role": "admin",
-          "branchId": "all",
-        };
+        return {'role': 'admin', 'branchId': 'all'};
       }
 
       // ✅ Fetch from Firestore
       final doc = await FirebaseFirestore.instance
-          .collection("users")
+          .collection('users')
           .doc(user.uid)
           .get();
-
-      if (doc.exists) {
-        return doc.data();
-      }
+      if (doc.exists) return doc.data();
     } catch (e) {
-      debugPrint("❌ Firestore fetch error: $e");
+      debugPrint('❌ Firestore fetch error: $e');
     }
 
-    // ✅ Fallback to local cache
+    // ✅ fallback to local cache
     final cached = LocalStorageService.getLocalUserByEmail(
-            user.email?.toLowerCase() ?? "") ??
+            user.email?.toLowerCase() ?? '') ??
         LocalStorageService.getLocalUserByUid(user.uid);
 
     return cached;
@@ -52,19 +48,18 @@ class HomeRouter extends StatelessWidget {
     final normalized = role.toLowerCase().trim();
 
     switch (normalized) {
-      case "doctor":
-        return DoctorScreen(
-          branchId: branchId,
-          doctorId: uid, // ✅ pass doctorId explicitly
-        );
-      case "receptionist":
-        return ReceptionistScreen(branchId: branchId);
-      case "dispensor":
-      case "dispenser":
-      case "pharmacist":
+      case 'doctor':
+        return DoctorScreen(branchId: branchId, doctorId: uid);
+      case 'receptionist':
+        return ReceptionistScreen(branchId: branchId, receptionistId: uid);
+      case 'inventory': // ✅ Fixed inventory route
+        return InventoryPage(branchId: branchId, receptionistId: uid);
+      case 'dispensor':
+      case 'dispenser':
+      case 'pharmacist':
         return DispensarScreen(branchId: branchId);
-      case "admin":
-        return const AdminScreen(); // ✅ updated usage
+      case 'admin':
+        return const AdminScreen();
       default:
         return const UnknownRolePage();
     }
@@ -86,10 +81,10 @@ class HomeRouter extends StatelessWidget {
         }
 
         final data = snapshot.data!;
-        final role = (data["role"] ?? "unknown").toString();
-        final branchId = (data["branchId"] ?? "unknown").toString();
+        final role = (data['role'] ?? 'unknown').toString();
+        final branchId = (data['branchId'] ?? 'unknown').toString();
 
-        debugPrint("🚦 Routing user: role=$role, branchId=$branchId");
+        debugPrint('🚦 Routing user: role=$role, branchId=$branchId');
 
         return _getScreenByRole(role, branchId, user.uid);
       },

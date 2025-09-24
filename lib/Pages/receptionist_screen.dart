@@ -1,19 +1,20 @@
 // lib/pages/receptionist_screen.dart
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:hive/hive.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/services.dart';
 
-// ✅ Import InventoryPage (correct path)
 import 'inventory.dart';
 
 class ReceptionistScreen extends StatefulWidget {
   final String branchId;
+  final String receptionistId;
 
-  const ReceptionistScreen({super.key, required this.branchId});
+  const ReceptionistScreen({
+    super.key,
+    required this.branchId,
+    required this.receptionistId,
+  });
 
   @override
   State<ReceptionistScreen> createState() => _ReceptionistScreenState();
@@ -21,488 +22,493 @@ class ReceptionistScreen extends StatefulWidget {
 
 class _ReceptionistScreenState extends State<ReceptionistScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _firestore = FirebaseFirestore.instance;
 
-  // Controllers
+  final _nameController = TextEditingController();
   final _cnicController = TextEditingController();
-  final _patientName = TextEditingController();
-  final _age = TextEditingController();
-  final _weight = TextEditingController();
-  final _temperature = TextEditingController();
-  final _sugarTest = TextEditingController();
+  final _ageController = TextEditingController();
+  final _weightController = TextEditingController();
+  final _tempController = TextEditingController();
+  final _sugarController = TextEditingController();
   final _searchController = TextEditingController();
 
-  String? selectedGender;
-  String? selectedBloodType;
-  String? currentSerial;
-
-  final List<String> bloodTypes = [
-    "A+",
-    "A-",
-    "B+",
-    "B-",
-    "O+",
-    "O-",
-    "AB+",
-    "AB-"
-  ];
-  final List<String> genders = ["Male", "Female"];
-
-  late Box<Map> _localBox;
-  late StreamSubscription<dynamic> _connectivitySub;
-  bool _isOnline = true;
+  String? _selectedGender;
+  String? _selectedBloodGroup;
+  String? _serialNumber;
 
   @override
   void initState() {
     super.initState();
-    _initHive();
-    _listenConnectivity();
-    _fetchCurrentSerial(widget.branchId);
-  }
-
-  Future<void> _initHive() async {
-    _localBox = await Hive.openBox<Map>("patients_${widget.branchId}");
-    await _syncLocalPatients();
-  }
-
-  void _listenConnectivity() {
-    _connectivitySub =
-        Connectivity().onConnectivityChanged.listen((dynamic event) async {
-      List<ConnectivityResult> results;
-      if (event is ConnectivityResult) {
-        results = [event];
-      } else if (event is List<ConnectivityResult>) {
-        results = event;
-      } else {
-        results = [ConnectivityResult.none];
-      }
-
-      final online = results.any((r) => r != ConnectivityResult.none);
-
-      if (online && !_isOnline) {
-        await _syncLocalPatients();
-        await _fetchCurrentSerial(widget.branchId);
-      }
-
-      if (mounted) setState(() => _isOnline = online);
-    });
-  }
-
-  Future<void> _fetchCurrentSerial(String branchId) async {
-    try {
-      final today = DateTime.now();
-      final datePart =
-          "${today.day.toString().padLeft(2, '0')}${today.month.toString().padLeft(2, '0')}${today.year.toString().substring(2)}";
-
-      final docSnap = await _firestore
-          .collection("branches")
-          .doc(branchId)
-          .collection("metadata")
-          .doc("serials")
-          .get();
-
-      int count = 0;
-      if (docSnap.exists) {
-        final data = docSnap.data();
-        if (data != null && data.containsKey(datePart)) {
-          count = data[datePart] is int
-              ? data[datePart]
-              : int.tryParse(data[datePart].toString()) ?? 0;
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          currentSerial = "$datePart-${(count + 1).toString().padLeft(3, '0')}";
-        });
-      }
-    } catch (e) {
-      debugPrint("❌ Failed to fetch current serial: $e");
-    }
-  }
-
-  Future<void> _syncLocalPatients() async {
-    if (!_isOnline) return;
-    try {
-      final cachedPatients = _localBox.values.toList();
-      for (var patient in cachedPatients) {
-        final Map<String, dynamic> p = Map<String, dynamic>.from(patient);
-        final cnic = p["cnic"];
-        await _firestore
-            .collection("branches")
-            .doc(widget.branchId)
-            .collection("patients")
-            .doc(cnic)
-            .set(p, SetOptions(merge: true));
-      }
-      await _localBox.clear();
-    } catch (e) {
-      debugPrint("❌ Failed to sync local patients: $e");
-    }
-  }
-
-  Future<void> _savePatient() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-
-    final cnic = _cnicController.text.trim();
-
-    final patientRef = _firestore
-        .collection("branches")
-        .doc(widget.branchId)
-        .collection("patients")
-        .doc(cnic);
-
-    final existing = await patientRef.get();
-
-    final visitData = {
-      "serial": currentSerial ?? "",
-      "age": _age.text,
-      "weight": _weight.text,
-      "temperature": _temperature.text,
-      "sugarTest": _sugarTest.text,
-      "branchId": widget.branchId,
-      "receptionistId": user.uid,
-      "createdAt": FieldValue.serverTimestamp(),
-    };
-
-    final patientData = {
-      "cnic": cnic,
-      "name": _patientName.text,
-      "gender": selectedGender ?? "Unknown",
-      "bloodType": selectedBloodType ?? "Unknown",
-      "branchId": widget.branchId,
-      "visits": FieldValue.arrayUnion([visitData]),
-    };
-
-    try {
-      if (_isOnline) {
-        if (existing.exists) {
-          await patientRef.update({
-            "visits": FieldValue.arrayUnion([visitData]),
-          });
-        } else {
-          await patientRef.set(patientData, SetOptions(merge: true));
-        }
-
-        final today = DateTime.now();
-        final datePart =
-            "${today.day.toString().padLeft(2, '0')}${today.month.toString().padLeft(2, '0')}${today.year.toString().substring(2)}";
-
-        await _firestore
-            .collection("branches")
-            .doc(widget.branchId)
-            .collection("metadata")
-            .doc("serials")
-            .set({datePart: FieldValue.increment(1)}, SetOptions(merge: true));
-
-        await _fetchCurrentSerial(widget.branchId);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ Patient registered successfully")),
-        );
-      } else {
-        await _localBox.put(cnic, Map<String, dynamic>.from(patientData));
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("📦 Patient saved locally (offline)")),
-        );
-      }
-
-      _patientName.clear();
-      _age.clear();
-      _weight.clear();
-      _temperature.clear();
-      _sugarTest.clear();
-      setState(() {
-        selectedGender = null;
-        selectedBloodType = null;
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("❌ Error saving patient: $e")),
-      );
-    }
-  }
-
-  Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
-    if (!mounted) return;
-    Navigator.pushNamedAndRemoveUntil(context, "/login", (route) => false);
-  }
-
-  InputDecoration _roundedInput(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Colors.black54),
-      filled: true,
-      fillColor: Colors.white,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-        borderSide: const BorderSide(color: Colors.green),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(30),
-        borderSide: const BorderSide(color: Colors.white, width: 2),
-      ),
-    );
+    _generateSerialNumber();
   }
 
   @override
   void dispose() {
-    _connectivitySub.cancel();
+    _nameController.dispose();
     _cnicController.dispose();
-    _patientName.dispose();
-    _age.dispose();
-    _weight.dispose();
-    _temperature.dispose();
-    _sugarTest.dispose();
+    _ageController.dispose();
+    _weightController.dispose();
+    _tempController.dispose();
+    _sugarController.dispose();
     _searchController.dispose();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async => false,
-      child: Scaffold(
-        backgroundColor: const Color.fromRGBO(76, 175, 80, 1),
-        appBar: AppBar(
-          title: const Text("Receptionist Dashboard",
-              style: TextStyle(color: Colors.white)),
-          backgroundColor: const Color.fromRGBO(76, 175, 80, 1),
-          automaticallyImplyLeading: false,
-          actions: [
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.green,
-              ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        InventoryPage(branchId: widget.branchId),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.inventory),
-              label: const Text("Inventory"),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: _logout,
-              icon: const Icon(Icons.logout),
-              label: const Text("Logout"),
-            ),
-            const SizedBox(width: 8),
-          ],
-        ),
-        body: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    const Text("Patient Details",
-                        style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white)),
-                    const Spacer(),
-                    if (currentSerial != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: Text(currentSerial!,
-                            style: const TextStyle(
-                                color: Colors.green,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: SingleChildScrollView(
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _cnicController,
-                                  decoration:
-                                      _roundedInput("CNIC (XXXXX-XXXXXXX-X)"),
-                                  keyboardType: TextInputType.number,
-                                  inputFormatters: [
-                                    FilteringTextInputFormatter.digitsOnly,
-                                    LengthLimitingTextInputFormatter(13),
-                                    CnicInputFormatter(),
-                                  ],
-                                  validator: (v) {
-                                    if (v == null || v.isEmpty) {
-                                      return 'Enter CNIC';
-                                    }
-                                    if (!RegExp(r'^\d{5}-\d{7}-\d{1}$')
-                                        .hasMatch(v)) {
-                                      return 'Invalid CNIC format';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _patientName,
-                                  decoration: _roundedInput("Patient Name"),
-                                  validator: (v) =>
-                                      v!.isEmpty ? "Enter patient name" : null,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  value: selectedGender,
-                                  decoration: _roundedInput("Gender"),
-                                  items: genders
-                                      .map((g) => DropdownMenuItem(
-                                          value: g, child: Text(g)))
-                                      .toList(),
-                                  onChanged: (val) =>
-                                      setState(() => selectedGender = val),
-                                  validator: (v) =>
-                                      v == null ? "Select gender" : null,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  value: selectedBloodType,
-                                  decoration: _roundedInput("Blood Type"),
-                                  items: bloodTypes
-                                      .map((b) => DropdownMenuItem(
-                                          value: b, child: Text(b)))
-                                      .toList(),
-                                  onChanged: (val) =>
-                                      setState(() => selectedBloodType = val),
-                                  validator: (v) =>
-                                      v == null ? "Select blood type" : null,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _age,
-                                  decoration: _roundedInput("Age"),
-                                  keyboardType: TextInputType.number,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _weight,
-                                  decoration: _roundedInput("Weight (kg)"),
-                                  keyboardType: TextInputType.number,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _temperature,
-                                  decoration: _roundedInput("Temperature (°C)"),
-                                  keyboardType: TextInputType.number,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: TextFormField(
-                                  controller: _sugarTest,
-                                  decoration: _roundedInput("Sugar Test"),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.green,
-                                foregroundColor: Colors.white,
-                                minimumSize: const Size(double.infinity, 50),
-                                shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(30))),
-                            onPressed: _savePatient,
-                            child: const Text("Confirm"),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
+  /// 🔢 Generate ddMMyy-001 style serial per branch/day
+  Future<void> _generateSerialNumber() async {
+    final today = DateTime.now();
+    final datePart =
+        "${today.day.toString().padLeft(2, '0')}${today.month.toString().padLeft(2, '0')}${today.year.toString().substring(2)}";
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('patients')
+        .where('serialDate', isEqualTo: datePart)
+        .orderBy('serial', descending: true)
+        .limit(1)
+        .get();
+
+    int nextNumber = 1;
+    if (snapshot.docs.isNotEmpty) {
+      final lastSerial = snapshot.docs.first['serial'] as String?;
+      if (lastSerial != null && lastSerial.contains('-')) {
+        final lastNum = int.tryParse(lastSerial.split('-').last);
+        if (lastNum != null) {
+          nextNumber = lastNum + 1;
+        }
+      }
+    }
+
+    setState(() {
+      _serialNumber = "$datePart-${nextNumber.toString().padLeft(3, '0')}";
+    });
+  }
+
+  /// ✅ Validate & save patient
+  Future<void> _savePatient() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_serialNumber == null) {
+      await _generateSerialNumber();
+    }
+
+    final data = {
+      'serial': _serialNumber,
+      'serialDate': _serialNumber!.split('-')[0],
+      'name': _nameController.text.trim(),
+      'cnic': _cnicController.text.trim(),
+      'age': _ageController.text.trim(),
+      'weight': _weightController.text.trim(),
+      'temperature': _tempController.text.trim(),
+      'sugar': _sugarController.text.trim(),
+      'gender': _selectedGender,
+      'bloodGroup': _selectedBloodGroup,
+      'branchId': widget.branchId,
+      'receptionistId': widget.receptionistId,
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    await FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('patients')
+        .doc(_serialNumber) // save with serial as docId
+        .set(data);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ Patient saved successfully')),
+    );
+
+    _resetFormAndNextSerial();
+  }
+
+  void _resetFormAndNextSerial() {
+    _formKey.currentState?.reset();
+    _nameController.clear();
+    _cnicController.clear();
+    _ageController.clear();
+    _weightController.clear();
+    _tempController.clear();
+    _sugarController.clear();
+    setState(() {
+      _selectedGender = null;
+      _selectedBloodGroup = null;
+    });
+    _generateSerialNumber();
+  }
+
+  /// 🔒 CNIC formatter (XXXXX-XXXXXXX-X)
+  TextInputFormatter get _cnicFormatter => TextInputFormatter.withFunction(
+        (oldValue, newValue) {
+          final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+          final capped = digits.length <= 13 ? digits : digits.substring(0, 13);
+          String formatted = capped;
+          if (capped.length > 5 && capped.length <= 12) {
+            formatted = "${capped.substring(0, 5)}-${capped.substring(5)}";
+          } else if (capped.length > 12) {
+            formatted =
+                "${capped.substring(0, 5)}-${capped.substring(5, 12)}-${capped.substring(12)}";
+          }
+          return TextEditingValue(
+            text: formatted,
+            selection: TextSelection.collapsed(offset: formatted.length),
+          );
+        },
+      );
+
+  Widget _buildTextFormField({
+    required String label,
+    required TextEditingController controller,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+    IconData? icon,
+  }) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      validator: validator,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: icon != null ? Icon(icon) : null,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
       ),
     );
   }
-}
 
-class CnicInputFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
-    final digitsOnly = newValue.text.replaceAll(RegExp(r'\D'), '');
-    final limited =
-        digitsOnly.length <= 13 ? digitsOnly : digitsOnly.substring(0, 13);
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.green.shade50,
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: Colors.green.shade700,
+        title: Row(
+          children: [
+            Image.asset('assets/logo/gmwf.png', height: 36),
+            const SizedBox(width: 10),
+            const Text(
+              'Receptionist',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => InventoryPage(
+                    branchId: widget.branchId,
+                    receptionistId: widget.receptionistId,
+                  ),
+                ),
+              );
+            },
+            icon: const Icon(Icons.inventory, color: Colors.white),
+            label: const Text(
+              "Inventory",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              Navigator.of(context).pushReplacementNamed('/login');
+            },
+            icon: const Icon(Icons.logout, color: Colors.white),
+            label: const Text(
+              "Logout",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            // Patient Form Card
+            Card(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Patient Details',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      _buildTextFormField(
+                        label: 'Name',
+                        controller: _nameController,
+                        icon: Icons.person,
+                        validator: (v) =>
+                            v == null || v.trim().isEmpty ? 'Enter name' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      _buildTextFormField(
+                        label: 'CNIC (00000-0000000-0)',
+                        controller: _cnicController,
+                        icon: Icons.credit_card,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[\d-]')),
+                          LengthLimitingTextInputFormatter(15),
+                          _cnicFormatter,
+                        ],
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) {
+                            return 'Enter CNIC';
+                          }
+                          if (!RegExp(r'^\d{5}-\d{7}-\d{1}$')
+                              .hasMatch(v.trim())) {
+                            return 'CNIC must be 00000-0000000-0';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildTextFormField(
+                              label: 'Age',
+                              controller: _ageController,
+                              icon: Icons.cake,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(3),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildTextFormField(
+                              label: 'Weight (kg)',
+                              controller: _weightController,
+                              icon: Icons.monitor_weight,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(3),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildTextFormField(
+                              label: 'Temp (°C)',
+                              controller: _tempController,
+                              icon: Icons.thermostat,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(
+                                    RegExp(r'[\d.]')),
+                                LengthLimitingTextInputFormatter(3),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildTextFormField(
+                              label: 'Sugar',
+                              controller: _sugarController,
+                              icon: Icons.bloodtype,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [
+                                FilteringTextInputFormatter.digitsOnly,
+                                LengthLimitingTextInputFormatter(3),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedGender,
+                              hint: const Text('Select Gender'),
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.wc),
+                              ),
+                              items: ['Male', 'Female', 'Other']
+                                  .map((g) => DropdownMenuItem(
+                                        value: g,
+                                        child: Text(g),
+                                      ))
+                                  .toList(),
+                              onChanged: (v) =>
+                                  setState(() => _selectedGender = v),
+                              validator: (v) =>
+                                  v == null ? 'Please select gender' : null,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedBloodGroup,
+                              hint: const Text('Select Blood Group'),
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.bloodtype),
+                              ),
+                              items: [
+                                'A+',
+                                'A-',
+                                'B+',
+                                'B-',
+                                'O+',
+                                'O-',
+                                'AB+',
+                                'AB-'
+                              ]
+                                  .map((bg) => DropdownMenuItem(
+                                        value: bg,
+                                        child: Text(bg),
+                                      ))
+                                  .toList(),
+                              onChanged: (v) =>
+                                  setState(() => _selectedBloodGroup = v),
+                              validator: (v) => v == null
+                                  ? 'Please select blood group'
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.check),
+                          label: const Text('Confirm'),
+                          onPressed: () async {
+                            if (_selectedGender == null ||
+                                _selectedBloodGroup == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text(
+                                        'Please select gender and blood group')),
+                              );
+                              return;
+                            }
+                            if (_formKey.currentState!.validate()) {
+                              await _savePatient();
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
 
-    String formatted;
-    if (limited.length <= 5) {
-      formatted = limited;
-    } else if (limited.length <= 12) {
-      formatted = '${limited.substring(0, 5)}-${limited.substring(5)}';
-    } else {
-      formatted =
-          '${limited.substring(0, 5)}-${limited.substring(5, 12)}-${limited.substring(12)}';
-    }
+            const SizedBox(height: 20),
 
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
+            // 🔹 Unified bottom card for Serial + Search
+            Card(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    if (_serialNumber != null)
+                      Text('Current Serial: $_serialNumber',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search by Serial or CNIC',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 12),
+                      ),
+                      onChanged: (v) => setState(() {}),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 20),
+
+            // Patients list
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(widget.branchId)
+                  .collection('patients')
+                  .orderBy('createdAt', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox();
+
+                final query = _searchController.text.trim().toLowerCase();
+                final docs = snapshot.data!.docs.where((doc) {
+                  final serial = (doc['serial'] ?? '').toString().toLowerCase();
+                  final cnic = (doc['cnic'] ?? '').toString().toLowerCase();
+                  if (query.isEmpty) return true;
+                  return serial.contains(query) || cnic.contains(query);
+                }).toList();
+
+                if (_searchController.text.isNotEmpty && docs.isEmpty) {
+                  return const Text('❌ No patient found');
+                }
+
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final d = docs[index].data() as Map<String, dynamic>;
+                    return Card(
+                      child: ListTile(
+                        title: Text(d['name'] ?? 'Unnamed'),
+                        subtitle: Text('Serial: ${d['serial'] ?? '-'}'),
+                        trailing: Text('CNIC: ${d['cnic'] ?? '-'}'),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
