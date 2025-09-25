@@ -41,11 +41,15 @@ Future<void> main() async {
 
     // ✅ Setup custom window frame
     doWhenWindowReady(() {
-      const initialSize = Size(1280, 720);
-      appWindow.minSize = initialSize;
-      appWindow.size = initialSize;
+      const minSize = Size(1280, 720);
+      appWindow.minSize = minSize;
+
       appWindow.alignment = Alignment.center;
       appWindow.title = "Gulzar Madina Dispensary";
+
+      // ✅ Start maximized by default, but user can resize/move later
+      appWindow.maximize();
+
       appWindow.show();
     });
 
@@ -78,6 +82,11 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
+  void _enterFullScreen() {
+    // ✅ Force fullscreen (maximize) after login
+    appWindow.maximize();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -92,6 +101,8 @@ class _MyAppState extends State<MyApp> {
           }
 
           if (snapshot.hasData && snapshot.data != null) {
+            // ✅ Enter fullscreen once login is successful
+            Future.microtask(() => _enterFullScreen());
             return HomeRouter(user: snapshot.data!);
           }
 

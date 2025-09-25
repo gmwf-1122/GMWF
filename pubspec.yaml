@@ -22,7 +22,7 @@ dependencies:
   connectivity_plus: ^7.0.0
   http: ^1.2.2
 
-  #windows border 
+  # Windows border 
   bitsdojo_window: ^0.1.6
 
   # Unique IDs
@@ -45,6 +45,9 @@ dependencies:
   # Desktop window manager (for fullscreen/sizing on Windows)
   window_manager: ^0.3.8
   share_plus: ^12.0.0
+
+  # For medical icons
+  font_awesome_flutter: ^10.4.0
 
 dev_dependencies:
   flutter_test:

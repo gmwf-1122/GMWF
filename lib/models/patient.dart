@@ -6,7 +6,7 @@ class Patient {
   final String branchId;
   final String createdBy;
   final String status; // New → PrescriptionReady → Dispensed → Completed
-  final String? assignedDoctorId; // ✅ doctor assigned
+  final String? assignedDoctorId;
   final String? branchName;
   final Timestamp? createdAt;
   final Map<String, dynamic>? visitDetails;

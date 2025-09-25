@@ -72,10 +72,10 @@ class AuthService {
           .doc(user.uid)
           .set(firestoreUserData, SetOptions(merge: true));
 
-      // ✅ Ensure branch doc exists
+      // ✅ Ensure branch doc exists with new structure
       await _firestore.collection("branches").doc(branchId).set({
-        "id": branchId,
-        "name": branchName,
+        "branchId": branchId,
+        "branchName": branchName,
         "createdAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 

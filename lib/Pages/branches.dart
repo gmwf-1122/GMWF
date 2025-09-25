@@ -73,71 +73,6 @@ class Branches extends StatelessWidget {
     }
   }
 
-  Future<void> _deleteBranch(BuildContext context, String branchId) async {
-    if (defaultBranches.contains(branchId)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text("⚠ Default branch \"$branchId\" cannot be deleted")),
-      );
-      return;
-    }
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Branch"),
-        content: Text(
-          "Are you sure you want to delete branch \"$branchId\"?\n\n"
-          "⚠ All users in this branch will be removed.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text("Delete", style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        final batch = FirebaseFirestore.instance.batch();
-
-        // ✅ Delete all users in branch (both global + branch subcollection)
-        final usersSnapshot = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('users')
-            .get();
-
-        for (var doc in usersSnapshot.docs) {
-          batch.delete(
-              FirebaseFirestore.instance.collection('users').doc(doc.id));
-          batch.delete(doc.reference);
-        }
-
-        // ✅ Delete branch doc
-        batch.delete(
-            FirebaseFirestore.instance.collection('branches').doc(branchId));
-
-        await batch.commit();
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Branch \"$branchId\" deleted successfully")),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error deleting branch: $e")),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -225,14 +160,7 @@ class Branches extends StatelessWidget {
                                 fontSize: 16,
                               ),
                             ),
-                            trailing: defaultBranches.contains(branchName)
-                                ? null
-                                : IconButton(
-                                    icon: const Icon(Icons.delete,
-                                        color: Colors.red),
-                                    onPressed: () =>
-                                        _deleteBranch(context, branchName),
-                                  ),
+                            trailing: null, // ❌ no branch delete
                             children: [
                               Padding(
                                 padding: const EdgeInsets.all(12.0),

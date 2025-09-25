@@ -1,7 +1,9 @@
 // lib/pages/inventory.dart
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'receptionist_screen.dart'; // for back navigation
 
 class InventoryPage extends StatefulWidget {
   final String branchId;
@@ -18,420 +20,400 @@ class InventoryPage extends StatefulWidget {
 }
 
 class _InventoryPageState extends State<InventoryPage> {
-  final _firestore = FirebaseFirestore.instance;
-
-  final _nameController = TextEditingController();
-  final _codeController = TextEditingController();
-  final _quantityController = TextEditingController();
-  final _priceController = TextEditingController();
-
-  String? _editingDocId;
-  String? _selectedType;
-  String _searchQuery = "";
+  final TextEditingController _searchController = TextEditingController();
+  String _sortOption = "Name";
   String _filterType = "All";
 
-  final List<String> _medicineTypes = [
+  final List<String> _types = [
+    "All",
     "Tablet",
     "Capsule",
     "Syrup",
-    "Injection",
-    "Other"
+    "Injection"
   ];
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _codeController.dispose();
-    _quantityController.dispose();
-    _priceController.dispose();
-    super.dispose();
-  }
+  void _showAddMedicineForm() {
+    final TextEditingController nameController = TextEditingController();
+    final TextEditingController codeController = TextEditingController();
+    final TextEditingController qtyController = TextEditingController();
+    final TextEditingController priceController = TextEditingController();
+    final TextEditingController expiryController = TextEditingController();
+    String selectedType = "Tablet";
 
-  List<String> _generateKeywords(String input) {
-    input = input.toLowerCase();
-    List<String> keywords = [];
-    for (int i = 1; i <= input.length; i++) {
-      keywords.add(input.substring(0, i));
-    }
-    return keywords;
-  }
-
-  Future<void> _saveMedicine() async {
-    if (_nameController.text.isEmpty ||
-        _codeController.text.isEmpty ||
-        _quantityController.text.isEmpty ||
-        _priceController.text.isEmpty ||
-        _selectedType == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("⚠️ Please fill all fields")),
-      );
-      return;
-    }
-
-    final confirm = await showDialog<bool>(
+    showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Confirm Save"),
-        content: Text(_editingDocId == null
-            ? "Do you want to add this medicine?"
-            : "Do you want to update this medicine?"),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel")),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Confirm")),
-        ],
-      ),
+      builder: (context) {
+        return AlertDialog(
+          title: const Text("Add Medicine"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Medicine Code
+                TextField(
+                  controller: codeController,
+                  decoration: const InputDecoration(
+                    labelText: "Medicine Code",
+                    prefixIcon: Icon(Icons.code, color: Colors.green),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Medicine Name
+                TextField(
+                  controller: nameController,
+                  decoration: const InputDecoration(
+                    labelText: "Medicine Name",
+                    prefixIcon:
+                        Icon(Icons.medical_services, color: Colors.green),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Medicine Type
+                DropdownButtonFormField<String>(
+                  value: selectedType,
+                  decoration: const InputDecoration(
+                    labelText: "Type",
+                    prefixIcon: Icon(Icons.category, color: Colors.green),
+                  ),
+                  items:
+                      ["Tablet", "Capsule", "Syrup", "Injection"].map((type) {
+                    return DropdownMenuItem(value: type, child: Text(type));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) selectedType = val;
+                  },
+                ),
+                const SizedBox(height: 10),
+                // Quantity
+                TextField(
+                  controller: qtyController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: "Quantity",
+                    prefixIcon: Icon(Icons.inventory_2, color: Colors.green),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Price
+                TextField(
+                  controller: priceController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(
+                    labelText: "Price (PKR)",
+                    prefixIcon: Text(
+                      "PKR ",
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, color: Colors.green),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                // Expiry Date (strict dd-mm-yyyy)
+                TextField(
+                  controller: expiryController,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'\d|-')),
+                    LengthLimitingTextInputFormatter(10),
+                    ExpiryDateFormatter(), // custom formatter below
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: "Expiry Date (dd-mm-yyyy)",
+                    prefixIcon: Icon(Icons.date_range, color: Colors.green),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              child: const Text("Cancel"),
+              onPressed: () => Navigator.pop(context),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.check, color: Colors.white),
+              label:
+                  const Text("Confirm", style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                final name = nameController.text.trim();
+                final code = codeController.text.trim();
+                final qty = int.tryParse(qtyController.text.trim()) ?? 0;
+                final price = double.tryParse(priceController.text.trim()) ?? 0;
+                final expiryText = expiryController.text.trim();
+
+                if (name.isEmpty ||
+                    code.isEmpty ||
+                    qty <= 0 ||
+                    price <= 0 ||
+                    expiryText.length != 10) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text(
+                            "🚩 Fill all fields correctly (expiry dd-mm-yyyy)")),
+                  );
+                  return;
+                }
+
+                // Duplicate check
+                final existing = await FirebaseFirestore.instance
+                    .collection('branches')
+                    .doc(widget.branchId)
+                    .collection('inventory')
+                    .where('code', isEqualTo: code)
+                    .get();
+
+                if (existing.docs.isNotEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text("❌ Medicine code already exists")),
+                  );
+                  return;
+                }
+
+                await FirebaseFirestore.instance
+                    .collection('branches')
+                    .doc(widget.branchId)
+                    .collection('inventory')
+                    .add({
+                  'code': code,
+                  'name': name,
+                  'type': selectedType,
+                  'quantity': qty,
+                  'price': price,
+                  'expiryDate': expiryText,
+                  'createdBy': widget.receptionistId,
+                  'createdAt': FieldValue.serverTimestamp(),
+                });
+
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        );
+      },
     );
-
-    if (confirm != true) return;
-
-    final data = {
-      "name": _nameController.text.trim(),
-      "code": _codeController.text.trim(),
-      "quantity": int.tryParse(_quantityController.text.trim()) ?? 0,
-      "price": double.tryParse(_priceController.text.trim()) ?? 0.0,
-      "type": _selectedType,
-      "branchId": widget.branchId,
-      "addedBy": widget.receptionistId,
-      "updatedAt": FieldValue.serverTimestamp(),
-      "searchKeywords": [
-        ..._generateKeywords(_nameController.text),
-        ..._generateKeywords(_codeController.text),
-      ],
-    };
-
-    final colRef = _firestore
-        .collection("branches")
-        .doc(widget.branchId)
-        .collection("inventory");
-
-    if (_editingDocId == null) {
-      await colRef.add(data);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Medicine added!")),
-      );
-    } else {
-      await colRef.doc(_editingDocId).update(data);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("✅ Medicine updated!")),
-      );
-    }
-
-    _clearForm();
-  }
-
-  Future<void> _deleteMedicine(String docId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("Delete Medicine"),
-        content: const Text("Are you sure you want to delete this medicine?"),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel")),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Delete")),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      await _firestore
-          .collection("branches")
-          .doc(widget.branchId)
-          .collection("inventory")
-          .doc(docId)
-          .delete();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("🗑️ Medicine deleted")),
-      );
-    }
-  }
-
-  void _clearForm() {
-    setState(() {
-      _nameController.clear();
-      _codeController.clear();
-      _quantityController.clear();
-      _priceController.clear();
-      _editingDocId = null;
-      _selectedType = null;
-    });
-  }
-
-  void _editMedicine(DocumentSnapshot doc) {
-    setState(() {
-      _editingDocId = doc.id;
-      _nameController.text = doc["name"] ?? "";
-      _codeController.text = doc["code"] ?? "";
-      _quantityController.text = (doc["quantity"] ?? "").toString();
-      _priceController.text = (doc["price"] ?? "").toString();
-      _selectedType = doc["type"];
-    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final colRef = _firestore
-        .collection("branches")
-        .doc(widget.branchId)
-        .collection("inventory");
-
     return Scaffold(
-      backgroundColor: Colors.green.shade700,
       appBar: AppBar(
-        backgroundColor: Colors.green.shade900,
+        backgroundColor: Colors.green,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          "📦 Inventory",
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              // Medicine Form
-              Card(
-                elevation: 6,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: _nameController,
-                        decoration: const InputDecoration(
-                          labelText: "Medicine Name",
-                          prefixIcon: Icon(Icons.medical_services),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _codeController,
-                        decoration: const InputDecoration(
-                          labelText: "Medicine Code",
-                          prefixIcon: Icon(Icons.numbers),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: _selectedType,
-                        decoration: const InputDecoration(
-                          labelText: "Medicine Type",
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.category),
-                        ),
-                        items: _medicineTypes
-                            .map((type) => DropdownMenuItem(
-                                  value: type,
-                                  child: Text(type),
-                                ))
-                            .toList(),
-                        onChanged: (v) => setState(() => _selectedType = v),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _quantityController,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly
-                        ],
-                        decoration: const InputDecoration(
-                          labelText: "Quantity",
-                          prefixIcon: Icon(Icons.confirmation_number),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextField(
-                        controller: _priceController,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.allow(
-                              RegExp(r'^\d+\.?\d{0,2}'))
-                        ],
-                        decoration: const InputDecoration(
-                          labelText: "Price",
-                          prefixIcon: Text(
-                            "PKR",
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          ElevatedButton.icon(
-                            onPressed: _saveMedicine,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green.shade700,
-                              foregroundColor: Colors.white,
-                            ),
-                            icon: const Icon(Icons.save),
-                            label: Text(
-                              _editingDocId == null
-                                  ? "Add Medicine"
-                                  : "Update Medicine",
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          if (_editingDocId != null)
-                            ElevatedButton.icon(
-                              onPressed: _clearForm,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey,
-                                foregroundColor: Colors.white,
-                              ),
-                              icon: const Icon(Icons.cancel),
-                              label: const Text("Cancel"),
-                            ),
-                        ],
-                      )
-                    ],
-                  ),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ReceptionistScreen(
+                  branchId: widget.branchId,
+                  receptionistId: widget.receptionistId,
                 ),
               ),
-              const SizedBox(height: 20),
-
-              // Inventory Card with Search + Filter
-              Card(
-                elevation: 6,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
-                child: Container(
-                  height: 500,
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      // 🔍 Search + Filter Row inside Card
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              decoration: const InputDecoration(
-                                hintText: "Search medicine",
-                                prefixIcon: Icon(Icons.search),
-                                border: OutlineInputBorder(),
-                              ),
-                              onChanged: (v) => setState(
-                                  () => _searchQuery = v.trim().toLowerCase()),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          DropdownButton<String>(
-                            value: _filterType,
-                            items: ["All", ..._medicineTypes]
-                                .map((type) => DropdownMenuItem(
-                                    value: type, child: Text(type)))
-                                .toList(),
-                            onChanged: (v) =>
-                                setState(() => _filterType = v ?? "All"),
-                          ),
-                        ],
+            );
+          },
+        ),
+        title: const Text("Inventory", style: TextStyle(color: Colors.white)),
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.green,
+        onPressed: _showAddMedicineForm,
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: Column(
+        children: [
+          // Red gradient strip
+          Container(
+            height: 15,
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.redAccent, Colors.red],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.only(
+                bottomLeft: Radius.circular(10),
+                bottomRight: Radius.circular(10),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: "Search medicine...",
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      const SizedBox(height: 12),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                DropdownButton<String>(
+                  value: _sortOption,
+                  items: ["Name", "Quantity", "Expiry"].map((opt) {
+                    return DropdownMenuItem(
+                        value: opt, child: Text("Sort: $opt"));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => _sortOption = val);
+                  },
+                ),
+                const SizedBox(width: 8),
+                DropdownButton<String>(
+                  value: _filterType,
+                  items: _types.map((opt) {
+                    return DropdownMenuItem(
+                        value: opt, child: Text("Type: $opt"));
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => _filterType = val);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(widget.branchId)
+                  .collection('inventory')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  return const Center(child: Text("No medicines found."));
+                }
 
-                      // Medicine List
-                      Expanded(
-                        child: StreamBuilder<QuerySnapshot>(
-                          stream: colRef
-                              .orderBy("updatedAt", descending: true)
-                              .snapshots(),
-                          builder: (context, snapshot) {
-                            if (!snapshot.hasData) {
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            }
+                var meds = snapshot.data!.docs;
+                var filteredMeds = meds.where((doc) {
+                  final d = doc.data() as Map<String, dynamic>;
+                  final name = (d['name'] ?? '').toString().toLowerCase();
+                  final type = (d['type'] ?? '').toString();
+                  final code = (d['code'] ?? '').toString().toLowerCase();
+                  final matchesSearch =
+                      name.contains(_searchController.text.toLowerCase()) ||
+                          code.contains(_searchController.text.toLowerCase());
+                  final matchesType =
+                      _filterType == "All" || type == _filterType;
+                  return matchesSearch && matchesType;
+                }).toList();
 
-                            var docs = snapshot.data!.docs;
+                filteredMeds.sort((a, b) {
+                  final aData = a.data() as Map<String, dynamic>;
+                  final bData = b.data() as Map<String, dynamic>;
+                  if (_sortOption == "Name") {
+                    return (aData['name'] ?? "").compareTo(bData['name'] ?? "");
+                  } else if (_sortOption == "Quantity") {
+                    return (aData['quantity'] ?? 0)
+                        .compareTo(bData['quantity'] ?? 0);
+                  } else if (_sortOption == "Expiry") {
+                    final aDate = aData['expiryDate'] ?? '';
+                    final bDate = bData['expiryDate'] ?? '';
+                    return aDate.toString().compareTo(bDate.toString());
+                  }
+                  return 0;
+                });
 
-                            // Apply search + filter
-                            docs = docs.where((doc) {
-                              final name =
-                                  (doc["name"] ?? "").toString().toLowerCase();
-                              final code =
-                                  (doc["code"] ?? "").toString().toLowerCase();
-                              final type = (doc["type"] ?? "").toString();
-                              final matchesSearch =
-                                  name.contains(_searchQuery) ||
-                                      code.contains(_searchQuery);
-                              final matchesFilter =
-                                  _filterType == "All" || type == _filterType;
-                              return matchesSearch && matchesFilter;
-                            }).toList();
+                return ListView.builder(
+                  itemCount: filteredMeds.length,
+                  itemBuilder: (context, index) {
+                    final d =
+                        filteredMeds[index].data() as Map<String, dynamic>;
+                    final code = d['code'] ?? '';
+                    final name = d['name'] ?? '';
+                    final type = d['type'] ?? '';
+                    final qty = d['quantity'] ?? 0;
+                    final price = d['price'] ?? 0;
+                    final expiry = d['expiryDate'] ?? '';
 
-                            if (docs.isEmpty) {
-                              return const Center(
-                                  child: Text("❌ No medicines found."));
-                            }
+                    IconData iconData;
+                    switch (type.toLowerCase()) {
+                      case "tablet":
+                        iconData = FontAwesomeIcons.tablets;
+                        break;
+                      case "capsule":
+                        iconData = FontAwesomeIcons.capsules;
+                        break;
+                      case "syrup":
+                        iconData = FontAwesomeIcons.prescriptionBottleMedical;
+                        break;
+                      case "injection":
+                        iconData = FontAwesomeIcons.syringe;
+                        break;
+                      default:
+                        iconData = FontAwesomeIcons.pills;
+                    }
 
-                            return ListView.builder(
-                              itemCount: docs.length,
-                              itemBuilder: (_, index) {
-                                final doc = docs[index];
-                                return Card(
-                                  margin:
-                                      const EdgeInsets.symmetric(vertical: 6),
-                                  child: ListTile(
-                                    leading: const Icon(Icons.medication,
-                                        color: Colors.green),
-                                    title: Text(
-                                      doc["name"] ?? "Unnamed",
-                                      style: const TextStyle(
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                    subtitle: Text(
-                                      "Code: ${doc["code"] ?? "-"} | "
-                                      "Type: ${doc["type"] ?? "-"} | "
-                                      "Qty: ${doc["quantity"] ?? 0} | "
-                                      "Price: PKR ${doc["price"] ?? 0}",
-                                    ),
-                                    trailing: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        IconButton(
-                                          icon: const Icon(Icons.edit,
-                                              color: Colors.blue),
-                                          onPressed: () => _editMedicine(doc),
-                                        ),
-                                        IconButton(
-                                          icon: const Icon(Icons.delete,
-                                              color: Colors.red),
-                                          onPressed: () =>
-                                              _deleteMedicine(doc.id),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                );
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      child: ListTile(
+                        leading:
+                            FaIcon(iconData, size: 28, color: Colors.green),
+                        title: Text("$name ($code)"),
+                        subtitle: Text(
+                            "Type: $type | Qty: $qty | PKR $price | Expiry: $expiry"),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.edit, color: Colors.blue),
+                              onPressed: () {
+                                // TODO: implement edit
                               },
-                            );
-                          },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () async {
+                                await filteredMeds[index].reference.delete();
+                              },
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+                    );
+                  },
+                );
+              },
+            ),
           ),
-        ),
+        ],
       ),
+    );
+  }
+}
+
+/// Formatter to enforce dd-mm-yyyy input
+class ExpiryDateFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    String digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    StringBuffer buffer = StringBuffer();
+    for (int i = 0; i < digits.length && i < 8; i++) {
+      buffer.write(digits[i]);
+      if (i == 1 || i == 3) buffer.write('-');
+    }
+    return TextEditingValue(
+      text: buffer.toString(),
+      selection: TextSelection.collapsed(offset: buffer.length),
     );
   }
 }
