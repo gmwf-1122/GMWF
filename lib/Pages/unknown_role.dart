@@ -47,7 +47,7 @@ class UnknownRolePage extends StatelessWidget {
                 const Icon(Icons.person_off, color: Colors.red, size: 60),
                 const SizedBox(height: 20),
                 const Text(
-                  "❌ No User Found",
+                  "No User Found",
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,

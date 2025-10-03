@@ -68,6 +68,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final SyncService _syncService = SyncService();
+  // ignore: unused_field
   final FirestoreService _firestoreService = FirestoreService();
 
   @override

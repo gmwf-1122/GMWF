@@ -7,21 +7,24 @@ class AuthService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   final Map<String, String> _hardcodedAdmins = {
-    "admin@gmd.com": "Admin@123",
+    "admin": "Admin@123", // ✅ Now username instead of email
   };
 
-  /// Sign up new user → store uid, role, branchId, branchName
+  /// Sign up new user → store uid, username, role, branchId, branchName, phone
   Future<User?> signUp(
-    String email,
+    String email, // Firebase still needs email for auth
     String password,
+    String username, // ✅ New param
     String role,
     String branchId,
-    String branchName,
-  ) async {
+    String branchName, {
+    String? phone,
+  }) async {
     email = email.trim().toLowerCase();
     branchId = branchId.trim().toLowerCase();
+    username = username.trim();
 
-    if (_hardcodedAdmins.containsKey(email)) {
+    if (_hardcodedAdmins.containsKey(username)) {
       await LocalStorageService.seedLocalAdmins();
       return null;
     }
@@ -49,20 +52,16 @@ class AuthService {
     if (user != null) {
       final firestoreUserData = {
         "uid": user.uid,
-        "email": email,
+        "username": username, // ✅ Store username
+        "email": email, // still stored internally
         "role": role.toLowerCase(),
         "branchId": branchId,
         "branchName": branchName,
+        "phone": phone ?? "",
         "passwordHash": LocalStorageService.hashPassword(password),
         "createdAt": FieldValue.serverTimestamp(),
         "updatedAt": FieldValue.serverTimestamp(),
       };
-
-      // ✅ Save to global users collection
-      await _firestore.collection("users").doc(user.uid).set(
-            firestoreUserData,
-            SetOptions(merge: true),
-          );
 
       // ✅ Save inside branch subcollection
       await _firestore
@@ -72,7 +71,7 @@ class AuthService {
           .doc(user.uid)
           .set(firestoreUserData, SetOptions(merge: true));
 
-      // ✅ Ensure branch doc exists with new structure
+      // ✅ Ensure branch doc exists
       await _firestore.collection("branches").doc(branchId).set({
         "branchId": branchId,
         "branchName": branchName,
@@ -90,19 +89,21 @@ class AuthService {
     return user;
   }
 
-  /// Login
-  Future<Map<String, dynamic>?> login(String email, String password) async {
-    email = email.trim().toLowerCase();
+  /// Login by username
+  Future<Map<String, dynamic>?> login(String username, String password) async {
+    username = username.trim().toLowerCase();
 
-    if (_hardcodedAdmins.containsKey(email)) {
-      if (_hardcodedAdmins[email] == password) {
+    // ✅ Hardcoded admin check
+    if (_hardcodedAdmins.containsKey(username)) {
+      if (_hardcodedAdmins[username] == password) {
         await LocalStorageService.seedLocalAdmins();
         return {
           "uid": "hardcoded_admin",
-          "email": email,
+          "username": username,
           "role": "admin",
           "branchId": "",
           "branchName": "HQ",
+          "phone": "",
         };
       } else {
         throw Exception("❌ Wrong admin credentials");
@@ -110,47 +111,64 @@ class AuthService {
     }
 
     try {
+      // 🔎 Step 1: find user’s email by username
+      final branches = await _firestore.collection("branches").get();
+      String? foundEmail;
+      Map<String, dynamic>? userData;
+
+      for (var branch in branches.docs) {
+        final usersRef = branch.reference.collection("users");
+        final q = await usersRef.where("username", isEqualTo: username).get();
+
+        if (q.docs.isNotEmpty) {
+          final data = q.docs.first.data();
+          foundEmail = data["email"];
+          userData = data;
+          break;
+        }
+      }
+
+      if (foundEmail == null) {
+        throw Exception("❌ Username not found");
+      }
+
+      // 🔎 Step 2: sign in with email & password
       UserCredential result = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email: foundEmail,
         password: password,
       );
 
       final user = result.user;
-      if (user != null) {
-        final userDoc =
-            await _firestore.collection("users").doc(user.uid).get();
-        final data = userDoc.data() ?? {};
-
-        final role = (data['role']?.toString() ?? 'user').toLowerCase();
-        final branchId = data['branchId']?.toString() ?? '';
-        final branchName = data['branchName']?.toString() ?? '';
-
-        final userData = {
+      if (user != null && userData != null) {
+        final finalUserData = {
           "uid": user.uid,
-          "email": email,
-          "role": role,
-          "branchId": branchId,
-          "branchName": branchName,
+          "username": userData["username"],
+          "email": foundEmail,
+          "role": (userData['role'] ?? 'user').toString().toLowerCase(),
+          "branchId": userData['branchId'] ?? "",
+          "branchName": userData['branchName'] ?? "",
+          "phone": userData['phone'] ?? "",
           "passwordHash": LocalStorageService.hashPassword(password),
-          "createdAt": data['createdAt'] ?? DateTime.now(),
+          "createdAt": userData['createdAt'] ?? DateTime.now(),
         };
 
-        await LocalStorageService.saveLocalUser(userData);
-        return userData;
+        await LocalStorageService.saveLocalUser(finalUserData);
+        return finalUserData;
       }
     } catch (e) {
       // 🔄 Offline fallback
-      final local = LocalStorageService.getLocalUserByEmail(email);
+      final local = LocalStorageService.getLocalUserByEmail(username);
       final localHash = local?['passwordHash'] as String?;
       if (local != null &&
           localHash != null &&
           LocalStorageService.verifyPassword(password, localHash)) {
         return {
           "uid": local['uid'] ?? "local_user",
-          "email": email,
+          "username": local['username'] ?? username,
           "role": (local['role'] ?? "user").toString().toLowerCase(),
           "branchId": local['branchId'] ?? "",
           "branchName": local['branchName'] ?? "",
+          "phone": local['phone'] ?? "",
         };
       }
       rethrow;

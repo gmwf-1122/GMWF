@@ -5,9 +5,11 @@ class InventoryItem {
   final String id; // Firestore document ID
   final String serial; // Permanent unique serial / barcode
   final String name; // Medicine name
-  final int stock; // Quantity available
+  final String type; // Tablet, Capsule, Syrup, Injection, Drip
+  final int quantity; // Quantity available
   final num price; // Price per unit
-  final String? description; // Optional description (dosage, brand, etc.)
+  final String expiryDate; // dd-mm-yyyy
+  final String createdBy; // receptionistId
   final Timestamp createdAt; // When medicine was first added
   final Timestamp? updatedAt; // When medicine was last updated
 
@@ -15,9 +17,11 @@ class InventoryItem {
     required this.id,
     required this.serial,
     required this.name,
-    required this.stock,
+    required this.type,
+    required this.quantity,
     required this.price,
-    this.description,
+    required this.expiryDate,
+    required this.createdBy,
     required this.createdAt,
     this.updatedAt,
   });
@@ -30,9 +34,11 @@ class InventoryItem {
       id: doc.id,
       serial: d['serial'] ?? '',
       name: d['name'] ?? '',
-      stock: (d['stock'] ?? 0) as int,
+      type: d['type'] ?? '',
+      quantity: (d['quantity'] ?? 0) as int,
       price: (d['price'] ?? 0) as num,
-      description: d['description'],
+      expiryDate: d['expiryDate'] ?? '',
+      createdBy: d['createdBy'] ?? '',
       createdAt: d['createdAt'] is Timestamp ? d['createdAt'] : Timestamp.now(),
       updatedAt: d['updatedAt'] is Timestamp ? d['updatedAt'] : null,
     );
@@ -43,9 +49,11 @@ class InventoryItem {
     return {
       'serial': serial,
       'name': name,
-      'stock': stock,
+      'type': type,
+      'quantity': quantity,
       'price': price,
-      'description': description,
+      'expiryDate': expiryDate,
+      'createdBy': createdBy,
       'createdAt': forUpdate ? createdAt : FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     };

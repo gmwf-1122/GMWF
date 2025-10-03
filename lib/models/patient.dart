@@ -1,7 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Patient {
-  final String id;
+  final String id; // docId (CNIC in your case)
+  final String cnic; // ✅ Explicit CNIC field
   final String name;
   final String branchId;
   final String createdBy;
@@ -14,6 +15,7 @@ class Patient {
 
   Patient({
     required this.id,
+    required this.cnic,
     required this.name,
     required this.branchId,
     required this.createdBy,
@@ -29,6 +31,7 @@ class Patient {
     final d = doc.data() as Map<String, dynamic>? ?? {};
     return Patient(
       id: doc.id,
+      cnic: d['cnic'] ?? doc.id, // ✅ fallback for old docs
       name: d['name'] ?? '',
       branchId: d['branchId'] ?? '',
       createdBy: d['createdBy'] ?? '',
@@ -43,6 +46,8 @@ class Patient {
 
   Map<String, dynamic> toMap() {
     return {
+      'id': id,
+      'cnic': cnic, // ✅ Save CNIC at root
       'name': name,
       'branchId': branchId,
       'createdBy': createdBy,

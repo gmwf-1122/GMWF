@@ -1,5 +1,8 @@
+// lib/pages/login_page.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'home_router.dart';
 
 class LoginPage extends StatefulWidget {
@@ -10,17 +13,57 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final _emailController = TextEditingController();
+  final _usernameOrEmailController = TextEditingController();
   final _passwordController = TextEditingController();
 
   bool _loading = false;
   bool _obscurePassword = true;
 
+  @override
+  void initState() {
+    super.initState();
+    _checkLocalLogin();
+  }
+
+  /// ✅ Offline login check with Hive
+  Future<void> _checkLocalLogin() async {
+    final authBox = await Hive.openBox('authBox');
+    final userId = authBox.get('userId');
+    final username = authBox.get('username');
+    final email = authBox.get('email');
+    final branchId = authBox.get('branchId');
+    final role = authBox.get('role');
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+
+    if (userId != null &&
+        (username != null || email != null) &&
+        role != null &&
+        currentUser != null) {
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => HomeRouter(
+            user: currentUser,
+            localUser: {
+              "uid": userId,
+              "username": username,
+              "email": email,
+              "branchId": branchId,
+              "role": role,
+            },
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _login() async {
-    final email = _emailController.text.trim().toLowerCase();
+    final input = _usernameOrEmailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
+    if (input.isEmpty || password.isEmpty) {
       _showSnack("⚠️ Fill all fields");
       return;
     }
@@ -28,21 +71,130 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _loading = true);
 
     try {
-      // ✅ Sign in with Firebase Auth
-      final cred = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(email: email, password: password);
+      final firestore = FirebaseFirestore.instance;
+      final authBox = await Hive.openBox('authBox');
 
-      final user = cred.user;
-      if (user == null) {
-        _showSnack("❌ Login failed: no user found");
+      // ✅ Special case for admin
+      if (input.toLowerCase() == "admin" ||
+          input.toLowerCase() == "admin@system.com") {
+        const email = "admin@system.com";
+        final cred = await FirebaseAuth.instance
+            .signInWithEmailAndPassword(email: email, password: password);
+
+        final user = cred.user;
+        if (user == null) throw Exception("Admin user not found");
+
+        await authBox.clear();
+        await authBox.put('userId', user.uid);
+        await authBox.put('username', "admin");
+        await authBox.put('email', email);
+        await authBox.put('role', "admin");
+        await authBox.put('branchId', "all");
+
+        if (!mounted) return;
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeRouter(
+              user: user,
+              localUser: {
+                "uid": user.uid,
+                "username": "admin",
+                "email": email,
+                "role": "admin",
+                "branchId": "all",
+              },
+            ),
+          ),
+        );
         return;
       }
 
-      // ✅ Navigate to HomeRouter (handles role-based routing)
+      String? email;
+      String? username;
+      String? branchId;
+      String? role;
+      String? uid;
+
+      // ✅ If user typed an email
+      if (input.contains("@")) {
+        email = input;
+        username = null;
+
+        // Look for user in branches
+        final branchesSnap = await firestore.collection("branches").get();
+        for (var branchDoc in branchesSnap.docs) {
+          final userDoc = await branchDoc.reference
+              .collection("users")
+              .where("email", isEqualTo: email)
+              .get();
+
+          if (userDoc.docs.isNotEmpty) {
+            final data = userDoc.docs.first.data();
+            branchId = branchDoc.id;
+            uid = userDoc.docs.first.id;
+            role = data['role'];
+            username = data['username'];
+            break;
+          }
+        }
+      } else {
+        // ✅ Otherwise treat input as username
+        username = input;
+
+        final branchesSnap = await firestore.collection("branches").get();
+        for (var branchDoc in branchesSnap.docs) {
+          final usersSnap = await branchDoc.reference.collection("users").get();
+
+          for (var userDoc in usersSnap.docs) {
+            final data = userDoc.data();
+            if (data['username']?.toString().toLowerCase() ==
+                username.toLowerCase()) {
+              email = data['email'];
+              role = data['role'];
+              branchId = branchDoc.id;
+              uid = userDoc.id;
+              break;
+            }
+          }
+          if (email != null) break;
+        }
+      }
+
+      if (email == null || role == null || branchId == null) {
+        _showSnack("❌ User not found or unauthorized");
+        return;
+      }
+
+      // ✅ Authenticate
+      final cred = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
+      final user = cred.user;
+      if (user == null) throw Exception("Failed to login");
+
+      // ✅ Save session locally
+      await authBox.clear();
+      await authBox.put('userId', uid ?? user.uid);
+      await authBox.put('username', username);
+      await authBox.put('email', email);
+      await authBox.put('branchId', branchId);
+      await authBox.put('role', role);
+
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => HomeRouter(user: user)),
+        MaterialPageRoute(
+          builder: (_) => HomeRouter(
+            user: user,
+            localUser: {
+              "uid": uid ?? user.uid,
+              "username": username,
+              "email": email,
+              "branchId": branchId,
+              "role": role,
+            },
+          ),
+        ),
       );
     } catch (e) {
       _showSnack("❌ Login failed: $e");
@@ -61,105 +213,123 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Colors.green, Colors.lightGreen],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+          gradient: RadialGradient(
+            center: Alignment.center,
+            radius: 1.2,
+            colors: [
+              Colors.green,
+              Colors.green,
+            ],
+            stops: [0.3, 1.0],
           ),
         ),
         child: Center(
           child: SingleChildScrollView(
-            child: SizedBox(
-              width: 900,
-              child: Row(
+            child: Container(
+              width: 400,
+              padding: const EdgeInsets.all(30),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.4),
+                  width: 1.5,
+                ),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Image.asset(
-                        "assets/logo/gmwf.png",
-                        height: 240,
+                  Image.asset("assets/logo/gmwf.png", height: 120),
+                  const SizedBox(height: 30),
+                  const Text(
+                    "Login",
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Username/Email field
+                  TextField(
+                    controller: _usernameOrEmailController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: "Username or Email",
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      prefixIcon: const Icon(Icons.person, color: Colors.white),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.05),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.white70),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: Colors.white, width: 2),
                       ),
                     ),
                   ),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.all(30),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 15,
-                            spreadRadius: 2,
-                            offset: Offset(0, 8),
-                          ),
-                        ],
+                  const SizedBox(height: 20),
+
+                  // Password field
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: _obscurePassword,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      labelText: "Password",
+                      labelStyle: const TextStyle(color: Colors.white70),
+                      prefixIcon: const Icon(Icons.lock, color: Colors.white),
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_off
+                              : Icons.visibility,
+                          color: Colors.white,
+                        ),
+                        onPressed: () => setState(
+                            () => _obscurePassword = !_obscurePassword),
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            "Login",
-                            style: TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          TextField(
-                            controller: _emailController,
-                            decoration: const InputDecoration(
-                              labelText: "Email",
-                              prefixIcon: Icon(Icons.email),
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          TextField(
-                            controller: _passwordController,
-                            obscureText: _obscurePassword,
-                            decoration: InputDecoration(
-                              labelText: "Password",
-                              prefixIcon: const Icon(Icons.lock),
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_off
-                                      : Icons.visibility,
-                                ),
-                                onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword,
-                                ),
-                              ),
-                            ),
-                            onSubmitted: (_) => _login(),
-                          ),
-                          const SizedBox(height: 20),
-                          _loading
-                              ? const CircularProgressIndicator()
-                              : ElevatedButton(
-                                  onPressed: _login,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
-                                    minimumSize:
-                                        const Size(double.infinity, 50),
-                                  ),
-                                  child: const Text("Login"),
-                                ),
-                          const SizedBox(height: 10),
-                          // ❌ Removed "Register User" button
-                          const Text(
-                            "Contact admin to create an account",
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
-                              color: Colors.black54,
-                            ),
-                          ),
-                        ],
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.05),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: Colors.white70),
                       ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: Colors.white, width: 2),
+                      ),
+                    ),
+                    onSubmitted: (_) => _login(),
+                  ),
+                  const SizedBox(height: 20),
+
+                  _loading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : ElevatedButton(
+                          onPressed: _login,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 50),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          child: const Text("Login"),
+                        ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    "Contact admin to create an account",
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.white70,
                     ),
                   ),
                 ],

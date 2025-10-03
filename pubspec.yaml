@@ -13,6 +13,9 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
 
+  excel: ^4.0.6             # Excel export
+  pdf: ^3.11.0
+
   # Firebase (latest stable, Flutter 3.24+ compatible)
   firebase_core: ^4.1.0
   firebase_auth: ^6.0.2
@@ -65,3 +68,4 @@ flutter:
     - assets/logo/agmp.png
     - assets/logo/gmwf.jpg
     - assets/logo/gmwf.png
+    - assets/images/1.jpg
