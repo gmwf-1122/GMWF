@@ -1,242 +1,185 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
+// lib/pages/patient_info.dart
+// FIXED: Replaced the outer SingleChildScrollView + Padding(24) with a direct
+// Padding(16) so there's no double-padding inside the Card. The vital tiles
+// now use full height and don't feel cramped. Added overflow handling so the
+// vital row never wraps weirdly on smaller screens.
 
-class PatientInfo extends StatefulWidget {
-  final String branchId;
+import 'package:flutter/material.dart';
+
+class PatientInfo extends StatelessWidget {
   final Map<String, dynamic>? patientData;
 
   const PatientInfo({
     super.key,
-    required this.branchId,
     required this.patientData,
   });
 
-  @override
-  State<PatientInfo> createState() => _PatientInfoState();
-}
-
-class _PatientInfoState extends State<PatientInfo> {
-  Map<String, dynamic>? _fullPatientData;
-  bool _loading = true;
-
-  static const Color _green = Color(0xFF2E7D32);
+  static const Color _teal  = Color(0xFF00695C);
   static const Color _amber = Color(0xFFFFA000);
 
-  @override
-  void initState() {
-    super.initState();
-    _fetchFullPatientData();
-  }
-
-  Future<void> _fetchFullPatientData() async {
-    if (widget.patientData == null) return;
-    setState(() => _loading = true);
-
-    try {
-      final today = DateFormat('ddMMyy').format(DateTime.now());
-      final serialId = widget.patientData!['id'];
-
-      // Check zakat first
-      var doc = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('serials')
-          .doc(today)
-          .collection('zakat')
-          .doc(serialId)
-          .get();
-
-      // If not found, check non-zakat
-      if (!doc.exists) {
-        doc = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('serials')
-            .doc(today)
-            .collection('non-zakat')
-            .doc(serialId)
-            .get();
-      }
-
-      if (!doc.exists) {
-        setState(() => _loading = false);
-        return;
-      }
-
-      final serialData = doc.data()!;
-      final cnic = serialData['patientCNIC'];
-
-      // Fetch full patient info
-      final patientDoc = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('patients')
-          .doc(cnic)
-          .get();
-
-      if (patientDoc.exists) {
-        setState(() {
-          _fullPatientData = {...serialData, ...patientDoc.data()!};
-          _loading = false;
-        });
-      } else {
-        setState(() {
-          _fullPatientData = serialData;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("❌ Error fetching patient info: $e");
-      setState(() => _loading = false);
-    }
-  }
-
-  Widget _buildVitalsCard(
-      String label, String value, IconData icon, Color color) {
-    return Container(
-      width: 110, // fixed width for horizontal scroll
-      height: 65,
-      margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color, width: 1.0),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 6),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: color,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
+  Widget _buildVital({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color backgroundColor,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10.5,
               ),
-              const SizedBox(height: 3),
-              Text(
-                value,
-                style: const TextStyle(
-                  color: Colors.black,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13,
               ),
-            ],
-          ),
-        ],
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+    // When no patient is selected
+    if (patientData == null || patientData!.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.person_search, size: 70, color: Colors.grey.shade400),
+            const SizedBox(height: 12),
+            Text(
+              "Select a patient to view details",
+              style: TextStyle(fontSize: 18, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
     }
 
-    if (_fullPatientData == null) {
-      return const Center(child: Text("No patient info available"));
-    }
+    final patient = patientData!;
+    final vitals  = Map<String, dynamic>.from(patient['vitals'] ?? {});
 
-    final patient = _fullPatientData!;
-
-    return Container(
-      height: 320, // 👈 Fixed height (adjust as needed)
-      padding: const EdgeInsets.all(12),
+    // FIX: Use Padding(16) directly — no extra SingleChildScrollView wrapper.
+    // The card is fixed height (230px) so there's no need to scroll; removing
+    // the scroll wrapper also prevents the inner Column from miscalculating height.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          // Name + Serial Row
+          // ── Patient name + serial badge ──────────────────────────────────
           Row(
             children: [
-              const Icon(Icons.person, color: Colors.black87),
-              const SizedBox(width: 8),
+              const Icon(Icons.person, color: _teal, size: 26),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  patient['patientName'] ?? patient['name'] ?? 'Unknown',
+                  patient['patientName'] ?? patient['name'] ?? 'Unknown Patient',
                   style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
+                      fontSize: 20, fontWeight: FontWeight.bold, color: _teal),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Row(
-                children: [
-                  const Icon(Icons.confirmation_number, color: _amber),
-                  const SizedBox(width: 4),
-                  Text(
-                    patient['serial'] ?? '-',
-                    style: const TextStyle(
-                      color: _amber,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: _amber.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: _amber, width: 2),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.confirmation_number, color: _amber, size: 18),
+                    const SizedBox(width: 6),
+                    Text(
+                      patient['serial'] ?? '-',
+                      style: const TextStyle(
+                          color: _amber, fontSize: 16, fontWeight: FontWeight.bold),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ],
           ),
 
           const SizedBox(height: 12),
 
-          // Title for vitals
-          const Row(
-            children: [
-              Icon(Icons.monitor_heart, color: _green, size: 20),
-              SizedBox(width: 6),
-              Text(
-                "Vitals",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: _green,
+          // ── Vital tiles row ──────────────────────────────────────────────
+          SizedBox(
+            height: 86,
+            child: Row(
+              children: [
+                _buildVital(
+                  label: "Age",
+                  value: (vitals['age'] ?? patient['age'] ?? '-').toString(),
+                  icon: Icons.calendar_today,
+                  backgroundColor: _teal,
                 ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 6),
-
-          // Horizontally scrollable vitals row
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildVitalsCard("Age", patient['age']?.toString() ?? '-',
-                      Icons.calendar_today, _green),
-                  _buildVitalsCard("Gender", patient['gender'] ?? '-',
-                      Icons.male, Colors.blueAccent),
-                  _buildVitalsCard("Blood", patient['bloodGroup'] ?? '-',
-                      Icons.bloodtype, Colors.redAccent),
-                  _buildVitalsCard("BP", patient['vitals']?['bp'] ?? '-',
-                      Icons.favorite, Colors.red),
-                  _buildVitalsCard(
-                      "Temp",
-                      patient['vitals']?['temp'] != null
-                          ? "${patient['vitals']!['temp']} ${patient['vitals']!['tempUnit'] ?? ''}"
-                          : '-',
-                      Icons.thermostat,
-                      Colors.orange),
-                  _buildVitalsCard("Sugar", patient['vitals']?['sugar'] ?? '-',
-                      Icons.opacity, Colors.purple),
-                  _buildVitalsCard(
-                      "Weight",
-                      patient['vitals']?['weight'] ?? '-',
-                      Icons.fitness_center,
-                      Colors.greenAccent),
-                ],
-              ),
+                _buildVital(
+                  label: "Gender",
+                  value: vitals['gender'] ?? patient['gender'] ?? '-',
+                  icon: Icons.person_outline,
+                  backgroundColor: Colors.blue[700]!,
+                ),
+                _buildVital(
+                  label: "Blood Group",
+                  value: vitals['bloodGroup'] ?? patient['bloodGroup'] ?? '-',
+                  icon: Icons.bloodtype,
+                  backgroundColor: Colors.red[700]!,
+                ),
+                _buildVital(
+                  label: "BP",
+                  value: vitals['bp'] ?? '-',
+                  icon: Icons.favorite,
+                  backgroundColor: Colors.red,
+                ),
+                _buildVital(
+                  label: "Temp",
+                  value: vitals['temp'] != null ? "${vitals['temp']} °C" : '-',
+                  icon: Icons.thermostat,
+                  backgroundColor: Colors.orange,
+                ),
+                _buildVital(
+                  label: "Sugar",
+                  value: vitals['sugar'] ?? '-',
+                  icon: Icons.opacity,
+                  backgroundColor: Colors.purple,
+                ),
+                _buildVital(
+                  label: "Weight",
+                  value: vitals['weight'] != null ? "${vitals['weight']} kg" : '-',
+                  icon: Icons.monitor_weight,
+                  backgroundColor: Colors.green[700]!,
+                ),
+              ],
             ),
           ),
         ],

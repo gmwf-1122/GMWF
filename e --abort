@@ -1,0 +1,13 @@
+[33mce013c8[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmy-branch[m[33m, [m[1;31morigin/my-branch[m[33m)[m Clean up README.md formatting
+[33m3193638[m Initial commit: Token screen with daily serial generation
+[33m851a9f4[m Updated receptionist_screen and login_screen with latest changes
+[33m94005fc[m Update receptionist & inventory screens with branch-based storage, serial fix, and UI icons
+[33m913ee58[m Update receptionist screen and Firestore integration
+[33m14652e2[m Updated Admin, Branches, and Register with sidebar and UI fixes
+[33m95e579a[m Update latest changes
+[33mee36ed4[m Update latest changes
+[33mfc21d30[m Backup version Sept 18
+[33m91bfb4a[m Backup version Sept 18
+[33mdf8561e[m Updated code with fixes (null operator, routing, admin screen, etc.)
+[33m5e5241c[m first commit
+[33mff8ab84[m Initial Flutter project commit

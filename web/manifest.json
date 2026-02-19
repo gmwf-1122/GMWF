@@ -1,6 +1,8 @@
 {
-    "name": "gm_new",
-    "short_name": "gm_new",
+    "name": "GMWF",
+    "short_name": "GMWF",
+    "name": "GMWF",
+    "short_name": "GMWF",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

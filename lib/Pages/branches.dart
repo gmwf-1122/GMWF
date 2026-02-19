@@ -1,1087 +1,818 @@
+// lib/pages/branches.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'inventory.dart';
-import 'warehouse.dart';
+
+import 'inventory_doc.dart';
 import 'assets.dart';
+import 'branches_register.dart';
+
+class PatientSummaryCard extends StatelessWidget {
+  final String title;
+  final Future<Map<String, int>> dataFuture;
+  final Color color;
+  final IconData titleIcon;
+  final bool showRevenue;
+  final Map<String, IconData> valueIcons;
+  final Map<String, String> valueLabels;
+
+  // No 'const' keyword → fixes hot reload error
+  PatientSummaryCard({
+    super.key,
+    required this.title,
+    required this.dataFuture,
+    required this.color,
+    required this.titleIcon,
+    this.showRevenue = false,
+    required this.valueIcons,
+    required this.valueLabels,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<Map<String, int>>(
+      future: dataFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: Colors.white));
+        }
+        if (snapshot.hasError) {
+          return const Center(child: Text("Error", style: TextStyle(color: Colors.white)));
+        }
+        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+          return const Center(child: Text("No data", style: TextStyle(color: Colors.white70)));
+        }
+
+        final d = snapshot.data!;
+        final revenue = d['revenue'] ?? 0;
+        final minis = <Widget>[];
+
+        for (final key in valueLabels.keys.where((k) => k.startsWith('v'))) {
+          minis.add(_mini(valueLabels[key]!, d[key] ?? 0, valueIcons[key] ?? Icons.help_outline));
+        }
+        minis.add(_mini("Total", d['total'] ?? 0, valueIcons['total'] ?? Icons.people));
+
+        return Card(
+          elevation: 4,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: color,
+          child: SizedBox(
+            height: 180,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(titleIcon, color: Colors.white, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        title,
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: minis),
+                  if (showRevenue)
+                    Row(
+                      children: [
+                        const Icon(Icons.attach_money, size: 20, color: Colors.white),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Rs. $revenue",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _mini(String label, int value, IconData icon) => Expanded(
+        child: Column(
+          children: [
+            Icon(icon, size: 24, color: Colors.white),
+            const SizedBox(height: 6),
+            Text(label, style: const TextStyle(fontSize: 12, color: Colors.white70)),
+            Text(
+              "$value",
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ],
+        ),
+      );
+}
 
 class Branches extends StatefulWidget {
-  const Branches({super.key});
+  final String? branchId;
+
+  const Branches({super.key, this.branchId});
 
   @override
   State<Branches> createState() => _BranchesState();
 }
 
-class _BranchesState extends State<Branches> {
-  final List<String> defaultBranches = const [
-    "Gujrat",
-    "Sialkot",
-    "Karachi-1",
-    "Karachi-2",
-  ];
-
-  final Map<String, IconData> roleIcons = const {
-    "supervisor": Icons.supervisor_account,
-    "receptionist": Icons.person_add,
-    "doctor": Icons.medical_services,
-    "dispenser": Icons.local_pharmacy,
-  };
-
-  final List<String> roleOrder = const [
-    "supervisor",
-    "receptionist",
-    "doctor",
-    "dispenser",
-  ];
-
-  String? selectedBranch;
-  String selectedPeriod = 'today';
+class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin {
+  String? selectedTypeFilter;
+  DateTime? selectedStartDate;
+  DateTime? selectedEndDate;
 
   @override
-  void initState() {
-    super.initState();
-    selectedBranch = defaultBranches.first;
+  bool get wantKeepAlive => true;
+
+  DateTime get effectiveStart {
+    if (selectedStartDate != null && selectedEndDate != null) return selectedStartDate!;
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
   }
 
-  Future<void> _deleteUser(BuildContext context, String userId, String email,
-      String branchId) async {
-    final codeController = TextEditingController();
+  DateTime get effectiveEnd {
+    if (selectedStartDate != null && selectedEndDate != null) return selectedEndDate!.add(const Duration(days: 1));
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day + 1);
+  }
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete User"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text("Enter admin code to delete \"$email\":"),
-            const SizedBox(height: 10),
-            TextField(
-              controller: codeController,
-              decoration: const InputDecoration(
-                labelText: "Admin Code",
-                border: OutlineInputBorder(),
+  Future<Map<String, int>> _tokensFuture(String branchId) async {
+    try {
+      int zakat = 0, nonZakat = 0, gmwf = 0;
+      final df = DateFormat('ddMMyy');
+      final start = effectiveStart;
+      final end = effectiveEnd;
+
+      for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+        final ds = df.format(d);
+        final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(ds);
+        final countFutures = ['zakat', 'non-zakat', 'gmwf'].map((c) => base.collection(c).count().get());
+        final snaps = await Future.wait(countFutures);
+        zakat += snaps[0].count ?? 0;
+        nonZakat += snaps[1].count ?? 0;
+        gmwf += snaps[2].count ?? 0;
+      }
+      final total = zakat + nonZakat + gmwf;
+      final revenue = zakat * 20 + nonZakat * 100;
+      return {'v1': zakat, 'v2': nonZakat, 'v3': gmwf, 'total': total, 'revenue': revenue};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Map<String, int>> _prescriptionsFuture(String branchId) async {
+    try {
+      int waiting = 0;
+      int prescribed = 0;
+      final df = DateFormat('ddMMyy');
+      final start = effectiveStart;
+      final end = effectiveEnd;
+
+      for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+        final ds = df.format(d);
+        final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(ds);
+
+        final futures = ['zakat', 'non-zakat', 'gmwf'].map((c) => base.collection(c).get());
+        final snaps = await Future.wait(futures);
+
+        final serialToIdentifier = <String, String>{};
+
+        for (final snap in snaps) {
+          for (final doc in snap.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final serial = data['serial']?.toString();
+
+            // CRITICAL FIX: Prefer cnic → guardianCnic → patientId
+            // (your prescriptions are saved under CNIC or guardianCNIC as parent doc)
+            String identifier = data['cnic']?.toString()?.trim() ?? '';
+            if (identifier.isEmpty) {
+              identifier = data['guardianCnic']?.toString()?.trim() ?? '';
+            }
+            if (identifier.isEmpty) {
+              identifier = data['patientId']?.toString()?.trim() ?? '';
+            }
+
+            if (serial != null && identifier.isNotEmpty) {
+              serialToIdentifier[serial] = identifier;
+              debugPrint('Serial $serial linked to identifier: $identifier');
+            } else {
+              debugPrint('Serial $serial has no usable identifier');
+            }
+          }
+        }
+
+        final presRoot = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('prescriptions');
+        for (final entry in serialToIdentifier.entries) {
+          final serial = entry.key;
+          final identifier = entry.value;
+          final presSnap = await presRoot.doc(identifier).collection('prescriptions').doc(serial).get();
+          if (presSnap.exists) {
+            prescribed++;
+            debugPrint('Prescription FOUND for serial $serial (identifier: $identifier)');
+          } else {
+            waiting++;
+            debugPrint('Prescription MISSING for serial $serial (identifier: $identifier)');
+          }
+        }
+      }
+
+      final total = waiting + prescribed;
+      debugPrint('Prescriptions summary: Waiting=$waiting, Prescribed=$prescribed, Total=$total');
+      return {'v1': waiting, 'v2': prescribed, 'total': total};
+    } catch (e) {
+      debugPrint("Prescriptions error: $e");
+      return {'v1': 0, 'v2': 0, 'total': 0};
+    }
+  }
+
+  Future<Map<String, int>> _dispensaryCountFuture(String branchId) async {
+    try {
+      final df = DateFormat('ddMMyy');
+      final start = effectiveStart;
+      final end = effectiveEnd;
+      int count = 0;
+      for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+        final ds = df.format(d);
+        final snap = await FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$ds/$ds').count().get();
+        count += snap.count ?? 0;
+      }
+      return {'v1': 0, 'v2': count, 'total': count};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Map<String, dynamic>> _dispensaryFuture(String branchId) async {
+    try {
+      final df = DateFormat('ddMMyy');
+      final displayFormat = DateFormat('dd MMM yyyy');
+      final start = effectiveStart;
+      final end = effectiveEnd;
+
+      final List<Map<String, dynamic>> list = [];
+      Map<String, String> serialToType = {};
+
+      for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+        final ds = df.format(d);
+        final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(ds);
+        final futures = ['zakat', 'non-zakat', 'gmwf'].map((c) => base.collection(c).get());
+        final snaps = await Future.wait(futures);
+
+        for (int i = 0; i < 3; i++) {
+          final coll = ['zakat', 'non-zakat', 'gmwf'][i];
+          for (final doc in snaps[i].docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final serial = data['serial']?.toString();
+            if (serial != null && serial.isNotEmpty) {
+              serialToType[serial] = coll;
+            }
+          }
+        }
+      }
+
+      for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+        final ds = df.format(d);
+        final snap = await FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$ds/$ds').get();
+
+        for (final doc in snap.docs) {
+          final data = Map<String, dynamic>.from(doc.data());
+          final serial = data['serial']?.toString() ?? '';
+          if (serial.isEmpty) continue;
+
+          data['name'] = data['patientName'] ?? 'Unknown';
+          data['phone'] = (data['phone']?.toString().isNotEmpty ?? false) ? data['phone'] : 'N/A';
+          data['doctorName'] = data['prescribedBy'] ?? 'Unknown';
+          data['dispenserName'] = data['dispenserName'] ?? 'Unknown';
+          data['tokenBy'] = data['tokenBy'] ?? 'Unknown';
+          data['type'] = serialToType[serial] ?? _queueTypeToType(data['queueType']);
+          data['serial'] = serial;
+          data['dispenseDate'] = data['dispensedAt'] != null
+              ? displayFormat.format((data['dispensedAt'] as Timestamp).toDate())
+              : displayFormat.format(DateFormat('ddMMyy').parse(ds));
+
+          final pid = data['patientId']?.toString() ?? '';
+          if (pid.isNotEmpty) {
+            try {
+              final psnap = await FirebaseFirestore.instance.collection('branches/$branchId/patients').doc(pid).get();
+              if (psnap.exists) {
+                final p = psnap.data()!;
+                if (data['name'] == 'Unknown') data['name'] = p['name'] ?? 'Unknown';
+                if (data['phone'] == 'N/A') data['phone'] = p['phone'] ?? 'N/A';
+                data['age'] = p['age']?.toString() ?? 'N/A';
+                data['gender'] = p['gender'] ?? 'N/A';
+                data['bloodGroup'] = p['bloodGroup'] ?? 'N/A';
+
+                final cnic = p['cnic']?.toString()?.trim() ?? '';
+                if (cnic.isNotEmpty) {
+                  data['displayCnic'] = cnic;
+                  data['isChild'] = false;
+                } else {
+                  final gcnic = p['guardianCnic']?.toString()?.trim() ?? '';
+                  data['displayCnic'] = gcnic.isNotEmpty ? gcnic : 'N/A';
+                  data['isChild'] = true;
+                  if (gcnic.isNotEmpty) {
+                    final gq = await FirebaseFirestore.instance
+                        .collection('branches/$branchId/patients')
+                        .where('cnic', isEqualTo: gcnic)
+                        .limit(1)
+                        .get();
+                    if (gq.docs.isNotEmpty) data['guardianName'] = gq.docs.first['name'] ?? 'N/A';
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+
+          list.add(data);
+        }
+      }
+
+      return {
+        'v1': 0,
+        'v2': list.length,
+        'total': list.length,
+        'dispensed': list,
+      };
+    } catch (e) {
+      debugPrint("Dispensary error: $e");
+      return {};
+    }
+  }
+
+  String _queueTypeToType(String? qt) {
+    switch (qt?.toLowerCase()) {
+      case 'zakat':     return 'zakat';
+      case 'non-zakat': return 'non-zakat';
+      case 'gmwf':      return 'gmwf';
+      default:          return 'Unknown';
+    }
+  }
+
+  Widget _dateRangeSelector() {
+    final isToday = selectedStartDate == null && selectedEndDate == null;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Text("From:", style: TextStyle(fontWeight: FontWeight.w500)),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 140,
+          child: InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: selectedStartDate ?? DateTime.now(),
+                firstDate: DateTime(2024),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) setState(() => selectedStartDate = picked);
+            },
+            child: InputDecorator(
+              decoration: InputDecoration(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                suffixIcon: const Icon(Icons.calendar_today, size: 18),
+              ),
+              child: Text(
+                selectedStartDate != null ? DateFormat('dd MMM yyyy').format(selectedStartDate!) : "Select date",
+                style: TextStyle(color: selectedStartDate != null ? Colors.black87 : Colors.grey[600]),
               ),
             ),
-          ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
-              if (codeController.text == "admin1122") {
-                Navigator.pop(ctx, true);
-              } else {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(content: Text("Invalid admin code")),
-                );
-              }
+        const SizedBox(width: 16),
+        const Text("To:", style: TextStyle(fontWeight: FontWeight.w500)),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 140,
+          child: InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: selectedEndDate ?? DateTime.now(),
+                firstDate: selectedStartDate ?? DateTime(2024),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) setState(() => selectedEndDate = picked);
             },
-            child: const Text("Delete", style: TextStyle(color: Colors.white)),
+            child: InputDecorator(
+              decoration: InputDecoration(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                suffixIcon: const Icon(Icons.calendar_today, size: 18),
+              ),
+              child: Text(
+                selectedEndDate != null ? DateFormat('dd MMM yyyy').format(selectedEndDate!) : "Select date",
+                style: TextStyle(color: selectedEndDate != null ? Colors.black87 : Colors.grey[600]),
+              ),
+            ),
           ),
+        ),
+        const SizedBox(width: 12),
+        ElevatedButton(
+          onPressed: () => setState(() {}),
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700, foregroundColor: Colors.white),
+          child: const Text("Apply"),
+        ),
+        if (!isToday)
+          IconButton(
+            icon: const Icon(Icons.clear, color: Colors.redAccent),
+            tooltip: "Clear range (back to today)",
+            onPressed: () => setState(() {
+              selectedStartDate = null;
+              selectedEndDate = null;
+            }),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(left: 12),
+            child: Text(
+              "(Today)",
+              style: TextStyle(color: Colors.blueGrey[700], fontStyle: FontStyle.italic, fontSize: 13),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _typeFilter() {
+    final isWide = MediaQuery.of(context).size.width > 600;
+
+    if (isWide) {
+      return Wrap(
+        spacing: 8,
+        children: [
+          _filterChip("All", null),
+          _filterChip("Zakat", "zakat"),
+          _filterChip("Non-Zakat", "non-zakat"),
+          _filterChip("GMWF", "gmwf"),
+        ],
+      );
+    } else {
+      return DropdownButton<String>(
+        value: selectedTypeFilter ?? 'all',
+        underline: const SizedBox(),
+        items: const [
+          DropdownMenuItem(value: 'all', child: Text('All')),
+          DropdownMenuItem(value: 'zakat', child: Text('Zakat')),
+          DropdownMenuItem(value: 'non-zakat', child: Text('Non-Zakat')),
+          DropdownMenuItem(value: 'gmwf', child: Text('GMWF')),
+        ],
+        onChanged: (v) => setState(() => selectedTypeFilter = v == 'all' ? null : v),
+      );
+    }
+  }
+
+  Widget _filterChip(String label, String? type) {
+    final selected = selectedTypeFilter == type;
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (sel) => setState(() => selectedTypeFilter = sel ? type : null),
+      selectedColor: Colors.blue.shade700,
+      backgroundColor: Colors.grey.shade200,
+      labelStyle: TextStyle(color: selected ? Colors.white : Colors.black87),
+      checkmarkColor: Colors.white,
+    );
+  }
+
+  Widget _infoRow(IconData icon, String text, {String? copy}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[700]),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 14))),
+          if (copy != null && copy.isNotEmpty && copy != 'N/A')
+            IconButton(
+              icon: const Icon(Icons.content_copy, size: 18),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: copy));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Copied: $copy')));
+              },
+            ),
         ],
       ),
     );
-
-    if (confirm == true) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(userId)
-            .delete();
-
-        if (branchId.isNotEmpty) {
-          await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(branchId)
-              .collection('users')
-              .doc(userId)
-              .delete();
-        }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("User deleted successfully")),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error deleting user: $e")),
-        );
-      }
-    }
   }
 
-  Future<void> _editUser(BuildContext context, String userId, String branchId,
-      Map<String, dynamic> currentData) async {
-    final usernameController =
-        TextEditingController(text: currentData['username']);
-    final phoneController = TextEditingController(text: currentData['phone']);
-    String? selectedRole = currentData['role'];
+  Widget _buildBranchDetails(String branchName, String branchId) {
+    final isSupervisor = widget.branchId != null;
+    final isWide = MediaQuery.of(context).size.width > 900;
 
-    final List<String> roles = [
-      "supervisor",
-      "receptionist",
-      "doctor",
-      "dispenser"
-    ];
-
-    final formKey = GlobalKey<FormState>();
-
-    await showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setState) {
-          return AlertDialog(
-            title: const Text("Edit User"),
-            content: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
+    return SingleChildScrollView(
+      child: Padding(
+        padding: EdgeInsets.all(isWide ? 32 : 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  branchName,
+                  style: TextStyle(fontSize: isWide ? 32 : 26, fontWeight: FontWeight.bold),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    TextFormField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(
-                        labelText: "Username",
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Enter username" : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: "Phone Number",
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      maxLength: 11,
-                      validator: (val) {
-                        if (val == null || val.isEmpty) {
-                          return "Enter phone number";
-                        } else if (val.length != 11) {
-                          return "Phone number must be 11 digits";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      value: selectedRole,
-                      hint: const Text("Select Role"),
-                      items: roles
-                          .map((role) => DropdownMenuItem(
-                                value: role,
-                                child: Text(
-                                    role[0].toUpperCase() + role.substring(1)),
-                              ))
-                          .toList(),
-                      onChanged: (val) => setState(() => selectedRole = val),
-                      validator: (val) => val == null ? "Select role" : null,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
-
-                  final updatedData = {
-                    "username": usernameController.text.trim(),
-                    "phone": phoneController.text.trim(),
-                    "role": selectedRole,
-                  };
-
-                  try {
-                    await FirebaseFirestore.instance
-                        .collection("users")
-                        .doc(userId)
-                        .update(updatedData);
-
-                    await FirebaseFirestore.instance
-                        .collection("branches")
-                        .doc(branchId)
-                        .collection("users")
-                        .doc(userId)
-                        .update(updatedData);
-
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text("User updated successfully"),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text("Error updating user: $e"),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text(
-                  "Save Changes",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  Future<void> _addBranchDialog(BuildContext context) async {
-    final branchController = TextEditingController();
-    final usernameController = TextEditingController();
-    final phoneController = TextEditingController();
-    final emailController = TextEditingController();
-    final passwordController = TextEditingController();
-    String? selectedRole;
-
-    final List<String> roles = [
-      "Supervisor",
-      "Doctor",
-      "Receptionist",
-      "Dispenser"
-    ];
-
-    final formKey = GlobalKey<FormState>();
-    bool obscurePassword = true;
-
-    await showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(builder: (ctx, setState) {
-          return AlertDialog(
-            title: const Text("Create New Branch"),
-            content: SingleChildScrollView(
-              child: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: branchController,
-                      decoration: const InputDecoration(
-                        labelText: "Branch Name",
-                        prefixIcon: Icon(Icons.apartment),
-                      ),
-                      validator: (val) => val == null || val.isEmpty
-                          ? "Enter branch name"
-                          : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: usernameController,
-                      decoration: const InputDecoration(
-                        labelText: "Username",
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Enter username" : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: emailController,
-                      decoration: const InputDecoration(
-                        labelText: "Email",
-                        prefixIcon: Icon(Icons.email),
-                      ),
-                      validator: (val) =>
-                          val == null || val.isEmpty ? "Enter email" : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: phoneController,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: "Phone Number",
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      maxLength: 11,
-                      validator: (val) {
-                        if (val == null || val.isEmpty) {
-                          return "Enter phone number";
-                        } else if (val.length != 11) {
-                          return "Phone number must be 11 digits";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: passwordController,
-                      obscureText: obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: "Password",
-                        prefixIcon: const Icon(Icons.lock),
-                        suffixIcon: IconButton(
-                          icon: Icon(
-                            obscurePassword
-                                ? Icons.visibility_off
-                                : Icons.visibility,
-                          ),
-                          onPressed: () => setState(
-                              () => obscurePassword = !obscurePassword),
-                        ),
-                      ),
-                      validator: (val) {
-                        if (val == null || val.isEmpty) {
-                          return "Enter password";
-                        }
-                        if (val.length < 6) {
-                          return "Password must be at least 6 chars";
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<String>(
-                      value: selectedRole,
-                      hint: const Text("Select Role"),
-                      items: roles
-                          .map((role) => DropdownMenuItem(
-                                value: role,
-                                child: Text(role),
-                              ))
-                          .toList(),
-                      onChanged: (val) => setState(() => selectedRole = val),
-                      validator: (val) => val == null ? "Select role" : null,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Cancel"),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (!formKey.currentState!.validate()) return;
-
-                  final branchName = branchController.text.trim();
-                  final branchId = branchName.toLowerCase().replaceAll(" ", "");
-                  final username = usernameController.text.trim();
-                  final email = emailController.text.trim();
-                  final phone = phoneController.text.trim();
-                  final password = passwordController.text.trim();
-                  final role = selectedRole!.toLowerCase();
-
-                  try {
-                    // ✅ Check if branch already exists
-                    final existing = await FirebaseFirestore.instance
-                        .collection("branches")
-                        .doc(branchId)
-                        .get();
-
-                    if (existing.exists) {
-                      Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content:
-                              Text("⚠️ Branch \"$branchName\" already exists!"),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                      return;
-                    }
-
-                    // ✅ Create user in Firebase Auth
-                    final userCred = await FirebaseAuth.instance
-                        .createUserWithEmailAndPassword(
-                      email: email,
-                      password: password,
-                    );
-
-                    final userId = userCred.user!.uid;
-
-                    final userData = {
-                      "username": username,
-                      "email": email,
-                      "phone": phone,
-                      "role": role,
-                      "branchId": branchId,
-                      "branchName": branchName,
-                      "createdAt": FieldValue.serverTimestamp(),
-                    };
-
-                    // ✅ Add user globally
-                    await FirebaseFirestore.instance
-                        .collection("users")
-                        .doc(userId)
-                        .set(userData);
-
-                    // ✅ Create branch
-                    await FirebaseFirestore.instance
-                        .collection("branches")
-                        .doc(branchId)
-                        .set({"name": branchName}, SetOptions(merge: true));
-
-                    // ✅ Add user under branch
-                    await FirebaseFirestore.instance
-                        .collection("branches")
-                        .doc(branchId)
-                        .collection("users")
-                        .doc(userId)
-                        .set(userData);
-
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                            "✅ Branch \"$branchName\" created successfully"),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  } catch (e) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text("❌ Error: $e"),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                child: const Text(
-                  "Create Branch",
-                  style: TextStyle(color: Colors.white),
-                ),
-              ),
-            ],
-          );
-        });
-      },
-    );
-  }
-
-  Future<int> _getTotalPatients(
-      String branchId, String userId, String role) async {
-    if (role != 'receptionist') return 0;
-    try {
-      final query = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('patients')
-          .where('registeredBy', isEqualTo: userId);
-
-      final aggregate = await query.count().get();
-      return aggregate.count ?? 0;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  Future<int> _getTodayTokens(
-      String branchId, String userId, String role) async {
-    if (role != 'receptionist') return 0;
-    try {
-      final now = DateTime.now();
-      final startOfDay = DateTime(now.year, now.month, now.day);
-      final endOfDay = startOfDay.add(const Duration(days: 1));
-
-      final query = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('patients')
-          .where('registeredBy', isEqualTo: userId)
-          .where('createdAt',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
-          .where('createdAt', isLessThan: Timestamp.fromDate(endOfDay));
-
-      final aggregate = await query.count().get();
-      return aggregate.count ?? 0;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  Future<int> _getTotalPrescriptions(String branchId, String period) async {
-    try {
-      final dates = _getDatesForPeriod(period);
-      int total = 0;
-      for (String date in dates) {
-        // Assuming prescriptions are stored daily or something, but since structure is /prescriptions/{cnic}/prescriptions/{id}
-        // Use collectionGroup with time filter
-        // Assume 'createdAt' field in prescriptions docs
-        final start = Timestamp.fromDate(DateFormat('ddMMyy').parse(date));
-        final end = start.toDate().add(const Duration(days: 1));
-        final query = FirebaseFirestore.instance
-            .collectionGroup('prescriptions')
-            .where('branchId',
-                isEqualTo: branchId) // Assume branchId field if needed
-            .where('createdAt', isGreaterThanOrEqualTo: start)
-            .where('createdAt', isLessThan: Timestamp.fromDate(end));
-
-        final aggregate = await query.count().get();
-        total += aggregate.count ?? 0;
-      }
-      return total;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  Future<int> _getTotalDispenses(String branchId, String period) async {
-    try {
-      final dates = _getDatesForPeriod(period);
-      int total = 0;
-      for (String date in dates) {
-        final query = FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('dispensary')
-            .doc(date)
-            .collection(date);
-
-        final aggregate = await query.count().get();
-        total += aggregate.count ?? 0;
-      }
-      return total;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  Future<int> _getInventoryRequests(
-      String branchId, String userId, String role) async {
-    if (role != 'dispenser') return 0;
-    try {
-      final query = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('inventory_requests')
-          .where('requestedBy', isEqualTo: userId);
-
-      final aggregate = await query.count().get();
-      return aggregate.count ?? 0;
-    } catch (e) {
-      return 0;
-    }
-  }
-
-  Future<int> _getTokenCount(String branchId, String period) async {
-    List<String> dates = _getDatesForPeriod(period);
-    int total = 0;
-    for (String date in dates) {
-      try {
-        final zakatQuery = FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('serials')
-            .doc(date)
-            .collection('zakat');
-        final zakatCount = await zakatQuery.count().get();
-        total += zakatCount.count ?? 0;
-
-        final nonZakatQuery = FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('serials')
-            .doc(date)
-            .collection('non-zakat');
-        final nonZakatCount = await nonZakatQuery.count().get();
-        total += nonZakatCount.count ?? 0;
-      } catch (e) {
-        // Ignore errors for missing dates
-      }
-    }
-    return total;
-  }
-
-  List<String> _getDatesForPeriod(String period) {
-    final now = DateTime.now();
-    List<String> dates = [];
-    final format = DateFormat('ddMMyy');
-
-    if (period == 'today') {
-      dates.add(format.format(now));
-    } else if (period == 'week') {
-      for (int i = 0; i < 7; i++) {
-        dates.add(format.format(now.subtract(Duration(days: i))));
-      }
-    } else if (period == 'month') {
-      final firstDay = DateTime(now.year, now.month, 1);
-      final lastDay = DateTime(now.year, now.month + 1, 0);
-      for (DateTime d = firstDay;
-          !d.isAfter(lastDay);
-          d = d.add(const Duration(days: 1))) {
-        dates.add(format.format(d));
-      }
-    }
-    return dates;
-  }
-
-  Widget _buildBranchSidebar(List<String> branches) {
-    return Container(
-      width: MediaQuery.of(context).size.width * 0.2,
-      color: Colors.green.shade700,
-      child: ListView.builder(
-        itemCount: branches.length,
-        itemBuilder: (context, index) {
-          final branch = branches[index];
-          final isSelected = branch == selectedBranch;
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                elevation: 0,
-                backgroundColor: isSelected
-                    ? Colors.white.withOpacity(0.9)
-                    : Colors.green.shade600,
-                foregroundColor:
-                    isSelected ? Colors.green.shade900 : Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-              onPressed: () {
-                setState(() {
-                  selectedBranch = branch;
-                  selectedPeriod = 'today';
-                });
-              },
-              child: Row(
-                children: [
-                  const Icon(Icons.apartment, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      branch,
-                      style: const TextStyle(fontSize: 15),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildBranchDetails(Map<String, List<Map<String, dynamic>>> branches) {
-    if (selectedBranch == null) {
-      return const Expanded(
-        child: Center(child: Text("Select a branch")),
-      );
-    }
-
-    final branchUsers = branches[selectedBranch] ?? [];
-    final branchId =
-        selectedBranch!.toLowerCase().replaceAll(" ", "").replaceAll("-", "");
-
-    return Expanded(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Users Section
-              if (branchUsers.isNotEmpty)
-                ...roleOrder.map((role) {
-                  final roleUsers = branchUsers
-                      .where((u) => (u['role'] ?? "").toLowerCase() == role)
-                      .toList();
-                  if (roleUsers.isEmpty) return const SizedBox.shrink();
-
-                  return Card(
-                    elevation: 2,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    if (!isSupervisor)
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Icon(roleIcons[role], color: Colors.green),
-                              const SizedBox(width: 8),
-                              Text(
-                                role[0].toUpperCase() + role.substring(1),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.inventory, color: Colors.white),
+                            label: const Text(
+                              "Inventory",
+                              style: TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => InventoryDocPage(branchId: branchId)),
+                              );
+                            },
                           ),
-                          const Divider(),
-                          ...roleUsers.map((user) {
-                            return FutureBuilder<List<int>>(
-                              future: Future.wait([
-                                _getTotalPatients(branchId, user['id'], role),
-                                _getTodayTokens(branchId, user['id'], role),
-                                _getInventoryRequests(
-                                    branchId, user['id'], role),
-                              ]),
-                              builder: (context, snapshot) {
-                                if (snapshot.connectionState ==
-                                    ConnectionState.waiting) {
-                                  return const ListTile(
-                                    leading: CircularProgressIndicator(),
-                                  );
-                                }
-
-                                final totalPatients = snapshot.data?[0] ?? 0;
-                                final todayTokens = snapshot.data?[1] ?? 0;
-                                final inventoryRequests =
-                                    snapshot.data?[2] ?? 0;
-
-                                String subtitleText = "";
-                                if (role == 'receptionist') {
-                                  subtitleText =
-                                      "Total Patients: $totalPatients\nTokens Today: $todayTokens";
-                                } else if (role == 'doctor') {
-                                  subtitleText = "";
-                                } else if (role == 'dispenser') {
-                                  subtitleText =
-                                      "Inventory Requests: $inventoryRequests";
-                                } else if (role == 'supervisor') {
-                                  subtitleText = "Overseeing branch activities";
-                                }
-
-                                return ListTile(
-                                  leading: const Icon(Icons.person,
-                                      color: Colors.amber),
-                                  title: Text(user['email'] ?? "Unknown Email"),
-                                  subtitle: Text(subtitleText),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      IconButton(
-                                        icon: const Icon(Icons.edit,
-                                            color: Colors.blue),
-                                        onPressed: () => _editUser(
-                                          context,
-                                          user['id'],
-                                          branchId,
-                                          user,
-                                        ),
-                                      ),
-                                      IconButton(
-                                        icon: const Icon(Icons.delete,
-                                            color: Colors.red),
-                                        onPressed: () => _deleteUser(
-                                          context,
-                                          user['id'],
-                                          user['email'],
-                                          branchId,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            );
-                          }),
+                          const SizedBox(width: 16),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.account_balance_wallet, color: Colors.white),
+                            label: const Text(
+                              "Assets",
+                              style: TextStyle(color: Colors.white, fontSize: 16),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.purple.shade700,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => AssetsPage(branchId: branchId, isAdmin: true)),
+                              );
+                            },
+                          ),
                         ],
                       ),
-                    ),
+                    const SizedBox(height: 12),
+                    _dateRangeSelector(),
+                  ],
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 32),
+
+            // Summary Cards – no const
+            LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth > 900) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: PatientSummaryCard(
+                          title: "Tokens",
+                          dataFuture: _tokensFuture(branchId),
+                          color: Colors.green.shade600,
+                          titleIcon: Icons.people_alt,
+                          showRevenue: true,
+                          valueIcons: {'v1': Icons.favorite, 'v2': Icons.group, 'v3': Icons.handshake, 'total': Icons.people_alt},
+                          valueLabels: {'v1': 'Zakat', 'v2': 'Non-Zakat', 'v3': 'GMWF'},
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: PatientSummaryCard(
+                          title: "Prescriptions",
+                          dataFuture: _prescriptionsFuture(branchId),
+                          color: Colors.blue.shade600,
+                          titleIcon: Icons.medical_information,
+                          valueIcons: {'v1': Icons.timer, 'v2': Icons.check_circle, 'total': Icons.medical_information},
+                          valueLabels: {'v1': 'Waiting', 'v2': 'Prescribed'},
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: PatientSummaryCard(
+                          title: "Dispensary",
+                          dataFuture: _dispensaryCountFuture(branchId),
+                          color: Colors.orange.shade600,
+                          titleIcon: Icons.local_pharmacy,
+                          valueIcons: {'v1': Icons.access_time, 'v2': Icons.done_all, 'total': Icons.local_pharmacy},
+                          valueLabels: {'v1': 'Pending', 'v2': 'Dispensed'},
+                        ),
+                      ),
+                    ],
                   );
-                }),
-              if (branchUsers.isEmpty)
-                const Center(
-                  child: Text(
-                    "No users found",
-                    style: TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
-                ),
+                }
 
-              // Tokens Section
-              Card(
-                elevation: 2,
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.token, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text(
-                            "Tokens",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                return Column(
+                  children: [
+                    PatientSummaryCard(
+                      title: "Tokens",
+                      dataFuture: _tokensFuture(branchId),
+                      color: Colors.green.shade600,
+                      titleIcon: Icons.people_alt,
+                      showRevenue: true,
+                      valueIcons: {'v1': Icons.favorite, 'v2': Icons.group, 'v3': Icons.handshake, 'total': Icons.people_alt},
+                      valueLabels: {'v1': 'Zakat', 'v2': 'Non-Zakat', 'v3': 'GMWF'},
+                    ),
+                    const SizedBox(height: 20),
+                    PatientSummaryCard(
+                      title: "Prescriptions",
+                      dataFuture: _prescriptionsFuture(branchId),
+                      color: Colors.blue.shade600,
+                      titleIcon: Icons.medical_information,
+                      valueIcons: {'v1': Icons.timer, 'v2': Icons.check_circle, 'total': Icons.medical_information},
+                      valueLabels: {'v1': 'Waiting', 'v2': 'Prescribed'},
+                    ),
+                    const SizedBox(height: 20),
+                    PatientSummaryCard(
+                      title: "Dispensary",
+                      dataFuture: _dispensaryCountFuture(branchId),
+                      color: Colors.orange.shade600,
+                      titleIcon: Icons.local_pharmacy,
+                      valueIcons: {'v1': Icons.access_time, 'v2': Icons.done_all, 'total': Icons.local_pharmacy},
+                      valueLabels: {'v1': 'Pending', 'v2': 'Dispensed'},
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            const SizedBox(height: 40),
+
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const Text("Dispensed Patients", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                _typeFilter(),
+              ],
+            ),
+
+            const SizedBox(height: 24),
+
+            FutureBuilder<Map<String, dynamic>>(
+              key: ValueKey('dispensed-$branchId-$selectedStartDate-$selectedEndDate-$selectedTypeFilter'),
+              future: _dispensaryFuture(branchId),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
+                  return const Center(child: Text("No dispensed records found for selected period"));
+                }
+
+                final all = snapshot.data!['dispensed'] as List<dynamic>;
+                final filtered = all
+                    .where((p) => selectedTypeFilter == null || p['type']?.toString().toLowerCase() == selectedTypeFilter)
+                    .cast<Map<String, dynamic>>()
+                    .toList();
+
+                if (filtered.isEmpty) {
+                  return const Center(child: Text("No patients match the selected type filter"));
+                }
+
+                return ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: filtered.length,
+                  itemBuilder: (context, i) {
+                    final p = filtered[i];
+                    final isChild = p['isChild'] == true;
+                    final typeColor = {
+                      'zakat': Colors.green.shade600,
+                      'non-zakat': Colors.blue.shade600,
+                      'gmwf': Colors.orange.shade600,
+                    }[p['type']?.toLowerCase()] ?? Colors.grey.shade600;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      elevation: 2,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(isChild ? Icons.child_care : Icons.person, color: Colors.green.shade700, size: 28),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    p['name'] ?? 'Unknown',
+                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(color: typeColor, borderRadius: BorderRadius.circular(20)),
+                                  child: Text(
+                                    (p['type'] ?? 'Unknown').toUpperCase(),
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
+                            const Divider(height: 24),
+                            _infoRow(Icons.calendar_today, 'Date: ${p['dispenseDate'] ?? 'N/A'}'),
+                            _infoRow(Icons.badge, '${isChild ? "Guardian CNIC" : "CNIC"}: ${p['displayCnic'] ?? 'N/A'}', copy: p['displayCnic']),
+                            if (isChild) _infoRow(Icons.family_restroom, 'Guardian: ${p['guardianName'] ?? 'N/A'}'),
+                            _infoRow(Icons.phone, 'Phone: ${p['phone'] ?? 'N/A'}', copy: p['phone']),
+                            _infoRow(Icons.cake, 'Age: ${p['age'] ?? 'N/A'} • Gender: ${p['gender'] ?? 'N/A'}'),
+                            _infoRow(Icons.bloodtype, 'Blood Group: ${p['bloodGroup'] ?? 'N/A'}'),
+                            _infoRow(Icons.medical_services, 'Prescribed by: ${p['doctorName'] ?? 'Unknown'}'),
+                            _infoRow(Icons.token, 'Token by: ${p['tokenBy'] ?? 'Unknown'}'),
+                            _infoRow(Icons.local_pharmacy, 'Dispensed by: ${p['dispenserName'] ?? 'Unknown'}'),
+                            _infoRow(Icons.numbers, 'Serial: ${p['serial'] ?? 'N/A'}'),
+                          ],
+                        ),
                       ),
-                      const Divider(),
-                      Row(
-                        children: [
-                          const Text("Filter: "),
-                          DropdownButton<String>(
-                            value: selectedPeriod,
-                            items: ['today', 'week', 'month']
-                                .map((p) => DropdownMenuItem(
-                                    value: p,
-                                    child: Text(
-                                        p[0].toUpperCase() + p.substring(1))))
-                                .toList(),
-                            onChanged: (val) =>
-                                setState(() => selectedPeriod = val!),
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<int>(
-                        future: _getTokenCount(branchId, selectedPeriod),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const CircularProgressIndicator();
-                          }
-                          final count = snapshot.data ?? 0;
-                          return Text("Total Tokens: $count");
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Prescriptions Section
-              Card(
-                elevation: 2,
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.medical_information, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text(
-                            "Prescriptions",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(),
-                      Row(
-                        children: [
-                          const Text("Filter: "),
-                          DropdownButton<String>(
-                            value: selectedPeriod,
-                            items: ['today', 'week', 'month']
-                                .map((p) => DropdownMenuItem(
-                                    value: p,
-                                    child: Text(
-                                        p[0].toUpperCase() + p.substring(1))))
-                                .toList(),
-                            onChanged: (val) =>
-                                setState(() => selectedPeriod = val!),
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<int>(
-                        future:
-                            _getTotalPrescriptions(branchId, selectedPeriod),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const CircularProgressIndicator();
-                          }
-                          final count = snapshot.data ?? 0;
-                          return Text("Total Prescriptions: $count");
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Dispensary Section
-              Card(
-                elevation: 2,
-                margin: const EdgeInsets.symmetric(vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.local_pharmacy, color: Colors.green),
-                          SizedBox(width: 8),
-                          Text(
-                            "Dispensary Data",
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Divider(),
-                      Row(
-                        children: [
-                          const Text("Filter: "),
-                          DropdownButton<String>(
-                            value: selectedPeriod,
-                            items: ['today', 'week', 'month']
-                                .map((p) => DropdownMenuItem(
-                                    value: p,
-                                    child: Text(
-                                        p[0].toUpperCase() + p.substring(1))))
-                                .toList(),
-                            onChanged: (val) =>
-                                setState(() => selectedPeriod = val!),
-                          ),
-                        ],
-                      ),
-                      FutureBuilder<int>(
-                        future: _getTotalDispenses(branchId, selectedPeriod),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState ==
-                              ConnectionState.waiting) {
-                            return const CircularProgressIndicator();
-                          }
-                          final count = snapshot.data ?? 0;
-                          return Text("Total Dispensary Entries: $count");
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Inventory, Warehouse, and Assets Buttons
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  bool isWide = constraints.maxWidth > 600;
-                  return isWide
-                      ? Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: _buildResourceButtons(branchId),
-                        )
-                      : Column(
-                          children: _buildResourceButtons(branchId),
-                        );
-                },
-              ),
-            ],
-          ),
+                    );
+                  },
+                );
+              },
+            ),
+          ],
         ),
       ),
     );
-  }
-
-  List<Widget> _buildResourceButtons(String branchId) {
-    return [
-      ElevatedButton.icon(
-        icon: const Icon(Icons.inventory),
-        label: const Text("View Inventory"),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => InventoryPage(branchId: branchId),
-            ),
-          );
-        },
-      ),
-      const SizedBox(width: 8, height: 8),
-      ElevatedButton.icon(
-        icon: const Icon(Icons.warehouse),
-        label: const Text("View Warehouse"),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => WarehouseScreen(
-                branchId: branchId,
-              ),
-            ),
-          );
-        },
-      ),
-      const SizedBox(width: 8, height: 8),
-      ElevatedButton.icon(
-        icon: const Icon(Icons.account_balance_wallet),
-        label: const Text("View Assets"),
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (ctx) => AssetsPage(branchId: branchId, isAdmin: false),
-            ),
-          );
-        },
-      ),
-    ];
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isSupervisorMode = widget.branchId != null;
+
+    if (isSupervisorMode) {
+      final branchName = widget.branchId![0].toUpperCase() + widget.branchId!.substring(1).replaceAll('-', ' ');
+      return Scaffold(
+        appBar: AppBar(
+          title: Text("Branch: $branchName"),
+          backgroundColor: const Color(0xFF006D5B),
+          foregroundColor: Colors.white,
+        ),
+        body: _buildBranchDetails(branchName, widget.branchId!),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collectionGroup('users').snapshots(),
+        stream: FirebaseFirestore.instance.collection('branches').snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final users = snapshot.data!.docs;
-          final Map<String, List<Map<String, dynamic>>> branches = {};
-
-          for (var user in users) {
-            final data = user.data() as Map<String, dynamic>;
-            final branchId = data['branchId'] ?? "unknown";
-            final branchName = data['branchName'] ?? branchId.toUpperCase();
-            data['id'] = user.id;
-
-            if ((data['role'] ?? "").toLowerCase() == "admin") continue;
-            branches.putIfAbsent(branchName, () => []);
-            branches[branchName]!.add(data);
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text("No branches found"));
           }
 
-          for (var branch in defaultBranches) {
-            branches.putIfAbsent(branch, () => []);
-          }
+          final branches = snapshot.data!.docs.map((doc) {
+            final data = doc.data() as Map<String, dynamic>?;
+            final name = data?['name'] as String? ?? doc.id;
+            return MapEntry(name, doc.id);
+          }).toList()..sort((a, b) => a.key.compareTo(b.key));
 
-          final allBranches = branches.keys.toList()..sort();
-
-          return Row(
-            children: [
-              _buildBranchSidebar(allBranches),
-              _buildBranchDetails(branches),
-            ],
+          return DefaultTabController(
+            length: branches.length,
+            child: Column(
+              children: [
+                Container(
+                  color: const Color(0xFF006D5B),
+                  child: TabBar(
+                    isScrollable: true,
+                    labelColor: Colors.white,
+                    unselectedLabelColor: Colors.white70,
+                    indicatorColor: Colors.white,
+                    tabs: branches.map((e) => Tab(text: e.key)).toList(),
+                  ),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: branches.map((e) => _buildBranchDetails(e.key, e.value)).toList(),
+                  ),
+                ),
+              ],
+            ),
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: Colors.green,
-        onPressed: () => _addBranchDialog(context),
-        child: const Icon(Icons.add_business, color: Colors.white),
       ),
     );
   }

@@ -2,192 +2,359 @@
 import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+
+import '../models/patient.dart';
+import '../models/token.dart';
 import 'local_storage_service.dart';
+import 'sync_service.dart';
+import '../realtime/realtime_manager.dart';
+import '../realtime/realtime_events.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  // ---------------------------
-  // 🧠 Helper: Check Firestore ready
-  // ---------------------------
+  static DateTime _toDateTime(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    if (value is String) {
+      try {
+        return DateTime.parse(value);
+      } catch (_) {}
+    }
+    return DateTime.now();
+  }
+
   Future<bool> _isFirestoreAvailable() async {
     if (!Platform.isWindows) return true;
     try {
-      // Run a lightweight query to confirm availability
-      await _db.collection('ping').limit(1).get();
+      await _db.collection('_ping').limit(1).get();
       return true;
-    } catch (e) {
-      print("⚠️ Firestore unavailable (Windows): $e");
+    } catch (_) {
       return false;
     }
   }
 
-  // ---------------------------
-  // USERS
-  // ---------------------------
-
-  Future<Map<String, dynamic>?> getUserByEmail(String email) async {
-    if (!await _isFirestoreAvailable()) return null;
-
-    try {
-      final query = await _db
-          .collection('users')
-          .where('email', isEqualTo: email.trim().toLowerCase())
-          .limit(1)
-          .get();
-
-      if (query.docs.isNotEmpty) {
-        return query.docs.first.data();
-      }
-    } catch (e, st) {
-      print("⚠️ getUserByEmail error: $e\n$st");
-    }
-    return null;
+Future<void> savePatient({
+  required String branchId,
+  required String patientId,
+  required Map<String, dynamic> patientData,
+}) async {
+  if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
+    print("ERROR: savePatient → branchId or patientId empty");
+    return;
   }
 
-  /// Users by branch (subcollection)
-  Stream<List<Map<String, dynamic>>> streamUsersByBranch(String branchId) {
+  final data = Map<String, dynamic>.from(patientData);
+  data['branchId'] = branchId;
+  data['patientId'] = patientId;
+  data.remove('id');
+
+  if (data['dob'] is String) {
     try {
-      return _db
+      data['dob'] = Timestamp.fromDate(DateTime.parse(data['dob']));
+    } catch (e) {
+      print('Invalid DOB format: ${data['dob']} → $e');
+    }
+  } else if (data['dob'] is DateTime) {
+    data['dob'] = Timestamp.fromDate(data['dob']);
+  }
+
+  print('Saving patient locally → patientId: $patientId | Name: ${data['name'] ?? 'unknown'}');
+
+  await LocalStorageService.saveLocalPatient(data);
+
+  RealtimeManager().sendMessage(
+    RealtimeEvents.payload(
+      type: RealtimeEvents.savePatient,
+      data: {
+        'branchId': branchId,
+        'patientId': patientId,
+        'data': data,
+      },
+    ),
+  );
+
+  final action = {
+    'type': 'save_patient',
+    'branchId': branchId,
+    'patientId': patientId,
+    'data': data,
+  };
+
+  await LocalStorageService.enqueueSync(action);
+
+  print("Patient enqueued → $patientId | queue size now: ${Hive.box(LocalStorageService.syncBox).length}");
+
+  SyncService().triggerUpload();
+  print("triggerUpload called after patient enqueue");
+}
+
+Future<void> saveEntry({
+  required String branchId,
+  required String patientId,
+  required Map<String, dynamic> vitals,
+}) async {
+  if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
+    print('ERROR: Cannot save entry — branchId or patientId empty');
+    return;
+  }
+
+  final dateKey = DateFormat('ddMMyy').format(DateTime.now());
+  final serial = await _generateNextSerial(branchId, dateKey);
+
+  final now = DateTime.now();
+
+  String queueType = 'zakat';
+  String patientName = 'Unknown Patient';
+  String patientCnic = '';
+  String guardianCnic = '';
+
+  try {
+    final patientData = Hive.box(LocalStorageService.patientsBox).get(patientId);
+    if (patientData is Map) {
+      final status = (patientData['status'] as String?)?.toLowerCase().trim() ?? 'zakat';
+      patientName = (patientData['name'] as String?)?.trim() ?? 'Unknown Patient';
+      patientCnic = (patientData['cnic'] as String?)?.trim() ?? '';
+      guardianCnic = (patientData['guardianCnic'] as String?)?.trim() ?? '';
+
+      if (status.contains('non-zakat') || status == 'non zakat') {
+        queueType = 'non-zakat';
+      } else if (status.contains('gmwf') || status == 'gm wf') {
+        queueType = 'gmwf';
+      }
+    }
+  } catch (e) {
+    print('Could not fetch patient from Hive for $patientId: $e');
+  }
+
+  if (patientCnic.isEmpty && guardianCnic.isEmpty && patientName == 'Unknown Patient') {
+    try {
+      final patientDoc = await _db
           .collection('branches')
           .doc(branchId)
-          .collection('users')
-          .snapshots()
-          .handleError((e) {
-        print("⚠️ streamUsersByBranch error: $e");
-      }).map((snap) => snap.docs.map((d) => d.data()).toList());
-    } catch (e, st) {
-      print("⚠️ streamUsersByBranch failed: $e\n$st");
-      // Return a safe empty stream to prevent crashes
-      return Stream.value([]);
+          .collection('patients')
+          .doc(patientId)
+          .get();
+
+      if (patientDoc.exists) {
+        final data = patientDoc.data()!;
+        patientName = data['name']?.toString().trim() ?? 'Unknown Patient';
+        patientCnic = data['cnic']?.toString().trim() ?? '';
+        guardianCnic = data['guardianCnic']?.toString().trim() ?? '';
+      }
+    } catch (e) {
+      print('Firestore fallback for patient $patientId failed: $e');
     }
   }
 
-  /// Global users (all branches)
-  Stream<List<Map<String, dynamic>>> streamAllUsers() {
-    try {
-      return _db.collection('users').snapshots().handleError((e) {
-        print("⚠️ streamAllUsers error: $e");
-      }).map((snap) => snap.docs.map((d) => d.data()).toList());
-    } catch (e, st) {
-      print("⚠️ streamAllUsers failed: $e\n$st");
-      return Stream.value([]);
-    }
+  final data = {
+    'serial': serial,
+    'patientId': patientId,
+    'patientName': patientName,
+    'patientCnic': patientCnic,
+    'guardianCnic': guardianCnic,
+    'branchId': branchId,
+    'vitals': vitals,
+    'dateKey': dateKey,
+    'timestamp': now.toIso8601String(),
+    'createdAt': now.toIso8601String(),
+    'status': 'waiting',
+  };
+
+  print('Saving entry locally → Serial: $serial | Patient: $patientName | CNIC: $patientCnic | Guardian CNIC: $guardianCnic');
+
+  await LocalStorageService.saveEntryLocal(branchId, serial, data);
+
+  RealtimeManager().sendMessage(
+    RealtimeEvents.payload(
+      type: RealtimeEvents.saveEntry,
+      data: {
+        'branchId': branchId,
+        'datePart': dateKey,
+        'queueType': queueType,
+        'serial': serial,
+        'data': data,
+      },
+    ),
+  );
+
+  final action = {
+    'type': 'save_entry',
+    'branchId': branchId,
+    'datePart': dateKey,
+    'queueType': queueType,
+    'serial': serial,
+    'data': data,
+  };
+
+  await LocalStorageService.enqueueSync(action);
+
+  print("Entry enqueued → serial: $serial | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
+
+  SyncService().triggerUpload();
+  print("triggerUpload called after entry enqueue");
+}
+  Future<String> _generateNextSerial(String branchId, String dateKey) async {
+    final localCount = LocalStorageService.getLocalEntries(branchId)
+        .where((e) => (e['dateKey'] as String?) == dateKey)
+        .length;
+
+    final nextNumber = localCount + 1;
+    return '$dateKey-${nextNumber.toString().padLeft(3, '0')}';
   }
 
-  // ---------------------------
-  // BRANCHES
-  // ---------------------------
-
-  Future<void> ensureBranchExists(String branchId, String branchName) async {
+  Future<Map<String, dynamic>?> getUserByEmail(String email) async {
     if (!await _isFirestoreAvailable()) {
-      print("⚠️ Skipping branch creation — Firestore not ready on Windows");
+      return LocalStorageService.getLocalUserByEmail(email);
+    }
+
+    final q = await _db
+        .collection('users')
+        .where('email', isEqualTo: email.trim().toLowerCase())
+        .limit(1)
+        .get();
+
+    if (q.docs.isEmpty) return null;
+
+    final data = q.docs.first.data();
+    if (data['createdAt'] is Timestamp) data['createdAt'] = _toDateTime(data['createdAt']);
+    if (data['updatedAt'] is Timestamp) data['updatedAt'] = _toDateTime(data['updatedAt']);
+    return data;
+  }
+
+  Future<Map<String, dynamic>?> getPatientByCnic(String cnic) async {
+    if (cnic.trim().isEmpty) return null;
+
+    if (!await _isFirestoreAvailable()) {
+      return LocalStorageService.getLocalPatientByCnic(cnic);
+    }
+
+    final doc = await _db.collection('patients').doc(cnic).get();
+    if (!doc.exists) return null;
+
+    final data = doc.data()!;
+    if (data['dob'] != null) data['dob'] = _toDateTime(data['dob']);
+    return data;
+  }
+
+  Stream<List<Map<String, dynamic>>> streamPatientsByBranch(String branchId) async* {
+    if (!await _isFirestoreAvailable()) {
+      yield LocalStorageService.getAllLocalPatients(branchId: branchId);
       return;
     }
 
-    try {
-      final ref = _db.collection('branches').doc(branchId);
-      await ref.set({
-        'id': branchId,
-        'name': branchName,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    } catch (e, st) {
-      print("⚠️ ensureBranchExists error: $e\n$st");
-    }
+    yield* _db
+        .collection('branches')
+        .doc(branchId)
+        .collection('patients')
+        .snapshots()
+        .map((s) => s.docs.map((d) {
+              final data = d.data();
+              if (data['dob'] != null) data['dob'] = _toDateTime(data['dob']);
+              return data;
+            }).toList());
   }
 
-  Stream<List<Map<String, dynamic>>> streamBranches() {
-    try {
-      return _db.collection('branches').snapshots().handleError((e) {
-        print("⚠️ streamBranches error: $e");
-      }).map((s) => s.docs.map((d) => {'id': d.id, ...d.data()}).toList());
-    } catch (e, st) {
-      print("⚠️ streamBranches failed: $e\n$st");
-      return Stream.value([]);
+  Future<List<Patient>> getAllPatientsForBranch(String branchId) async {
+    if (!await _isFirestoreAvailable()) {
+      return LocalStorageService.getAllLocalPatients(branchId: branchId)
+          .map((map) => Patient.fromMap(map))
+          .toList();
     }
+
+    final snapshot = await _db
+        .collection('branches')
+        .doc(branchId)
+        .collection('patients')
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      if (data['dob'] != null) data['dob'] = _toDateTime(data['dob']);
+      return Patient.fromMap(data);
+    }).toList();
   }
 
-  // ---------------------------
-  // ENTRIES (Vitals, CNIC, etc.)
-  // ---------------------------
+  Future<List<Token>> getTodayTokensForBranch(String branchId) async {
+    final String todayKey = DateFormat('ddMMyy').format(DateTime.now());
 
-  /// Save new entry: patient CNIC + vitals + auto serial (ddMMyy-001)
-  Future<void> saveEntry({
+    if (!await _isFirestoreAvailable()) {
+      return LocalStorageService.getLocalEntries(branchId)
+          .where((e) => (e['dateKey'] as String?) == todayKey)
+          .map((map) => Token.fromMap(map))
+          .toList();
+    }
+
+    final snapshot = await _db
+        .collection('branches')
+        .doc(branchId)
+        .collection('serials')
+        .doc(todayKey)
+        .collection('zakat')
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      if (data['timestamp'] != null) data['timestamp'] = _toDateTime(data['timestamp']);
+      return Token.fromMap(data);
+    }).toList();
+  }
+
+  Stream<List<Map<String, dynamic>>> streamEntriesByBranch(String branchId) async* {
+    if (!await _isFirestoreAvailable()) {
+      yield LocalStorageService.getLocalEntries(branchId);
+      return;
+    }
+
+    yield* _db
+        .collection('branches')
+        .doc(branchId)
+        .collection('serials')
+        .snapshots()
+        .map((s) => s.docs.map((d) {
+              final data = d.data();
+              if (data['timestamp'] != null) data['timestamp'] = _toDateTime(data['timestamp']);
+              return data;
+            }).toList());
+  }
+
+  Future<void> savePrescription({
     required String branchId,
-    required String patientCnic,
-    required Map<String, dynamic> vitals,
+    required Map<String, dynamic> prescriptionData,
   }) async {
-    try {
-      final now = DateTime.now();
-      final dateKey = DateFormat('ddMMyy').format(now);
-      final serial = await _generateNextSerial(branchId, dateKey);
-
-      final entryData = {
-        'serial': serial,
-        'patientCnic': patientCnic,
-        'vitals': vitals,
-        'timestamp': FieldValue.serverTimestamp(),
-        'dateKey': dateKey,
-      };
-
-      // 🔹 Firestore write — skip if on Windows
-      final isFirestoreReady = await _isFirestoreAvailable();
-      if (isFirestoreReady) {
-        final branchRef = _db.collection('branches').doc(branchId);
-        await branchRef.collection('entries').doc(serial).set(entryData);
-        await _db.collection('entries').doc(serial).set(entryData);
-      } else {
-        print("💾 Firestore skipped (Windows/offline) — saving locally");
-      }
-
-      // 🔹 Always save locally
-      await LocalStorageService.saveEntryLocal(branchId, serial, entryData);
-
-      print("✅ Entry saved successfully: $serial");
-    } catch (e, st) {
-      print("⚠️ saveEntry error: $e\n$st");
-
-      // Backup for later sync
-      await LocalStorageService.enqueueSync({
-        'type': 'save_entry',
-        'branchId': branchId,
-        'patientCnic': patientCnic,
-        'vitals': vitals,
-      });
+    final id = prescriptionData['id']?.toString()?.trim();
+    if (id == null || id.isEmpty) {
+      print('ERROR: Cannot save prescription — missing or empty ID');
+      return;
     }
-  }
 
-  /// Generate next serial for entry: ddMMyy-001, ddMMyy-002, etc.
-  Future<String> _generateNextSerial(String branchId, String dateKey) async {
-    try {
-      final isFirestoreReady = await _isFirestoreAvailable();
-      if (!isFirestoreReady) {
-        return "$dateKey-001";
-      }
+    final sanitized = LocalStorageService.sanitize(prescriptionData);
 
-      final query = await _db
-          .collection('branches')
-          .doc(branchId)
-          .collection('entries')
-          .where('dateKey', isEqualTo: dateKey)
-          .orderBy('serial', descending: true)
-          .limit(1)
-          .get();
+    print('Saving prescription locally → ID: $id');
 
-      if (query.docs.isEmpty) {
-        return "$dateKey-001";
-      }
+    await LocalStorageService.saveLocalPrescription(sanitized);
 
-      final lastSerial = query.docs.first['serial'] ?? '';
-      final parts = lastSerial.split('-');
-      final lastNumber = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+    RealtimeManager().sendMessage(
+      RealtimeEvents.payload(
+        type: RealtimeEvents.savePrescription,
+        data: {
+          'branchId': branchId,
+          'serial': id,
+          'data': sanitized,
+        },
+      ),
+    );
 
-      final newSerial = lastNumber + 1;
-      return "$dateKey-${newSerial.toString().padLeft(3, '0')}";
-    } catch (e, st) {
-      print("⚠️ _generateNextSerial error: $e\n$st");
-      return "$dateKey-001";
-    }
+    await LocalStorageService.enqueueSync({
+      'type': 'save_prescription',
+      'branchId': branchId,
+      'serial': id,
+      'data': sanitized,
+    });
+
+    print('Prescription enqueued → ID: $id');
+
+    SyncService().triggerUpload();
   }
 }

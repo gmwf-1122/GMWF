@@ -1,10 +1,14 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
-project(gm_new LANGUAGES CXX)
+
+# Allow Firebase SDK to use older CMake requirements
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
+project(gmwf LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "gm_new")
+set(BINARY_NAME "gmwf")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

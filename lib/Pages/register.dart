@@ -1,6 +1,16 @@
-// lib/pages/register.dart
+// lib/pages/register.dart - DROPDOWN ROLES + CROWN & SHIELD ICONS
+
+import 'dart:typed_data';
+import 'dart:io' show File;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
+
 import '../services/auth_service.dart';
 
 class Register extends StatefulWidget {
@@ -10,303 +20,806 @@ class Register extends StatefulWidget {
   State<Register> createState() => _RegisterState();
 }
 
-class _RegisterState extends State<Register> {
+class _RegisterState extends State<Register> with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final AuthService _authService = AuthService();
 
   String? _selectedRole;
   String? _selectedBranch;
+  String? _selectedDegree;
 
-  final TextEditingController _usernameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _usernameController     = TextEditingController();
+  final TextEditingController _emailController        = TextEditingController();
+  final TextEditingController _passwordController     = TextEditingController();
+  final TextEditingController _phoneController        = TextEditingController();
+  final TextEditingController _identificationController = TextEditingController();
+  final TextEditingController _addressController      = TextEditingController();
+  final TextEditingController _bankNameController     = TextEditingController();
+  final TextEditingController _bankAccountController  = TextEditingController();
+  final TextEditingController _customDegreeController = TextEditingController();
+  final TextEditingController _salaryController       = TextEditingController();
 
-  bool _loading = false;
+  XFile?       _profileImageXFile;
+  Uint8List?   _profileImageBytes;
+  PlatformFile? _identificationFile;
+  PlatformFile? _degreeFile;
+
+  bool _loading        = false;
   bool _obscurePassword = true;
 
-  final List<String> roles = [
-    "Doctor",
-    "Receptionist",
-    "Dispenser",
-    "Supervisor",
+  late AnimationController _animController;
+  late Animation<double>   _fadeAnim;
+
+  // ── Role definitions — crown first, shield next, rest after ──
+  static const List<Map<String, dynamic>> _roleItems = [
+    {'label': 'CEO',                  'icon': Icons.workspace_premium_rounded,   'type': 'crown'},
+    {'label': 'Admin',                'icon': Icons.workspace_premium_rounded,   'type': 'crown'},
+    {'label': 'Chairman',             'icon': Icons.workspace_premium_rounded,   'type': 'crown'},
+    {'label': 'Server',               'icon': Icons.shield_rounded,              'type': 'shield'},
+    {'label': 'Doctor',               'icon': Icons.medical_services_outlined,   'type': 'normal'},
+    {'label': 'Receptionist',         'icon': Icons.support_agent_rounded,       'type': 'normal'},
+    {'label': 'Dispenser',            'icon': Icons.medication_outlined,         'type': 'normal'},
+    {'label': 'Supervisor',           'icon': Icons.manage_accounts_outlined,    'type': 'normal'},
+    {'label': 'Food Token Generator', 'icon': Icons.confirmation_number_outlined,'type': 'normal'},
+    {'label': 'Kitchen',              'icon': Icons.restaurant_outlined,         'type': 'normal'},
   ];
 
-  final List<String> branches = ["Gujrat", "Sialkot", "Karachi-1", "Karachi-2"];
+  final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'Other'];
+  List<Map<String, dynamic>> _branches = [];
+  String? _usernameError;
+
+  // ── Palette ─────────────────────────────────────────────────
+  static const Color _green900 = Color(0xFF064D2E);
+  static const Color _green700 = Color(0xFF0A6640);
+  static const Color _green500 = Color(0xFF1A8A55);
+  static const Color _gold     = Color(0xFFD4AF37);
+  static const Color _blue     = Color(0xFF1565C0);
+  static const Color _bg       = Color(0xFFF2F6F4);
+  static const Color _surface  = Color(0xFFFFFFFF);
+  static const Color _ink      = Color(0xFF0D1B12);
+  static const Color _inkMid   = Color(0xFF4A6356);
+  static const Color _inkLight = Color(0xFF9BBAAD);
+  static const Color _divider  = Color(0xFFDDE8E3);
+
+  @override
+  void initState() {
+    super.initState();
+    _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
+    _animController.forward();
+    _loadBranches();
+  }
+
+  @override
+  void dispose() {
+    _animController.dispose();
+    for (final c in [
+      _usernameController, _emailController, _passwordController,
+      _phoneController, _identificationController, _addressController,
+      _bankNameController, _bankAccountController, _customDegreeController,
+      _salaryController,
+    ]) { c.dispose(); }
+    super.dispose();
+  }
+
+  // ── Data ────────────────────────────────────────────────────
+
+  Future<void> _loadBranches() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      setState(() {
+        _branches = snap.docs.map((d) {
+          final data = d.data();
+          return {'id': d.id, 'name': data['name'] as String? ?? d.id};
+        }).toList()
+          ..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      });
+    } catch (e) {
+      _snack('Failed to load branches: $e', error: true);
+    }
+  }
+
+  Future<bool> _usernameExists(String username) async {
+    final lower = username.trim().toLowerCase();
+    final snap  = await FirebaseFirestore.instance.collection('branches').get();
+    for (final doc in snap.docs) {
+      final res = await FirebaseFirestore.instance
+          .collection('branches').doc(doc.id).collection('users')
+          .where('username', isEqualTo: lower).limit(1).get();
+      if (res.docs.isNotEmpty) return true;
+    }
+    return false;
+  }
+
+  bool _requiresBranch() {
+    final r = _selectedRole?.toLowerCase();
+    return r != 'ceo' && r != 'chairman' && r != 'admin';
+  }
+
+  String _getBranchId() {
+    if (!_requiresBranch()) return 'global';
+    if (_selectedBranch == null) throw Exception('Branch must be selected for this role');
+    return _branches.firstWhere((b) => b['name'] == _selectedBranch)['id'] as String;
+  }
+
+  String _getBranchName() => _requiresBranch() ? (_selectedBranch ?? 'Unknown') : 'All Branches';
+
+  // ── Actions ─────────────────────────────────────────────────
+
+  Future<void> _pickProfileImage() async {
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      try {
+        final cropped = await ImageCropper().cropImage(
+          sourcePath: picked.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          compressQuality: 80,
+          uiSettings: [
+            AndroidUiSettings(toolbarTitle: 'Crop Photo', toolbarColor: _green700,
+                toolbarWidgetColor: Colors.white, initAspectRatio: CropAspectRatioPreset.square, lockAspectRatio: true),
+            IOSUiSettings(title: 'Crop Photo', aspectRatioLockEnabled: true),
+            WebUiSettings(context: context, presentStyle: WebPresentStyle.dialog,
+                size: const CropperSize(width: 500, height: 500), initialAspectRatio: 1.0),
+          ],
+        );
+        if (cropped != null) {
+          final cb = await cropped.readAsBytes();
+          setState(() { _profileImageXFile = XFile(cropped.path); _profileImageBytes = cb; });
+        } else {
+          setState(() { _profileImageXFile = picked; _profileImageBytes = bytes; });
+        }
+      } catch (_) {
+        setState(() { _profileImageXFile = picked; _profileImageBytes = bytes; });
+      }
+    } catch (e) {
+      _snack('Failed to pick image: $e', error: true);
+    }
+  }
+
+  void _removeProfileImage() => setState(() { _profileImageXFile = null; _profileImageBytes = null; });
+
+  Future<void> _pickDocument(String type) async {
+    final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png']);
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        if (type == 'identification') _identificationFile = result.files.first;
+        else if (type == 'degree')    _degreeFile          = result.files.first;
+      });
+    }
+  }
 
   Future<void> _registerUser() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _loading = true);
-
+    if (!_formKey.currentState!.validate()) {
+      _snack('Please fill all required fields', error: true);
+      return;
+    }
+    setState(() { _usernameError = null; _loading = true; });
     try {
-      final branchId = _selectedBranch!.toLowerCase().replaceAll(" ", "");
-      final branchName = _selectedBranch!;
+      final username = _usernameController.text.trim().toLowerCase();
+      if (await _usernameExists(username)) {
+        setState(() => _usernameError = 'Username already taken');
+        _snack('Username already exists', error: true);
+        return;
+      }
 
-      await _authService.signUp(
-        _emailController.text.trim(),
-        _passwordController.text.trim(),
-        _usernameController.text.trim(),
-        _selectedRole!,
-        branchId,
-        branchName,
-        phone: _phoneController.text.trim(),
+      final degree = _selectedDegree == 'Other'
+          ? _customDegreeController.text.trim()
+          : (_selectedDegree ?? '');
+
+      double? salary;
+      final salaryText = _salaryController.text.trim();
+      if (salaryText.isNotEmpty) {
+        salary = double.tryParse(salaryText);
+        if (salary == null) { _snack('Invalid salary format', error: true); return; }
+      }
+
+      final user = await _authService.signUp(
+        email:               _emailController.text.trim().toLowerCase(),
+        password:            _passwordController.text.trim(),
+        username:            username,
+        role:                _selectedRole!,
+        branchId:            _getBranchId(),
+        branchName:          _getBranchName(),
+        phone:               _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
+        identification:      _identificationController.text.trim().isNotEmpty ? _identificationController.text.trim() : null,
+        address:             _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
+        bankName:            _bankNameController.text.trim().isNotEmpty ? _bankNameController.text.trim() : null,
+        bankAccount:         _bankAccountController.text.trim().isNotEmpty ? _bankAccountController.text.trim() : null,
+        degree:              degree.isNotEmpty ? degree : null,
+        salary:              salary,
+        profileImageXFile:   _profileImageXFile,
+        profileImageBytes:   _profileImageBytes,
+        identificationFile:  _identificationFile,
+        degreeFile:          _degreeFile,
       );
 
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("User registered successfully!"),
-          backgroundColor: Colors.green,
-        ),
-      );
-
-      _resetForm();
+      if (user == null) throw 'Failed to create account';
+      _snack('${_usernameController.text} registered successfully!', success: true);
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-      );
+      _snack('Error: $e', error: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  void _resetForm() {
-    _usernameController.clear();
-    _emailController.clear();
-    _passwordController.clear();
-    _phoneController.clear();
-    setState(() {
-      _selectedRole = null;
-      _selectedBranch = null;
-    });
+  void _snack(String msg, {bool error = false, bool success = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [
+        Icon(error ? Icons.error_outline : success ? Icons.check_circle_outline : Icons.info_outline,
+            color: Colors.white, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(msg, style: const TextStyle(fontSize: 13))),
+      ]),
+      backgroundColor: error ? const Color(0xFFB00020) : success ? _green700 : const Color(0xFF37474F),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.all(16),
+      duration: const Duration(seconds: 3),
+    ));
   }
+
+  // ── Build ────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    final requiresBranch = _requiresBranch();
+    final isDoctor = _selectedRole?.toLowerCase() == 'doctor';
+
     return Scaffold(
-      backgroundColor: Colors.white, // Clean white background
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Card(
-              elevation: 12,
-              shadowColor: Colors.black12,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+      backgroundColor: _bg,
+      body: Stack(
+        children: [
+          // Green header gradient
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: Container(
+              height: 210,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [_green900, _green700, _green500],
+                ),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(32.0),
-                child: Form(
-                  key: _formKey,
+            ),
+          ),
+
+          SafeArea(
+            child: Column(
+              children: [
+                // AppBar
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
+                  child: Text(
+                    'Register New User',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Expanded(
+                  child: FadeTransition(
+                    opacity: _fadeAnim,
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 48),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+
+                            // Avatar card
+                            _buildAvatarCard(),
+                            const SizedBox(height: 16),
+
+                            // Role & Branch
+                            _buildCard(
+                              title: 'Role & Assignment',
+                              icon: Icons.badge_outlined,
+                              accent: const Color(0xFF6A1B9A),
+                              child: Column(
+                                children: [
+                                  _buildRoleDropdown(),
+                                  if (_selectedRole != null && requiresBranch) ...[
+                                    const SizedBox(height: 14),
+                                    _buildSimpleDropdown(
+                                      value: _selectedBranch,
+                                      items: _branches.map((b) => b['name'] as String).toList(),
+                                      hint: _branches.isEmpty ? 'Loading branches…' : 'Select Branch *',
+                                      icon: Icons.location_city_rounded,
+                                      onChanged: (v) => setState(() => _selectedBranch = v),
+                                      validator: (v) => v == null ? 'Required' : null,
+                                    ),
+                                  ],
+                                  if (_selectedRole != null && !requiresBranch) ...[
+                                    const SizedBox(height: 14),
+                                    _buildGlobalBadge(),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Basic Information
+                            _buildCard(
+                              title: 'Basic Information',
+                              icon: Icons.person_outline_rounded,
+                              accent: _blue,
+                              child: Column(
+                                children: [
+                                  _buildRow([
+                                    _buildField(controller: _usernameController, label: 'Username',
+                                        icon: Icons.alternate_email_rounded, required: true,
+                                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                                    _buildField(controller: _emailController, label: 'Email',
+                                        icon: Icons.mail_outline_rounded, required: true,
+                                        keyboardType: TextInputType.emailAddress,
+                                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                                  ]),
+                                  const SizedBox(height: 14),
+                                  _buildRow([
+                                    _buildField(controller: _passwordController, label: 'Password',
+                                        icon: Icons.lock_outline_rounded, isPassword: true, required: true,
+                                        validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
+                                    _buildField(controller: _phoneController, label: 'Phone',
+                                        icon: Icons.phone_outlined, keyboardType: TextInputType.phone,
+                                        inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                                  ]),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Contact
+                            _buildCard(
+                              title: 'Contact & Address',
+                              icon: Icons.contact_mail_outlined,
+                              accent: const Color(0xFFE65100),
+                              child: Column(
+                                children: [
+                                  _buildField(controller: _identificationController,
+                                      label: 'CNIC / ID Number', icon: Icons.credit_card_outlined),
+                                  const SizedBox(height: 14),
+                                  _buildField(controller: _addressController,
+                                      label: 'Address', icon: Icons.home_outlined, maxLines: 3),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // Financial
+                            _buildCard(
+                              title: 'Financial Details',
+                              icon: Icons.account_balance_wallet_outlined,
+                              accent: _green700,
+                              child: Column(
+                                children: [
+                                  _buildRow([
+                                    _buildField(controller: _bankNameController, label: 'Bank Name',
+                                        icon: Icons.account_balance_outlined),
+                                    _buildField(controller: _bankAccountController, label: 'Account No.',
+                                        icon: Icons.numbers_outlined, keyboardType: TextInputType.number),
+                                  ]),
+                                  const SizedBox(height: 14),
+                                  _buildField(controller: _salaryController, label: 'Base Salary (PKR)',
+                                      icon: Icons.payments_outlined,
+                                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
+                                ],
+                              ),
+                            ),
+
+                            // Doctor qualifications
+                            if (isDoctor) ...[
+                              const SizedBox(height: 16),
+                              _buildCard(
+                                title: 'Medical Qualifications',
+                                icon: Icons.local_hospital_outlined,
+                                accent: const Color(0xFF00695C),
+                                child: Column(
+                                  children: [
+                                    _buildSimpleDropdown(
+                                      value: _selectedDegree,
+                                      items: _degrees,
+                                      hint: 'Select Degree *',
+                                      icon: Icons.school_outlined,
+                                      onChanged: (v) => setState(() {
+                                        _selectedDegree = v;
+                                        if (v != 'Other') _customDegreeController.clear();
+                                      }),
+                                      validator: (v) => v == null ? 'Required' : null,
+                                    ),
+                                    if (_selectedDegree == 'Other') ...[
+                                      const SizedBox(height: 14),
+                                      _buildField(controller: _customDegreeController, label: 'Specify Degree',
+                                          icon: Icons.edit_outlined, required: true,
+                                          validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+
+                            const SizedBox(height: 16),
+
+                            // Documents
+                            _buildCard(
+                              title: 'Documents',
+                              icon: Icons.folder_outlined,
+                              accent: const Color(0xFF37474F),
+                              child: Column(
+                                children: [
+                                  _buildFileCard(
+                                    title: 'Identification Document',
+                                    subtitle: 'CNIC, Passport, or Government ID',
+                                    file: _identificationFile,
+                                    onTap: () => _pickDocument('identification'),
+                                    onRemove: () => setState(() => _identificationFile = null),
+                                    icon: Icons.badge_outlined,
+                                  ),
+                                  if (isDoctor) ...[
+                                    const SizedBox(height: 12),
+                                    _buildFileCard(
+                                      title: 'Degree Certificate',
+                                      subtitle: 'Medical degree / diploma',
+                                      file: _degreeFile,
+                                      onTap: () => _pickDocument('degree'),
+                                      onRemove: () => setState(() => _degreeFile = null),
+                                      icon: Icons.school_outlined,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 32),
+                            _buildSubmitButton(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Loading overlay
+          if (_loading)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 36),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 30, offset: Offset(0, 10))],
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo + Title
-                      Column(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade50,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.person_add_alt_1,
-                              size: 48,
-                              color: Colors.green.shade700,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          const Text(
-                            "Register New User",
-                            style: TextStyle(
-                              fontSize: 26,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "Fill in the details to create an account",
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 32),
-
-                      // Form Fields
-                      _buildTextField(
-                        controller: _usernameController,
-                        label: "Username",
-                        icon: Icons.person_outline,
-                        validator: (v) =>
-                            v?.trim().isEmpty ?? true ? "Enter username" : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _emailController,
-                        label: "Email Address",
-                        icon: Icons.email_outlined,
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (v) {
-                          if (v?.trim().isEmpty ?? true) return "Enter email";
-                          if (!v!.contains("@")) return "Invalid email";
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _passwordController,
-                        label: "Password",
-                        icon: Icons.lock_outline,
-                        isPassword: true,
-                        validator: (v) =>
-                            (v?.length ?? 0) < 6 ? "Min 6 characters" : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(
-                        controller: _phoneController,
-                        label: "Phone Number",
-                        icon: Icons.phone_outlined,
-                        keyboardType: TextInputType.phone,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          LengthLimitingTextInputFormatter(11),
-                        ],
-                        validator: (v) =>
-                            v?.length != 11 ? "Enter 11-digit number" : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildDropdown(
-                        value: _selectedRole,
-                        items: roles,
-                        hint: "Select Role",
-                        icon: Icons.badge_outlined,
-                        onChanged: (val) => setState(() => _selectedRole = val),
-                        validator: (val) =>
-                            val == null ? "Select a role" : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildDropdown(
-                        value: _selectedBranch,
-                        items: branches,
-                        hint: "Select Branch",
-                        icon: Icons.location_city_outlined,
-                        onChanged: (val) =>
-                            setState(() => _selectedBranch = val),
-                        validator: (val) =>
-                            val == null ? "Select a branch" : null,
-                      ),
-                      const SizedBox(height: 32),
-
-                      // Submit Button
                       SizedBox(
-                        width: double.infinity,
-                        height: 50,
-                        child: ElevatedButton(
-                          onPressed: _loading ? null : _registerUser,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green.shade600,
-                            foregroundColor: Colors.white,
-                            elevation: 3,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            disabledBackgroundColor: Colors.grey.shade300,
-                          ),
-                          child: _loading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text(
-                                  "Create Account",
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                        ),
+                        width: 52, height: 52,
+                        child: CircularProgressIndicator(
+                            color: _green700, strokeWidth: 4,
+                            backgroundColor: _green700.withOpacity(0.12)),
                       ),
+                      const SizedBox(height: 20),
+                      const Text('Creating Account',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: _ink)),
+                      const SizedBox(height: 6),
+                      const Text('Please wait…',
+                          style: TextStyle(fontSize: 13, color: _inkLight)),
                     ],
                   ),
                 ),
               ),
             ),
-          ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildTextField({
+  // ── Widgets ──────────────────────────────────────────────────
+
+  Widget _buildAvatarCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 18, offset: const Offset(0, 4))],
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: _pickProfileImage,
+            child: Stack(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _profileImageBytes != null ? _green700 : _divider, width: 3),
+                    boxShadow: [BoxShadow(color: _green700.withOpacity(0.15), blurRadius: 18, offset: const Offset(0, 6))],
+                  ),
+                  child: CircleAvatar(
+                    radius: 54,
+                    backgroundColor: const Color(0xFFE8F5EE),
+                    backgroundImage: _profileImageBytes != null ? MemoryImage(_profileImageBytes!) : null,
+                    child: _profileImageBytes == null
+                        ? Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.person_outline_rounded, size: 38, color: _green700.withOpacity(0.4)),
+                              const SizedBox(height: 4),
+                              const Text('Add Photo',
+                                  style: TextStyle(fontSize: 11, color: _inkLight, fontWeight: FontWeight.w500)),
+                            ],
+                          )
+                        : null,
+                  ),
+                ),
+                Positioned(
+                  right: 2, bottom: 2,
+                  child: GestureDetector(
+                    onTap: _profileImageBytes != null ? _removeProfileImage : _pickProfileImage,
+                    child: Container(
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        color: _profileImageBytes != null ? const Color(0xFFB00020) : _green700,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 2.5),
+                      ),
+                      child: Icon(
+                        _profileImageBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
+                        color: Colors.white, size: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text('Profile Picture',
+              style: TextStyle(fontSize: 13, color: _inkLight, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 3),
+          const Text('Optional', style: TextStyle(fontSize: 11, color: _inkLight)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRoleDropdown() {
+    return DropdownButtonFormField<String>(
+      value: _selectedRole,
+      isExpanded: true,
+      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _inkLight),
+      dropdownColor: _surface,
+      hint: const Row(
+        children: [
+          Icon(Icons.badge_outlined, color: _inkLight, size: 20),
+          SizedBox(width: 10),
+          Text('Select Role *', style: TextStyle(color: _inkLight, fontSize: 13)),
+        ],
+      ),
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: _bg,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        border:             OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        enabledBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        focusedBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _green700, width: 2)),
+        errorBorder:        OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade400)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade600, width: 2)),
+        errorStyle: const TextStyle(fontSize: 11),
+      ),
+      // What shows in the field when selected
+      selectedItemBuilder: (context) => _roleItems.map((role) {
+        final type  = role['type']  as String;
+        final icon  = role['icon']  as IconData;
+        final label = role['label'] as String;
+        final Color iconColor = type == 'crown' ? _gold : type == 'shield' ? _blue : _inkMid;
+        return Row(
+          children: [
+            Icon(icon, color: iconColor, size: 18),
+            const SizedBox(width: 10),
+            Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _ink)),
+          ],
+        );
+      }).toList(),
+      // Dropdown menu items
+      items: _roleItems.map((role) {
+        final type     = role['type']  as String;
+        final icon     = role['icon']  as IconData;
+        final label    = role['label'] as String;
+        final isCrown  = type == 'crown';
+        final isShield = type == 'shield';
+        final Color iconColor = isCrown ? _gold   : isShield ? _blue   : _inkMid;
+        final Color textColor = isCrown ? const Color(0xFF7B5B00) : isShield ? _blue : _ink;
+        final Color bgColor   = isCrown ? const Color(0xFFFFF8E1) : isShield ? const Color(0xFFE3F2FD) : _surface;
+
+        return DropdownMenuItem<String>(
+          value: label,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                      color: iconColor.withOpacity(0.13), borderRadius: BorderRadius.circular(8)),
+                  child: Icon(icon, color: iconColor, size: 17),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(label,
+                      style: TextStyle(fontSize: 14,
+                          fontWeight: (isCrown || isShield) ? FontWeight.w700 : FontWeight.w500,
+                          color: textColor)),
+                ),
+                if (isCrown)
+                  _roleBadge('Authority', _gold),
+                if (isShield)
+                  _roleBadge('Server', _blue),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+      onChanged: (val) => setState(() {
+        _selectedRole = val;
+        if (val != 'Doctor') { _selectedDegree = null; _customDegreeController.clear(); _degreeFile = null; }
+        if (!_requiresBranch()) _selectedBranch = null;
+      }),
+      validator: (val) => val == null ? 'Please select a role' : null,
+    );
+  }
+
+  Widget _roleBadge(String text, Color color) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(color: color.withOpacity(0.13), borderRadius: BorderRadius.circular(20)),
+    child: Text(text,
+        style: TextStyle(fontSize: 10, color: color.withOpacity(0.9), fontWeight: FontWeight.w700)),
+  );
+
+  Widget _buildGlobalBadge() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [_gold.withOpacity(0.10), _gold.withOpacity(0.04)]),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _gold.withOpacity(0.35), width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: _gold.withOpacity(0.15), borderRadius: BorderRadius.circular(10)),
+            child: const Icon(Icons.workspace_premium_rounded, color: _gold, size: 22),
+          ),
+          const SizedBox(width: 14),
+          const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Global Access Granted',
+                  style: TextStyle(color: Color(0xFF7B5B00), fontWeight: FontWeight.w700, fontSize: 14)),
+              SizedBox(height: 2),
+              Text('Full access to all branches',
+                  style: TextStyle(color: _gold, fontSize: 12)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard({
+    required String title,
+    required IconData icon,
+    required Color accent,
+    required Widget child,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: _divider))),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: accent.withOpacity(0.10), borderRadius: BorderRadius.circular(10)),
+                  child: Icon(icon, color: accent, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Text(title,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
+                        color: _ink, letterSpacing: 0.1)),
+              ],
+            ),
+          ),
+          Padding(padding: const EdgeInsets.all(18), child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRow(List<Widget> children) {
+    return Row(
+      children: children
+          .expand((w) => [Expanded(child: w), const SizedBox(width: 12)])
+          .toList()
+        ..removeLast(),
+    );
+  }
+
+  Widget _buildField({
     required TextEditingController controller,
     required String label,
     required IconData icon,
     TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
     bool isPassword = false,
-    required String? Function(String?) validator,
+    bool required = false,
+    int maxLines = 1,
+    String? Function(String?)? validator,
   }) {
     return TextFormField(
       controller: controller,
-      obscureText: isPassword ? _obscurePassword : false,
+      obscureText: isPassword && _obscurePassword,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
-      style: const TextStyle(fontSize: 15),
+      maxLines: maxLines,
+      style: const TextStyle(fontSize: 14, color: _ink, fontWeight: FontWeight.w500),
       decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: Colors.green.shade700),
+        labelText: required ? '$label *' : label,
+        labelStyle: const TextStyle(fontSize: 13, color: _inkLight),
+        floatingLabelStyle: const TextStyle(fontSize: 12, color: _green700, fontWeight: FontWeight.w600),
+        prefixIcon: Icon(icon, color: _inkLight, size: 20),
         suffixIcon: isPassword
             ? IconButton(
-                icon: Icon(
-                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                  color: Colors.grey.shade600,
-                ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
-              )
+                icon: Icon(_obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    color: _inkLight, size: 20),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword))
             : null,
         filled: true,
-        fillColor: Colors.grey.shade50,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.green.shade600, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.red, width: 1),
-        ),
+        fillColor: _bg,
+        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: maxLines > 1 ? 14 : 0),
+        border:             OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        enabledBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        focusedBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _green700, width: 2)),
+        errorBorder:        OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade400)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade600, width: 2)),
+        errorStyle: const TextStyle(fontSize: 11),
       ),
       validator: validator,
     );
   }
 
-  Widget _buildDropdown({
+  Widget _buildSimpleDropdown({
     required String? value,
     required List<String> items,
     required String hint,
@@ -316,45 +829,120 @@ class _RegisterState extends State<Register> {
   }) {
     return DropdownButtonFormField<String>(
       value: value,
-      hint: Text(hint, style: TextStyle(color: Colors.grey.shade600)),
-      dropdownColor: Colors.white,
-      icon: Icon(Icons.keyboard_arrow_down, color: Colors.green.shade700),
-      style: const TextStyle(color: Colors.black87, fontSize: 15),
+      hint: Text(hint, style: const TextStyle(color: _inkLight, fontSize: 13)),
+      isExpanded: true,
+      icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _inkLight),
+      dropdownColor: _surface,
       decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.green.shade700),
+        prefixIcon: Icon(icon, color: _inkLight, size: 20),
         filled: true,
-        fillColor: Colors.grey.shade50,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 16,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.green.shade600, width: 2),
-        ),
+        fillColor: _bg,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+        border:             OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        enabledBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _divider)),
+        focusedBorder:      OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _green700, width: 2)),
+        errorBorder:        OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.red.shade400)),
+        errorStyle: const TextStyle(fontSize: 11),
       ),
-      items: items
-          .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-          .toList(),
+      items: items.map((e) => DropdownMenuItem(
+            value: e,
+            child: Text(e, style: const TextStyle(fontSize: 14, color: _ink)),
+          )).toList(),
       onChanged: onChanged,
       validator: validator,
     );
   }
 
-  @override
-  void dispose() {
-    _usernameController.dispose();
-    _emailController.dispose();
-    _passwordController.dispose();
-    _phoneController.dispose();
-    super.dispose();
+  Widget _buildFileCard({
+    required String title,
+    required String subtitle,
+    required PlatformFile? file,
+    required VoidCallback onTap,
+    required VoidCallback onRemove,
+    required IconData icon,
+  }) {
+    final has = file != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: has ? const Color(0xFFE8F5EE) : _bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: has ? _green700.withOpacity(0.4) : _divider, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(11),
+              decoration: BoxDecoration(
+                color: has ? _green700.withOpacity(0.15) : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(has ? Icons.check_rounded : icon,
+                  color: has ? _green700 : _inkLight, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14,
+                          color: has ? _green700 : _ink)),
+                  const SizedBox(height: 3),
+                  Text(has ? file.name : subtitle,
+                      style: TextStyle(fontSize: 12,
+                          color: has ? _green700.withOpacity(0.7) : _inkLight),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            if (has)
+              GestureDetector(
+                onTap: onRemove,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: Icon(Icons.close_rounded, color: Colors.red.shade600, size: 18),
+                ),
+              )
+            else
+              const Icon(Icons.upload_file_rounded, color: _inkLight, size: 22),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return GestureDetector(
+      onTap: _loading ? null : _registerUser,
+      child: Container(
+        height: 58,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              colors: [_green900, _green700, _green500],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [BoxShadow(color: _green700.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
+        ),
+        child: _loading
+            ? const Center(child: SizedBox(width: 24, height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)))
+            : const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 22),
+                  SizedBox(width: 12),
+                  Text('Create Account',
+                      style: TextStyle(color: Colors.white, fontSize: 17,
+                          fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                ],
+              ),
+      ),
+    );
   }
 }
