@@ -263,96 +263,122 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
         double childAspectRatio = 1.4;
 
         if (width > 1600) {
-          crossAxisCount = 5;
+          crossAxisCount = 4;
           childAspectRatio = 1.35;
         } else if (width > 1300) {
-          crossAxisCount = 4;
+          crossAxisCount = 3;
           childAspectRatio = 1.4;
         } else if (width > 1000) {
-          crossAxisCount = 3;
+          crossAxisCount = 2;
           childAspectRatio = 1.45;
         } else if (width > 700) {
           crossAxisCount = 2;
           childAspectRatio = 1.5;
         }
 
-        return GridView.builder(
-          padding: const EdgeInsets.all(16),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 18,
-            childAspectRatio: childAspectRatio,
-          ),
-          itemCount: sections.length,
-          itemBuilder: (context, index) {
-            final section = sections[index];
-            final List<Map<String, dynamic>> items = section == 'All Medicines'
-                ? List.from(filtered)
-                : (groupedByType[section] ?? []);
-
-            if (items.isEmpty) return const SizedBox.shrink();
-
+        // Separate All Medicines from other sections
+        final allMedicinesItems = List<Map<String, dynamic>>.from(filtered);
+        _sortItems(allMedicinesItems);
+        
+        final otherSections = sections.sublist(1); // Skip 'All Medicines'
+        final List<Widget> gridItems = [];
+        
+        for (final section in otherSections) {
+          final items = groupedByType[section] ?? [];
+          if (items.isNotEmpty) {
             _sortItems(items);
+            gridItems.add(_buildCategoryCard(section, items));
+          }
+        }
 
-            return Card(
-              elevation: 5,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        FaIcon(
-                          section == 'All Medicines' ? FontAwesomeIcons.pills : FontAwesomeIcons.circleDot,
-                          color: _teal,
-                          size: 16,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            section,
-                            style: const TextStyle(
-                              color: _teal,
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                        // Total count badge kept here (useful in inventory view)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _teal.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            '${items.length}',
-                            style: const TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Divider(height: 1, thickness: 0.8),
-                    const SizedBox(height: 6),
-                    Expanded(
-                      child: ListView.separated(
-                        padding: EdgeInsets.zero,
-                        itemCount: items.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 5),
-                        itemBuilder: (_, i) => _buildItemRow(items[i]),
-                      ),
-                    ),
-                  ],
-                ),
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // All Medicines - Left side, full height
+              Expanded(
+                flex: 2,
+                child: _buildCategoryCard('All Medicines', allMedicinesItems, isFullHeight: true),
               ),
-            );
-          },
+              
+              if (gridItems.isNotEmpty) ...[
+                const SizedBox(width: 16),
+                // Other categories in grid on the right
+                Expanded(
+                  flex: 3,
+                  child: GridView.count(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 14,
+                    mainAxisSpacing: 18,
+                    childAspectRatio: childAspectRatio,
+                    children: gridItems,
+                  ),
+                ),
+              ],
+            ],
+          ),
         );
       },
+    );
+  }
+
+  Widget _buildCategoryCard(String section, List<Map<String, dynamic>> items, {bool isFullHeight = false}) {
+    return Card(
+      elevation: 5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                FaIcon(
+                  section == 'All Medicines' ? FontAwesomeIcons.pills : FontAwesomeIcons.circleDot,
+                  color: _teal,
+                  size: 16,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    section,
+                    style: const TextStyle(
+                      color: _teal,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                // Total count badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _teal.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${items.length}',
+                    style: const TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1, thickness: 0.8),
+            const SizedBox(height: 6),
+            // Expanded for full height cards, fixed size for grid cards
+            Expanded(
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 5),
+                itemBuilder: (_, i) => _buildItemRow(items[i]),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

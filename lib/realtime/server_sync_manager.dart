@@ -1,0 +1,894 @@
+// lib/realtime/server_sync_manager.dart
+//
+// FIXES vs previous version:
+//   1. _pushCatchUpToSocket() now has THREE fallbacks for finding a prescription:
+//        a) LocalStorageService.getLocalPrescription(serial)   ← prescriptions box
+//        b) entry['prescription'] embedded field               ← entries box
+//        c) Scan ALL prescriptions box keys for matching serial ← catches key mismatch
+//   2. _savePrescription() now saves with BOTH the serial key AND the id key
+//      so getLocalPrescription() can find it regardless of which key it uses.
+//   3. Added _pendingPrescriptions map: when a prescription arrives but its
+//      entry doesn't exist yet (doctor saved before receptionist issued token,
+//      or race condition), we store it and retry after entry arrives.
+//   4. _interceptMessage() now handles the case where Doctor sends prescription
+//      while Dispenser is offline but Receptionist IS online — data is saved
+//      server-side and will be pushed on Dispenser reconnect.
+//   5. _pushCatchUpToSocket() now also pushes prescriptions whose entry status
+//      is NOT yet 'completed' but whose prescription exists in the box — covers
+//      the race where SSM saved prescription but hadn't updated entry status yet.
+//
+// QUEUE-TYPE FIX:
+//   All queueType resolution now goes through _resolveQueueType() which
+//   normalises every known variant.  No code path can silently fall back to
+//   'zakat' when a different value was actually supplied.
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:intl/intl.dart';
+
+import '../services/local_storage_service.dart';
+import 'lan_server.dart';
+
+class ServerSyncManager {
+  // ── Singleton ──────────────────────────────────────────────────────────────
+  static final ServerSyncManager _i = ServerSyncManager._();
+  factory ServerSyncManager() => _i;
+  ServerSyncManager._();
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  LanServer? _server;
+  String?    _branchId;
+  bool       _running   = false;
+  bool       _uploading = false;
+
+  Function(Map<String, dynamic>)?                     _prevOnMessage;
+  Function(String socketId, Map<String, dynamic>)?    _prevOnConnected;
+
+  Timer? _syncTimer;
+  Timer? _downloadTimer;
+  StreamSubscription? _connSub;
+
+  // FIX #3: Buffer for prescriptions that arrive before their entry exists
+  final Map<String, Map<String, dynamic>> _pendingPrescriptions = {};
+
+  static const _serverQueueBox  = 'server_sync_queue';
+  static const _editRequestsBox = 'local_edit_requests';
+
+  final _db = FirebaseFirestore.instance;
+
+  // ── Queue-type resolver ────────────────────────────────────────────────────
+  /// Converts any known variant to the canonical Firestore sub-collection name.
+  /// Returns null when raw is null/empty so callers can distinguish "missing"
+  /// from "zakat".
+  static String? _resolveQueueType(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    final s = raw.toLowerCase().trim();
+    if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
+        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
+    if (s == 'zakat') return 'zakat';
+    return s; // unknown — pass through verbatim
+  }
+
+  // ── Public API ─────────────────────────────────────────────────────────────
+
+  Future<void> start({
+    required LanServer server,
+    required String branchId,
+  }) async {
+    final cleanBranch = branchId.toLowerCase().trim();
+
+    if (_running && _branchId == cleanBranch && _server == server) {
+      debugPrint('[SSM] Already running for branch $cleanBranch — skipping');
+      return;
+    }
+
+    stop();
+
+    _server   = server;
+    _branchId = cleanBranch;
+    _running  = true;
+
+    debugPrint('╔══════════════════════════════════════════════════════╗');
+    debugPrint('║  ServerSyncManager  STARTED  branch: $_branchId');
+    debugPrint('╚══════════════════════════════════════════════════════╝');
+
+    _prevOnMessage = server.onMessageReceived;
+    server.onMessageReceived = (msg) {
+      _interceptMessage(msg);
+      _prevOnMessage?.call(msg);
+    };
+
+    _prevOnConnected = server.onClientConnected;
+    server.onClientConnected = (socketId, info) {
+      _prevOnConnected?.call(socketId, info);
+      Future.delayed(const Duration(milliseconds: 600), () {
+        _pushCatchUpToSocket(socketId, info);
+      });
+    };
+
+    _downloadAllFromFirestore().ignore();
+    _uploadQueue().ignore();
+
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_running) _uploadQueue().ignore();
+    });
+
+    _downloadTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (_running) _downloadTodayTokens().ignore();
+    });
+
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      final online = results.any((r) => r != ConnectivityResult.none);
+      if (online && _running) {
+        _uploadQueue().ignore();
+        _downloadAllFromFirestore().ignore();
+      }
+    });
+  }
+
+  void stop() {
+    _running = false;
+    _syncTimer?.cancel();
+    _downloadTimer?.cancel();
+    _connSub?.cancel();
+    _syncTimer    = null;
+    _downloadTimer = null;
+    _connSub      = null;
+
+    if (_server != null) {
+      _server!.onMessageReceived = _prevOnMessage;
+      _server!.onClientConnected = _prevOnConnected;
+    }
+    _prevOnMessage   = null;
+    _prevOnConnected = null;
+    _server          = null;
+
+    debugPrint('[SSM] Stopped');
+  }
+
+  static Future<void> initHive() async {
+    await Hive.openBox(_serverQueueBox);
+    await Hive.openBox(_editRequestsBox);
+  }
+
+  // ── Message interception ───────────────────────────────────────────────────
+
+  void _interceptMessage(Map<String, dynamic> msg) {
+    if (_branchId == null || !_running) return;
+
+    final type = msg['event_type']?.toString() ?? '';
+    final data = (msg['data'] is Map)
+        ? Map<String, dynamic>.from(msg['data'] as Map)
+        : Map<String, dynamic>.from(msg);
+
+    // Hoist top-level routing fields into data so _saveEntry can find them
+    // even when the broadcaster placed them at the message root.
+    for (final field in ['queueType', 'dateKey', 'serial', 'branchId']) {
+      if (!data.containsKey(field) && msg.containsKey(field)) {
+        data[field] = msg[field];
+      }
+    }
+
+    debugPrint('[SSM] intercept: $type | queueType=${data['queueType']} | serial=${data['serial']}');
+
+    switch (type) {
+      case 'save_entry':
+      case 'token_created':
+        _saveEntry(data, msg);
+        // FIX #3: After saving entry, check if we have a buffered prescription for it
+        _flushPendingPrescription(data['serial']?.toString()?.trim());
+        break;
+
+      case 'save_prescription':
+      case 'prescription_created':
+        _savePrescription(data, msg);
+        break;
+
+      case 'dispense_completed':
+        _saveDispense(data, msg);
+        break;
+
+      case 'save_patient':
+        _savePatient(data, msg);
+        break;
+
+      case 'save_dispensary_record':
+        _saveDispensaryRecord(data, msg);
+        break;
+
+      case 'save_stock_item':
+        LocalStorageService.saveLocalStockItem(
+            data['data'] is Map
+                ? Map<String, dynamic>.from(data['data'] as Map)
+                : data);
+        break;
+    }
+  }
+
+  // ── FIX #3: Flush a buffered prescription once its entry exists ────────────
+  void _flushPendingPrescription(String? serial) {
+    if (serial == null || serial.isEmpty) return;
+    final pending = _pendingPrescriptions.remove(serial);
+    if (pending != null) {
+      debugPrint('[SSM] Flushing buffered prescription for $serial');
+      _savePrescription(pending, pending);
+    }
+  }
+
+  // ── Persist helpers ────────────────────────────────────────────────────────
+
+  void _saveEntry(Map<String, dynamic> data, Map<String, dynamic> full) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final serial   = data['serial']?.toString().trim();
+    if (serial == null || serial.isEmpty) {
+      debugPrint('[SSM] _saveEntry: missing serial — skipping');
+      return;
+    }
+
+    final dateKey = data['dateKey']?.toString() ??
+        (serial.contains('-') ? serial.split('-')[0] : _todayKey());
+
+    // ── FIX: resolve queueType; log a warning if it had to fall back ──────
+    final rawQueueType = (data['queueType'] ?? full['queueType'])?.toString();
+    final queueType    = _resolveQueueType(rawQueueType) ?? 'zakat';
+    if (rawQueueType == null || rawQueueType.trim().isEmpty) {
+      debugPrint('[SSM] ⚠️  _saveEntry: queueType missing for $serial — defaulting to zakat');
+    } else {
+      debugPrint('[SSM] _saveEntry: $serial → queueType="$queueType" (raw="$rawQueueType")');
+    }
+
+    final entry = <String, dynamic>{
+      'serial':        serial,
+      'branchId':      branchId,
+      'queueType':     queueType,  // always canonical
+      'patientId':     data['patientId'] ?? '',
+      'patientName':   data['patientName'] ?? data['name'] ?? 'Unknown',
+      'patientCnic':   data['patientCnic'] ?? data['cnic'] ?? '',
+      'guardianCnic':  data['guardianCnic'],
+      'createdAt':     data['createdAt'] ?? DateTime.now().toIso8601String(),
+      'status':        data['status'] ?? 'waiting',
+      'vitals':        data['vitals'] ?? {},
+      'createdBy':     data['createdBy'] ?? '',
+      'createdByName': data['createdByName'] ?? '',
+      'dateKey':       dateKey,
+    };
+    data.forEach((k, v) { if (!entry.containsKey(k) && v != null) entry[k] = v; });
+
+    LocalStorageService.saveEntryLocal(branchId, serial, entry);
+    debugPrint('[SSM] ✅ entry saved: $branchId-$serial ($queueType)');
+
+    _enqueue({
+      'type':      'save_entry',
+      'branchId':  branchId,
+      'dateKey':   dateKey,
+      'queueType': queueType,  // canonical value stored in queue
+      'serial':    serial,
+      'data':      entry,
+    });
+  }
+
+  void _savePrescription(Map<String, dynamic> data, Map<String, dynamic> full) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final serial   = (data['serial'] ?? data['id'])?.toString().trim();
+    if (serial == null || serial.isEmpty) {
+      debugPrint('[SSM] _savePrescription: missing serial — skipping');
+      return;
+    }
+
+    final prescWithBranch = {...data, 'branchId': branchId, 'serial': serial};
+
+    // FIX #2: Save prescription with MULTIPLE keys so any lookup path works.
+    LocalStorageService.saveLocalPrescription(prescWithBranch);
+
+    final id = data['id']?.toString().trim();
+    if (id != null && id.isNotEmpty && id != serial) {
+      final prescById = {...prescWithBranch, 'serial': id};
+      LocalStorageService.saveLocalPrescription(prescById);
+    }
+
+    debugPrint('[SSM] ✅ prescription saved (keys: $serial${id != null && id != serial ? ", $id" : ""}): $serial');
+
+    // Update matching entry
+    final entryKey = '$branchId-$serial';
+    final box      = Hive.box(LocalStorageService.entriesBox);
+    final existing = box.get(entryKey);
+
+    if (existing != null) {
+      final upd = Map<String, dynamic>.from(existing);
+      upd['status']         = 'completed';
+      upd['completedAt']    = data['completedAt'] ?? DateTime.now().toIso8601String();
+      upd['prescription']   = prescWithBranch;
+      upd['prescriptionId'] = serial;
+      box.put(entryKey, upd);
+      debugPrint('[SSM] ✅ entry updated with prescription: $entryKey');
+    } else {
+      debugPrint('[SSM] ⚠️  entry not found for prescription: $entryKey — buffering');
+      _pendingPrescriptions[serial] = data;
+    }
+
+    String cnic = _cleanCnic(
+      data['patientCnic']?.toString() ??
+      data['cnic']?.toString() ??
+      data['guardianCnic']?.toString() ?? '',
+    );
+    if (cnic.isEmpty) cnic = 'unknown_$serial';
+
+    _enqueue({
+      'type':     'save_prescription',
+      'branchId': branchId,
+      'cnic':     cnic,
+      'serial':   serial,
+      'data':     prescWithBranch,
+    });
+
+    _enqueue({
+      'type':     'update_serial_status',
+      'branchId': branchId,
+      'serial':   serial,
+      'data': {
+        'status':      'completed',
+        'completedAt': data['completedAt'] ?? DateTime.now().toIso8601String(),
+        'doctorName':  data['doctorName'],
+        'prescription': prescWithBranch,
+      },
+    });
+  }
+
+  void _saveDispense(Map<String, dynamic> data, Map<String, dynamic> full) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final serial   = data['serial']?.toString().trim();
+    if (serial == null || serial.isEmpty) {
+      debugPrint('[SSM] _saveDispense: missing serial — skipping');
+      return;
+    }
+
+    final now    = DateTime.now().toIso8601String();
+    final update = {
+      'dispenseStatus': 'dispensed',
+      'dispensedAt':    data['dispensedAt'] ?? now,
+      'dispensedBy':    data['dispensedBy'] ?? '',
+    };
+
+    LocalStorageService.updateLocalEntryField(branchId, serial, update);
+    debugPrint('[SSM] ✅ dispense saved: $branchId-$serial');
+
+    _enqueue({
+      'type':     'update_serial_status',
+      'branchId': branchId,
+      'serial':   serial,
+      'data':     update,
+    });
+  }
+
+  void _savePatient(Map<String, dynamic> data, Map<String, dynamic> full) {
+    final p = (data['data'] is Map)
+        ? Map<String, dynamic>.from(data['data'] as Map)
+        : data;
+    LocalStorageService.saveLocalPatient({...p, 'branchId': _branchId});
+    debugPrint('[SSM] ✅ patient saved locally');
+
+    _enqueue({
+      'type':      'save_patient',
+      'branchId':  _branchId,
+      'patientId': p['patientId'],
+      'data':      p,
+    });
+  }
+
+  void _saveDispensaryRecord(Map<String, dynamic> data, Map<String, dynamic> full) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final serial   = data['serial']?.toString().trim();
+    final dateKey  = data['dateKey']?.toString() ?? _todayKey();
+    if (serial == null || serial.isEmpty) return;
+
+    final record = {...data, 'branchId': branchId, 'dateKey': dateKey};
+    LocalStorageService.saveLocalDispensaryRecord(record);
+    debugPrint('[SSM] ✅ dispensary record saved: $serial');
+
+    _enqueue({
+      'type':     'save_dispensary_record',
+      'branchId': branchId,
+      'dateKey':  dateKey,
+      'serial':   serial,
+      'data':     record,
+    });
+  }
+
+  // ── FIX #1: Robust catch-up push with 3-tier prescription lookup ──────────
+
+  Future<void> _pushCatchUpToSocket(
+      String socketId, Map<String, dynamic> info) async {
+    if (_server == null || _branchId == null || !_running) return;
+
+    final role = (info['role'] ?? '').toString().toLowerCase();
+    if (role == 'receptionist') return;
+
+    final today   = _todayKey();
+    final entries = LocalStorageService.getLocalEntries(_branchId!)
+        .where((e) => (e['dateKey'] ?? '') == today)
+        .toList();
+
+    debugPrint('[SSM] Pushing catch-up to $role ($socketId): ${entries.length} entries');
+
+    // Pre-build serial→prescription map
+    final prescBox = Hive.box(LocalStorageService.prescriptionsBox);
+    final Map<String, Map<String, dynamic>> prescBySerial = {};
+    for (final key in prescBox.keys) {
+      final raw = prescBox.get(key);
+      if (raw is Map) {
+        final p = Map<String, dynamic>.from(raw);
+        final s = p['serial']?.toString() ?? p['id']?.toString();
+        if (s != null && s.isNotEmpty) {
+          prescBySerial[s] = p;
+        }
+      }
+    }
+
+    debugPrint('[SSM] Pre-loaded ${prescBySerial.length} prescriptions for catch-up lookup');
+
+    for (final entry in entries) {
+      if (!_running) break;
+
+      final serial = entry['serial']?.toString() ?? '';
+      if (serial.isEmpty) continue;
+
+      _sendToSocket(socketId, {
+        'event_type':  'save_entry',
+        'branchId':    _branchId,
+        'data':        entry,
+        '_serverPush': true,
+        '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+      });
+
+      // ── 3-tier prescription lookup ──────────────────────────────────────
+
+      Map<String, dynamic>? presc;
+
+      final tier1 = LocalStorageService.getLocalPrescription(serial);
+      if (tier1 != null && tier1.isNotEmpty) {
+        presc = tier1;
+        debugPrint('[SSM] Catch-up presc TIER1 (direct): $serial');
+      }
+
+      if (presc == null || presc.isEmpty) {
+        final embedded = entry['prescription'];
+        if (embedded is Map && embedded.isNotEmpty) {
+          presc = Map<String, dynamic>.from(embedded);
+          debugPrint('[SSM] Catch-up presc TIER2 (embedded): $serial');
+        }
+      }
+
+      if (presc == null || presc.isEmpty) {
+        final scanned = prescBySerial[serial];
+        if (scanned != null && scanned.isNotEmpty) {
+          presc = scanned;
+          debugPrint('[SSM] Catch-up presc TIER3 (box scan): $serial');
+        }
+      }
+
+      if (presc != null && presc.isNotEmpty) {
+        _sendToSocket(socketId, {
+          'event_type':  'save_prescription',
+          'branchId':    _branchId,
+          'data':        presc,
+          '_serverPush': true,
+          '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+        });
+      } else {
+        final entryStatus = entry['status']?.toString() ?? '';
+        if (entryStatus == 'completed') {
+          debugPrint('[SSM] ⚠️  Entry $serial is completed but NO prescription found in any tier!');
+        }
+      }
+
+      // Push dispense status
+      final dispenseStatus = entry['dispenseStatus']?.toString() ?? '';
+      if (dispenseStatus == 'dispensed') {
+        _sendToSocket(socketId, {
+          'event_type':  'dispense_completed',
+          'branchId':    _branchId,
+          'data': {
+            'serial':         serial,
+            'branchId':       _branchId,
+            'dispenseStatus': 'dispensed',
+            'dispensedAt':    entry['dispensedAt'] ?? '',
+            'dispensedBy':    entry['dispensedBy'] ?? '',
+          },
+          '_serverPush': true,
+          '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+        });
+      }
+
+      await Future.delayed(const Duration(milliseconds: 30));
+    }
+
+    debugPrint('[SSM] Catch-up complete → $role ($socketId)');
+  }
+
+  void _sendToSocket(String socketId, Map<String, dynamic> payload) {
+    try {
+      _server?.sendToSocket(socketId, jsonEncode(payload));
+    } catch (e) {
+      debugPrint('[SSM] sendToSocket failed for $socketId: $e');
+    }
+  }
+
+  void _broadcast(Map<String, dynamic> payload) {
+    try {
+      _server?.broadcast(jsonEncode(payload));
+    } catch (e) {
+      debugPrint('[SSM] broadcast failed: $e');
+    }
+  }
+
+  // ── Firestore upload queue ─────────────────────────────────────────────────
+
+  void _enqueue(Map<String, dynamic> op) {
+    try {
+      final box = Hive.box(_serverQueueBox);
+      final key = 'ssync_${DateTime.now().microsecondsSinceEpoch}';
+      op['createdAt'] = DateTime.now().toIso8601String();
+      box.put(key, LocalStorageService.sanitize(op));
+    } catch (e) {
+      debugPrint('[SSM] _enqueue failed: $e');
+    }
+  }
+
+  Future<void> _uploadQueue() async {
+    if (_uploading || !_running) return;
+
+    final conn = await Connectivity().checkConnectivity();
+    if (conn.every((r) => r == ConnectivityResult.none)) {
+      debugPrint('[SSM] Offline — skipping upload');
+      return;
+    }
+
+    _uploading = true;
+    final box  = Hive.box(_serverQueueBox);
+    debugPrint('[SSM] upload queue: ${box.length} ops');
+
+    for (final key in box.keys.toList()) {
+      if (!_running) break;
+
+      final raw = box.get(key);
+      if (raw == null || raw is! Map) { box.delete(key); continue; }
+
+      final op       = Map<String, dynamic>.from(raw);
+      final attempts = (op['_attempts'] as int?) ?? 0;
+
+      if (attempts >= 5) {
+        debugPrint('[SSM] Dropping op after 5 failures: ${op['type']}');
+        box.delete(key);
+        continue;
+      }
+
+      try {
+        await _executeOp(op);
+        box.delete(key);
+        debugPrint('[SSM] ✅ uploaded: ${op['type']} ${op['serial'] ?? ''}');
+      } catch (e) {
+        op['_attempts'] = attempts + 1;
+        op['_err']      = e.toString().substring(0, e.toString().length.clamp(0, 200));
+        box.put(key, op);
+        debugPrint('[SSM] ⚠️ upload fail (attempt ${attempts + 1}): $e');
+        await Future.delayed(Duration(seconds: 2 * (attempts + 1)));
+      }
+
+      await Future.delayed(const Duration(milliseconds: 150));
+    }
+
+    _uploading = false;
+    debugPrint('[SSM] upload done. remaining: ${box.length}');
+  }
+
+  Future<void> _executeOp(Map<String, dynamic> op) async {
+    final type     = op['type']?.toString() ?? '';
+    final branchId = (op['branchId'] ?? _branchId!).toString();
+    final data     = Map<String, dynamic>.from(op['data'] ?? {});
+    final cleanData = LocalStorageService.sanitize(data);
+
+    switch (type) {
+      case 'save_entry':
+        final dateKey = (op['dateKey'] ?? cleanData['dateKey'])?.toString();
+        final serial  = op['serial']?.toString();
+        if (dateKey == null || serial == null) return;
+
+        // ── FIX: use resolver; never fall back to 'zakat' silently ──────────
+        final rawQT     = (op['queueType'] ?? cleanData['queueType'])?.toString();
+        final queueType = _resolveQueueType(rawQT) ?? 'zakat';
+        if (rawQT == null || rawQT.trim().isEmpty) {
+          debugPrint('[SSM] ⚠️  _executeOp save_entry: queueType missing for $serial → zakat');
+        }
+
+        await _db.collection('branches').doc(branchId)
+            .collection('serials').doc(dateKey)
+            .collection(queueType).doc(serial)
+            .set(cleanData, SetOptions(merge: true));
+
+        final num = int.tryParse(serial.split('-').last);
+        if (num != null) {
+          await _db.collection('branches').doc(branchId)
+              .collection('serials').doc(dateKey)
+              .set({'lastSerialNumber': num}, SetOptions(merge: true));
+        }
+        break;
+
+      case 'save_prescription':
+        final cnic   = (op['cnic'] ??
+            _cleanCnic(cleanData['patientCnic']?.toString() ?? '')).toString();
+        final serial = op['serial']?.toString();
+        if (serial == null) return;
+
+        await _db.collection('branches').doc(branchId)
+            .collection('prescriptions').doc(cnic)
+            .collection('prescriptions').doc(serial)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'update_serial_status':
+        final serial = op['serial']?.toString();
+        if (serial == null) return;
+
+        final local   = LocalStorageService.getLocalEntry(branchId, serial);
+        final dateKey = local?['dateKey']?.toString() ?? _todayKey();
+        // ── FIX: use resolver for status updates too ──────────────────────
+        final rawQT2  = local?['queueType']?.toString();
+        final qt      = _resolveQueueType(rawQT2) ?? 'zakat';
+
+        try {
+          await _db.collection('branches').doc(branchId)
+              .collection('serials').doc(dateKey)
+              .collection(qt).doc(serial)
+              .update(cleanData);
+        } catch (_) {
+          await _db.collection('branches').doc(branchId)
+              .collection('serials').doc(dateKey)
+              .collection(qt).doc(serial)
+              .set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
+      case 'save_dispensary_record':
+        final dateKey = (op['dateKey'] ?? cleanData['dateKey'] ?? _todayKey()).toString();
+        final serial  = op['serial']?.toString();
+        if (serial == null) return;
+
+        await _db.collection('branches').doc(branchId)
+            .collection('dispensary').doc(dateKey)
+            .collection(dateKey).doc(serial)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'save_patient':
+        final patientId = op['patientId']?.toString();
+        if (patientId == null) return;
+
+        await _db.collection('branches').doc(branchId)
+            .collection('patients').doc(patientId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      default:
+        debugPrint('[SSM] Unknown op type: $type');
+    }
+  }
+
+  // ── Firestore downloads ────────────────────────────────────────────────────
+
+  Future<void> _downloadAllFromFirestore() async {
+    if (_branchId == null || !_running) return;
+
+    final conn = await Connectivity().checkConnectivity();
+    if (conn.every((r) => r == ConnectivityResult.none)) {
+      debugPrint('[SSM] Offline — skipping download');
+      return;
+    }
+
+    debugPrint('[SSM] Starting full download...');
+    await Future.wait([
+      _downloadPatients(),
+      _downloadInventory(),
+      _downloadPrescriptions(),
+      _downloadTodayTokens(),
+      _downloadTodayDispensary(),
+      _downloadEditRequests(),
+    ]);
+    debugPrint('[SSM] Full download complete');
+  }
+
+  Future<void> _downloadTodayTokens() async {
+    if (_branchId == null) return;
+    try {
+      final today   = _todayKey();
+      final dateRef = _db.collection('branches').doc(_branchId)
+          .collection('serials').doc(today);
+
+      final dateDoc = await dateRef.get();
+      if (!dateDoc.exists) return;
+
+      int count = 0;
+      for (final qt in ['zakat', 'non-zakat', 'gmwf']) {
+        final snap = await dateRef.collection(qt).get();
+        for (final doc in snap.docs) {
+          final d = Map<String, dynamic>.from(doc.data());
+          d['serial']    = doc.id;
+          d['dateKey']   = today;
+          d['branchId']  = _branchId;
+          d['queueType'] = qt;  // always set canonical value from the collection name
+
+          final existing = Hive.box(LocalStorageService.entriesBox)
+              .get('$_branchId-${doc.id}');
+          if (existing is Map) {
+            if (existing['prescription'] != null) {
+              d['prescription']   = existing['prescription'];
+              d['prescriptionId'] = existing['prescriptionId'];
+            }
+            if (existing['dispenseStatus'] != null) {
+              d['dispenseStatus'] = existing['dispenseStatus'];
+              d['dispensedAt']    = existing['dispensedAt'];
+              d['dispensedBy']    = existing['dispensedBy'];
+            }
+            final localStatus  = (existing['status'] ?? '').toString();
+            final remoteStatus = (d['status'] ?? '').toString();
+            if (localStatus == 'completed' && remoteStatus != 'completed') {
+              d['status'] = 'completed';
+            }
+          }
+
+          await LocalStorageService.saveEntryLocal(_branchId!, doc.id, d);
+          count++;
+        }
+      }
+      debugPrint('[SSM] Downloaded $count today tokens');
+    } catch (e) {
+      debugPrint('[SSM] _downloadTodayTokens failed: $e');
+    }
+  }
+
+  Future<void> _downloadPatients() async {
+    if (_branchId == null) return;
+    try {
+      final snap = await _db.collection('branches').doc(_branchId)
+          .collection('patients').get();
+
+      final patients = snap.docs.map((doc) {
+        final d = Map<String, dynamic>.from(doc.data());
+        d['patientId'] = doc.id;
+        d['branchId']  = _branchId;
+        return d;
+      }).toList();
+
+      await LocalStorageService.saveAllLocalPatients(patients);
+      debugPrint('[SSM] Downloaded ${patients.length} patients');
+    } catch (e) {
+      debugPrint('[SSM] _downloadPatients failed: $e');
+    }
+  }
+
+  Future<void> _downloadInventory() async {
+    if (_branchId == null) return;
+    try {
+      final snap = await _db.collection('branches').doc(_branchId)
+          .collection('inventory').get();
+
+      final items = snap.docs.map((doc) {
+        final d = Map<String, dynamic>.from(doc.data());
+        d['id']       = doc.id;
+        d['branchId'] = _branchId;
+        return d;
+      }).toList();
+
+      await LocalStorageService.saveAllLocalStockItems(items);
+      debugPrint('[SSM] Downloaded ${items.length} inventory items');
+    } catch (e) {
+      debugPrint('[SSM] _downloadInventory failed: $e');
+    }
+  }
+
+  Future<void> _downloadPrescriptions() async {
+    if (_branchId == null) return;
+    try {
+      final cnicDocs = await _db.collection('branches').doc(_branchId)
+          .collection('prescriptions').get();
+
+      int count = 0;
+      for (final cnicDoc in cnicDocs.docs) {
+        final prescSnap = await cnicDoc.reference.collection('prescriptions').get();
+
+        for (final prescDoc in prescSnap.docs) {
+          final d = Map<String, dynamic>.from(prescDoc.data());
+          d['id']          = prescDoc.id;
+          d['serial']      = prescDoc.id;
+          d['patientCnic'] = cnicDoc.id;
+          d['cnic']        = cnicDoc.id;
+          d['branchId']    = _branchId;
+
+          await LocalStorageService.saveLocalPrescription(d);
+
+          final entryKey = '$_branchId-${prescDoc.id}';
+          final box      = Hive.box(LocalStorageService.entriesBox);
+          final existing = box.get(entryKey);
+          if (existing != null) {
+            final upd = Map<String, dynamic>.from(existing);
+            if (upd['status'] != 'completed') {
+              upd['status']         = 'completed';
+              upd['prescription']   = d;
+              upd['prescriptionId'] = prescDoc.id;
+              box.put(entryKey, upd);
+            }
+          }
+          count++;
+        }
+      }
+      debugPrint('[SSM] Downloaded $count prescriptions');
+    } catch (e) {
+      debugPrint('[SSM] _downloadPrescriptions failed: $e');
+    }
+  }
+
+  Future<void> _downloadTodayDispensary() async {
+    if (_branchId == null) return;
+    try {
+      final today = _todayKey();
+      final snap  = await _db.collection('branches').doc(_branchId)
+          .collection('dispensary').doc(today)
+          .collection(today).get();
+
+      for (final doc in snap.docs) {
+        final d = Map<String, dynamic>.from(doc.data());
+        d['serial']   = doc.id;
+        d['dateKey']  = today;
+        d['branchId'] = _branchId;
+        await LocalStorageService.saveLocalDispensaryRecord(d);
+
+        await LocalStorageService.updateLocalEntryField(_branchId!, doc.id, {
+          'dispenseStatus': d['dispenseStatus'] ?? 'dispensed',
+          'dispensedAt':    d['dispensedAt'] ?? '',
+          'dispensedBy':    d['dispensedBy'] ?? '',
+        });
+      }
+      debugPrint('[SSM] Downloaded ${snap.docs.length} dispensary records');
+    } catch (e) {
+      debugPrint('[SSM] _downloadTodayDispensary failed: $e');
+    }
+  }
+
+  Future<void> _downloadEditRequests() async {
+    if (_branchId == null) return;
+    try {
+      final snap = await _db.collection('branches').doc(_branchId)
+          .collection('edit_requests')
+          .where('status', isEqualTo: 'approved')
+          .get();
+
+      final box = Hive.box(_editRequestsBox);
+      for (final doc in snap.docs) {
+        final d = Map<String, dynamic>.from(doc.data());
+        d['id'] = doc.id;
+        box.put(doc.id, LocalStorageService.sanitize(d));
+      }
+      debugPrint('[SSM] Downloaded ${snap.docs.length} approved edit_requests');
+    } catch (e) {
+      debugPrint('[SSM] _downloadEditRequests failed: $e');
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+
+  String _todayKey() => DateFormat('ddMMyy').format(DateTime.now());
+
+  String? _field(
+          Map<String, dynamic> data, Map<String, dynamic> full, String field) =>
+      data[field]?.toString() ??
+      full[field]?.toString() ??
+      full['_senderBranch']?.toString();
+
+  String _cleanCnic(String raw) =>
+      raw.replaceAll(RegExp(r'[-\s]'), '').toLowerCase();
+}

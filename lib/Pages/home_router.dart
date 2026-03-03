@@ -1,4 +1,4 @@
-// lib/pages/home_router.dart - FIXED VERSION
+// lib/pages/home_router.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -11,17 +11,21 @@ import '../services/offline_auth_service.dart' as offline_auth;
 import '../models/patient.dart';
 import '../models/token.dart';
 
-import 'receptionist_screen.dart';
-import 'doctor_screen.dart';
+import 'dispensary/receptionist/receptionist_screen.dart';
+import 'dispensary/doctor/doctor_screen.dart';
 import 'admin_screen.dart';
+import 'ceo_screen.dart';
+import 'chairman_screen.dart';
 import 'supervisor.dart';
-import 'inventory.dart';
-import 'dispensar_screen.dart';
+import 'dispensary/dispensar/inventory.dart';
+import 'dispensary/dispensar/dispensar_screen.dart';
 import 'login_page.dart';
+import 'manager_screen.dart';
 import 'server_dashboard_with_sync.dart';
 
-import 'dasterkhwaan/food_token.dart';
+import 'dasterkhwaan/office_boy.dart';
 import 'dasterkhwaan/kitchen.dart';
+import 'donations/donations_screen.dart';
 
 import '../main.dart';
 
@@ -38,10 +42,9 @@ class HomeRouter extends StatelessWidget {
   Future<bool> _checkConnectivity() async {
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
-      
-      // Handle both List<ConnectivityResult> (new) and ConnectivityResult (old)
       if (connectivityResult is List<ConnectivityResult>) {
-        return connectivityResult.any((result) => result != ConnectivityResult.none);
+        return connectivityResult
+            .any((result) => result != ConnectivityResult.none);
       } else {
         return connectivityResult != ConnectivityResult.none;
       }
@@ -59,10 +62,11 @@ class HomeRouter extends StatelessWidget {
 
     final currentUser = user;
     if (currentUser == null) {
-      debugPrint("HomeRouter: No Firebase user and no localUser → checking cached data");
-      
+      debugPrint(
+          "HomeRouter: No Firebase user and no localUser -> checking cached data");
       try {
-        final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+        final cachedData =
+            await offline_auth.OfflineAuthService.getCachedUserData();
         if (cachedData != null) {
           debugPrint("HomeRouter: Found cached user data");
           return cachedData;
@@ -70,7 +74,6 @@ class HomeRouter extends StatelessWidget {
       } catch (e) {
         debugPrint("HomeRouter: Error retrieving cached user data: $e");
       }
-      
       return null;
     }
 
@@ -78,81 +81,72 @@ class HomeRouter extends StatelessWidget {
     final emailLower = currentUser.email?.toLowerCase() ?? '';
 
     final isOnline = await _checkConnectivity();
-    
+
     if (!isOnline) {
       debugPrint("HomeRouter: Device is offline, using local storage");
-      
       try {
-        final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+        final cachedData =
+            await offline_auth.OfflineAuthService.getCachedUserData();
         if (cachedData != null) {
-          debugPrint("HomeRouter: Using cached user data from OfflineAuthService");
+          debugPrint(
+              "HomeRouter: Using cached user data from OfflineAuthService");
           return cachedData;
         }
       } catch (e) {
         debugPrint("HomeRouter: Error retrieving cached data: $e");
       }
-      
       final localByUid = LocalStorageService.getLocalUserByUid(uid);
       if (localByUid != null) {
-        debugPrint("HomeRouter: Found user in local storage by UID");
-        return {
-          ...localByUid,
-          'uid': uid,
-          'email': currentUser.email,
-        };
+        return {...localByUid, 'uid': uid, 'email': currentUser.email};
       }
-
-      final localByEmail = LocalStorageService.getLocalUserByEmail(emailLower);
+      final localByEmail =
+          LocalStorageService.getLocalUserByEmail(emailLower);
       if (localByEmail != null) {
-        debugPrint("HomeRouter: Found user in local storage by email");
-        return {
-          ...localByEmail,
-          'uid': uid,
-          'email': currentUser.email,
-        };
+        return {...localByEmail, 'uid': uid, 'email': currentUser.email};
       }
-
       debugPrint("HomeRouter: No local user data found for offline mode");
       return null;
     }
 
-    // Online mode
-    if (emailLower == 'admin@system.com') {
-      final adminData = {
+    // System accounts
+    final systemAccounts = {
+      'admin@system.com': {
         'role': 'admin',
         'branchId': 'all',
-        'uid': uid,
-        'email': currentUser.email,
         'username': 'admin',
-        'name': 'Admin',
-      };
-      await _cacheUserDataLocally(adminData);
-      return adminData;
-    }
-    if (emailLower == 'chairman@system.com') {
-      final chairmanData = {
+        'name': 'Admin'
+      },
+      'chairman@system.com': {
         'role': 'chairman',
         'branchId': 'all',
-        'uid': uid,
-        'email': currentUser.email,
         'username': 'chairman',
-        'name': 'Chairman',
-      };
-      await _cacheUserDataLocally(chairmanData);
-      return chairmanData;
+        'name': 'Chairman'
+      },
+      'ceo@system.com': {
+        'role': 'ceo',
+        'branchId': 'all',
+        'username': 'ceo',
+        'name': 'CEO'
+      },
+    };
+
+    if (systemAccounts.containsKey(emailLower)) {
+      final d = systemAccounts[emailLower]!;
+      final data = {...d, 'uid': uid, 'email': currentUser.email};
+      await _cacheUserDataLocally(data);
+      return data;
     }
 
+    // Top-level /users
     try {
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .get()
           .timeout(const Duration(seconds: 10));
-          
+
       if (userDoc.exists) {
         final data = userDoc.data()!;
-        debugPrint("HomeRouter: Found user in top-level /users collection");
-        
         final userData = {
           ...data,
           'uid': uid,
@@ -160,32 +154,29 @@ class HomeRouter extends StatelessWidget {
           'name': data['username'] ?? data['name'] ?? 'User',
           'username': data['username'] ?? 'unknown',
         };
-
         await _cacheUserDataLocally(userData);
-        
         return userData;
       }
     } catch (e) {
       debugPrint("HomeRouter: Top-level /users fetch failed: $e");
     }
 
+    // Branch /users
     try {
       final branchesSnap = await FirebaseFirestore.instance
           .collection("branches")
           .get()
           .timeout(const Duration(seconds: 10));
-          
+
       for (final branch in branchesSnap.docs) {
         final userDoc = await branch.reference
             .collection("users")
             .doc(uid)
             .get()
             .timeout(const Duration(seconds: 5));
-            
+
         if (userDoc.exists) {
           final data = userDoc.data()!;
-          debugPrint("HomeRouter: Found user in branch ${branch.id}/users");
-          
           final userData = {
             ...data,
             "branchId": branch.id,
@@ -194,9 +185,7 @@ class HomeRouter extends StatelessWidget {
             "name": data['username'] ?? data['name'] ?? 'User',
             "username": data['username'] ?? 'unknown',
           };
-
           await _cacheUserDataLocally(userData);
-          
           return userData;
         }
       }
@@ -204,24 +193,14 @@ class HomeRouter extends StatelessWidget {
       debugPrint('HomeRouter: Error fetching user from Firestore branches: $e');
     }
 
+    // Hive fallback
     final localByUid = LocalStorageService.getLocalUserByUid(uid);
     if (localByUid != null) {
-      debugPrint("HomeRouter: Fallback to Hive local user data");
-      return {
-        ...localByUid,
-        'uid': uid,
-        'email': currentUser.email,
-      };
+      return {...localByUid, 'uid': uid, 'email': currentUser.email};
     }
-
     final localByEmail = LocalStorageService.getLocalUserByEmail(emailLower);
     if (localByEmail != null) {
-      debugPrint("HomeRouter: Fallback to Hive local user by email");
-      return {
-        ...localByEmail,
-        'uid': uid,
-        'email': currentUser.email,
-      };
+      return {...localByEmail, 'uid': uid, 'email': currentUser.email};
     }
 
     debugPrint("HomeRouter: Could not find user data anywhere for UID: $uid");
@@ -231,29 +210,25 @@ class HomeRouter extends StatelessWidget {
   Future<void> _cacheUserDataLocally(Map<String, dynamic> userData) async {
     try {
       await LocalStorageService.saveLocalUser(userData);
-      debugPrint("✅ User data cached locally for offline access");
     } catch (e) {
-      debugPrint("⚠️ Error caching user data locally: $e");
+      debugPrint("Warning: Error caching user data locally: $e");
     }
   }
 
   Future<void> _bootstrapReceptionistData(String branchId) async {
     final isOnline = await _checkConnectivity();
-    
-    if (!isOnline) {
-      debugPrint("HomeRouter: Offline mode - skipping bootstrap from Firestore");
-      return;
-    }
+    if (!isOnline) return;
 
     final firestoreService = FirestoreService();
-
     try {
-      final existingPatientIds = LocalStorageService.getAllLocalPatients(branchId: branchId)
+      final existingPatientIds = LocalStorageService.getAllLocalPatients(
+              branchId: branchId)
           .map((m) => m['patientId'] as String?)
           .whereType<String>()
           .toSet();
 
-      final List<Patient> patients = await firestoreService.getAllPatientsForBranch(branchId);
+      final List<Patient> patients =
+          await firestoreService.getAllPatientsForBranch(branchId);
       for (final patient in patients) {
         final map = patient.toMap();
         final patientId = map['patientId'] as String?;
@@ -267,7 +242,8 @@ class HomeRouter extends StatelessWidget {
           .whereType<String>()
           .toSet();
 
-      final List<Token> tokens = await firestoreService.getTodayTokensForBranch(branchId);
+      final List<Token> tokens =
+          await firestoreService.getTodayTokensForBranch(branchId);
       for (final token in tokens) {
         final map = token.toMap();
         final serial = map['serial'] as String?;
@@ -276,7 +252,7 @@ class HomeRouter extends StatelessWidget {
         }
       }
     } catch (e) {
-      debugPrint("⚠️ Error bootstrapping receptionist data: $e");
+      debugPrint("Warning: Error bootstrapping receptionist data: $e");
     }
   }
 
@@ -289,6 +265,19 @@ class HomeRouter extends StatelessWidget {
     final r = role.toLowerCase().trim();
 
     switch (r) {
+      case 'ceo':
+        return const CeoScreen();
+
+      case 'chairman':
+        return const ChairmanScreen();
+
+      case 'admin':
+        return AdminScreen(branchId: branchId);
+
+      // Manager: same authority level as admin, branch-scoped
+      case 'manager':
+        return ManagerScreen(branchId: branchId, username: userName);
+
       case 'server':
         return ServerDashboardWithSync(branchId: branchId);
 
@@ -305,7 +294,9 @@ class HomeRouter extends StatelessWidget {
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Scaffold(
-                body: Center(child: CircularProgressIndicator(color: Color(0xFF4CAF50))),
+                body: Center(
+                    child: CircularProgressIndicator(
+                        color: Color(0xFF4CAF50))),
               );
             }
             return ReceptionistScreen(
@@ -324,27 +315,29 @@ class HomeRouter extends StatelessWidget {
       case 'inventory':
         return InventoryPage(branchId: branchId);
 
-      case 'admin':
-      case 'chairman':
-      case 'ceo':
-        return AdminScreen(branchId: branchId);
-
       case 'supervisor':
         return SupervisorScreen(branchId: branchId, supervisorId: uid);
 
-      case 'dasterkhwaan token generator':
-      case 'dasterkhwaan':
-      case 'token generator':
+      // Dasterkhwaan: Office Boy
+      case 'office boy':
+      case 'dasterkhwaan office boy':
       case 'food token generator':
-        return const DasterkhwaanTokenGenerator();
+      case 'dasterkhwaan token generator':
+      case 'token generator':
+      case 'dasterkhwaan':
+        return const DasterkhwaanOfficeBoy();
 
-      case 'dasterkhwaan kitchen':
+      // Dasterkhwaan: Kitchen
       case 'kitchen':
+      case 'dasterkhwaan kitchen':
         return const DasterkhwaanKitchen();
 
+      // Standalone Donations screen
+      case 'donations':
+        return DonationsScreen();
+
       default:
-        debugPrint("❌ Unknown role: $role");
-        
+        debugPrint("Unknown role: $role");
         return Scaffold(
           body: Container(
             decoration: const BoxDecoration(
@@ -357,34 +350,35 @@ class HomeRouter extends StatelessWidget {
             child: Center(
               child: Card(
                 margin: const EdgeInsets.all(24),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20)),
                 child: Padding(
                   padding: const EdgeInsets.all(32),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.error_outline, size: 80, color: Colors.orange),
+                      const Icon(Icons.error_outline,
+                          size: 80, color: Colors.orange),
                       const SizedBox(height: 24),
-                      const Text(
-                        "Unknown Role",
-                        style: TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF004D40),
-                        ),
-                      ),
+                      const Text("Unknown Role",
+                          style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF004D40))),
                       const SizedBox(height: 16),
                       Text(
                         "Your account role '$role' is not recognized.\nPlease contact your administrator.",
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+                        style: TextStyle(
+                            fontSize: 16, color: Colors.grey.shade700),
                       ),
                       const SizedBox(height: 32),
                       ElevatedButton.icon(
                         onPressed: () {
                           Navigator.pushAndRemoveUntil(
                             navigatorKey.currentContext!,
-                            MaterialPageRoute(builder: (_) => const LoginPage()),
+                            MaterialPageRoute(
+                                builder: (_) => const LoginPage()),
                             (route) => false,
                           );
                         },
@@ -393,8 +387,10 @@ class HomeRouter extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF00695C),
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 32, vertical: 16),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ],
@@ -415,22 +411,23 @@ class HomeRouter extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(
-              child: CircularProgressIndicator(color: Color(0xFF4CAF50)),
-            ),
+                child: CircularProgressIndicator(color: Color(0xFF4CAF50))),
           );
         }
 
         if (!snapshot.hasData || snapshot.data == null) {
-          debugPrint("HomeRouter: No user data found – redirecting to login");
-          
+          debugPrint(
+              "HomeRouter: No user data found - redirecting to login");
+
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
               Flushbar(
-                message: "Session expired or account not found. Please log in again.",
+                message:
+                    "Session expired or account not found. Please log in again.",
                 backgroundColor: Colors.orange.shade700,
                 duration: const Duration(seconds: 5),
               ).show(context);
-              
+
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -438,21 +435,28 @@ class HomeRouter extends StatelessWidget {
               );
             }
           });
-          
+
           return const Scaffold(
-            body: Center(child: Text("No user data found. Redirecting to login...")),
+            body: Center(
+                child: Text(
+                    "No user data found. Redirecting to login...")),
           );
         }
 
         final data = snapshot.data!;
-        final role = (data['role'] as String? ?? 'unknown').toLowerCase().trim();
-        final branchId = (data['branchId'] as String? ?? 'unknown').trim();
-        final uid = (data['uid'] as String?) ?? user?.uid ?? data['uid'] ?? 'unknown';
-        final userName = (data['name'] as String?) ??
-            (data['username'] as String?) ??
-            'User';
+        final role =
+            (data['role'] as String? ?? 'unknown').toLowerCase().trim();
+        final branchId =
+            (data['branchId'] as String? ?? 'unknown').trim();
+        final uid = (data['uid'] as String?) ??
+            user?.uid ??
+            data['uid'] ??
+            'unknown';
+        final userName =
+            (data['name'] as String?) ?? (data['username'] as String?) ?? 'User';
 
-        debugPrint("HomeRouter → Role: $role | Branch: $branchId | UID: $uid | Name: $userName");
+        debugPrint(
+            "HomeRouter -> Role: $role | Branch: $branchId | UID: $uid | Name: $userName");
 
         return _getScreenByRole(role, branchId, uid, userName);
       },

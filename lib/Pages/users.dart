@@ -1,4 +1,4 @@
-// lib/pages/users.dart — COMPLETE REDESIGN
+// lib/pages/users.dart — Role-Theme Aware
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -8,32 +8,8 @@ import 'patient_detail_screen.dart';
 import 'user_detail_screen.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
-
-// ─── Shared Design Tokens ────────────────────────────────────────────────────
-class _DS {
-  // Patient (teal) palette
-  static const teal800 = Color(0xFF00514A);
-  static const teal600 = Color(0xFF00796B);
-  static const teal400 = Color(0xFF26A69A);
-  static const tealBg  = Color(0xFFE0F2F1);
-
-  // Staff (indigo) palette
-  static const indigo800 = Color(0xFF1A237E);
-  static const indigo600 = Color(0xFF3949AB);
-  static const indigo400 = Color(0xFF5C6BC0);
-  static const indigoBg  = Color(0xFFE8EAF6);
-
-  // Neutrals
-  static const bg       = Color(0xFFF5F6FA);
-  static const surface  = Color(0xFFFFFFFF);
-  static const ink      = Color(0xFF1C1F26);
-  static const inkMid   = Color(0xFF5A6072);
-  static const inkLight = Color(0xFFADB5BD);
-  static const divider  = Color(0xFFE9ECEF);
-
-  static const radius = 16.0;
-  static const radiusLg = 22.0;
-}
+import '../theme/role_theme_provider.dart';
+import '../theme/app_theme.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
@@ -43,7 +19,8 @@ class UsersScreen extends StatefulWidget {
   State<UsersScreen> createState() => _UsersScreenState();
 }
 
-class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStateMixin {
+class _UsersScreenState extends State<UsersScreen>
+    with SingleTickerProviderStateMixin {
   List<Map<String, dynamic>> _branches = [];
   TabController? _tabController;
 
@@ -54,12 +31,7 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
   String? _ageFilter;
   bool _familyView = false;
   Box? _localBox;
-
   bool _filtersExpanded = false;
-
-  Color get _primary => widget.isPatientMode ? _DS.teal600 : _DS.indigo600;
-  Color get _dark    => widget.isPatientMode ? _DS.teal800 : _DS.indigo800;
-  Color get _light   => widget.isPatientMode ? _DS.tealBg  : _DS.indigoBg;
 
   @override
   void initState() {
@@ -72,16 +44,19 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
 
   Future<void> _loadBranches() async {
     try {
-      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      final snap =
+          await FirebaseFirestore.instance.collection('branches').get();
       final branches = snap.docs.map((d) {
         final data = d.data();
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
       }).toList()
-        ..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+        ..sort((a, b) =>
+            (a['name'] as String).compareTo(b['name'] as String));
 
       setState(() {
         _branches = branches;
-        _tabController = TabController(length: branches.length, vsync: this);
+        _tabController =
+            TabController(length: branches.length, vsync: this);
       });
     } catch (e) {
       if (mounted) {
@@ -90,7 +65,8 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
             content: Text('Failed to load branches: $e'),
             backgroundColor: Colors.red.shade700,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -105,14 +81,18 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
+    // ── Read role theme once at the top ──
+    final t = RoleThemeScope.dataOf(context);
+
     if (_branches.isEmpty || _tabController == null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: _primary),
+            CircularProgressIndicator(color: t.accent),
             const SizedBox(height: 16),
-            Text('Loading branches…', style: TextStyle(color: _DS.inkMid, fontSize: 14)),
+            Text('Loading branches…',
+                style: TextStyle(color: t.textSecondary, fontSize: 14)),
           ],
         ),
       );
@@ -120,98 +100,114 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
 
     return Column(
       children: [
-        // ── Tab bar ──────────────────────────────────────────────
+        // ── Tab bar ──
         Container(
-          color: _DS.surface,
+          color: t.bgCard,
           child: TabBar(
             controller: _tabController!,
             isScrollable: true,
-            labelColor: _primary,
-            unselectedLabelColor: _DS.inkLight,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+            labelColor: t.accent,
+            unselectedLabelColor: t.textTertiary,
+            labelStyle:
+                const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            unselectedLabelStyle:
+                const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
             indicator: UnderlineTabIndicator(
-              borderSide: BorderSide(color: _primary, width: 3),
+              borderSide: BorderSide(color: t.accent, width: 3),
               insets: const EdgeInsets.symmetric(horizontal: 12),
             ),
             tabAlignment: TabAlignment.start,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            tabs: _branches.map((b) => Tab(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(b['name'] as String),
-              ),
-            )).toList(),
+            tabs: _branches
+                .map((b) => Tab(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(b['name'] as String),
+                      ),
+                    ))
+                .toList(),
           ),
         ),
 
-        // ── Search + Filter bar ───────────────────────────────────
-        _buildFilterBar(),
+        // ── Filter bar ──
+        _buildFilterBar(t),
 
-        // ── Content ───────────────────────────────────────────────
+        // ── Content ──
         Expanded(
           child: TabBarView(
             controller: _tabController!,
-            children: _branches.map((b) => _buildList(b['id'] as String)).toList(),
+            children: _branches
+                .map((b) => _buildList(b['id'] as String, t))
+                .toList(),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildFilterBar() {
+  Widget _buildFilterBar(RoleThemeData t) {
     return Container(
-      color: _DS.surface,
+      color: t.bgCard,
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       child: Column(
         children: [
-          // Search row
           Row(
             children: [
               Expanded(
                 child: Container(
                   height: 44,
                   decoration: BoxDecoration(
-                    color: _DS.bg,
+                    color: t.bg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _DS.divider),
+                    border: Border.all(color: t.bgRule),
                   ),
                   child: TextField(
-                    onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
-                    style: const TextStyle(fontSize: 14, color: _DS.ink),
+                    onChanged: (v) =>
+                        setState(() => _searchQuery = v.trim().toLowerCase()),
+                    style:
+                        TextStyle(fontSize: 14, color: t.textPrimary),
                     decoration: InputDecoration(
                       hintText: widget.isPatientMode
                           ? 'Search name, CNIC, phone, UID…'
                           : 'Search by username…',
-                      hintStyle: TextStyle(color: _DS.inkLight, fontSize: 13),
-                      prefixIcon: Icon(Icons.search_rounded, color: _primary, size: 20),
+                      hintStyle:
+                          TextStyle(color: t.textTertiary, fontSize: 13),
+                      prefixIcon:
+                          Icon(Icons.search_rounded, color: t.accent, size: 20),
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      contentPadding:
+                          const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
-              // Filter toggle
               GestureDetector(
-                onTap: () => setState(() => _filtersExpanded = !_filtersExpanded),
+                onTap: () =>
+                    setState(() => _filtersExpanded = !_filtersExpanded),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   height: 44,
                   padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: _filtersExpanded ? _primary : _DS.bg,
+                    color: _filtersExpanded ? t.accent : t.bg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _filtersExpanded ? _primary : _DS.divider),
+                    border: Border.all(
+                        color: _filtersExpanded ? t.accent : t.bgRule),
                   ),
                   child: Row(
                     children: [
                       Icon(Icons.tune_rounded,
-                          color: _filtersExpanded ? Colors.white : _DS.inkMid, size: 18),
+                          color: _filtersExpanded
+                              ? Colors.white
+                              : t.textSecondary,
+                          size: 18),
                       const SizedBox(width: 6),
                       Text('Filters',
                           style: TextStyle(
-                            color: _filtersExpanded ? Colors.white : _DS.inkMid,
+                            color: _filtersExpanded
+                                ? Colors.white
+                                : t.textSecondary,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                           )),
@@ -221,15 +217,17 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
               ),
             ],
           ),
-
-          // Expandable filters
           AnimatedCrossFade(
             duration: const Duration(milliseconds: 250),
-            crossFadeState: _filtersExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+            crossFadeState: _filtersExpanded
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
             firstChild: const SizedBox.shrink(),
             secondChild: Padding(
               padding: const EdgeInsets.only(top: 10),
-              child: widget.isPatientMode ? _buildPatientFilters() : _buildStaffFilters(),
+              child: widget.isPatientMode
+                  ? _buildPatientFilters(t)
+                  : _buildStaffFilters(t),
             ),
           ),
         ],
@@ -237,19 +235,25 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildPatientFilters() {
+  Widget _buildPatientFilters(RoleThemeData t) {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
       children: [
         _filterChipGroup(
+          t: t,
           label: 'Status',
           value: _filterStatus,
           icon: Icons.mosque_rounded,
-          options: {'Zakat': 'Zakat', 'Non-Zakat': 'Non-Zakat', 'GMWF': 'GMWF'},
+          options: {
+            'Zakat': 'Zakat',
+            'Non-Zakat': 'Non-Zakat',
+            'GMWF': 'GMWF'
+          },
           onChanged: (v) => setState(() => _filterStatus = v),
         ),
         _filterChipGroup(
+          t: t,
           label: 'Gender',
           value: _genderFilter,
           icon: Icons.wc_rounded,
@@ -257,32 +261,38 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           onChanged: (v) => setState(() => _genderFilter = v),
         ),
         _filterChipGroup(
+          t: t,
           label: 'Age',
           value: _ageFilter,
           icon: Icons.cake_rounded,
           options: {'child': '0–18', 'adult': '19–60', 'senior': '61+'},
           onChanged: (v) => setState(() => _ageFilter = v),
         ),
-        // Family view toggle chip
         GestureDetector(
           onTap: () => setState(() => _familyView = !_familyView),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: _familyView ? _primary : _DS.bg,
+              color: _familyView ? t.accent : t.bg,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _familyView ? _primary : _DS.divider),
+              border: Border.all(
+                  color: _familyView ? t.accent : t.bgRule),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(Icons.family_restroom_rounded,
-                    color: _familyView ? Colors.white : _DS.inkMid, size: 16),
+                    color:
+                        _familyView ? Colors.white : t.textSecondary,
+                    size: 16),
                 const SizedBox(width: 6),
                 Text('Family View',
                     style: TextStyle(
-                      color: _familyView ? Colors.white : _DS.inkMid,
+                      color: _familyView
+                          ? Colors.white
+                          : t.textSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
                     )),
@@ -294,8 +304,9 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildStaffFilters() {
+  Widget _buildStaffFilters(RoleThemeData t) {
     return _filterChipGroup(
+      t: t,
       label: 'Role',
       value: _roleFilter,
       icon: Icons.badge_outlined,
@@ -312,6 +323,7 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
   }
 
   Widget _filterChipGroup({
+    required RoleThemeData t,
     required String label,
     required String? value,
     required IconData icon,
@@ -322,32 +334,31 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
       spacing: 8,
       runSpacing: 8,
       children: [
-        // "All" chip
         GestureDetector(
           onTap: () => onChanged(null),
-          child: _chip('All $label', value == null, icon),
+          child: _chip(t, 'All $label', value == null),
         ),
         ...options.entries.map((e) => GestureDetector(
               onTap: () => onChanged(value == e.key ? null : e.key),
-              child: _chip(e.value, value == e.key, icon),
+              child: _chip(t, e.value, value == e.key),
             )),
       ],
     );
   }
 
-  Widget _chip(String label, bool active, IconData icon) {
+  Widget _chip(RoleThemeData t, String label, bool active) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: active ? _primary : _DS.bg,
+        color: active ? t.accent : t.bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: active ? _primary : _DS.divider),
+        border: Border.all(color: active ? t.accent : t.bgRule),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: active ? Colors.white : _DS.inkMid,
+          color: active ? Colors.white : t.textSecondary,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
@@ -355,18 +366,21 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     );
   }
 
-  // ── List ──────────────────────────────────────────────────────
+  // ── List ──
 
-  Widget _buildList(String branchId) {
+  Widget _buildList(String branchId, RoleThemeData t) {
     final collection = widget.isPatientMode ? 'patients' : 'users';
     return StreamBuilder<QuerySnapshot>(
       stream: _getFilteredStream(branchId, collection),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return _emptyState(Icons.error_outline_rounded, 'Something went wrong', '${snapshot.error}', isError: true);
+          return _emptyState(t, Icons.error_outline_rounded,
+              'Something went wrong', '${snapshot.error}',
+              isError: true);
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator(color: _primary));
+          return Center(
+              child: CircularProgressIndicator(color: t.accent));
         }
 
         var docs = snapshot.data!.docs;
@@ -375,16 +389,21 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           docs = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
             if (widget.isPatientMode) {
-              final name = (data['name'] as String?)?.toLowerCase() ?? '';
+              final name =
+                  (data['name'] as String?)?.toLowerCase() ?? '';
               final phone = data['phone'] as String? ?? '';
               final cnic = data['cnic'] as String? ?? '';
-              final guardianCnic = data['guardianCnic'] as String? ?? '';
+              final guardianCnic =
+                  data['guardianCnic'] as String? ?? '';
               final uid = doc.id.toLowerCase();
-              return name.contains(_searchQuery) || phone.contains(_searchQuery) ||
-                  cnic.contains(_searchQuery) || guardianCnic.contains(_searchQuery) ||
+              return name.contains(_searchQuery) ||
+                  phone.contains(_searchQuery) ||
+                  cnic.contains(_searchQuery) ||
+                  guardianCnic.contains(_searchQuery) ||
                   uid.contains(_searchQuery);
             } else {
-              return ((data['username'] as String?)?.toLowerCase() ?? '').contains(_searchQuery);
+              return ((data['username'] as String?)?.toLowerCase() ?? '')
+                  .contains(_searchQuery);
             }
           }).toList();
         }
@@ -393,12 +412,16 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           final da = a.data() as Map<String, dynamic>;
           final db = b.data() as Map<String, dynamic>;
           final key = widget.isPatientMode ? 'name' : 'username';
-          return (da[key] as String? ?? '').compareTo(db[key] as String? ?? '');
+          return (da[key] as String? ?? '')
+              .compareTo(db[key] as String? ?? '');
         });
 
         if (docs.isEmpty) {
           return _emptyState(
-            widget.isPatientMode ? Icons.person_search_rounded : Icons.manage_accounts_rounded,
+            t,
+            widget.isPatientMode
+                ? Icons.person_search_rounded
+                : Icons.manage_accounts_rounded,
             'No ${widget.isPatientMode ? 'patients' : 'users'} found',
             'Try adjusting your search or filters',
           );
@@ -408,26 +431,34 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           children: [
             // Count bar
             Container(
-              color: _light.withOpacity(0.5),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              color: t.accentMuted.withOpacity(0.3),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 10),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 5),
                     decoration: BoxDecoration(
-                      color: _primary.withOpacity(0.12),
+                      color: t.accent.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(widget.isPatientMode ? Icons.people_rounded : Icons.badge_rounded,
-                            color: _primary, size: 15),
+                        Icon(
+                            widget.isPatientMode
+                                ? Icons.people_rounded
+                                : Icons.badge_rounded,
+                            color: t.accent,
+                            size: 15),
                         const SizedBox(width: 6),
                         Text(
                           '${docs.length} ${widget.isPatientMode ? 'Patients' : 'Users'}',
                           style: TextStyle(
-                              color: _primary, fontWeight: FontWeight.w700, fontSize: 13),
+                              color: t.accent,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13),
                         ),
                       ],
                     ),
@@ -437,12 +468,14 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
             ),
             Expanded(
               child: widget.isPatientMode && _familyView
-                  ? _buildFamilyView(docs, branchId)
+                  ? _buildFamilyView(docs, branchId, t)
                   : ListView.builder(
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                      padding:
+                          const EdgeInsets.fromLTRB(12, 8, 12, 24),
                       itemCount: docs.length,
-                      itemBuilder: (ctx, i) => _buildCard(docs[i], branchId),
+                      itemBuilder: (ctx, i) =>
+                          _buildCard(docs[i], branchId, t),
                     ),
             ),
           ],
@@ -451,7 +484,8 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildCard(QueryDocumentSnapshot doc, String branchId) {
+  Widget _buildCard(
+      QueryDocumentSnapshot doc, String branchId, RoleThemeData t) {
     final data = doc.data() as Map<String, dynamic>;
     final itemId = doc.id;
     final profilePicUrl = data['profilePictureUrl'] as String?;
@@ -464,29 +498,36 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
 
     final initials = name.trim().isEmpty
         ? '?'
-        : name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase();
+        : name
+            .trim()
+            .split(' ')
+            .map((w) => w[0])
+            .take(2)
+            .join()
+            .toUpperCase();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _DS.surface,
-        borderRadius: BorderRadius.circular(_DS.radius),
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.bgRule, width: 0.8),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 3)),
         ],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(_DS.radius),
+        borderRadius: BorderRadius.circular(14),
         child: InkWell(
-          borderRadius: BorderRadius.circular(_DS.radius),
+          borderRadius: BorderRadius.circular(14),
           onTap: () => _openDetail(itemId, branchId),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 12),
             child: Row(
               children: [
                 // Avatar
@@ -495,15 +536,20 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
                   height: 50,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _light,
+                    color: t.accentMuted,
                     image: profilePicUrl != null
-                        ? DecorationImage(image: NetworkImage(profilePicUrl), fit: BoxFit.cover)
+                        ? DecorationImage(
+                            image: NetworkImage(profilePicUrl),
+                            fit: BoxFit.cover)
                         : null,
                   ),
                   alignment: Alignment.center,
                   child: profilePicUrl == null
                       ? Text(initials,
-                          style: TextStyle(color: _primary, fontWeight: FontWeight.w800, fontSize: 16))
+                          style: TextStyle(
+                              color: t.accent,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16))
                       : null,
                 ),
                 const SizedBox(width: 14),
@@ -513,27 +559,28 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name,
-                          style: const TextStyle(
-                              fontSize: 15, fontWeight: FontWeight.w700, color: _DS.ink)),
+                          style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: t.textPrimary)),
                       const SizedBox(height: 3),
                       Text(subtitle,
-                          style: const TextStyle(fontSize: 12, color: _DS.inkMid)),
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: t.textSecondary)),
                     ],
                   ),
                 ),
-                // View button
+                // Arrow
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: _primary.withOpacity(0.08),
+                    color: t.accent.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.arrow_forward_ios_rounded, color: _primary, size: 13),
-                    ],
-                  ),
+                  child: Icon(Icons.arrow_forward_ios_rounded,
+                      color: t.accent, size: 13),
                 ),
               ],
             ),
@@ -546,22 +593,35 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
   void _openDetail(String itemId, String branchId) {
     if (_localBox == null) return;
     if (widget.isPatientMode) {
-      Navigator.push(context, MaterialPageRoute(
-        builder: (_) => PatientDetailScreen(
-          patientId: itemId, isOnline: true, localBox: _localBox!,
-          branchId: branchId, doctorId: '', isAdmin: true,
-        ),
-      ));
+      Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PatientDetailScreen(
+              patientId: itemId,
+              isOnline: true,
+              localBox: _localBox!,
+              branchId: branchId,
+              doctorId: '',
+              isAdmin: true,
+            ),
+          ));
     } else {
-      Navigator.push(context, MaterialPageRoute(
-        builder: (_) => UserDetailScreen(
-          userId: itemId, branchId: branchId, localBox: _localBox!, isOnline: true,
-        ),
-      ));
+      Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => UserDetailScreen(
+              userId: itemId,
+              branchId: branchId,
+              localBox: _localBox!,
+              isOnline: true,
+            ),
+          ));
     }
   }
 
-  Widget _emptyState(IconData icon, String title, String subtitle, {bool isError = false}) {
+  Widget _emptyState(RoleThemeData t, IconData icon, String title,
+      String subtitle,
+      {bool isError = false}) {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),
@@ -571,45 +631,59 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: (isError ? Colors.red : _primary).withOpacity(0.08),
+                color: (isError ? Colors.red : t.accent).withOpacity(0.08),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 40, color: isError ? Colors.red.shade400 : _primary.withOpacity(0.5)),
+              child: Icon(icon,
+                  size: 40,
+                  color: isError
+                      ? Colors.red.shade400
+                      : t.accent.withOpacity(0.5)),
             ),
             const SizedBox(height: 16),
             Text(title,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _DS.ink)),
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: t.textPrimary)),
             const SizedBox(height: 6),
             Text(subtitle,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: _DS.inkMid)),
+                style:
+                    TextStyle(fontSize: 13, color: t.textSecondary)),
           ],
         ),
       ),
     );
   }
 
-  // ── Family view ───────────────────────────────────────────────
+  // ── Family view ──
 
-  Widget _buildFamilyView(List<QueryDocumentSnapshot> docs, String branchId) {
+  Widget _buildFamilyView(List<QueryDocumentSnapshot> docs,
+      String branchId, RoleThemeData t) {
     Map<String, Map<String, dynamic>> cnicToGuardian = {};
     Map<String, List<Map<String, dynamic>>> families = {};
     List<Map<String, dynamic>> adultsWithoutChildren = [];
 
     for (var doc in docs) {
-      final data = {...doc.data() as Map<String, dynamic>, 'id': doc.id};
+      final data = {
+        ...doc.data() as Map<String, dynamic>,
+        'id': doc.id
+      };
       if (data['isAdult'] == true) {
         final cnic = data['cnic'] as String? ?? '';
         if (cnic.isNotEmpty) cnicToGuardian[cnic] = data;
         adultsWithoutChildren.add(data);
       } else {
-        final guardianCnic = data['guardianCnic'] as String? ?? 'Unknown';
+        final guardianCnic =
+            data['guardianCnic'] as String? ?? 'Unknown';
         families.putIfAbsent(guardianCnic, () => []);
         families[guardianCnic]!.add(data);
       }
     }
     families.keys.forEach((gc) {
-      adultsWithoutChildren.removeWhere((a) => a['cnic'] == gc);
+      adultsWithoutChildren
+          .removeWhere((a) => a['cnic'] == gc);
     });
 
     return ListView(
@@ -620,8 +694,8 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           final guardian = cnicToGuardian[entry.key];
           final children = entry.value;
           final guardianName = guardian?['name'] ?? 'Unknown';
-
           return _familyCard(
+            t: t,
             guardianName: guardianName,
             guardianCnic: entry.key,
             guardian: guardian,
@@ -630,12 +704,13 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
           );
         }),
         if (adultsWithoutChildren.isNotEmpty)
-          _soloAdultsCard(adultsWithoutChildren, branchId),
+          _soloAdultsCard(adultsWithoutChildren, branchId, t),
       ],
     );
   }
 
   Widget _familyCard({
+    required RoleThemeData t,
     required String guardianName,
     required String guardianCnic,
     required Map<String, dynamic>? guardian,
@@ -645,39 +720,60 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: _DS.surface,
-        borderRadius: BorderRadius.circular(_DS.radiusLg),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 4))],
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.bgRule, width: 0.8),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          tilePadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: _light, borderRadius: BorderRadius.circular(12)),
-            child: Icon(Icons.family_restroom_rounded, color: _primary, size: 22),
+            decoration: BoxDecoration(
+                color: t.accentMuted,
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(Icons.family_restroom_rounded,
+                color: t.accent, size: 22),
           ),
           title: Text(guardianName,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _DS.ink)),
+              style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: t.textPrimary)),
           subtitle: Text(
             '${children.length} child${children.length != 1 ? 'ren' : ''} · CNIC: $guardianCnic',
-            style: const TextStyle(fontSize: 12, color: _DS.inkMid),
+            style:
+                TextStyle(fontSize: 12, color: t.textSecondary),
           ),
           children: [
             if (guardian != null)
-              _familyMemberTile(guardian, Icons.person_rounded, _primary, branchId, isGuardian: true),
-            ...children.map((c) => _familyMemberTile(c, Icons.child_care_rounded, Colors.orange.shade600, branchId)),
+              _familyMemberTile(guardian, Icons.person_rounded,
+                  t.accent, branchId, t,
+                  isGuardian: true),
+            ...children.map((c) => _familyMemberTile(c,
+                Icons.child_care_rounded,
+                Colors.orange.shade600, branchId, t)),
           ],
         ),
       ),
     );
   }
 
-  Widget _familyMemberTile(Map<String, dynamic> data, IconData icon, Color color, String branchId, {bool isGuardian = false}) {
+  Widget _familyMemberTile(Map<String, dynamic> data, IconData icon,
+      Color color, String branchId, RoleThemeData t,
+      {bool isGuardian = false}) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: color.withOpacity(0.06),
         borderRadius: BorderRadius.circular(12),
@@ -692,19 +788,30 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(data['name'] ?? 'N/A',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _DS.ink)),
-                Text('${data['gender'] ?? 'N/A'} · ${data['age']?.toString() ?? '?'} yrs',
-                    style: const TextStyle(fontSize: 11, color: _DS.inkMid)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: t.textPrimary)),
+                Text(
+                    '${data['gender'] ?? 'N/A'} · ${data['age']?.toString() ?? '?'} yrs',
+                    style: TextStyle(
+                        fontSize: 11, color: t.textSecondary)),
               ],
             ),
           ),
           GestureDetector(
             onTap: () => _openDetail(data['id'], branchId),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                  color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
-              child: Text('View', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(8)),
+              child: Text('View',
+                  style: TextStyle(
+                      color: color,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700)),
             ),
           ),
         ],
@@ -712,40 +819,60 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _soloAdultsCard(List<Map<String, dynamic>> adults, String branchId) {
+  Widget _soloAdultsCard(List<Map<String, dynamic>> adults,
+      String branchId, RoleThemeData t) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: _DS.surface,
-        borderRadius: BorderRadius.circular(_DS.radiusLg),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 4))],
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.bgRule, width: 0.8),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          tilePadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           leading: Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(12)),
-            child: Icon(Icons.person_outline_rounded, color: Colors.purple.shade600, size: 22),
+            decoration: BoxDecoration(
+                color: t.accentMuted,
+                borderRadius: BorderRadius.circular(12)),
+            child: Icon(Icons.person_outline_rounded,
+                color: t.accent, size: 22),
           ),
           title: Text('Adults without Children',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _DS.ink)),
-          subtitle: Text('${adults.length} individual${adults.length != 1 ? 's' : ''}',
-              style: const TextStyle(fontSize: 12, color: _DS.inkMid)),
+              style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: t.textPrimary)),
+          subtitle: Text(
+              '${adults.length} individual${adults.length != 1 ? 's' : ''}',
+              style:
+                  TextStyle(fontSize: 12, color: t.textSecondary)),
           children: adults
-              .map((a) => _familyMemberTile(a, Icons.person_rounded, Colors.purple.shade600, branchId))
+              .map((a) => _familyMemberTile(
+                  a, Icons.person_rounded, t.accent, branchId, t))
               .toList(),
         ),
       ),
     );
   }
 
-  // ── Stream ────────────────────────────────────────────────────
+  // ── Stream ──
 
-  Stream<QuerySnapshot> _getFilteredStream(String branchId, String collection) {
+  Stream<QuerySnapshot> _getFilteredStream(
+      String branchId, String collection) {
     Query<Map<String, dynamic>> q = FirebaseFirestore.instance
-        .collection('branches').doc(branchId).collection(collection);
+        .collection('branches')
+        .doc(branchId)
+        .collection(collection);
 
     if (widget.isPatientMode && _filterStatus != null)
       q = q.where('status', isEqualTo: _filterStatus);
@@ -753,10 +880,17 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
       q = q.where('gender', isEqualTo: _genderFilter);
     if (widget.isPatientMode && _ageFilter != null) {
       int min = 0, max = 200;
-      if (_ageFilter == 'child') { max = 18; }
-      else if (_ageFilter == 'adult') { min = 19; max = 60; }
-      else if (_ageFilter == 'senior') { min = 61; }
-      q = q.where('age', isGreaterThanOrEqualTo: min).where('age', isLessThanOrEqualTo: max);
+      if (_ageFilter == 'child') {
+        max = 18;
+      } else if (_ageFilter == 'adult') {
+        min = 19;
+        max = 60;
+      } else if (_ageFilter == 'senior') {
+        min = 61;
+      }
+      q = q
+          .where('age', isGreaterThanOrEqualTo: min)
+          .where('age', isLessThanOrEqualTo: max);
     }
     if (!widget.isPatientMode && _roleFilter != null)
       q = q.where('role', isEqualTo: _roleFilter);
@@ -768,21 +902,27 @@ class _UsersScreenState extends State<UsersScreen> with SingleTickerProviderStat
 // ─── Formatters ───────────────────────────────────────────────────────────────
 class CNICInputFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
-    final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final digits =
+        newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     final buffer = StringBuffer();
     for (int i = 0; i < digits.length; i++) {
       buffer.write(digits[i]);
-      if ((i == 4 || i == 11) && i != digits.length - 1) buffer.write('-');
+      if ((i == 4 || i == 11) && i != digits.length - 1)
+        buffer.write('-');
     }
     return TextEditingValue(
-        text: buffer.toString(), selection: TextSelection.collapsed(offset: buffer.length));
+        text: buffer.toString(),
+        selection:
+            TextSelection.collapsed(offset: buffer.length));
   }
 }
 
 class _DobFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue old, TextEditingValue newVal) {
+  TextEditingValue formatEditUpdate(
+      TextEditingValue old, TextEditingValue newVal) {
     var t = newVal.text.replaceAll(RegExp(r'\D'), '');
     if (t.length > 8) t = t.substring(0, 8);
     final b = StringBuffer();
@@ -790,6 +930,8 @@ class _DobFormatter extends TextInputFormatter {
       if (i == 2 || i == 4) b.write('-');
       b.write(t[i]);
     }
-    return TextEditingValue(text: b.toString(), selection: TextSelection.collapsed(offset: b.length));
+    return TextEditingValue(
+        text: b.toString(),
+        selection: TextSelection.collapsed(offset: b.length));
   }
 }

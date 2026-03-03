@@ -17,10 +17,12 @@ import 'pages/login_page.dart';
 import 'pages/home_router.dart';
 import 'pages/admin_screen.dart';
 import 'pages/chairman_screen.dart';
-import 'pages/dispensar_screen.dart';
-import 'pages/inventory.dart';
+import 'pages/dispensary/dispensar/dispensar_screen.dart';
+import 'pages/dispensary/dispensar/inventory.dart';
+import 'pages/donations/donations_screen.dart';
 
 import 'services/local_storage_service.dart';
+import 'realtime/server_sync_manager.dart';
 
 // Global navigator key — used to show Flushbar/SnackBar from anywhere (safely)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -48,7 +50,8 @@ Future<void> _logError(String message, [String? stack]) async {
     final dir = await getApplicationSupportDirectory();
     final logFile = File(path.join(dir.path, 'gmwf_crash.log'));
     final timestamp = DateTime.now().toIso8601String();
-    final entry = '[$timestamp] ERROR: $message\nSTACK: ${stack ?? ''}\n\n';
+    final entry =
+        '[$timestamp] ERROR: $message\nSTACK: ${stack ?? ''}\n\n';
     await logFile.writeAsString(entry, mode: FileMode.append);
     debugPrint("Error logged to file: $message");
   } catch (e) {
@@ -61,7 +64,6 @@ Future<void> _markLastCrash() async {
     final dir = await getApplicationSupportDirectory();
     final crashMarker = File(path.join(dir.path, '.last_crash'));
     await crashMarker.writeAsString(DateTime.now().toIso8601String());
-    debugPrint("Crash marker written");
   } catch (e) {
     debugPrint("Failed to write crash marker: $e");
   }
@@ -83,10 +85,7 @@ Future<void> _clearCrashMarkerOnSuccess() async {
 void _showCrashScreen(Object error, StackTrace stack) {
   WidgetsBinding.instance.addPostFrameCallback((_) {
     final ctx = navigatorKey.currentContext;
-    if (ctx == null) {
-      debugPrint("Cannot show crash screen: navigatorKey context is null");
-      return;
-    }
+    if (ctx == null) return;
 
     runApp(
       MaterialApp(
@@ -99,36 +98,35 @@ void _showCrashScreen(Object error, StackTrace stack) {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, size: 72, color: Colors.red),
+                  const Icon(Icons.error_outline,
+                      size: 72, color: Colors.red),
                   const SizedBox(height: 24),
-                  const Text(
-                    'GMWF — An error occurred',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                  ),
+                  const Text('GMWF — An error occurred',
+                      style: TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 16),
                   const Text(
-                    'An unexpected error happened. The app logged the problem. You can try to continue using the app or restart it manually.',
+                    'An unexpected error happened. The app logged the problem. '
+                    'You can try to continue using the app or restart it manually.',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 16),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Log saved. Send the gmwf_crash.log file to support if the issue persists.',
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    style:
+                        TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                   const SizedBox(height: 32),
                   ElevatedButton.icon(
-                    onPressed: () {
-                      WidgetsBinding.instance.reassembleApplication();
-                    },
+                    onPressed: () =>
+                        WidgetsBinding.instance.reassembleApplication(),
                     icon: const Icon(Icons.refresh),
                     label: const Text('Reload UI'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 24,
-                        vertical: 12,
-                      ),
+                          horizontal: 24, vertical: 12),
                     ),
                   ),
                 ],
@@ -181,6 +179,10 @@ Future<void> main() async {
     await LocalStorageService.init();
     debugPrint("[main] Hive boxes opened");
 
+    debugPrint("[main] 3b. Opening ServerSyncManager Hive boxes...");
+    await ServerSyncManager.initHive();
+    debugPrint("[main] ServerSyncManager boxes opened");
+
     debugPrint("[main] 4. Seeding local admins...");
     await LocalStorageService.seedLocalAdmins();
     debugPrint("[main] Admins seeded");
@@ -195,13 +197,10 @@ Future<void> main() async {
     await _logError("App initialization failed: $e", st.toString());
     await _markLastCrash();
     debugPrint("[main] CRITICAL STARTUP ERROR: $e\n$st");
-
-    // Show crash screen
     _showCrashScreen(e, st);
-    return; // Don't continue to MyApp if init failed
+    return;
   }
 
-  // Only reach here if init succeeded
   runApp(const MyApp());
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -222,7 +221,8 @@ Future<void> main() async {
   }
 }
 
-// Simple loading screen shown during startup
+// ── Startup loading screen ────────────────────────────────────────────────────
+
 class _StartupLoadingScreen extends StatelessWidget {
   const _StartupLoadingScreen();
 
@@ -231,6 +231,7 @@ class _StartupLoadingScreen extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
+        backgroundColor: const Color(0xFFF1F8E9),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -245,16 +246,26 @@ class _StartupLoadingScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 40),
-              const CircularProgressIndicator(),
+              const SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(
+                  color: Color(0xFF1B5E20),
+                  strokeWidth: 3,
+                ),
+              ),
               const SizedBox(height: 24),
               const Text(
                 "GMWF is starting...",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1B5E20)),
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "Initializing services...",
-                style: TextStyle(color: Colors.grey),
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
               ),
             ],
           ),
@@ -263,6 +274,8 @@ class _StartupLoadingScreen extends StatelessWidget {
     );
   }
 }
+
+// ── Main App ──────────────────────────────────────────────────────────────────
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -283,7 +296,19 @@ class MyApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'GM-D',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(primarySwatch: Colors.green),
+      theme: ThemeData(
+        primarySwatch: Colors.green,
+        // Smooth page transitions on mobile
+        pageTransitionsTheme: const PageTransitionsTheme(
+          builders: {
+            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+            TargetPlatform.macOS: FadeUpwardsPageTransitionsBuilder(),
+          },
+        ),
+      ),
       initialRoute: '/',
       routes: {
         '/': (context) => StreamBuilder<User?>(
@@ -292,24 +317,25 @@ class MyApp extends StatelessWidget {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const _StartupLoadingScreen();
                 }
-
                 if (snapshot.hasData && snapshot.data != null) {
                   Future.microtask(() => _enterFullScreen());
                   return HomeRouter(user: snapshot.data!);
                 }
-
                 return const LoginPage();
               },
             ),
         '/login': (context) => const LoginPage(),
         '/admin': (context) => AdminScreen(branchId: 'all'),
         '/chairman': (context) => const ChairmanScreen(),
+        '/donations': (context) => DonationsScreen(),
         '/dispensar': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          final args = ModalRoute.of(context)!.settings.arguments
+              as Map<String, dynamic>?;
           return DispensarScreen(branchId: args?['branchId'] ?? 'unknown');
         },
         '/inventory': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+          final args = ModalRoute.of(context)!.settings.arguments
+              as Map<String, dynamic>?;
           return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
         },
       },

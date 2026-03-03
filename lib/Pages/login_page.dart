@@ -10,6 +10,8 @@ import 'package:another_flushbar/flushbar.dart';
 import '../services/offline_auth_service.dart';
 import 'home_router.dart';
 import 'admin_screen.dart';
+import 'ceo_screen.dart';
+import 'chairman_screen.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -20,18 +22,17 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _usernameOrEmailController = TextEditingController();
-  final _passwordController = TextEditingController();
-  final _scrollController = ScrollController();
-  final _usernameFocus = FocusNode();
-  final _passwordFocus = FocusNode();
+  final _passwordController        = TextEditingController();
+  final _scrollController          = ScrollController();
+  final _usernameFocus             = FocusNode();
+  final _passwordFocus             = FocusNode();
 
-  bool _loading = false;
+  bool _loading         = false;
   bool _obscurePassword = true;
-  bool _loginHover = false;
-  bool _changeHover = false;
-  bool _isOnline = true;
+  bool _loginHover      = false;
+  bool _changeHover     = false;
+  bool _isOnline        = true;
 
-  // ── Live connectivity listener (fixes "stuck offline" bug) ────────────────
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   @override
@@ -40,7 +41,6 @@ class _LoginPageState extends State<LoginPage> {
     _checkConnectivityFast();
     _loadCachedCredentials();
 
-    // Subscribe to connectivity changes so the UI updates automatically
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
       if (mounted && online != _isOnline) {
@@ -88,7 +88,6 @@ class _LoginPageState extends State<LoginPage> {
       final result = await Connectivity().checkConnectivity();
       final online = result.any((r) => r != ConnectivityResult.none);
       if (mounted) setState(() => _isOnline = online);
-      debugPrint('[LoginPage] Initial connectivity: online=$online');
     } catch (e) {
       debugPrint('[LoginPage] Connectivity check error: $e — assuming offline');
       if (mounted) setState(() => _isOnline = false);
@@ -100,7 +99,6 @@ class _LoginPageState extends State<LoginPage> {
       final cached = await OfflineAuthService.getCachedUsername();
       if (cached != null && cached.isNotEmpty && mounted) {
         _usernameOrEmailController.text = cached;
-        debugPrint('[LoginPage] Pre-filled username: $cached');
       }
     } catch (e) {
       debugPrint('[LoginPage] Error loading cached credentials: $e');
@@ -109,14 +107,8 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Main login entry point ────────────────────────────────────────────────
   Future<void> _login() async {
-    final input = _usernameOrEmailController.text.trim();
+    final input    = _usernameOrEmailController.text.trim();
     final password = _passwordController.text.trim();
-
-    debugPrint('════════════════════════════════════════');
-    debugPrint('🔐 LOGIN ATTEMPT');
-    debugPrint('👤 Input: $input');
-    debugPrint('🌐 Is online: $_isOnline');
-    debugPrint('════════════════════════════════════════');
 
     if (input.isEmpty || password.isEmpty) {
       _showError("Please enter username/email and password");
@@ -126,26 +118,26 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) setState(() => _loading = true);
 
     try {
+      // ── Pure offline path ──────────────────────────────────────────────────
       if (!_isOnline) {
-        // ── Pure offline path ────────────────────────────────────────────────
-        debugPrint('[LoginPage] OFFLINE MODE — fast offline login');
+        debugPrint('[LoginPage] OFFLINE MODE');
         final ok = await _attemptOfflineLogin(input, password);
         if (!ok && mounted) {
-          _showError(
-              "Offline login failed. Check your credentials or connect to the internet.");
+          _showError("Offline login failed. Please connect to the internet and log in once first.");
         }
         return;
       }
 
-      // ── Online path ──────────────────────────────────────────────────────
+      // ── Online path ────────────────────────────────────────────────────────
       debugPrint('[LoginPage] ONLINE MODE — Firebase login');
-      String email = input;
 
-      if (!input.contains('@')) {
+      // Resolve username → email if needed
+      String email = input.contains('@') ? input.toLowerCase() : '';
+      if (email.isEmpty) {
         debugPrint('[LoginPage] Looking up email for username: $input');
         final found = await _findUserByUsername(input);
         if (found == null) {
-          debugPrint('[LoginPage] Username not found online — trying offline');
+          // No online record — try offline before giving up
           final ok = await _attemptOfflineLogin(input, password);
           if (!ok && mounted) {
             _showError("No account found for username '$input'");
@@ -156,7 +148,7 @@ class _LoginPageState extends State<LoginPage> {
         debugPrint('[LoginPage] Resolved email: $email');
       }
 
-      // Firebase sign-in
+      // Firebase sign-in — single attempt, NO retry loops
       final cred = await FirebaseAuth.instance
           .signInWithEmailAndPassword(
             email: email.toLowerCase(),
@@ -172,24 +164,33 @@ class _LoginPageState extends State<LoginPage> {
 
       debugPrint('[LoginPage] Firebase sign-in OK — fetching user data');
 
-      // Fetch user data from Firestore
       final userData = await _fetchUserDataFromFirestore(user, input);
       if (userData == null) {
         _showError("User account data not found. Contact admin.");
         return;
       }
 
-      // Cache for offline login
-      try {
-        await OfflineAuthService.saveCredentials(
-          usernameOrEmail: input.toLowerCase(),
+      // ── Cache credentials for offline use ─────────────────────────────────
+      // ✅ FIX: saveCredentials now returns bool instead of throwing.
+      // We attempt to save under both the typed input AND the resolved email
+      // so offline lookup works with either key.
+      await _cacheCredentialsSafely(
+        usernameOrEmail: input.toLowerCase(),
+        password: password,
+        userData: userData,
+      );
+
+      // Also cache by email so either key works offline
+      if (!input.contains('@') && email.isNotEmpty) {
+        await _cacheCredentialsSafely(
+          usernameOrEmail: email.toLowerCase(),
           password: password,
           userData: userData,
         );
-        debugPrint('[LoginPage] Credentials cached for offline');
-      } catch (e) {
-        debugPrint('[LoginPage] Failed to cache credentials (non-fatal): $e');
       }
+
+      // Debug: confirm what was stored
+      await OfflineAuthService.debugDumpStoredKeys();
 
       if (mounted) {
         Flushbar(
@@ -200,77 +201,120 @@ class _LoginPageState extends State<LoginPage> {
         _navigateToHome(user, userData);
       }
     } on FirebaseAuthException catch (e) {
-      debugPrint('[LoginPage] FirebaseAuthException: ${e.code} — ${e.message}');
+      debugPrint('[LoginPage] FirebaseAuthException: ${e.code}');
       await _handleFirebaseAuthError(e, input, password);
+    } on TimeoutException {
+      debugPrint('[LoginPage] Timeout');
+      final ok = await _attemptOfflineLogin(input, password);
+      if (!ok && mounted) {
+        _showError("Connection timed out. Please check your internet and try again.");
+      }
     } catch (e) {
       debugPrint('[LoginPage] Unexpected error: $e');
-      // Timeout or unknown — try offline as last resort
-      if (e.toString().contains('timeout') ||
-          e.toString().contains('TimeoutException')) {
-        debugPrint('[LoginPage] Timeout — trying offline');
-        final ok = await _attemptOfflineLogin(input, password);
-        if (!ok && mounted) {
-          _showError("Connection timed out and offline login failed.");
-        }
-      } else {
-        // Swallow internal/platform errors that aren't auth failures;
-        // try offline before showing the message to the user.
-        final ok = await _attemptOfflineLogin(input, password);
-        if (!ok && mounted) {
-          _showError("An unexpected error occurred. Please try again.");
-        }
+      final ok = await _attemptOfflineLogin(input, password);
+      if (!ok && mounted) {
+        _showError("An unexpected error occurred. Please try again.");
       }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  // ── Safe credential caching wrapper ──────────────────────────────────────
+  /// Wraps saveCredentials so a failure is logged but never interrupts login.
+  Future<void> _cacheCredentialsSafely({
+    required String usernameOrEmail,
+    required String password,
+    required Map<String, dynamic> userData,
+  }) async {
+    final saved = await OfflineAuthService.saveCredentials(
+      usernameOrEmail: usernameOrEmail,
+      password: password,
+      userData: userData,
+    );
+    if (saved) {
+      debugPrint('[LoginPage] ✅ Offline credentials cached for $usernameOrEmail');
+    } else {
+      // Non-fatal: user is logged in online; offline just won't work until storage recovers.
+      debugPrint('[LoginPage] ⚠️ Could not cache offline credentials for $usernameOrEmail');
+    }
+  }
+
   // ── Firebase error handler ────────────────────────────────────────────────
   Future<void> _handleFirebaseAuthError(
       FirebaseAuthException e, String input, String password) async {
-    const networkCodes = {
-      'network-request-failed',
-      'unavailable',
-      'deadline-exceeded',
-    };
-    const credentialCodes = {
-      'wrong-password',
-      'invalid-credential',
-      'user-not-found',
-    };
 
-    if (networkCodes.contains(e.code)) {
-      debugPrint('[LoginPage] Network error — trying offline');
-      final ok = await _attemptOfflineLogin(input, password);
-      if (!ok && mounted) _showError("Network error and offline login failed.");
-      return;
-    }
+    switch (e.code) {
 
-    if (credentialCodes.contains(e.code)) {
-      // Try offline first before showing an error — the credentials might be
-      // cached from an earlier session.
-      final ok = await _attemptOfflineLogin(input, password);
-      if (ok) return;
+      // ── Network errors → try offline ──────────────────────────────────────
+      case 'network-request-failed':
+      case 'unavailable':
+      case 'deadline-exceeded':
+        debugPrint('[LoginPage] Network error — trying offline');
+        final ok = await _attemptOfflineLogin(input, password);
+        if (!ok && mounted) {
+          _showError("Network error. Connect to the internet and try again.");
+        }
+        return;
 
-      final msg = e.code == 'wrong-password' || e.code == 'invalid-credential'
-          ? "Incorrect password"
-          : "No account found for '$input'";
-      if (mounted) _showError(msg);
-      return;
-    }
+      // ── Rate-limited — DO NOT retry Firebase or offline, just tell the user ─
+      case 'too-many-requests':
+        if (mounted) {
+          _showError(
+            "Too many failed attempts. Your account is temporarily locked. "
+            "Please wait a few minutes and try again, or reset your password.",
+          );
+        }
+        return;
 
-    if (e.code == 'too-many-requests') {
-      if (mounted) _showError("Too many attempts. Please try again later.");
-      return;
-    }
+      // ── Invalid credential (wrong password or non-existent user) ──────────
+      // Firebase returns 'invalid-credential' as the unified code to prevent
+      // user enumeration. Only fall through to offline if cached creds exist.
+      case 'wrong-password':
+      case 'invalid-credential':
+        final hasCached = await OfflineAuthService.hasCachedCredentialsFor(
+          input.toLowerCase(),
+        );
+        if (hasCached) {
+          debugPrint('[LoginPage] invalid-credential but has cache — trying offline');
+          final ok = await _attemptOfflineLogin(input, password);
+          if (ok) return;
+        }
+        if (mounted) {
+          _showError("Incorrect username or password. Please check and try again.");
+        }
+        return;
 
-    // For every other Firebase error (including 'unknown-error' which is
-    // usually a platform/internal error, NOT a wrong-credential error) try
-    // offline before giving up.
-    debugPrint('[LoginPage] Unhandled FirebaseAuthException ${e.code} — trying offline');
-    final ok = await _attemptOfflineLogin(input, password);
-    if (!ok && mounted) {
-      _showError("Login failed: ${e.message ?? e.code}");
+      case 'user-not-found':
+        final ok = await _attemptOfflineLogin(input, password);
+        if (!ok && mounted) {
+          _showError("No account found for '$input'.");
+        }
+        return;
+
+      case 'user-disabled':
+        if (mounted) _showError("This account has been disabled. Contact admin.");
+        return;
+
+      // ── Firebase internal / transient error — NOT a credential problem ────
+      case 'unknown-error':
+      case 'internal-error':
+        debugPrint('[LoginPage] Firebase internal error (${e.code}) — trying offline first');
+        final okUnknown = await _attemptOfflineLogin(input, password);
+        if (!okUnknown && mounted) {
+          _showError(
+            "A temporary error occurred with the login service. "
+            "Please try again in a moment.",
+          );
+        }
+        return;
+
+      default:
+        debugPrint('[LoginPage] Unhandled Firebase error: ${e.code} — ${e.message}');
+        final ok = await _attemptOfflineLogin(input, password);
+        if (!ok && mounted) {
+          _showError("Login failed (${e.code}). Please try again.");
+        }
     }
   }
 
@@ -288,7 +332,7 @@ class _LoginPageState extends State<LoginPage> {
         return false;
       }
 
-      debugPrint('[LoginPage] Offline login successful');
+      debugPrint('[LoginPage] Offline login successful → role=${userData['role']}');
       if (mounted) {
         Flushbar(
           message: "Welcome back, ${userData['username']}! (Offline Mode)",
@@ -309,7 +353,6 @@ class _LoginPageState extends State<LoginPage> {
       User user, String inputUsername) async {
     final uid = user.uid;
 
-    // Top-level /users
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
@@ -332,13 +375,11 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] Top-level /users fetch failed: $e');
     }
 
-    // Branch sub-collections
     try {
       final branches = await FirebaseFirestore.instance
           .collection('branches')
           .get()
           .timeout(const Duration(seconds: 10));
-
       for (final branch in branches.docs) {
         final doc = await branch.reference
             .collection('users')
@@ -362,7 +403,6 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] Branch /users fetch failed: $e');
     }
 
-    debugPrint('[LoginPage] User data not found in Firestore for uid=$uid');
     return null;
   }
 
@@ -370,7 +410,6 @@ class _LoginPageState extends State<LoginPage> {
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
     try {
-      // Top-level collection first
       final q = await FirebaseFirestore.instance
           .collection('users')
           .where('username', isEqualTo: lower)
@@ -382,12 +421,10 @@ class _LoginPageState extends State<LoginPage> {
         return {'email': doc['email'], 'username': doc['username']};
       }
 
-      // Branch sub-collections
       final branches = await FirebaseFirestore.instance
           .collection('branches')
           .get()
           .timeout(const Duration(seconds: 10));
-
       for (final branch in branches.docs) {
         final users = await branch.reference
             .collection('users')
@@ -413,36 +450,40 @@ class _LoginPageState extends State<LoginPage> {
   // ── Navigation helpers ────────────────────────────────────────────────────
   void _navigateToHome(User user, Map<String, dynamic> userData) {
     final role = (userData['role'] as String?)?.toLowerCase() ?? 'unknown';
-    if (role == 'admin' || role == 'chairman' || role == 'ceo') {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => AdminScreen(branchId: 'all')),
-        (r) => false,
-      );
+    Widget screen;
+    if (role == 'ceo') {
+      screen = const CeoScreen();
+    } else if (role == 'chairman') {
+      screen = const ChairmanScreen();
+    } else if (role == 'admin') {
+      screen = AdminScreen(branchId: 'all');
     } else {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => HomeRouter(user: user, localUser: userData)),
-        (r) => false,
-      );
+      screen = HomeRouter(user: user, localUser: userData);
     }
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+      (r) => false,
+    );
   }
 
   void _navigateToHomeOffline(Map<String, dynamic> userData) {
     final role = (userData['role'] as String?)?.toLowerCase() ?? 'unknown';
-    if (role == 'admin' || role == 'chairman' || role == 'ceo') {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => AdminScreen(branchId: 'all')),
-        (r) => false,
-      );
+    Widget screen;
+    if (role == 'ceo') {
+      screen = const CeoScreen();
+    } else if (role == 'chairman') {
+      screen = const ChairmanScreen();
+    } else if (role == 'admin') {
+      screen = AdminScreen(branchId: 'all');
     } else {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => HomeRouter(user: null, localUser: userData)),
-        (r) => false,
-      );
+      screen = HomeRouter(user: null, localUser: userData);
     }
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+      (r) => false,
+    );
   }
 
   // ── Change password dialog ────────────────────────────────────────────────
@@ -452,22 +493,21 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    final emailCtrl = TextEditingController(
+    final emailCtrl  = TextEditingController(
       text: _usernameOrEmailController.text.contains('@')
           ? _usernameOrEmailController.text
           : '',
     );
-    final oldPwCtrl = TextEditingController();
-    final newPwCtrl = TextEditingController();
-    final formKey = GlobalKey<FormState>();
+    final oldPwCtrl  = TextEditingController();
+    final newPwCtrl  = TextEditingController();
+    final formKey    = GlobalKey<FormState>();
 
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text("Change Password",
-            style: TextStyle(
-                fontWeight: FontWeight.bold, color: Color(0xFF00695C))),
+            style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF00695C))),
         content: Form(
           key: formKey,
           child: Column(
@@ -486,8 +526,7 @@ class _LoginPageState extends State<LoginPage> {
                 obscureText: true,
                 decoration: const InputDecoration(
                     labelText: "Old Password", prefixIcon: Icon(Icons.lock)),
-                validator: (v) =>
-                    (v == null || v.isEmpty) ? "Required" : null,
+                validator: (v) => (v == null || v.isEmpty) ? "Required" : null,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -507,8 +546,7 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: () => Navigator.pop(context),
               child: const Text("Cancel")),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00695C)),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00695C)),
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
               try {
@@ -522,12 +560,14 @@ class _LoginPageState extends State<LoginPage> {
                   password: oldPwCtrl.text.trim(),
                 );
                 await currentUser.reauthenticateWithCredential(cred);
-                await currentUser
-                    .updatePassword(newPwCtrl.text.trim());
-                try {
-                  await OfflineAuthService.updateCachedPassword(
-                      newPwCtrl.text.trim());
-                } catch (_) {}
+                await currentUser.updatePassword(newPwCtrl.text.trim());
+
+                // ✅ FIX: updateCachedPassword now returns bool — no need to try/catch
+                await OfflineAuthService.updateCachedPassword(
+                  newPwCtrl.text.trim(),
+                  usernameOrEmail: emailCtrl.text.trim().toLowerCase(),
+                );
+
                 if (mounted) {
                   Navigator.pop(context);
                   Flushbar(
@@ -544,8 +584,7 @@ class _LoginPageState extends State<LoginPage> {
                 _showError("Unexpected error: $e");
               }
             },
-            child:
-                const Text("Change", style: TextStyle(color: Colors.white)),
+            child: const Text("Change", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -592,14 +631,55 @@ class _LoginPageState extends State<LoginPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Image.asset(
-                          "assets/logo/gmwf.png",
-                          height: 120,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Icon(
-                            Icons.local_pharmacy,
-                            size: 100,
-                            color: Color(0xFF00695C),
+                        GestureDetector(
+                          // Long-press the logo to clear stale cached credentials.
+                          onLongPress: () async {
+                            final confirm = await showDialog<bool>(
+                              context: context,
+                              builder: (_) => AlertDialog(
+                                title: const Text("Clear Saved Login?"),
+                                content: const Text(
+                                  "This will remove the cached username and allow "
+                                  "a fresh login. Use this if the wrong account is "
+                                  "pre-filled.",
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context, false),
+                                    child: const Text("Cancel"),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFF00695C)),
+                                    onPressed: () => Navigator.pop(context, true),
+                                    child: const Text("Clear",
+                                        style: TextStyle(color: Colors.white)),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirm == true) {
+                              await OfflineAuthService.clearCredentials();
+                              if (mounted) {
+                                _usernameOrEmailController.clear();
+                                _passwordController.clear();
+                                Flushbar(
+                                  message: "Saved login cleared. Please sign in.",
+                                  backgroundColor: Colors.orange.shade700,
+                                  duration: const Duration(seconds: 3),
+                                ).show(context);
+                              }
+                            }
+                          },
+                          child: Image.asset(
+                            "assets/logo/gmwf.png",
+                            height: 120,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, __, ___) => const Icon(
+                              Icons.local_pharmacy,
+                              size: 100,
+                              color: Color(0xFF00695C),
+                            ),
                           ),
                         ),
                         const SizedBox(height: 40),
@@ -612,7 +692,6 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        // Live online/offline badge
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
                           child: Text(
@@ -631,7 +710,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 48),
 
-                        // Username / email field
                         TextField(
                           controller: _usernameOrEmailController,
                           focusNode: _usernameFocus,
@@ -654,7 +732,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 20),
 
-                        // Password field
                         TextField(
                           controller: _passwordController,
                           focusNode: _passwordFocus,
@@ -686,12 +763,9 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 40),
 
-                        // Sign In button
                         MouseRegion(
-                          onEnter: (_) =>
-                              setState(() => _loginHover = true),
-                          onExit: (_) =>
-                              setState(() => _loginHover = false),
+                          onEnter: (_) => setState(() => _loginHover = true),
+                          onExit:  (_) => setState(() => _loginHover = false),
                           child: SizedBox(
                             width: double.infinity,
                             height: 58,
@@ -721,12 +795,9 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(height: 16),
 
-                        // Change Password button
                         MouseRegion(
-                          onEnter: (_) =>
-                              setState(() => _changeHover = true),
-                          onExit: (_) =>
-                              setState(() => _changeHover = false),
+                          onEnter: (_) => setState(() => _changeHover = true),
+                          onExit:  (_) => setState(() => _changeHover = false),
                           child: SizedBox(
                             width: double.infinity,
                             height: 48,

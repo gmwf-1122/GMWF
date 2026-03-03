@@ -1,4 +1,3 @@
-// lib/services/firestore_service.dart
 import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -157,6 +156,7 @@ Future<void> saveEntry({
     'branchId': branchId,
     'vitals': vitals,
     'dateKey': dateKey,
+    'queueType': queueType,        // FIX 1: added to data map so sync_service can read queueType as fallback
     'timestamp': now.toIso8601String(),
     'createdAt': now.toIso8601String(),
     'status': 'waiting',
@@ -179,10 +179,11 @@ Future<void> saveEntry({
     ),
   );
 
+  // FIX 2: was 'datePart' — sync_service._uploadPending() reads 'dateKey'
   final action = {
     'type': 'save_entry',
     'branchId': branchId,
-    'datePart': dateKey,
+    'dateKey': dateKey,
     'queueType': queueType,
     'serial': serial,
     'data': data,
@@ -195,6 +196,7 @@ Future<void> saveEntry({
   SyncService().triggerUpload();
   print("triggerUpload called after entry enqueue");
 }
+
   Future<String> _generateNextSerial(String branchId, String dateKey) async {
     final localCount = LocalStorageService.getLocalEntries(branchId)
         .where((e) => (e['dateKey'] as String?) == dateKey)
