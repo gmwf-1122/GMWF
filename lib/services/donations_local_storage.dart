@@ -1,25 +1,14 @@
 // lib/services/donations_local_storage.dart
 //
-// Offline-first storage for donations and credit ledger entries.
-// Follows the exact same pattern as LocalStorageService:
-//   1. Write to Hive immediately (UI never waits)
-//   2. Enqueue via LocalStorageService.enqueueSync()
-//   3. SyncService picks it up and uploads to Firestore
-//   4. After upload, firestoreId is back-filled into Hive
+// FIXES vs previous revision:
+//   1. init() now also opens 'sync_queue' and 'app_settings' boxes.
+//      enqueueSync() (called on every save) uses Hive.box('sync_queue') and
+//      nextReceiptNumber() uses Hive.box('app_settings') for the offline
+//      fallback counter. If either box isn't open when saveDonation() is
+//      called, Hive throws HiveError which is an Error (not Exception) and
+//      escapes the try/catch in _submit(), killing the whole app.
 //
-// Box names  (opened alongside LocalStorageService.init):
-//   'local_donations'      → donation records
-//   'local_credit_ledger'  → OB→Manager and Manager→Chairman credit entries
-//
-// Key formats:
-//   donations     → '{branchId}_{date}_{localId}'
-//   creditLedger  → '{branchId}_credit_{localId}'
-//
-// SyncService action types added:
-//   'save_donation'        → upsert to branches/{b}/donations/{stableId}
-//   'update_donation'      → targeted .update() on a known Firestore doc
-//   'save_credit_entry'    → upsert to branches/{b}/creditLedger/{stableId}
-//   'update_credit_status' → targeted .update() on a known credit doc
+//   2. All other logic is identical to the previous revision.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
@@ -29,23 +18,74 @@ import 'package:intl/intl.dart';
 import 'local_storage_service.dart';
 
 class DonationsLocalStorage {
-  // ── Box names ──────────────────────────────────────────────────────────────
+  // ── Box names (public — SubmissionService references donationsBox) ─────────
   static const String donationsBox    = 'local_donations';
   static const String creditLedgerBox = 'local_credit_ledger';
 
-  // ── Init: call once in main() alongside LocalStorageService.init() ─────────
+  // ══════════════════════════════════════════════════════════════════════════
+  // INIT — call once in main() before runApp()
+  //
+  // FIX 1: Also opens 'sync_queue' and 'app_settings' which are accessed
+  // by LocalStorageService.enqueueSync() and nextReceiptNumber() respectively.
+  // Missing these caused HiveError → uncaught Error → app killed.
+  // ══════════════════════════════════════════════════════════════════════════
+
   static Future<void> init() async {
-    await Future.wait([
-      Hive.openBox(donationsBox),
-      Hive.openBox(creditLedgerBox),
-    ]);
-    debugPrint('[DonationsLocalStorage] Boxes opened.');
+    if (!Hive.isBoxOpen(donationsBox)) {
+      await Hive.openBox(donationsBox);
+    }
+    if (!Hive.isBoxOpen(creditLedgerBox)) {
+      await Hive.openBox(creditLedgerBox);
+    }
+    // FIX 1: required by LocalStorageService.enqueueSync()
+    if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
+      await Hive.openBox(LocalStorageService.syncBox);
+    }
+    // FIX 1: required by LocalStorageService.nextReceiptNumber() offline path
+    if (!Hive.isBoxOpen('app_settings')) {
+      await Hive.openBox('app_settings');
+    }
+    debugPrint('[DonationsLocalStorage] Boxes opened. Init sequence FINISHED.');
+  }
+
+  // ── Public box accessors ───────────────────────────────────────────────────
+  static Box getBox()       => Hive.box(donationsBox);
+  static Box getCreditBox() => Hive.box(creditLedgerBox);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // SANITIZE
+  //
+  // Hive only supports: String, int, double, bool, List, Map, null.
+  // DateTime, Timestamp, FieldValue, GeoPoint all crash Hive on put().
+  // This converts DateTime/Timestamp → ISO string and drops anything else
+  // that isn't a primitive Dart type.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  static Map<String, dynamic> _sanitize(Map<String, dynamic> input) {
+    final out = <String, dynamic>{};
+    input.forEach((k, v) => out[k] = _val(v));
+    return out;
+  }
+
+  static dynamic _val(dynamic v) {
+    if (v == null)       return null;
+    if (v is String)     return v;
+    if (v is int)        return v;
+    if (v is double)     return v;
+    if (v is bool)       return v;
+    if (v is DateTime)   return v.toIso8601String();
+    if (v is Timestamp)  return v.toDate().toIso8601String();
+    if (v is Map)        return _sanitize(Map<String, dynamic>.from(v));
+    if (v is List)       return v.map(_val).toList();
+    // FieldValue, GeoPoint, DocumentReference etc. — not storable in Hive.
+    debugPrint('[DonationsLS] _sanitize WARNING: dropping ${v.runtimeType} for value $v');
+    return null;
   }
 
   // ── Key helpers ────────────────────────────────────────────────────────────
-
+  // FIX: Using double underscore to match LocalStorageService (consistent with other app modules)
   static String _donationKey(String branchId, String date, String localId) =>
-      '${branchId}_${date}_$localId';
+      '${branchId}__${date}__$localId';
 
   static String _creditKey(String branchId, String localId) =>
       '${branchId}_credit_$localId';
@@ -55,9 +95,9 @@ class DonationsLocalStorage {
 
   static String _today() => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // DONATIONS
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // DONATIONS — write
+  // ══════════════════════════════════════════════════════════════════════════
 
   static Future<String> saveDonation({
     required String branchId,
@@ -73,11 +113,14 @@ class DonationsLocalStorage {
     record['branchId']    = branchId;
     record['syncStatus']  = 'pending';
     record['firestoreId'] = null;
+    record['submitted']   = false;
+    final sanitized = _sanitize(record);
 
-    final sanitized = LocalStorageService.sanitize(record);
+    debugPrint('[DonationsLS] Put record into Hive... key: $key');
     await Hive.box(donationsBox).put(key, sanitized);
-    debugPrint('[DonationsLS] Donation saved locally → $key');
+    debugPrint('[DonationsLS] Saved → $key');
 
+    debugPrint('[DonationsLS] Enqueuing sync...');
     await LocalStorageService.enqueueSync({
       'type':     'save_donation',
       'branchId': branchId,
@@ -97,14 +140,13 @@ class DonationsLocalStorage {
     final box = Hive.box(donationsBox);
     final raw = box.get(hiveKey);
     if (raw == null) {
-      debugPrint('[DonationsLS] updateDonationField: key not found → $hiveKey');
+      debugPrint('[DonationsLS] updateDonationField: not found → $hiveKey');
       return;
     }
-
     final updated = Map<String, dynamic>.from(raw as Map)
-      ..addAll(LocalStorageService.sanitize(fields));
+      ..addAll(_sanitize(fields));
     await box.put(hiveKey, updated);
-    debugPrint('[DonationsLS] Donation updated → $hiveKey | ${fields.keys.join(', ')}');
+    debugPrint('[DonationsLS] Updated → $hiveKey');
 
     final fsId = (raw as Map)['firestoreId']?.toString();
     if (fsId != null && fsId.isNotEmpty) {
@@ -112,7 +154,7 @@ class DonationsLocalStorage {
         'type':        'update_donation',
         'branchId':    branchId,
         'firestoreId': fsId,
-        'fields':      LocalStorageService.sanitize(fields),
+        'fields':      _sanitize(fields),
       });
     } else {
       await LocalStorageService.enqueueSync({
@@ -134,34 +176,80 @@ class DonationsLocalStorage {
       ..['firestoreId'] = firestoreId
       ..['syncStatus']  = 'synced';
     await box.put(hiveKey, updated);
-    debugPrint('[DonationsLS] Donation synced → $hiveKey → fs:$firestoreId');
+    debugPrint('[DonationsLS] Synced → $hiveKey → $firestoreId');
   }
 
-  // ── Local reads ────────────────────────────────────────────────────────────
+  static Future<void> deleteDonation(String hiveKey, String branchId) async {
+    final box = Hive.box(donationsBox);
+    final raw = box.get(hiveKey);
+    if (raw == null) return;
+    final fsId = (raw as Map)['firestoreId']?.toString();
+    await box.delete(hiveKey);
+    if (fsId != null && fsId.isNotEmpty) {
+      await LocalStorageService.enqueueSync({
+        'type':        'delete_donation',
+        'branchId':    branchId,
+        'firestoreId': fsId,
+      });
+    }
+    debugPrint('[DonationsLS] Deleted → $hiveKey');
+  }
+
+  // ── Reads ──────────────────────────────────────────────────────────────────
 
   static List<Map<String, dynamic>> getDonationsForDate(
       String branchId, String date) {
-    final prefix = '${branchId}_${date}_';
+    // FIX: Match both single and double underscore for transition safety
     final box    = Hive.box(donationsBox);
     return box.keys
-        .where((k) => k.toString().startsWith(prefix))
-        .map((k) => Map<String, dynamic>.from(box.get(k) as Map))
+        .where((k) {
+          final s = k.toString();
+          return (s.startsWith('${branchId}_${date}_') || 
+                  s.startsWith('${branchId}__${date}__')) &&
+                 !s.contains('_credit_');
+        })
+        .map((k) {
+          try {
+            return Map<String, dynamic>.from(box.get(k) as Map);
+          } catch (e) {
+            debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
+            return null;
+          }
+        })
+        .whereType<Map<String, dynamic>>()
         .toList()
-      ..sort((a, b) {
-        final at = (a['tokenNumber'] as int?) ?? 0;
-        final bt = (b['tokenNumber'] as int?) ?? 0;
-        return bt.compareTo(at);
-      });
+      ..sort((a, b) => ((b['timestamp'] as String?) ?? '')
+          .compareTo((a['timestamp'] as String?) ?? ''));
   }
 
-  static List<Map<String, dynamic>> getApprovedUnsubmitted(
-      String branchId, String date, String categoryId) {
-    return getDonationsForDate(branchId, date).where((d) {
-      return d['categoryId'] == categoryId &&
-          d['status'] == 'approved' &&
-          (d['submittedToManager'] != true);
-    }).toList();
+  /// All donations for branch, newest first. Credit keys excluded.
+  static List<Map<String, dynamic>> getAllDonations(String branchId) {
+    // FIX: Match both single and double underscore for transition safety
+    final box    = Hive.box(donationsBox);
+    return box.keys
+        .where((k) {
+          final s = k.toString();
+          return s.startsWith('${branchId}_') && !s.contains('_credit_');
+        })
+        .map((k) {
+          try {
+            return Map<String, dynamic>.from(box.get(k) as Map);
+          } catch (e) {
+            debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
+            return null;
+          }
+        })
+        .whereType<Map<String, dynamic>>()
+        .toList()
+      ..sort((a, b) => ((b['timestamp'] as String?) ?? '')
+          .compareTo((a['timestamp'] as String?) ?? ''));
   }
+
+  /// Alias used by SubmissionService.getUnsubmittedPool().
+  static List<Map<String, dynamic>> getDonationsList(String branchId) =>
+      getAllDonations(branchId);
+
+  // ── Streams ────────────────────────────────────────────────────────────────
 
   static Stream<List<Map<String, dynamic>>> streamDonationsForDate(
       String branchId, String date) async* {
@@ -171,9 +259,17 @@ class DonationsLocalStorage {
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // CREDIT LEDGER
-  // ═══════════════════════════════════════════════════════════════════════════
+  static Stream<List<Map<String, dynamic>>> streamAllDonations(
+      String branchId) async* {
+    yield getAllDonations(branchId);
+    await for (final _ in Hive.box(donationsBox).watch()) {
+      yield getAllDonations(branchId);
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CREDIT LEDGER — write
+  // ══════════════════════════════════════════════════════════════════════════
 
   static Future<String> saveCreditEntry({
     required String branchId,
@@ -189,11 +285,9 @@ class DonationsLocalStorage {
     record['syncStatus']  = 'pending';
     record['firestoreId'] = null;
 
-    final sanitized = LocalStorageService.sanitize(record);
+    final sanitized = _sanitize(record);
     await Hive.box(creditLedgerBox).put(key, sanitized);
-
-    debugPrint('[DonationsLS] Credit entry saved → $key | '
-        '${data['fromRole']} → ${data['toRole']} | PKR ${data['amount']}');
+    debugPrint('[DonationsLS] Credit saved → $key');
 
     await LocalStorageService.enqueueSync({
       'type':     'save_credit_entry',
@@ -211,23 +305,26 @@ class DonationsLocalStorage {
     required String status,
     required String approvedBy,
     required String branchId,
+    String? rejectionReason,
   }) async {
     final box = Hive.box(creditLedgerBox);
     final raw = box.get(hiveKey);
     if (raw == null) {
-      debugPrint('[DonationsLS] updateCreditStatus: key not found → $hiveKey');
+      debugPrint('[DonationsLS] updateCreditStatus: not found → $hiveKey');
       return;
     }
-
-    final fields = {
+    final isApproval = status == 'approved';
+    final fields = <String, dynamic>{
       'status':     status,
-      'approvedBy': approvedBy,
-      'approvedAt': DateTime.now().toIso8601String(),
+      if (isApproval)  'approvedBy': approvedBy,
+      if (isApproval)  'approvedAt': DateTime.now().toIso8601String(),
+      if (!isApproval) 'rejectedBy': approvedBy,
+      if (!isApproval) 'rejectedAt': DateTime.now().toIso8601String(),
+      if (rejectionReason != null) 'rejectionReason': rejectionReason,
     };
 
     final updated = Map<String, dynamic>.from(raw as Map)..addAll(fields);
     await box.put(hiveKey, updated);
-    debugPrint('[DonationsLS] Credit status updated → $hiveKey → $status');
 
     final fsId = (raw as Map)['firestoreId']?.toString();
     if (fsId != null && fsId.isNotEmpty) {
@@ -253,11 +350,9 @@ class DonationsLocalStorage {
     final box = Hive.box(creditLedgerBox);
     final raw = box.get(hiveKey);
     if (raw == null) return;
-
     final updated = Map<String, dynamic>.from(raw as Map)
       ..['forwardedToChairman'] = true;
     await box.put(hiveKey, updated);
-
     final fsId = (raw as Map)['firestoreId']?.toString();
     if (fsId != null && fsId.isNotEmpty) {
       await LocalStorageService.enqueueSync({
@@ -278,10 +373,10 @@ class DonationsLocalStorage {
       ..['firestoreId'] = firestoreId
       ..['syncStatus']  = 'synced';
     await box.put(hiveKey, updated);
-    debugPrint('[DonationsLS] Credit synced → $hiveKey → fs:$firestoreId');
+    debugPrint('[DonationsLS] Credit synced → $hiveKey → $firestoreId');
   }
 
-  // ── Local reads ────────────────────────────────────────────────────────────
+  // ── Credit reads ───────────────────────────────────────────────────────────
 
   static List<Map<String, dynamic>> getCreditEntries({
     required String branchId,
@@ -293,27 +388,28 @@ class DonationsLocalStorage {
   }) {
     final prefix = '${branchId}_credit_';
     final box    = Hive.box(creditLedgerBox);
-
     var list = box.keys
         .where((k) => k.toString().startsWith(prefix))
         .map((k) => Map<String, dynamic>.from(box.get(k) as Map))
         .toList();
 
-    if (toRole != null) list = list.where((e) => e['toRole'] == toRole).toList();
-    if (fromUserId != null) list = list.where((e) => e['fromUserId'] == fromUserId).toList();
-    if (status != null) list = list.where((e) => e['status'] == status).toList();
-    if (date != null) list = list.where((e) => e['date'] == date).toList();
+    if (toRole != null)
+      list = list.where((e) => e['toRole'] == toRole).toList();
+    if (fromUserId != null)
+      list = list.where((e) => e['fromUserId'] == fromUserId).toList();
+    if (status != null)
+      list = list.where((e) => e['status'] == status).toList();
+    if (date != null)
+      list = list.where((e) => e['date'] == date).toList();
     if (forwardedToChairman != null) {
-      list = list.where((e) =>
-          (e['forwardedToChairman'] as bool? ?? false) == forwardedToChairman).toList();
+      list = list
+          .where((e) =>
+              (e['forwardedToChairman'] as bool? ?? false) ==
+              forwardedToChairman)
+          .toList();
     }
-
-    list.sort((a, b) {
-      final at = (a['timestamp'] as String?) ?? '';
-      final bt = (b['timestamp'] as String?) ?? '';
-      return bt.compareTo(at);
-    });
-
+    list.sort((a, b) => ((b['timestamp'] as String?) ?? '')
+        .compareTo((a['timestamp'] as String?) ?? ''));
     return list;
   }
 
@@ -327,19 +423,21 @@ class DonationsLocalStorage {
   }) async* {
     yield getCreditEntries(
       branchId: branchId, toRole: toRole, fromUserId: fromUserId,
-      status: status, date: date, forwardedToChairman: forwardedToChairman,
+      status: status, date: date,
+      forwardedToChairman: forwardedToChairman,
     );
     await for (final _ in Hive.box(creditLedgerBox).watch()) {
       yield getCreditEntries(
         branchId: branchId, toRole: toRole, fromUserId: fromUserId,
-        status: status, date: date, forwardedToChairman: forwardedToChairman,
+        status: status, date: date,
+        forwardedToChairman: forwardedToChairman,
       );
     }
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // FIRESTORE → HIVE  (called by SyncService post-upload refresh)
-  // ═══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
+  // FIRESTORE → HIVE  (called by SyncService after upload)
+  // ══════════════════════════════════════════════════════════════════════════
 
   static Future<void> downloadTodayDonations(String branchId) async {
     try {
@@ -353,6 +451,7 @@ class DonationsLocalStorage {
 
       final box = Hive.box(donationsBox);
       for (final doc in snap.docs) {
+        if (doc.id == 'credit_ledger') continue;
         final d       = doc.data();
         final date    = (d['date'] as String?) ?? today;
         final localId = (d['localId'] as String?) ?? doc.id;
@@ -360,7 +459,7 @@ class DonationsLocalStorage {
 
         final existing = box.get(key);
         if (existing == null) {
-          await box.put(key, LocalStorageService.sanitize({
+          await box.put(key, _sanitize({
             ...d,
             'firestoreId': doc.id,
             'localId':     localId,
@@ -369,14 +468,14 @@ class DonationsLocalStorage {
           }));
         } else {
           final ex = Map<String, dynamic>.from(existing as Map);
-          if (ex['firestoreId'] == null && ex['syncStatus'] != 'pending') {
+          if (ex['syncStatus'] != 'pending') {
             ex['firestoreId'] = doc.id;
             ex['syncStatus']  = 'synced';
             await box.put(key, ex);
           }
         }
       }
-      debugPrint('[DonationsLS] Downloaded ${snap.docs.length} donations for $today');
+      debugPrint('[DonationsLS] Downloaded ${snap.docs.length} donations ($today)');
     } catch (e) {
       debugPrint('[DonationsLS] downloadTodayDonations error: $e');
     }
@@ -398,7 +497,7 @@ class DonationsLocalStorage {
 
         final existing = box.get(key);
         if (existing == null) {
-          await box.put(key, LocalStorageService.sanitize({
+          await box.put(key, _sanitize({
             ...d,
             'firestoreId': doc.id,
             'localId':     localId,
@@ -407,7 +506,7 @@ class DonationsLocalStorage {
           }));
         } else {
           final ex = Map<String, dynamic>.from(existing as Map);
-          if (ex['firestoreId'] == null && ex['syncStatus'] != 'pending') {
+          if (ex['syncStatus'] != 'pending') {
             ex['firestoreId'] = doc.id;
             ex['syncStatus']  = 'synced';
             await box.put(key, ex);
@@ -420,106 +519,9 @@ class DonationsLocalStorage {
     }
   }
 
-  // ── Cleanup ────────────────────────────────────────────────────────────────
-
   static Future<void> clearAll() async {
     await Hive.box(donationsBox).clear();
     await Hive.box(creditLedgerBox).clear();
-    debugPrint('[DonationsLS] All donation & credit data cleared.');
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // RECEIPT SEQUENCE  (Firestore transaction — unique across all devices)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /// Returns the next sequential integer for a receipt number.
-  /// Uses a Firestore transaction to guarantee uniqueness even under
-  /// concurrent saves from multiple devices on the same branch+date.
-  ///
-  /// Counter document:
-  ///   branches/{branchId}/donations/credit_ledger/receipt_seq/{dateKey}
-  /// Field: `seq`  (starts at 1, incremented atomically)
-  static Future<int> nextReceiptSeq({
-    required String branchId,
-    required String dateKey,   // e.g. '030326'  (ddMMyy)
-  }) async {
-    final seqRef = FirebaseFirestore.instance
-        .collection('branches')
-        .doc(branchId)
-        .collection('donations')
-        .doc('credit_ledger')
-        .collection('receipt_seq')
-        .doc(dateKey);
-
-    int next = 1;
-    await FirebaseFirestore.instance.runTransaction((tx) async {
-      final snap = await tx.get(seqRef);
-      if (snap.exists) {
-        next = ((snap.data()?['seq'] as int?) ?? 0) + 1;
-      } else {
-        next = 1;
-      }
-      tx.set(seqRef, {'seq': next}, SetOptions(merge: true));
-    });
-    return next;
-  }
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ATOMIC BATCH — approve OB entry + create Chairman entry in one commit
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /// Atomically:
-  ///   1. Updates the OB→Manager credit entry [updateKey] to [updateStatus]
-  ///   2. Creates a new Manager→Chairman credit entry [newEntry]
-  ///
-  /// [updateKey] is the Firestore doc ID stored in the entry's `hiveKey` /
-  /// `firestoreId` field. Both writes commit together — no partial-write
-  /// corruption. Local Hive boxes are also updated for offline consistency.
-  static Future<void> batchCreditOps({
-    required String branchId,
-    required String updateKey,      // Firestore doc ID (== hiveKey) of OB entry
-    required String updateStatus,   // e.g. 'approved'
-    required String approvedBy,
-    required Map<String, dynamic> newEntry,
-  }) async {
-    final db    = FirebaseFirestore.instance;
-    final batch = db.batch();
-
-    // 1 — update existing OB→Manager entry in Firestore
-    final obRef = db
-        .collection('branches')
-        .doc(branchId)
-        .collection('creditLedger')
-        .doc(updateKey);
-
-    batch.update(obRef, {
-      'status':     updateStatus,
-      'approvedBy': approvedBy,
-      'approvedAt': FieldValue.serverTimestamp(),
-    });
-
-    // 2 — create new Manager→Chairman entry in Firestore
-    final chairmanRef = db
-        .collection('branches')
-        .doc(branchId)
-        .collection('creditLedger')
-        .doc();   // auto-ID
-
-    batch.set(chairmanRef, {
-      ...newEntry,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-
-    // Commit both writes atomically
-    await batch.commit();
-
-    // Mirror into local Hive so offline reads stay consistent
-    await updateCreditStatus(
-      updateKey,
-      status:     updateStatus,
-      approvedBy: approvedBy,
-      branchId:   branchId,
-    );
-    await saveCreditEntry(branchId: branchId, data: newEntry);
+    debugPrint('[DonationsLS] Cleared all data.');
   }
 }

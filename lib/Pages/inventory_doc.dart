@@ -276,35 +276,72 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           childAspectRatio = 1.5;
         }
 
-        // Separate All Medicines from other sections
+        // Prepare data
         final allMedicinesItems = List<Map<String, dynamic>>.from(filtered);
         _sortItems(allMedicinesItems);
-        
+
         final otherSections = sections.sublist(1); // Skip 'All Medicines'
-        final List<Widget> gridItems = [];
-        
+        final List<Map<String, dynamic>> sectionData = [];
+
         for (final section in otherSections) {
           final items = groupedByType[section] ?? [];
           if (items.isNotEmpty) {
             _sortItems(items);
-            gridItems.add(_buildCategoryCard(section, items));
+            sectionData.add({'section': section, 'items': items});
           }
         }
+
+        // ── Mobile: one full-width card at a time, stacked vertically ──
+        if (width <= 700) {
+          const double cardHeight = 340;
+          final List<Widget> cards = [
+            SizedBox(
+              height: cardHeight,
+              child: _buildCategoryCard('All Medicines', allMedicinesItems, isFullHeight: true),
+            ),
+            ...sectionData.map(
+              (d) => SizedBox(
+                height: cardHeight,
+                child: _buildCategoryCard(
+                  d['section'] as String,
+                  d['items'] as List<Map<String, dynamic>>,
+                ),
+              ),
+            ),
+          ];
+
+          return Padding(
+            padding: const EdgeInsets.all(12),
+            child: ListView.separated(
+              itemCount: cards.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 14),
+              itemBuilder: (_, i) => cards[i],
+            ),
+          );
+        }
+
+        // ── Tablet / Desktop: side-by-side layout ──
+        final List<Widget> gridItems = sectionData
+            .map((d) => _buildCategoryCard(
+                  d['section'] as String,
+                  d['items'] as List<Map<String, dynamic>>,
+                ))
+            .toList();
 
         return Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // All Medicines - Left side, full height
+              // All Medicines — left side, full height
               Expanded(
                 flex: 2,
                 child: _buildCategoryCard('All Medicines', allMedicinesItems, isFullHeight: true),
               ),
-              
+
               if (gridItems.isNotEmpty) ...[
                 const SizedBox(width: 16),
-                // Other categories in grid on the right
+                // Other categories in a grid on the right
                 Expanded(
                   flex: 3,
                   child: GridView.count(
@@ -367,7 +404,6 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
             const SizedBox(height: 8),
             const Divider(height: 1, thickness: 0.8),
             const SizedBox(height: 6),
-            // Expanded for full height cards, fixed size for grid cards
             Expanded(
               child: ListView.separated(
                 padding: EdgeInsets.zero,

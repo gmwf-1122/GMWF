@@ -22,6 +22,8 @@ import 'pages/dispensary/dispensar/inventory.dart';
 import 'pages/donations/donations_screen.dart';
 
 import 'services/local_storage_service.dart';
+import 'services/donations_local_storage.dart';
+import 'services/submission_service.dart';
 import 'realtime/server_sync_manager.dart';
 
 // Global navigator key — used to show Flushbar/SnackBar from anywhere (safely)
@@ -177,6 +179,8 @@ Future<void> main() async {
 
     debugPrint("[main] 3. Opening Hive boxes...");
     await LocalStorageService.init();
+    await DonationsLocalStorage.init();
+    await SubmissionService.init();
     debugPrint("[main] Hive boxes opened");
 
     debugPrint("[main] 3b. Opening ServerSyncManager Hive boxes...");
@@ -232,42 +236,58 @@ class _StartupLoadingScreen extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         backgroundColor: const Color(0xFFF1F8E9),
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Image.asset(
-                'assets/logo/gmwf.png',
-                height: 120,
-                errorBuilder: (_, __, ___) => const Icon(
-                  Icons.local_pharmacy,
-                  size: 100,
-                  color: Color(0xFF00695C),
-                ),
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Logo — constrained and aspect-ratio safe
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final size = (MediaQuery.of(context).size.width * 0.35)
+                          .clamp(80.0, 160.0);
+                      return Image.asset(
+                        'assets/logo/gmwf.png',
+                        width: size,
+                        height: size,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.local_pharmacy,
+                          size: size,
+                          color: const Color(0xFF00695C),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 40),
+                  const SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF1B5E20),
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    "GMWF is starting...",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1B5E20)),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Initializing services...",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+                ],
               ),
-              const SizedBox(height: 40),
-              const SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(
-                  color: Color(0xFF1B5E20),
-                  strokeWidth: 3,
-                ),
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                "GMWF is starting...",
-                style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1B5E20)),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "Initializing services...",
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -298,7 +318,6 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.green,
-        // Smooth page transitions on mobile
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
             TargetPlatform.android: CupertinoPageTransitionsBuilder(),
@@ -327,7 +346,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => const LoginPage(),
         '/admin': (context) => AdminScreen(branchId: 'all'),
         '/chairman': (context) => const ChairmanScreen(),
-        '/donations': (context) => DonationsScreen(),
+        '/donations': (context) => const DonationsScreen.embedded(),
         '/dispensar': (context) {
           final args = ModalRoute.of(context)!.settings.arguments
               as Map<String, dynamic>?;

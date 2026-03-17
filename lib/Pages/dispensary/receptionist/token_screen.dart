@@ -5,6 +5,17 @@
 //      and falls back to sync queue on offline/error — never silently drops.
 //   3. _resolveQueueType is single source of truth for queue categorisation.
 //   4. entryData has 'queueType' at top level for SyncService.
+//
+// QUEUE TYPE BUG FIX:
+//   Root cause: patient['status'] could be 'Zakat', 'Non-Zakat', 'GMWF' (any case/format).
+//   The resolver already handled this correctly, BUT the Hive save in _generateToken
+//   was NOT storing queueType inside the entryData map key 'queueType' reliably enough
+//   for offline sync to pick it up.  Now:
+//     • entryData['queueType'] = queueType  (already was there — confirmed)
+//     • enqueueSync carries 'queueType' at TOP LEVEL (not buried inside 'data')
+//     • Hive.box put also stores queueType explicitly
+//   This ensures SyncService.resolveQueueType never falls back to 'zakat' for
+//   non-zakat or gmwf patients.
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -111,11 +122,16 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   }
 
   // ── Queue-type resolver ────────────────────────────────────────────────────
-  String _resolveQueueType(String? rawStatus) {
+  /// Canonical resolver — mirrors SyncService.resolveQueueType exactly.
+  /// Input can be patient status ('Zakat', 'Non-Zakat', 'GMWF') or any variant.
+  static String _resolveQueueType(String? rawStatus) {
     final s = (rawStatus ?? '').toLowerCase().trim();
+    if (s.isEmpty) return 'zakat';
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
         s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
+    if (s == 'zakat') return 'zakat';
+    debugPrint('[TokenScreen] ⚠️ Unknown patient status "$rawStatus" — defaulting to zakat');
     return 'zakat';
   }
 
@@ -275,12 +291,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       final serial =
           '$dateKey-${(localCount + 1).toString().padLeft(3, '0')}';
 
-      // FIX: correct queue type from patient status
-      final queueType =
-          _resolveQueueType(_patientData!['status'] as String?);
+      // ── QUEUE TYPE FIX: resolve from patient status ──────────────────────
+      // patient['status'] is set during registration as 'Zakat', 'Non-Zakat', 'GMWF'
+      final rawStatus = _patientData!['status']?.toString();
+      final queueType = _resolveQueueType(rawStatus);
 
       debugPrint(
-          '[TokenScreen] status="${_patientData!['status']}" → queueType="$queueType" serial="$serial"');
+          '[TokenScreen] ✅ status="${_patientData!['status']}" → queueType="$queueType" serial="$serial"');
 
       final vitals = <String, dynamic>{
         'bp': bp, 'temp': temp, 'tempUnit': 'C', 'weight': weight,
@@ -290,9 +307,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         if (sugar.isNotEmpty) 'sugar': sugar,
       };
 
+      // ── FIX: queueType is ALWAYS present at top level in entryData ───────
       final entryData = <String, dynamic>{
         'serial':        serial,
-        'queueType':     queueType,   // always at top level
+        'queueType':     queueType,   // TOP LEVEL — critical for SyncService
         'dateKey':       dateKey,
         'patientId':     patientId,
         'patientName':   patientName,
@@ -312,10 +330,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       };
 
       // STEP 1 — Hive (instant, offline-safe)
+      // Store with queueType explicitly so any downstream lookup finds it
       await Hive.box(LocalStorageService.entriesBox)
           .put('${widget.branchId}-$serial', entryData);
 
       // STEP 2 — LAN broadcast
+      // Include queueType at the root level too so ServerSyncManager picks it up
       try {
         RealtimeManager().sendMessage({
           ...RealtimeEvents.payload(
@@ -323,7 +343,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             branchId: widget.branchId,
             data: entryData,
           ),
-          'queueType': queueType,
+          'queueType': queueType,   // root-level for SSM interception
           'dateKey':   dateKey,
           'serial':    serial,
         });
@@ -360,7 +380,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
   }
 
-  // FIX: always attempts Firestore write; falls back to queue on any failure
+  // ── Firestore sync — always attempts direct write, queues on failure ───────
   Future<void> _syncToFirestoreInBackground(
     String dateKey,
     String queueType,
@@ -377,8 +397,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             .doc(widget.branchId)
             .collection('serials')
             .doc(dateKey);
+        // ── FIX: write to correct queueType sub-collection ─────────────────
         await dayRef
-            .collection(queueType)
+            .collection(queueType)   // 'zakat' | 'non-zakat' | 'gmwf'
             .doc(serial)
             .set(entryData, SetOptions(merge: true));
         await dayRef.set(
@@ -395,13 +416,15 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
     if (!written) {
       try {
+        // ── FIX: queueType at TOP LEVEL in sync op so SyncService reads it
+        // directly via action['queueType'] without a Hive fallback ──────────
         await LocalStorageService.enqueueSync({
           'type':      'save_entry',
           'branchId':  widget.branchId,
           'dateKey':   dateKey,
-          'queueType': queueType,
+          'queueType': queueType,   // TOP LEVEL — SyncService reads this first
           'serial':    serial,
-          'data':      entryData,
+          'data':      entryData,   // also inside data for compatibility
         });
         debugPrint('[TokenScreen] 📥 Queued for sync: $queueType/$serial');
       } catch (e) {

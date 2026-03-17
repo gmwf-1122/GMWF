@@ -1,1397 +1,1192 @@
+// lib/pages/donations/credit_ledger.dart
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
-import '../../services/donations_local_storage.dart';
+import '../../services/local_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/role_theme_provider.dart';
 import 'donations_shared.dart';
-
-// ════════════════════════════════════════════════════════════════════════════════
-// CREDIT ROLE CONSTANTS
-// ════════════════════════════════════════════════════════════════════════════════
-
-const String kRoleOfficeBoy = 'office_boy';
-const String kRoleManager   = 'manager';
-const String kRoleChairman  = 'chairman';
-
-// ════════════════════════════════════════════════════════════════════════════════
-// CREDIT LEDGER SERVICE
-// ════════════════════════════════════════════════════════════════════════════════
+import 'donations_screen.dart';
 
 class CreditLedgerService {
   final String branchId;
   CreditLedgerService(this.branchId);
 
-  String get _today => DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-  // ── OB → Manager (auto-created on every cash donation by OB) ─────────────────
   Future<String> officeBoyAutoCredit({
     required String fromUserId,
     required String fromUsername,
     required double amount,
     required String categoryId,
+    required String subtypeId,
     required String branchName,
     required String receiptNo,
-    String? subtypeId,
-    String  notes = '',
+    String notes = '',
   }) async {
-    return DonationsLocalStorage.saveCreditEntry(
+    return LocalStorageService.saveCreditEntry(
       branchId: branchId,
       data: {
-        'fromRole':            kRoleOfficeBoy,
-        'fromUserId':          fromUserId,
-        'fromUsername':        fromUsername,
-        'toRole':              kRoleManager,
-        'amount':              amount,
-        'categoryId':          categoryId,
-        'subtypeId':           subtypeId,
-        'receiptNo':           receiptNo,
-        'status':              kStatusPending,
-        'date':                _today,
-        'timestamp':           DateTime.now().toIso8601String(),
-        'notes':               notes,
-        'branchName':          branchName,
-        'forwardedToChairman': false,
-        'approvedBy':          null,
-        'approvedAt':          null,
+        'type':         'donation_collection',
+        'fromRole':     'Office Boy',
+        'toRole':       'Manager',
+        'fromUserId':   fromUserId,
+        'fromUsername': fromUsername,
+        'amount':       amount,
+        'categoryId':   categoryId,
+        'subtypeId':    subtypeId,
+        'branchName':   branchName,
+        'receiptNo':    receiptNo,
+        'notes':        notes,
+        'status':       kStatusPending,
+        'date':         DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'timestamp':    DateTime.now().toIso8601String(),
       },
     );
   }
 
-  // ── Manager approves OB credit AND forwards equivalent to Chairman ────────────
-  //
-  // Uses DonationsLocalStorage.batchCreditOps which performs a single Firestore
-  // batch commit — both the OB-entry approval and the new Chairman entry are
-  // written atomically, preventing partial-write data integrity issues.
-  Future<void> managerApproveAndForward({
-    required String obDocId,        // Firestore doc ID of the OB credit entry
-    required String managerUserId,
-    required String managerUsername,
-    required double amount,
-    required String categoryId,
-    required String branchName,
-    required String receiptNo,
-    String? subtypeId,
-    String  notes = '',
-  }) async {
-    final chairmanEntry = {
-      'fromRole':            kRoleManager,
-      'fromUserId':          managerUserId,
-      'fromUsername':        managerUsername,
-      'toRole':              kRoleChairman,
-      'amount':              amount,
-      'categoryId':          categoryId,
-      'subtypeId':           subtypeId,
-      'linkedObDocId':       obDocId,
-      'receiptNo':           receiptNo,
-      'status':              kStatusPending,
-      'date':                _today,
-      'timestamp':           DateTime.now().toIso8601String(),
-      'notes':               notes,
-      'branchName':          branchName,
-      'forwardedToChairman': false,
-      'approvedBy':          null,
-      'approvedAt':          null,
-    };
 
-    // Atomic batch — implemented in DonationsLocalStorage.batchCreditOps
-    await DonationsLocalStorage.batchCreditOps(
-      branchId:     branchId,
-      updateKey:    obDocId,
-      updateStatus: kStatusApproved,
-      approvedBy:   managerUsername,
-      newEntry:     chairmanEntry,
+  Future<void> managerApproveOBCredit(
+    String hiveKey,
+    String managerUsername,
+    String managerUserId,
+  ) async {
+    await LocalStorageService.updateCreditStatus(
+      hiveKey,
+      status:        kStatusApproved,
+      actorUsername: managerUsername,
+      branchId:      branchId,
+    );
+
+    final box = Hive.box(LocalStorageService.creditsBox);
+    final raw = box.get(hiveKey);
+    if (raw == null) return;
+    final obData = Map<String, dynamic>.from(raw as Map);
+
+    await LocalStorageService.saveCreditEntry(
+      branchId: branchId,
+      data: {
+        'type':            'manager_forwarding',
+        'fromRole':        'Manager',
+        'toRole':          'Chairman',
+        'fromUserId':      managerUserId,
+        'fromUsername':    managerUsername,
+        'amount':          obData['amount']      ?? 0.0,
+        'categoryId':      obData['categoryId']  ?? '',
+        'subtypeId':       obData['subtypeId']   ?? '',
+        'branchName':      obData['branchName']  ?? '',
+        'receiptNo':       obData['receiptNo']   ?? '',
+        'notes':           obData['notes']       ?? '',
+        'status':          kStatusPending,
+        'date':            DateFormat('yyyy-MM-dd').format(DateTime.now()),
+        'timestamp':       DateTime.now().toIso8601String(),
+        'collectedBy':     obData['fromUsername'] ?? '',
+        'collectedByRole': 'Office Boy',
+        'originalHiveKey': hiveKey,
+      },
     );
   }
 
-  Future<void> managerRejectCredit({
-    required String obDocId,
-    required String managerUsername,
-  }) =>
-      DonationsLocalStorage.updateCreditStatus(
-          obDocId,
-          status:     kStatusRejected,
-          approvedBy: managerUsername,
-          branchId:   branchId);
+  Future<void> managerRejectOBCredit(
+      String hiveKey, String managerUsername, String reason) async {
+    await LocalStorageService.updateCreditStatus(
+      hiveKey,
+      status:          kStatusRejected,
+      actorUsername:   managerUsername,
+      branchId:        branchId,
+      rejectionReason: reason,
+    );
+  }
 
-  Future<void> chairmanDecide({
-    required String docId,
-    required String decision,
-    required String chairmanUsername,
-  }) =>
-      DonationsLocalStorage.updateCreditStatus(
-          docId,
-          status:     decision,
-          approvedBy: chairmanUsername,
-          branchId:   branchId);
+  Future<void> chairmanApproveManagerCredit(
+      String hiveKey, String chairmanUsername) async {
+    await LocalStorageService.updateCreditStatus(
+      hiveKey,
+      status:        kStatusApproved,
+      actorUsername: chairmanUsername,
+      branchId:      branchId,
+    );
+  }
 
-  // ── Streams ───────────────────────────────────────────────────────────────────
+  Future<void> chairmanRejectManagerCredit(
+      String hiveKey, String chairmanUsername, String reason) async {
+    await LocalStorageService.updateCreditStatus(
+      hiveKey,
+      status:          kStatusRejected,
+      actorUsername:   chairmanUsername,
+      branchId:        branchId,
+      rejectionReason: reason,
+    );
+  }
 
-  Stream<List<Map<String, dynamic>>> obToManagerPending() =>
-      DonationsLocalStorage.streamCreditEntries(
-          branchId: branchId, toRole: kRoleManager, status: kStatusPending);
+  // ── Hive streams — no Firestore listeners, works fully offline ──────────────
 
-  Stream<List<Map<String, dynamic>>> managerToChairmanPending() =>
-      DonationsLocalStorage.streamCreditEntries(
-          branchId: branchId, toRole: kRoleChairman, status: kStatusPending);
+  Stream<List<Map<String, dynamic>>> watchAllForManager() =>
+      LocalStorageService.streamCredits(branchId: branchId, toRole: 'Manager');
 
-  Stream<List<Map<String, dynamic>>> chairmanApproved() =>
-      DonationsLocalStorage.streamCreditEntries(
-          branchId: branchId, toRole: kRoleChairman, status: kStatusApproved);
+  Stream<List<Map<String, dynamic>>> watchAllForChairman() =>
+      LocalStorageService.streamCredits(branchId: branchId, toRole: 'Chairman');
 
-  Stream<List<Map<String, dynamic>>> obOwnCredits(String userId) =>
-      DonationsLocalStorage.streamCreditEntries(
-          branchId: branchId, toRole: kRoleManager, fromUserId: userId);
+  Stream<List<Map<String, dynamic>>> watchManagerOwnCredits(String managerUserId) {
+    if (managerUserId.isEmpty) return const Stream.empty();
+    return LocalStorageService.streamCredits(
+        branchId: branchId, toRole: 'Chairman', fromUserId: managerUserId);
+  }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-  static bool isSynced(Map<String, dynamic> entry) =>
-      entry['syncStatus'] == 'synced';
-
-  static bool hasPendingSync(List<Map<String, dynamic>> entries) =>
-      entries.any((e) => !isSynced(e));
+  Stream<List<Map<String, dynamic>>> watchOfficeBoyCredits(String userId) {
+    if (userId.isEmpty) return const Stream.empty();
+    return LocalStorageService.streamCredits(
+        branchId: branchId, fromUserId: userId);
+  }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
-// MANAGER CREDITS DASHBOARD
-// ════════════════════════════════════════════════════════════════════════════════
-
 class ManagerCreditsDashboard extends StatefulWidget {
-  final String branchId, branchName, userId, username;
+  final String branchId, username, branchName, userId;
 
   const ManagerCreditsDashboard({
     super.key,
     required this.branchId,
+    required this.username,
     required this.branchName,
     required this.userId,
-    required this.username,
   });
 
   @override
-  State<ManagerCreditsDashboard> createState() =>
-      _ManagerCreditsDashboardState();
+  State<ManagerCreditsDashboard> createState() => _ManagerCreditsDashboardState();
 }
 
-class _ManagerCreditsDashboardState extends State<ManagerCreditsDashboard> {
-  late final CreditLedgerService _svc;
-  bool _processing = false;
+class _ManagerCreditsDashboardState
+    extends State<ManagerCreditsDashboard> with SingleTickerProviderStateMixin {
+  bool _showPendingOnly = false;
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    _svc = CreditLedgerService(widget.branchId);
+    _tabController = TabController(length: 2, vsync: this);
   }
 
-  Future<void> _approve(Map<String, dynamic> doc) async {
-    final docId = doc['hiveKey'] as String? ?? '';
-    if (docId.isEmpty) return;
-
-    final ok = await _creditConfirmDialog(
-      context:   context,
-      isApprove: true,
-      amount:    (doc['amount'] as num?)?.toDouble() ?? 0,
-      fromName:  doc['fromUsername'] as String? ?? '-',
-    );
-    if (ok != true || !mounted) return;
-
-    setState(() => _processing = true);
-    HapticFeedback.mediumImpact();
-
-    try {
-      await _svc.managerApproveAndForward(
-        obDocId:         docId,
-        managerUserId:   widget.userId,
-        managerUsername: widget.username,
-        amount:          (doc['amount'] as num?)?.toDouble() ?? 0,
-        categoryId:      doc['categoryId'] as String? ?? 'general',
-        subtypeId:       doc['subtypeId']  as String?,
-        branchName:      widget.branchName,
-        receiptNo:       doc['receiptNo']  as String? ?? '',
-        notes:           doc['notes']      as String? ?? '',
-      );
-      if (mounted) {
-        setState(() => _processing = false);
-        _showSnack(
-            context, 'Credit approved and forwarded to Chairman', DS.statusApproved);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _processing = false);
-        _showSnack(context, 'Failed to approve: $e', DS.statusRejected);
-      }
-    }
-  }
-
-  Future<void> _reject(Map<String, dynamic> doc) async {
-    final docId = doc['hiveKey'] as String? ?? '';
-    if (docId.isEmpty) return;
-
-    final ok = await _creditConfirmDialog(
-      context:   context,
-      isApprove: false,
-      amount:    (doc['amount'] as num?)?.toDouble() ?? 0,
-      fromName:  doc['fromUsername'] as String? ?? '-',
-    );
-    if (ok != true || !mounted) return;
-
-    setState(() => _processing = true);
-    try {
-      await _svc.managerRejectCredit(
-          obDocId: docId, managerUsername: widget.username);
-      if (mounted) {
-        setState(() => _processing = false);
-        _showSnack(context, 'Credit rejected', DS.statusRejected);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _processing = false);
-        _showSnack(context, 'Failed to reject: $e', DS.statusRejected);
-      }
-    }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _SectionHeader(
-        icon:     Icons.inbox_rounded,
-        title:    'Incoming Credits',
-        subtitle: 'From Office Boys — awaiting your review',
-        color:    t.accent,
-      ),
+    final t       = RoleThemeScope.dataOf(context);
+    final service = CreditLedgerService(widget.branchId);
 
-      StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _svc.obToManagerPending(),
-        builder: (_, snap) {
-          if (snap.hasError) {
-            return _ErrorCard(
-              message: 'Failed to load credits: ${snap.error}',
-              icon:    Icons.error_outline_rounded,
-              color:   DS.statusRejected,
-            );
-          }
-
-          if (!snap.hasData) return const _LoadingRow();
-          final docs = snap.data!;
-
-          if (docs.isEmpty) {
-            return _EmptyCard(
-              message: 'No pending credits from office boys',
-              icon:    Icons.inbox_outlined,
-              color:   t.accent,
-            );
-          }
-
-          double total = 0;
-          for (final d in docs) total += (d['amount'] as num?)?.toDouble() ?? 0;
-
-          return Column(children: [
-            _SummaryBar(count: docs.length, total: total, color: t.accent),
-            ListView.builder(
-              shrinkWrap: true,
-              physics:    const NeverScrollableScrollPhysics(),
-              padding:    const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              itemCount:  docs.length,
-              itemBuilder: (_, i) => _CreditReviewCard(
-                data:          docs[i],
-                processing:    _processing,
-                approverLabel: 'Approve → Chairman',
-                accentColor:   t.accent,
-                onApprove:     () => _approve(docs[i]),
-                onReject:      () => _reject(docs[i]),
-              ),
+    return Column(children: [
+      Container(
+        color:   t.bg,
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        child: Column(children: [
+          Row(children: [
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Credit Approvals', style: DS.heading(color: t.textPrimary)),
+              Text('Office Boy → Manager handoffs',
+                  style: DS.caption(color: t.textTertiary)),
+            ]),
+            const Spacer(),
+            _PendingToggle(
+              active: _showPendingOnly,
+              onTap:  () => setState(() => _showPendingOnly = !_showPendingOnly),
             ),
-          ]);
-        },
+          ]),
+          const SizedBox(height: 10),
+          TabBar(
+            controller:           _tabController,
+            labelColor:           t.accent,
+            unselectedLabelColor: t.textTertiary,
+            indicatorColor:       t.accent,
+            tabs: const [Tab(text: 'Pending Approvals'), Tab(text: 'My Credits')],
+          ),
+        ]),
       ),
 
-      const SizedBox(height: 8),
-      _ManagerForwardedSection(svc: _svc),
-      const SizedBox(height: 24),
+      Expanded(
+        child: TabBarView(
+          controller: _tabController,
+          physics:    const NeverScrollableScrollPhysics(),
+          children: [
+            _ManagerApprovalTab(
+              service:         service,
+              branchId:        widget.branchId,
+              username:        widget.username,
+              userId:          widget.userId,
+              branchName:      widget.branchName,
+              showPendingOnly: _showPendingOnly,
+            ),
+            _ManagerOwnCreditsTab(
+              service:  service,
+              branchId: widget.branchId,
+              userId:   widget.userId,
+            ),
+          ],
+        ),
+      ),
     ]);
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
-// CHAIRMAN CREDIT APPROVAL SECTION
-// ════════════════════════════════════════════════════════════════════════════════
 
-class ChairmanCreditApprovalSection extends StatefulWidget {
-  final String branchId, chairmanUsername;
+class _ManagerApprovalTab extends StatelessWidget {
+  final CreditLedgerService service;
+  final String branchId, username, userId, branchName;
+  final bool showPendingOnly;
+
+  const _ManagerApprovalTab({
+    required this.service, required this.branchId, required this.username,
+    required this.userId,  required this.branchName, required this.showPendingOnly,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      const SizedBox(height: 8),
+      _CreditSummaryRow(branchId: branchId, toRole: 'Manager'),
+      const SizedBox(height: 4),
+      Expanded(
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: service.watchAllForManager(),
+          builder: (context, snap) {
+            if (snap.hasError) return _ErrorView(error: '${snap.error}');
+            if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+
+            final all  = snap.data!;
+            final docs = showPendingOnly
+                ? all.where((d) => (d['status'] as String? ?? '') == kStatusPending).toList()
+                : all;
+
+            if (docs.isEmpty) return _EmptyCredits(pending: showPendingOnly, roleFrom: 'Office Boy');
+
+            return ListView.separated(
+              padding:          const EdgeInsets.fromLTRB(16, 4, 16, 32),
+              itemCount:        docs.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (ctx, i) => _CreditTile(
+                data:       docs[i],
+                hiveKey:    docs[i]['hiveKey'] as String? ?? '',
+                service:    service,
+                username:   username,
+                userId:     userId,
+                branchName: branchName,
+                isManager:  true,
+              ),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+}
+
+class _ManagerOwnCreditsTab extends StatelessWidget {
+  final CreditLedgerService service;
+  final String branchId, userId;
+
+  const _ManagerOwnCreditsTab({
+    required this.service, required this.branchId, required this.userId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+
+    return Column(children: [
+      Container(
+        margin:  const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color:        DS.sapphire100,
+          borderRadius: BorderRadius.circular(DS.rMd),
+          border: Border.all(color: DS.sapphire500.withOpacity(0.3)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.info_outline_rounded, size: 16, color: DS.sapphire700),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'These are credits you have forwarded to the Chairman '
+              'after approving Office Boy submissions.',
+              style: DS.caption(color: DS.sapphire700).copyWith(fontSize: 11),
+            ),
+          ),
+        ]),
+      ),
+      _CreditSummaryRow(branchId: branchId, toRole: 'Chairman', filterUserId: userId),
+      const SizedBox(height: 8),
+      Expanded(
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: service.watchManagerOwnCredits(userId),
+          builder: (context, snap) {
+            if (snap.hasError) return _ErrorView(error: '${snap.error}');
+            final docs = snap.data ?? [];
+            if (docs.isEmpty) return _EmptyCredits(pending: false, roleFrom: 'you');
+
+            return ListView.separated(
+              padding:          const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              itemCount:        docs.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (ctx, i) => _ManagerOwnCreditCard(data: docs[i], t: t),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+}
+
+class _ManagerOwnCreditCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final RoleThemeData t;
+  const _ManagerOwnCreditCard({required this.data, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final d           = data;
+    final amt         = (d['amount']     as num?)?.toDouble() ?? 0.0;
+    final stat        = d['status']      as String? ?? kStatusPending;
+    final catId       = d['categoryId']  as String? ?? '';
+    final catE        = DonationCategory.values.firstWhereOrNull((c) => c.name == catId) ?? DonationCategory.jamia;
+    final receiptNo   = d['receiptNo']   as String? ?? '';
+    final dateRaw     = d['date']        as String? ?? '';
+    final collectedBy = d['collectedBy'] as String? ?? '';
+    final syncSt      = d['syncStatus']  as String? ?? 'synced';
+    String dl = dateRaw;
+    try { dl = DateFormat('dd MMM yyyy').format(DateTime.parse(dateRaw)); } catch (_) {}
+
+    return Container(
+      padding:    const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.bgCard, borderRadius: BorderRadius.circular(DS.rMd),
+        border: Border.all(color: t.bgRule), boxShadow: DS.shadowSm,
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(color: catE.lightColor, shape: BoxShape.circle),
+            child: Icon(catE.icon, color: catE.color, size: 16),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(catE.label, style: DS.subheading(color: t.textPrimary).copyWith(fontSize: 12.5)),
+              if (receiptNo.isNotEmpty)
+                Text(receiptNo, style: DS.caption(color: t.textTertiary).copyWith(fontSize: 9.5, fontWeight: FontWeight.w700)),
+              Text(dl, style: DS.caption(color: t.textTertiary).copyWith(fontSize: 10)),
+            ]),
+          ),
+          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            Text('PKR ${fmtNum(amt)}', style: DS.mono(color: catE.color, size: 13)),
+            const SizedBox(height: 4),
+            DSStatusBadge(status: stat),
+          ]),
+        ]),
+        if (collectedBy.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Row(children: [
+            Icon(Icons.person_outline_rounded, size: 10, color: t.textTertiary),
+            const SizedBox(width: 4),
+            Text('Collected by Office Boy: $collectedBy',
+                style: DS.caption(color: t.textTertiary).copyWith(fontSize: 10)),
+          ]),
+        ],
+        if (syncSt == 'pending') ...[const SizedBox(height: 6), _SyncPendingChip()],
+      ]),
+    );
+  }
+}
+
+
+class ChairmanCreditApprovalSection extends StatelessWidget {
+  final String branchId, branchName, username;
 
   const ChairmanCreditApprovalSection({
     super.key,
     required this.branchId,
-    required this.chairmanUsername,
+    required this.branchName,
+    required this.username,
   });
 
   @override
-  State<ChairmanCreditApprovalSection> createState() =>
-      _ChairmanCreditApprovalSectionState();
-}
-
-class _ChairmanCreditApprovalSectionState
-    extends State<ChairmanCreditApprovalSection> {
-  String _filter = 'pending';
-
-  @override
   Widget build(BuildContext context) {
-    final t   = RoleThemeScope.dataOf(context);
-    final svc = CreditLedgerService(widget.branchId);
+    final t       = RoleThemeScope.dataOf(context);
+    final service = CreditLedgerService(branchId);
 
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      _SectionHeader(
-        icon:     Icons.verified_rounded,
-        title:    'Credit Approvals',
-        subtitle: 'Manager-forwarded credits awaiting your decision',
-        color:    t.accent,
-      ),
-
+    return Column(children: [
       Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-        child: _FilterTabBar(
-          selected:  _filter,
-          onChanged: (v) => setState(() => _filter = v),
-          svc:       svc,
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Row(children: [
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Credit Approvals', style: DS.heading(color: t.textPrimary)),
+            Text('Manager → Chairman submissions', style: DS.caption(color: t.textTertiary)),
+          ]),
+          const Spacer(),
+          _PendingCountBadge(branchId: branchId, toRole: 'Chairman'),
+        ]),
       ),
-
-      StreamBuilder<List<Map<String, dynamic>>>(
-        stream: svc.managerToChairmanPending(),
-        builder: (_, pendSnap) {
-          if (pendSnap.hasError) {
-            return _ErrorCard(
-              message: 'Failed to load pending approvals.',
-              icon:    Icons.error_outline_rounded,
-              color:   DS.statusRejected,
+      _CreditSummaryRow(branchId: branchId, toRole: 'Chairman'),
+      const SizedBox(height: 8),
+      Expanded(
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: service.watchAllForChairman(),
+          builder: (context, snap) {
+            if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+            final docs = snap.data!;
+            if (docs.isEmpty) return _EmptyCredits(pending: false, roleFrom: 'Manager');
+            return ListView.separated(
+              padding:          const EdgeInsets.fromLTRB(16, 4, 16, 32),
+              itemCount:        docs.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (ctx, i) => _CreditTile(
+                data:       docs[i],
+                hiveKey:    docs[i]['hiveKey'] as String? ?? '',
+                service:    service,
+                username:   username,
+                userId:     '',
+                branchName: branchName,
+                isManager:  false,
+              ),
             );
-          }
-          return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: svc.chairmanApproved(),
-            builder: (_, apprSnap) {
-              if (apprSnap.hasError) {
-                return _ErrorCard(
-                  message: 'Failed to load approved credits.',
-                  icon:    Icons.error_outline_rounded,
-                  color:   DS.statusRejected,
-                );
-              }
-
-              final pending  = pendSnap.data ?? [];
-              final approved = apprSnap.data ?? [];
-
-              List<Map<String, dynamic>> shown;
-              if (_filter == 'pending')       shown = pending;
-              else if (_filter == 'approved') shown = approved;
-              else                            shown = [...pending, ...approved];
-
-              if (shown.isEmpty) {
-                return _EmptyCard(
-                  message: _filter == 'pending'
-                      ? 'No credits awaiting your approval'
-                      : 'No approved credits yet',
-                  icon: _filter == 'pending'
-                      ? Icons.hourglass_empty_rounded
-                      : Icons.check_circle_outline_rounded,
-                  color: t.accent,
-                );
-              }
-
-              return ListView.builder(
-                shrinkWrap: true,
-                physics:    const NeverScrollableScrollPhysics(),
-                padding:    const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                itemCount:  shown.length,
-                itemBuilder: (_, i) {
-                  final d     = shown[i];
-                  final docId = d['hiveKey'] as String? ?? '';
-                  final isPending = d['status'] == kStatusPending;
-                  return _ChairmanCreditCard(
-                    data: d,
-                    onApprove: isPending && docId.isNotEmpty
-                        ? () => _chairmanDecide(context, svc, docId,
-                              kStatusApproved,
-                              (d['amount'] as num?)?.toDouble() ?? 0)
-                        : null,
-                    onReject: isPending && docId.isNotEmpty
-                        ? () => _chairmanDecide(context, svc, docId,
-                              kStatusRejected,
-                              (d['amount'] as num?)?.toDouble() ?? 0)
-                        : null,
-                  );
-                },
-              );
-            },
-          );
-        },
+          },
+        ),
       ),
     ]);
   }
-
-  Future<void> _chairmanDecide(
-    BuildContext context,
-    CreditLedgerService svc,
-    String docId,
-    String decision,
-    double amount,
-  ) async {
-    final isApprove = decision == kStatusApproved;
-    final ok = await _creditConfirmDialog(
-      context:   context,
-      isApprove: isApprove,
-      amount:    amount,
-      fromName:  'Manager',
-    );
-    if (ok == true) {
-      try {
-        await svc.chairmanDecide(
-            docId:            docId,
-            decision:         decision,
-            chairmanUsername: widget.chairmanUsername);
-        if (context.mounted) {
-          _showSnack(
-            context,
-            isApprove ? 'Donation approved successfully' : 'Credit rejected',
-            isApprove ? DS.statusApproved : DS.statusRejected,
-          );
-        }
-      } catch (e) {
-        if (context.mounted) {
-          _showSnack(context, 'Failed: $e', DS.statusRejected);
-        }
-      }
-    }
-  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// CREDIT SUMMARY BAR
+// OFFICE BOY CREDITS VIEW
 // ════════════════════════════════════════════════════════════════════════════════
 
-class CreditSummaryBar extends StatelessWidget {
-  final String branchId, role, userId;
-  final Color  color;
+class OfficeBoyCreditsView extends StatelessWidget {
+  final String branchId, userId;
 
-  const CreditSummaryBar({
-    super.key,
-    required this.branchId,
-    required this.role,
-    required this.userId,
-    required this.color,
-  });
+  const OfficeBoyCreditsView({super.key, required this.branchId, required this.userId});
 
   @override
   Widget build(BuildContext context) {
-    final svc = CreditLedgerService(branchId);
+    final t       = RoleThemeScope.dataOf(context);
+    final service = CreditLedgerService(branchId);
 
-    if (role == kRoleOfficeBoy) {
-      return StreamBuilder<List<Map<String, dynamic>>>(
-        stream: svc.obOwnCredits(userId),
-        builder: (_, snap) {
-          if (snap.hasError) return const SizedBox.shrink();
-          final docs       = snap.data ?? [];
-          double submitted = 0, approved = 0;
-          for (final d in docs) {
-            final amt = (d['amount'] as num?)?.toDouble() ?? 0;
-            submitted += amt;
-            if (d['status'] == kStatusApproved) approved += amt;
-          }
-          return _BarWidget(
-            label1:     'My Credits',
-            val1:       'PKR ${fmtNum(submitted)}',
-            label2:     'Approved',
-            val2:       'PKR ${fmtNum(approved)}',
-            color:      color,
-            hasPending: CreditLedgerService.hasPendingSync(docs),
-          );
-        },
-      );
-    }
+    return Column(children: [
+      Container(
+        margin:  const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: DS.sapphire100, borderRadius: BorderRadius.circular(DS.rMd),
+          border: Border.all(color: DS.sapphire500.withOpacity(0.3)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.info_outline_rounded, size: 16, color: DS.sapphire700),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Credits track your money handoff to the Manager. '
+              'All donations remain visible in the Donations tab.',
+              style: DS.caption(color: DS.sapphire700).copyWith(fontSize: 11),
+            ),
+          ),
+        ]),
+      ),
+      Expanded(
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: service.watchOfficeBoyCredits(userId),
+          builder: (context, snap) {
+            if (snap.hasError) return _ErrorView(error: '${snap.error}');
+            final docs = snap.data ?? [];
+            if (docs.isEmpty) return _EmptyCredits(pending: false, roleFrom: 'you');
 
-    if (role == kRoleManager) {
-      return StreamBuilder<List<Map<String, dynamic>>>(
-        stream: svc.obToManagerPending(),
-        builder: (_, obSnap) {
-          if (obSnap.hasError) return const SizedBox.shrink();
-          return StreamBuilder<List<Map<String, dynamic>>>(
-            stream: svc.managerToChairmanPending(),
-            builder: (_, chairSnap) {
-              if (chairSnap.hasError) return const SizedBox.shrink();
-              final obPend    = obSnap.data    ?? [];
-              final chairPend = chairSnap.data ?? [];
-              double obTotal = 0, chairTotal = 0;
-              for (final d in obPend)    obTotal    += (d['amount'] as num?)?.toDouble() ?? 0;
-              for (final d in chairPend) chairTotal += (d['amount'] as num?)?.toDouble() ?? 0;
-              return _BarWidget(
-                label1:     'OB Inbox',
-                val1:       'PKR ${fmtNum(obTotal)}',
-                label2:     'At Chairman',
-                val2:       'PKR ${fmtNum(chairTotal)}',
-                color:      color,
-                hasPending: CreditLedgerService.hasPendingSync(obPend),
-              );
-            },
-          );
-        },
-      );
-    }
+            return ListView.separated(
+              padding:          const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              itemCount:        docs.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              itemBuilder: (context, i) {
+                final d       = docs[i];
+                final amt     = (d['amount']    as num?)?.toDouble() ?? 0.0;
+                final stat    = d['status']     as String? ?? kStatusPending;
+                final catId   = d['categoryId'] as String? ?? '';
+                final catE    = DonationCategory.values.firstWhereOrNull((c) => c.name == catId) ?? DonationCategory.jamia;
+                final recNo   = d['receiptNo']  as String? ?? '';
+                final dateRaw = d['date']       as String? ?? '';
+                final syncSt  = d['syncStatus'] as String? ?? 'synced';
+                String dl = dateRaw;
+                try { dl = DateFormat('dd MMM yyyy').format(DateTime.parse(dateRaw)); } catch (_) {}
 
-    // Chairman
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: svc.managerToChairmanPending(),
-      builder: (_, snap) {
-        if (snap.hasError) return const SizedBox.shrink();
-        final docs  = snap.data ?? [];
-        double total = 0;
-        for (final d in docs) total += (d['amount'] as num?)?.toDouble() ?? 0;
-        return _BarWidget(
-          label1:     'Pending Approval',
-          val1:       'PKR ${fmtNum(total)}',
-          label2:     'Submissions',
-          val2:       '${docs.length}',
-          color:      color,
-          hasPending: CreditLedgerService.hasPendingSync(docs),
-        );
-      },
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// PRIVATE WIDGETS
-// ════════════════════════════════════════════════════════════════════════════════
-
-class _FilterTabBar extends StatelessWidget {
-  final String               selected;
-  final ValueChanged<String> onChanged;
-  final CreditLedgerService  svc;
-
-  const _FilterTabBar({
-    required this.selected,
-    required this.onChanged,
-    required this.svc,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: svc.managerToChairmanPending(),
-      builder: (_, pendSnap) {
-        return StreamBuilder<List<Map<String, dynamic>>>(
-          stream: svc.chairmanApproved(),
-          builder: (_, apprSnap) {
-            final pendCount = pendSnap.data?.length ?? 0;
-            final apprCount = apprSnap.data?.length ?? 0;
-            return Container(
-              padding:    const EdgeInsets.all(3),
-              decoration: BoxDecoration(
-                  color:        t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(DS.rMd)),
-              child: Row(children: [
-                _tab(t, 'all',      'All',      pendCount + apprCount),
-                _tab(t, 'pending',  'Pending',  pendCount),
-                _tab(t, 'approved', 'Approved', apprCount),
-              ]),
+                return Container(
+                  padding:    const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: t.bgCard, borderRadius: BorderRadius.circular(DS.rMd),
+                    border: Border.all(color: t.bgRule), boxShadow: DS.shadowSm,
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Row(children: [
+                      Container(
+                        width: 40, height: 40,
+                        decoration: BoxDecoration(color: catE.lightColor, shape: BoxShape.circle),
+                        child: Icon(catE.icon, color: catE.color, size: 16),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text(catE.label, style: DS.subheading(color: t.textPrimary).copyWith(fontSize: 12.5)),
+                          if (recNo.isNotEmpty)
+                            Text(recNo, style: DS.caption(color: t.textTertiary).copyWith(fontSize: 9.5, fontWeight: FontWeight.w700)),
+                          Text(dl, style: DS.caption(color: t.textTertiary).copyWith(fontSize: 10)),
+                        ]),
+                      ),
+                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                        Text('PKR ${fmtNum(amt)}', style: DS.mono(color: catE.color, size: 13)),
+                        const SizedBox(height: 4),
+                        DSStatusBadge(status: stat),
+                      ]),
+                    ]),
+                    if (syncSt == 'pending') ...[const SizedBox(height: 6), _SyncPendingChip()],
+                  ]),
+                );
+              },
             );
           },
-        );
-      },
-    );
-  }
-
-  Widget _tab(RoleThemeData t, String value, String label, int count) {
-    final isSel = selected == value;
-    return Expanded(
-      child: GestureDetector(
-        onTap: () => onChanged(value),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          padding:  const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color:        isSel ? t.bgCard : Colors.transparent,
-            borderRadius: BorderRadius.circular(DS.rSm),
-            boxShadow:    isSel ? DS.shadowSm : [],
-          ),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text(label,
-                style: DS.label(
-                        color: isSel ? t.textPrimary : t.textTertiary)
-                    .copyWith(
-                        letterSpacing: 0.3,
-                        fontSize:      12,
-                        fontWeight:    isSel ? FontWeight.w700 : FontWeight.w500)),
-            if (count > 0) ...[
-              const SizedBox(width: 5),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                decoration: BoxDecoration(
-                    color:        isSel ? t.accent : t.bgRule,
-                    borderRadius: BorderRadius.circular(10)),
-                child: Text('$count',
-                    style: DS.caption(
-                            color: isSel ? Colors.white : t.textSecondary)
-                        .copyWith(fontSize: 10, fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ]),
         ),
       ),
-    );
+    ]);
   }
 }
 
-// ── Chairman credit card ──────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// CREDIT TILE — takes Map from Hive (not QueryDocumentSnapshot)
+// ════════════════════════════════════════════════════════════════════════════════
 
-class _ChairmanCreditCard extends StatelessWidget {
+class _CreditTile extends StatefulWidget {
   final Map<String, dynamic> data;
-  final VoidCallback?        onApprove;
-  final VoidCallback?        onReject;
+  final String               hiveKey;
+  final CreditLedgerService  service;
+  final String               username, userId, branchName;
+  final bool                 isManager;
 
-  const _ChairmanCreditCard({
-    required this.data,
-    this.onApprove,
-    this.onReject,
+  const _CreditTile({
+    required this.data, required this.hiveKey, required this.service,
+    required this.username, required this.userId, required this.branchName,
+    required this.isManager,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final t        = RoleThemeScope.dataOf(context);
-    final amount   = (data['amount'] as num?)?.toDouble() ?? 0;
-    final from     = data['fromUsername'] as String? ?? '-';
-    final notes    = data['notes']        as String? ?? '';
-    final catId    = data['categoryId']   as String? ?? '';
-    final subId    = data['subtypeId']    as String?;
-    final ts       = data['timestamp']    as String? ?? '';
-    final status   = data['status']       as String? ?? kStatusPending;
-    final receiptNo = data['receiptNo']   as String? ?? '';
-    final isPend   = status == kStatusPending;
-
-    String timeStr = '';
-    try {
-      timeStr = DateFormat('dd MMM yyyy  •  hh:mm a').format(DateTime.parse(ts));
-    } catch (_) {}
-
-    final cat = DonationCategory.values.firstWhere(
-        (c) => c.name == catId, orElse: () => DonationCategory.general);
-    final subtype = subId != null
-        ? DonationSubtype.values.firstWhereOrNull((s) => s.name == subId)
-        : null;
-
-    final borderColor = isPend
-        ? t.accent.withOpacity(0.35)
-        : DS.statusApproved.withOpacity(0.35);
-    final headerBg   = isPend
-        ? t.accentMuted.withOpacity(0.4)
-        : DS.emerald100.withOpacity(0.5);
-    final iconBg     = isPend
-        ? t.accent.withOpacity(0.15)
-        : DS.emerald500.withOpacity(0.12);
-    final iconColor  = isPend ? t.accent : DS.emerald600;
-    final amtColor   = isPend ? t.accentLight : DS.emerald700;
-
-    return Container(
-      margin:     const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-          color:        t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: borderColor),
-          boxShadow:    DS.shadowMd),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          decoration: BoxDecoration(
-              color:        headerBg,
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(DS.rLg))),
-          child: Row(children: [
-            Container(
-              padding:    const EdgeInsets.all(9),
-              decoration: BoxDecoration(
-                  color:        iconBg,
-                  borderRadius: BorderRadius.circular(DS.rSm)),
-              child: Icon(Icons.manage_accounts_rounded,
-                  color: iconColor, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('From Manager: $from',
-                    style: DS.subheading(color: t.textPrimary)),
-                const SizedBox(height: 2),
-                Text(timeStr, style: DS.caption(color: t.textTertiary)),
-                if (receiptNo.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text('Receipt: $receiptNo',
-                      style: DS.caption(color: t.textTertiary)
-                          .copyWith(fontWeight: FontWeight.w700)),
-                ],
-              ]),
-            ),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text('PKR ${fmtNum(amount)}',
-                  style: DS.mono(color: amtColor, size: 18)),
-              const SizedBox(height: 4),
-              DSStatusBadge(status: status),
-            ]),
-          ]),
-        ),
-
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Wrap(spacing: 6, runSpacing: 6, children: [
-              if (catId.isNotEmpty)
-                _CategoryBadge(cat: cat),
-              if (subtype != null)
-                DSSubtypeBadge(subtype: subtype),
-            ]),
-
-            if (notes.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Container(
-                width:   double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                    color:        t.bgCardAlt,
-                    borderRadius: BorderRadius.circular(DS.rSm),
-                    border:       Border.all(color: t.bgRule)),
-                child: Text(notes,
-                    style: DS.caption(color: t.textSecondary)
-                        .copyWith(fontStyle: FontStyle.italic)),
-              ),
-            ],
-
-            if (isPend && (onApprove != null || onReject != null)) ...[
-              const SizedBox(height: 14),
-              _ReviewActionRow(onApprove: onApprove, onReject: onReject),
-            ],
-
-            const SizedBox(height: 14),
-          ]),
-        ),
-      ]),
-    );
-  }
+  State<_CreditTile> createState() => _CreditTileState();
 }
 
-// ── Manager review card ───────────────────────────────────────────────────────
-
-class _CreditReviewCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final bool                 processing;
-  final String               approverLabel;
-  final Color                accentColor;
-  final VoidCallback         onApprove;
-  final VoidCallback         onReject;
-
-  const _CreditReviewCard({
-    required this.data,
-    required this.processing,
-    required this.approverLabel,
-    required this.accentColor,
-    required this.onApprove,
-    required this.onReject,
-  });
+class _CreditTileState extends State<_CreditTile> {
+  bool _expanded   = false;
+  bool _actionBusy = false;
 
   @override
   Widget build(BuildContext context) {
     final t         = RoleThemeScope.dataOf(context);
-    final amount    = (data['amount'] as num?)?.toDouble() ?? 0;
-    final from      = data['fromUsername'] as String? ?? '-';
-    final notes     = data['notes']        as String? ?? '';
-    final catId     = data['categoryId']   as String? ?? '';
-    final subId     = data['subtypeId']    as String?;
-    final receiptNo = data['receiptNo']    as String? ?? '';
-    final ts        = data['timestamp']    as String? ?? '';
+    final d         = widget.data;
+    final catId     = d['categoryId']   as String? ?? '';
+    final cat       = DonationCategory.values.firstWhereOrNull((c) => c.name == catId) ?? DonationCategory.jamia;
+    final amt       = (d['amount']      as num?)?.toDouble() ?? 0.0;
+    final status    = d['status']       as String? ?? kStatusPending;
+    final fromUser  = d['fromUsername'] as String? ?? '-';
+    final fromRole  = d['fromRole']     as String? ?? '';
+    final collected = d['collectedBy']  as String? ?? '';
+    final receiptNo = d['receiptNo']    as String? ?? '';
+    final dateRaw   = d['date']         as String? ?? '';
+    final notes     = d['notes']        as String? ?? '';
+    final subtypeId = d['subtypeId']    as String?;
+    final syncSt    = d['syncStatus']   as String? ?? 'synced';
 
-    String timeStr = '';
-    try {
-      timeStr = DateFormat('dd MMM  •  hh:mm a').format(DateTime.parse(ts));
-    } catch (_) {}
+    String dl = dateRaw;
+    try { dl = DateFormat('dd MMM yyyy').format(DateTime.parse(dateRaw)); } catch (_) {}
 
-    final cat = DonationCategory.values.firstWhere(
-        (c) => c.name == catId, orElse: () => DonationCategory.general);
-    final subtype = subId != null
-        ? DonationSubtype.values.firstWhereOrNull((s) => s.name == subId)
-        : null;
+    final subtype    = subtypeId != null ? DonationSubtype.values.firstWhereOrNull((s) => s.name == subtypeId) : null;
+    final isPending  = status == kStatusPending;
+    final isApproved = status == kStatusApproved;
+    final isRejected = status == kStatusRejected;
+    final pillColor  = fromRole == 'Office Boy' ? DS.plum700    : DS.sapphire700;
+    final pillBg     = fromRole == 'Office Boy' ? DS.plum100    : DS.sapphire100;
+    final pillIcon   = fromRole == 'Office Boy' ? Icons.badge_outlined : Icons.account_balance_rounded;
+
+    Color borderColor() {
+      if (isPending)  return DS.statusPending.withOpacity(0.30);
+      if (isApproved) return DS.statusApproved.withOpacity(0.30);
+      return DS.statusRejected.withOpacity(0.30);
+    }
 
     return Container(
-      margin:     const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-          color:        t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: accentColor.withOpacity(0.2)),
-          boxShadow:    DS.shadowSm),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.05),
-              borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(DS.rLg)),
-              border: Border(
-                  bottom: BorderSide(color: accentColor.withOpacity(0.12)))),
-          child: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                  color:        accentColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(DS.rSm)),
-              child: Icon(Icons.person_rounded, color: accentColor, size: 15),
-            ),
-            const SizedBox(width: 10),
+        color: t.bgCard, borderRadius: BorderRadius.circular(DS.rMd),
+        border: Border.all(color: borderColor()), boxShadow: DS.shadowSm,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: [
+
+        IntrinsicHeight(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Container(width: 3, color: cat.color),
+            Container(width: 48, color: cat.lightColor,
+                child: Center(child: Icon(cat.icon, color: cat.color, size: 17))),
             Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(from, style: DS.subheading(color: t.textPrimary)),
-                Text(timeStr, style: DS.caption(color: t.textTertiary)),
-                if (receiptNo.isNotEmpty)
-                  Text('Receipt: $receiptNo',
-                      style: DS.caption(color: t.textTertiary)
-                          .copyWith(fontWeight: FontWeight.w700)),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 9, 10, 9),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(children: [
+                    _RolePill(label: fromRole, icon: pillIcon, color: pillColor, bg: pillBg),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(fromUser,
+                          style: DS.subheading(color: t.textPrimary).copyWith(fontSize: 13),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    Text('PKR ${fmtNum(amt)}', style: DS.mono(color: cat.color, size: 13)),
+                  ]),
+
+                  if (collected.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      Icon(Icons.person_outline_rounded, size: 10, color: t.textTertiary),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text('Originally collected by Office Boy: $collected',
+                            style: DS.caption(color: t.textTertiary).copyWith(fontSize: 10),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ]),
+                  ],
+
+                  const SizedBox(height: 4),
+
+                  Row(children: [
+                    _CatBadge(cat: cat),
+                    if (subtype != null) ...[const SizedBox(width: 5), DSSubtypeBadge(subtype: subtype)],
+                    const Spacer(),
+                    DSStatusBadge(status: status),
+                  ]),
+
+                  const SizedBox(height: 5),
+
+                  Row(children: [
+                    Icon(Icons.calendar_today_rounded, size: 9, color: t.textTertiary),
+                    const SizedBox(width: 3),
+                    Text(dl, style: DS.caption(color: t.textTertiary).copyWith(fontSize: 9.5)),
+                    if (receiptNo.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Icon(Icons.receipt_rounded, size: 9, color: t.textTertiary),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(receiptNo,
+                            style: DS.caption(color: t.textTertiary).copyWith(fontSize: 9.5),
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
+                    const Spacer(),
+                    if (syncSt == 'pending') ...[
+                      Icon(Icons.cloud_upload_outlined, size: 9, color: DS.statusPending.withOpacity(0.6)),
+                      const SizedBox(width: 3),
+                    ],
+                    _ExpandToggle(expanded: _expanded, color: t.accent,
+                        onTap: () => setState(() => _expanded = !_expanded)),
+                  ]),
+                ]),
+              ),
+            ),
+          ]),
+        ),
+
+        if (_expanded)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            decoration: BoxDecoration(
+              color: t.bgCardAlt,
+              border: Border(top: BorderSide(color: t.bgRule)),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _InfoBanner(text: 'Credit approval tracks money handoff only. The donation remains in the list regardless.'),
+              const SizedBox(height: 10),
+
+              Wrap(spacing: 7, runSpacing: 7, children: [
+                DSActionButton(icon: Icons.print_rounded,    label: 'Print',        color: DS.plum700,  onTap: () => printReceiptPdf(d, receiptNo)),
+                DSActionButton(icon: Icons.download_rounded, label: 'Download PDF', color: DS.navy700,  onTap: () => downloadReceiptPdf(d, receiptNo, context)),
+                if (isPending) ...[
+                  DSActionButton(icon: Icons.check_circle_rounded, label: widget.isManager ? 'Approve & Forward' : 'Approve',
+                      color: DS.statusApproved, disabled: _actionBusy, onTap: _approve),
+                  DSActionButton(icon: Icons.cancel_rounded, label: 'Reject',
+                      color: DS.statusRejected, disabled: _actionBusy, onTap: _promptReject),
+                ],
               ]),
-            ),
-            Text('PKR ${fmtNum(amount)}',
-                style: DS.mono(color: accentColor, size: 16)),
-          ]),
-        ),
 
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Wrap(spacing: 6, runSpacing: 6, children: [
-              if (catId.isNotEmpty) _CategoryBadge(cat: cat),
-              if (subtype != null)  DSSubtypeBadge(subtype: subtype),
+              if (isApproved) ...[
+                const SizedBox(height: 10),
+                _ApprovedBanner(text: 'Approved by ${d['approvedBy'] ?? '-'}${widget.isManager ? '  ·  Forwarded to Chairman.' : ''}'),
+              ],
+              if (isRejected) ...[
+                const SizedBox(height: 10),
+                _RejectedBanner(by: d['rejectedBy'] as String? ?? '-', reason: d['rejectionReason'] as String? ?? ''),
+              ],
+              if (syncSt == 'pending') ...[const SizedBox(height: 10), _SyncPendingChip()],
+              if (notes.isNotEmpty) ...[const SizedBox(height: 10), _NotesBanner(notes: notes)],
+
+              const SizedBox(height: 10),
+
+              Wrap(spacing: 20, runSpacing: 8, children: [
+                _Cell('Receipt No', receiptNo.isNotEmpty ? receiptNo : '-'),
+                _Cell('Category',   cat.label),
+                if (subtype != null) _Cell('Type', subtype.label),
+                _Cell('Submitted By', '$fromRole: $fromUser'),
+                if (collected.isNotEmpty) _Cell('Collected By', 'Office Boy: $collected'),
+                _Cell('Date',   dl),
+                _Cell('Status', status[0].toUpperCase() + status.substring(1)),
+                if (d['approvedBy']      != null) _Cell('Approved By', d['approvedBy'] as String),
+                if (d['rejectedBy']      != null) _Cell('Rejected By', d['rejectedBy'] as String),
+                if (d['rejectionReason'] != null) _Cell('Reason',      d['rejectionReason'] as String),
+                _Cell('Sync', syncSt == 'pending' ? '⏳ Queued' : '✅ Synced'),
+              ]),
             ]),
-
-            if (notes.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(notes,
-                  style: DS.caption(color: t.textTertiary)
-                      .copyWith(fontStyle: FontStyle.italic)),
-            ],
-
-            const SizedBox(height: 12),
-            _ReviewActionRow(
-              onApprove:    processing ? null : onApprove,
-              onReject:     processing ? null : onReject,
-              approveLabel: approverLabel,
-              isProcessing: processing,
-            ),
-          ]),
-        ),
+          ),
       ]),
     );
   }
-}
 
-// ── Review action row ─────────────────────────────────────────────────────────
+  Future<void> _approve() async {
+    if (_actionBusy || widget.hiveKey.isEmpty) return;
+    setState(() => _actionBusy = true);
+    try {
+      if (widget.isManager) {
+        await widget.service.managerApproveOBCredit(widget.hiveKey, widget.username, widget.userId);
+        if (mounted) _snack('✅  Approved & forwarded to Chairman', DS.statusApproved);
+      } else {
+        await widget.service.chairmanApproveManagerCredit(widget.hiveKey, widget.username);
+        if (mounted) _snack('✅  Credit approved', DS.statusApproved);
+      }
+    } catch (e) {
+      if (mounted) _snack('Approval failed: $e', DS.statusRejected);
+    } finally {
+      if (mounted) setState(() => _actionBusy = false);
+    }
+  }
 
-class _ReviewActionRow extends StatelessWidget {
-  final VoidCallback? onApprove;
-  final VoidCallback? onReject;
-  final String        approveLabel;
-  final bool          isProcessing;
+  Future<void> _promptReject() async {
+    if (_actionBusy || widget.hiveKey.isEmpty) return;
+    final reason = await _showRejectDialog(context);
+    if (reason == null) return;
+    setState(() => _actionBusy = true);
+    try {
+      if (widget.isManager) {
+        await widget.service.managerRejectOBCredit(widget.hiveKey, widget.username, reason);
+      } else {
+        await widget.service.chairmanRejectManagerCredit(widget.hiveKey, widget.username, reason);
+      }
+      if (mounted) _snack('❌  Credit rejected', DS.statusRejected);
+    } catch (e) {
+      debugPrint('[Reject] $e');
+    } finally {
+      if (mounted) setState(() => _actionBusy = false);
+    }
+  }
 
-  const _ReviewActionRow({
-    this.onApprove,
-    this.onReject,
-    this.approveLabel = 'Approve Donation',
-    this.isProcessing = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(children: [
-      Expanded(
-        child: OutlinedButton.icon(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: DS.statusRejected,
-            side:    const BorderSide(color: Color(0xFFEF4444), width: 1.2),
-            shape:   RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(DS.rMd)),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            backgroundColor: const Color(0xFFFFF5F5),
-          ),
-          onPressed: onReject,
-          icon:  const Icon(Icons.close_rounded, size: 16),
-          label: const Text('Reject',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
-        ),
-      ),
-      const SizedBox(width: 10),
-      Expanded(
-        flex: 2,
-        child: ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: DS.statusApproved,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(DS.rMd)),
-            padding:   const EdgeInsets.symmetric(vertical: 12),
-            elevation: 0,
-          ),
-          onPressed: onApprove,
-          icon: isProcessing
-              ? const SizedBox(
-                  width: 14, height: 14,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2))
-              : const Icon(Icons.check_circle_rounded, size: 16),
-          label: Text(approveLabel,
-              style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.w700)),
-        ),
-      ),
-    ]);
+  void _snack(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content:         Text(msg, style: const TextStyle(fontWeight: FontWeight.w700)),
+      backgroundColor: color,
+      behavior:        SnackBarBehavior.floating,
+      margin:          const EdgeInsets.all(16),
+      shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rMd)),
+    ));
   }
 }
 
-// ── Manager forwarded section ─────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════════════════════
+// REJECT DIALOG
+// ════════════════════════════════════════════════════════════════════════════════
 
-class _ManagerForwardedSection extends StatelessWidget {
-  final CreditLedgerService svc;
-  const _ManagerForwardedSection({required this.svc});
+Future<String?> _showRejectDialog(BuildContext context) async {
+  final t          = RoleThemeScope.dataOf(context);
+  final reasonCtrl = TextEditingController();
+
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rXl)),
+      child: Container(
+        padding:    const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: t.bgCard, borderRadius: BorderRadius.circular(DS.rXl),
+          border: Border.all(color: t.bgRule),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Reject Credit', style: DS.heading(color: t.textPrimary)),
+          const SizedBox(height: 6),
+          Text('This only affects money tracking — the donation stays in the list.',
+              style: DS.caption(color: t.textSecondary).copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Text('Reason:', style: DS.body(color: t.textSecondary)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: reasonCtrl,
+            maxLines:   2,
+            decoration: InputDecoration(
+              hintText: 'Enter reason for rejection',
+              hintStyle: DS.body(color: t.textTertiary),
+              filled:    true, fillColor: t.bgCardAlt,
+              border:        OutlineInputBorder(borderRadius: BorderRadius.circular(DS.rMd), borderSide: BorderSide(color: t.bgRule)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(DS.rMd), borderSide: BorderSide(color: t.bgRule)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(DS.rMd), borderSide: const BorderSide(color: DS.statusRejected, width: 1.5)),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: t.textSecondary,
+                    side:    BorderSide(color: t.bgRule),
+                    shape:   RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rMd)),
+                    padding: const EdgeInsets.symmetric(vertical: 12)),
+                child: const Text('Cancel'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: DS.statusRejected, foregroundColor: Colors.white,
+                    shape:     RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rMd)),
+                    padding:   const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0),
+                child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
+        ]),
+      ),
+    ),
+  );
+
+  if (confirmed != true) return null;
+  return reasonCtrl.text.trim();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SMALL REUSABLE WIDGETS
+// ════════════════════════════════════════════════════════════════════════════════
+
+class _PendingToggle extends StatelessWidget {
+  final bool active; final VoidCallback onTap;
+  const _PendingToggle({required this.active, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: active ? DS.gold100 : t.bgCard,
+          borderRadius: BorderRadius.circular(DS.rMd),
+          border: Border.all(color: active ? DS.statusPending.withOpacity(0.4) : t.bgRule),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.hourglass_top_rounded, size: 12,
+              color: active ? DS.statusPending : t.textTertiary),
+          const SizedBox(width: 5),
+          Text(active ? 'Pending only' : 'All credits',
+              style: DS.label(color: active ? DS.statusPending : t.textTertiary).copyWith(fontSize: 10.5)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _PendingCountBadge extends StatelessWidget {
+  final String branchId, toRole;
+  const _PendingCountBadge({required this.branchId, required this.toRole});
+
+  @override
+  Widget build(BuildContext context) {
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: svc.managerToChairmanPending(),
-      builder: (_, pendSnap) {
-        if (pendSnap.hasError) return const SizedBox.shrink();
-        return StreamBuilder<List<Map<String, dynamic>>>(
-          stream: svc.chairmanApproved(),
-          builder: (_, apprSnap) {
-            if (apprSnap.hasError) return const SizedBox.shrink();
-            final pending  = pendSnap.data ?? [];
-            final approved = apprSnap.data ?? [];
-            if (pending.isEmpty && approved.isEmpty) {
-              return const SizedBox.shrink();
-            }
-
-            double pendTotal = 0, appTotal = 0;
-            for (final d in pending)  pendTotal += (d['amount'] as num?)?.toDouble() ?? 0;
-            for (final d in approved) appTotal  += (d['amount'] as num?)?.toDouble() ?? 0;
-
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              child: Container(
-                padding:    const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                    color:        t.bgCard,
-                    borderRadius: BorderRadius.circular(DS.rLg),
-                    border:       Border.all(color: t.bgRule),
-                    boxShadow:    DS.shadowSm),
-                child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Forwarded to Chairman',
-                      style: DS.label(color: t.textTertiary)
-                          .copyWith(letterSpacing: 0.8)),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(
-                      child: _KpiTile(
-                          label: 'Awaiting Chairman',
-                          value: 'PKR ${fmtNum(pendTotal)}',
-                          icon:  Icons.pending_actions_rounded,
-                          color: DS.statusPending)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _KpiTile(
-                          label: 'Chairman Approved',
-                          value: 'PKR ${fmtNum(appTotal)}',
-                          icon:  Icons.check_circle_rounded,
-                          color: DS.statusApproved)),
-                  ]),
-                ]),
-              ),
-            );
-          },
+      stream: LocalStorageService.streamCredits(branchId: branchId, toRole: toRole),
+      builder: (context, snap) {
+        final count = snap.data
+                ?.where((d) => (d['status'] as String? ?? '') == kStatusPending)
+                .length ?? 0;
+        if (count == 0) return const SizedBox.shrink();
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: DS.gold100, borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: DS.statusPending.withOpacity(0.3)),
+          ),
+          child: Text('$count pending',
+              style: DS.label(color: DS.statusPending).copyWith(fontSize: 10)),
         );
       },
     );
   }
 }
 
-// ── Shared micro-widgets ──────────────────────────────────────────────────────
-
-class _SectionHeader extends StatelessWidget {
-  final IconData icon;
-  final String   title, subtitle;
-  final Color    color;
-
-  const _SectionHeader({
-    required this.icon,     required this.title,
-    required this.subtitle, required this.color,
-  });
+class _CreditSummaryRow extends StatelessWidget {
+  final String  branchId, toRole;
+  final String? filterUserId;
+  const _CreditSummaryRow({required this.branchId, required this.toRole, this.filterUserId});
 
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-      child: Row(children: [
-        Container(
-          padding:    const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-              color:        color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(DS.rMd)),
-          child: Icon(icon, color: color, size: 18),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(title, style: DS.heading(color: t.textPrimary)),
-            const SizedBox(height: 2),
-            Text(subtitle, style: DS.caption(color: t.textTertiary)),
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: LocalStorageService.streamCredits(
+          branchId: branchId, toRole: toRole, fromUserId: filterUserId),
+      builder: (context, snap) {
+        double pending = 0, approved = 0, rejected = 0;
+        for (final d in snap.data ?? []) {
+          final amt = (d['amount'] as num?)?.toDouble() ?? 0.0;
+          final st  = d['status'] as String? ?? kStatusPending;
+          if      (st == kStatusApproved) approved += amt;
+          else if (st == kStatusRejected) rejected += amt;
+          else                            pending  += amt;
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(children: [
+            _SummaryCell('Pending',  fmtNum(pending),  DS.statusPending,  DS.gold100),
+            const SizedBox(width: 8),
+            _SummaryCell('Approved', fmtNum(approved), DS.statusApproved, DS.emerald100),
+            const SizedBox(width: 8),
+            _SummaryCell('Rejected', fmtNum(rejected), DS.statusRejected, DS.crimson100),
           ]),
-        ),
-      ]),
+        );
+      },
     );
   }
 }
 
-class _SummaryBar extends StatelessWidget {
-  final int    count;
-  final double total;
-  final Color  color;
-
-  const _SummaryBar(
-      {required this.count, required this.total, required this.color});
+class _SummaryCell extends StatelessWidget {
+  final String label, value; final Color color, bg;
+  const _SummaryCell(this.label, this.value, this.color, this.bg);
 
   @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-            color:        color.withOpacity(0.06),
-            borderRadius: BorderRadius.circular(DS.rMd),
-            border:       Border.all(color: color.withOpacity(0.18))),
-        child: Row(children: [
-          Icon(Icons.payments_rounded, color: color, size: 15),
-          const SizedBox(width: 8),
-          Text('$count item${count != 1 ? "s" : ""} pending review',
-              style: DS.caption(color: t.textTertiary)),
-          const Spacer(),
-          Text('PKR ${fmtNum(total)}',
-              style: DS.mono(color: color, size: 14)),
-        ]),
-      ),
-    );
-  }
-}
-
-class _KpiTile extends StatelessWidget {
-  final String   label, value;
-  final IconData icon;
-  final Color    color;
-
-  const _KpiTile({
-    required this.label, required this.value,
-    required this.icon,  required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      padding: const EdgeInsets.all(12),
+  Widget build(BuildContext context) => Expanded(
+    child: Container(
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
       decoration: BoxDecoration(
-          color:        color.withOpacity(0.07),
-          borderRadius: BorderRadius.circular(DS.rMd),
-          border:       Border.all(color: color.withOpacity(0.18))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, color: color, size: 15),
-        const SizedBox(height: 6),
-        Text(value, style: DS.mono(color: color, size: 14)),
+        color: bg, borderRadius: BorderRadius.circular(DS.rSm),
+        border: Border.all(color: color.withOpacity(0.25)),
+      ),
+      child: Column(children: [
+        Text(label, style: DS.label(color: color).copyWith(fontSize: 9)),
         const SizedBox(height: 2),
-        Text(label, style: DS.caption(color: t.textTertiary)),
+        Text('PKR $value', style: DS.mono(color: color, size: 11), overflow: TextOverflow.ellipsis),
       ]),
-    );
-  }
-}
-
-class _EmptyCard extends StatelessWidget {
-  final String   message;
-  final IconData icon;
-  final Color    color;
-
-  const _EmptyCard(
-      {required this.message, required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Container(
-        width:   double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 32),
-        decoration: BoxDecoration(
-            color:        t.bgCardAlt,
-            borderRadius: BorderRadius.circular(DS.rLg),
-            border:       Border.all(color: color.withOpacity(0.15))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, color: color.withOpacity(0.30), size: 36),
-          const SizedBox(height: 10),
-          Text(message,
-              style: DS.caption(color: t.textTertiary)
-                  .copyWith(fontWeight: FontWeight.w600)),
-        ]),
-      ),
-    );
-  }
-}
-
-class _ErrorCard extends StatelessWidget {
-  final String   message;
-  final IconData icon;
-  final Color    color;
-
-  const _ErrorCard(
-      {required this.message, required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Container(
-        width:   double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
-        decoration: BoxDecoration(
-            color:        color.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(DS.rLg),
-            border:       Border.all(color: color.withOpacity(0.25))),
-        child: Row(children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(message,
-                style: DS.caption(color: t.textSecondary)
-                    .copyWith(fontWeight: FontWeight.w600)),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-class _LoadingRow extends StatelessWidget {
-  const _LoadingRow();
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.all(32),
-      child:   Center(
-          child: CircularProgressIndicator(strokeWidth: 2, color: t.accent)),
-    );
-  }
-}
-
-class _CategoryBadge extends StatelessWidget {
-  final DonationCategory cat;
-  const _CategoryBadge({required this.cat});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-          color:        cat.lightColor,
-          borderRadius: BorderRadius.circular(DS.rSm),
-          border:       Border.all(color: cat.color.withOpacity(0.25))),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(cat.icon, size: 11, color: cat.color),
-        const SizedBox(width: 5),
-        Text(cat.shortLabel,
-            style: DS.label(color: cat.color)
-                .copyWith(fontSize: 10, letterSpacing: 0.3)),
-      ]),
-    );
-  }
-}
-
-class _BarWidget extends StatelessWidget {
-  final String label1, val1, label2, val2;
-  final Color  color;
-  final bool   hasPending;
-
-  const _BarWidget({
-    required this.label1, required this.val1,
-    required this.label2, required this.val2,
-    required this.color,  required this.hasPending,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      margin:  const EdgeInsets.fromLTRB(16, 6, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-          color:        color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(DS.rMd),
-          border:       Border.all(color: color.withOpacity(0.18))),
-      child: Row(children: [
-        _kpi(t, label1, val1),
-        Container(
-            height: 28, width: 1,
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            color: color.withOpacity(0.2)),
-        _kpi(t, label2, val2),
-        if (hasPending) ...[
-          const Spacer(),
-          Icon(Icons.cloud_queue_rounded, size: 13, color: DS.statusPending),
-        ],
-      ]),
-    );
-  }
-
-  Widget _kpi(RoleThemeData t, String label, String val) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: DS.label(color: t.textTertiary)),
-        const SizedBox(height: 2),
-        Text(val, style: DS.mono(color: color, size: 13)),
-      ]);
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════════════════════
-
-Future<bool?> _creditConfirmDialog({
-  required BuildContext context,
-  required bool         isApprove,
-  required double       amount,
-  required String       fromName,
-}) {
-  final t = RoleThemeScope.dataOf(context);
-  return showDialog<bool>(
-    context: context,
-    builder: (ctx) => Dialog(
-      shape:     RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(DS.rXl)),
-      elevation: 0,
-      child: Container(
-        padding:    const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-            color:        t.bgCard,
-            borderRadius: BorderRadius.circular(DS.rXl),
-            border:       Border.all(color: t.bgRule)),
-        child: Column(
-          mainAxisSize:       MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Container(
-                padding:    const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                    color: isApprove
-                        ? DS.statusApproved.withOpacity(0.10)
-                        : DS.statusRejected.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(DS.rMd)),
-                child: Icon(
-                    isApprove
-                        ? Icons.check_circle_rounded
-                        : Icons.cancel_rounded,
-                    color: isApprove ? DS.statusApproved : DS.statusRejected,
-                    size: 20),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                  isApprove ? 'Confirm Approval' : 'Confirm Rejection',
-                  style: DS.heading(color: t.textPrimary)),
-            ]),
-            const SizedBox(height: 16),
-            Container(
-              width:   double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color:        t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(DS.rMd),
-                  border:       Border.all(color: t.bgRule)),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('AMOUNT', style: DS.label(color: t.textTertiary)),
-                const SizedBox(height: 4),
-                Text('PKR ${fmtNum(amount)}',
-                    style: DS.mono(color: t.textPrimary, size: 22)),
-                const SizedBox(height: 8),
-                Text('FROM', style: DS.label(color: t.textTertiary)),
-                const SizedBox(height: 4),
-                Text(fromName,
-                    style: DS.subheading(color: t.textSecondary)),
-              ]),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              isApprove
-                  ? 'This will forward the credit to the next approval level.'
-                  : 'The submitter will need to resubmit after corrections.',
-              style: DS.caption(color: t.textTertiary),
-            ),
-            const SizedBox(height: 20),
-            Row(children: [
-              Expanded(
-                child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: t.textSecondary,
-                      side: BorderSide(color: t.bgRule),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(DS.rMd)),
-                      padding: const EdgeInsets.symmetric(vertical: 13)),
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: isApprove
-                          ? DS.statusApproved
-                          : DS.statusRejected,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(DS.rMd)),
-                      padding:   const EdgeInsets.symmetric(vertical: 13),
-                      elevation: 0),
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: Text(isApprove ? 'Approve' : 'Reject',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 15)),
-                ),
-              ),
-            ]),
-          ]),
-      ),
     ),
   );
 }
 
-void _showSnack(BuildContext context, String message, Color color) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content:         Text(message,
-        style: const TextStyle(fontWeight: FontWeight.w600)),
-    backgroundColor: color,
-    behavior:        SnackBarBehavior.floating,
-    margin:          const EdgeInsets.all(16),
-    shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(DS.rMd)),
-    duration: const Duration(seconds: 3),
-  ));
+class _SyncPendingChip extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: DS.gold100, borderRadius: BorderRadius.circular(99),
+      border: Border.all(color: DS.statusPending.withOpacity(0.3)),
+    ),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(Icons.cloud_upload_outlined, size: 10, color: DS.statusPending),
+      const SizedBox(width: 4),
+      Text('Saved locally · will sync when online',
+          style: DS.label(color: DS.statusPending).copyWith(fontSize: 9.5)),
+    ]),
+  );
+}
+
+class _RolePill extends StatelessWidget {
+  final String label; final IconData icon; final Color color, bg;
+  const _RolePill({required this.label, required this.icon, required this.color, required this.bg});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg, borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: color.withOpacity(0.30))),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 9, color: color),
+      const SizedBox(width: 4),
+      Text(label, style: DS.label(color: color).copyWith(fontSize: 9, letterSpacing: 0.3)),
+    ]),
+  );
+}
+
+class _CatBadge extends StatelessWidget {
+  final DonationCategory cat;
+  const _CatBadge({required this.cat});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+    decoration: BoxDecoration(
+      color: cat.lightColor, borderRadius: BorderRadius.circular(99),
+      border: Border.all(color: cat.color.withOpacity(0.25))),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(cat.icon, size: 9, color: cat.color),
+      const SizedBox(width: 4),
+      Text(cat.shortLabel, style: DS.label(color: cat.color).copyWith(fontSize: 9, letterSpacing: 0.3)),
+    ]),
+  );
+}
+
+class _ExpandToggle extends StatelessWidget {
+  final bool expanded; final Color color; final VoidCallback onTap;
+  const _ExpandToggle({required this.expanded, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      Text(expanded ? 'Less' : 'Details', style: DS.label(color: color).copyWith(fontSize: 9.5)),
+      Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 12, color: color),
+    ]),
+  );
+}
+
+class _InfoBanner extends StatelessWidget {
+  final String text;
+  const _InfoBanner({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: DS.sapphire100, borderRadius: BorderRadius.circular(DS.rSm),
+      border: Border.all(color: DS.sapphire500.withOpacity(0.3))),
+    child: Row(children: [
+      const Icon(Icons.info_outline_rounded, size: 14, color: DS.sapphire700),
+      const SizedBox(width: 8),
+      Expanded(child: Text(text, style: DS.caption(color: DS.sapphire700).copyWith(fontSize: 10))),
+    ]),
+  );
+}
+
+class _ApprovedBanner extends StatelessWidget {
+  final String text;
+  const _ApprovedBanner({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: DS.emerald100, borderRadius: BorderRadius.circular(DS.rSm),
+      border: Border.all(color: DS.statusApproved.withOpacity(0.3))),
+    child: Row(children: [
+      const Icon(Icons.check_circle_rounded, size: 13, color: DS.statusApproved),
+      const SizedBox(width: 6),
+      Expanded(child: Text(text,
+          style: DS.caption(color: DS.emerald700).copyWith(fontWeight: FontWeight.w600, fontSize: 10))),
+    ]),
+  );
+}
+
+class _RejectedBanner extends StatelessWidget {
+  final String by, reason;
+  const _RejectedBanner({required this.by, required this.reason});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    decoration: BoxDecoration(
+      color: DS.crimson100, borderRadius: BorderRadius.circular(DS.rSm),
+      border: Border.all(color: DS.statusRejected.withOpacity(0.3))),
+    child: Row(children: [
+      const Icon(Icons.cancel_rounded, size: 13, color: DS.statusRejected),
+      const SizedBox(width: 6),
+      Expanded(child: Text(
+          'Rejected by $by${reason.isNotEmpty ? "  ·  $reason" : ""}',
+          style: DS.caption(color: DS.crimson700).copyWith(fontWeight: FontWeight.w600, fontSize: 10))),
+    ]),
+  );
+}
+
+class _NotesBanner extends StatelessWidget {
+  final String notes;
+  const _NotesBanner({required this.notes});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Container(
+      width: double.infinity, padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: t.bgCard, borderRadius: BorderRadius.circular(DS.rSm),
+        border: Border.all(color: t.bgRule)),
+      child: Text('📝 $notes',
+          style: DS.caption(color: t.textTertiary).copyWith(fontStyle: FontStyle.italic)),
+    );
+  }
+}
+
+class _Cell extends StatelessWidget {
+  final String label, value;
+  const _Cell(this.label, this.value);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(label, style: DS.label(color: t.textTertiary)),
+      const SizedBox(height: 3),
+      Text(value, style: DS.subheading(color: t.textPrimary).copyWith(fontSize: 12.5)),
+    ]);
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  final String error;
+  const _ErrorView({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.cloud_off_rounded, size: 40, color: DS.statusRejected.withOpacity(0.5)),
+          const SizedBox(height: 12),
+          Text('Could not load credits', style: DS.subheading(color: t.textSecondary)),
+          const SizedBox(height: 6),
+          Text(error, textAlign: TextAlign.center, style: DS.caption(color: t.textTertiary)),
+        ]),
+      ),
+    );
+  }
+}
+
+class _EmptyCredits extends StatelessWidget {
+  final bool pending; final String roleFrom;
+  const _EmptyCredits({required this.pending, required this.roleFrom});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.check_circle_outline_rounded, size: 44, color: DS.emerald500.withOpacity(0.35)),
+        const SizedBox(height: 12),
+        Text(pending ? 'No pending credits' : 'No credits yet',
+            style: DS.subheading(color: t.textTertiary)),
+        const SizedBox(height: 4),
+        Text(
+            pending ? 'All credits have been actioned'
+                    : 'Credits appear here once $roleFrom records a donation.',
+            textAlign: TextAlign.center,
+            style: DS.caption(color: t.textTertiary)),
+      ]),
+    );
+  }
 }

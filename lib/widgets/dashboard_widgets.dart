@@ -1135,94 +1135,188 @@ class PatientDistributionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = s.tokens;
-    final zPct  = total > 0 ? (s.zakat    / total * 100).round() : 0;
-    final nPct  = total > 0 ? (s.nonZakat / total * 100).round() : 0;
-    final gPct  = total > 0 ? (s.gmwf     / total * 100).round() : 0;
+    final zPct = total > 0 ? (s.zakat / total * 100).round() : 0;
+    final nPct = total > 0 ? (s.nonZakat / total * 100).round() : 0;
+    final gPct = total > 0 ? (s.gmwf / total * 100).round() : 0;
 
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: t.bgCard, borderRadius: BorderRadius.circular(20),
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-            blurRadius: 14, offset: const Offset(0, 4))],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(10)),
-              child: Icon(Icons.donut_large_rounded, color: t.accent, size: 18)),
-          const SizedBox(width: 10),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Patient Type Distribution – Today',
-                style: TextStyle(color: t.textPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
-            Text('Total across all branches',
-                style: TextStyle(color: t.textTertiary, fontSize: 11)),
-          ]),
-        ]),
-        const SizedBox(height: 24),
-        if (total == 0)
-          Center(child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('No patients today', style: TextStyle(color: t.textTertiary)),
-          ))
-        else
-          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            _AnimatedDonut(
-              size: 185,
-              values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
-              colors: [t.zakat, t.nonZakat, t.gmwf],
-              center: Column(mainAxisSize: MainAxisSize.min, children: [
-                _AnimatedCount(value: total,
-                    style: TextStyle(color: t.textPrimary, fontSize: 24,
-                        fontWeight: FontWeight.w900)),
-                Text('patients', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-              ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header (same for both layouts)
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: t.accentMuted,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.pie_chart_rounded, color: t.accent, size: 18),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Patient Type Distribution – Today",
+                    style: TextStyle(
+                      color: t.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    "Total across all branches",
+                    style: TextStyle(color: t.textTertiary, fontSize: 11),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          if (total == 0)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Text(
+                  "No patients today",
+                  style: TextStyle(color: t.textTertiary, fontSize: 14),
+                ),
+              ),
+            )
+          else
+            LayoutBuilder(
+              builder: (context, constraints) {
+                // Breakpoint: ~620–640px is a good mobile/desktop switch for this card
+                final isDesktop = constraints.maxWidth >= 620;
+
+                final donut = _AnimatedDonut(
+                  size: isDesktop ? 220 : 200,
+                  values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
+                  colors: [t.zakat, t.nonZakat, t.gmwf],
+                  center: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _AnimatedCount(
+                        value: total,
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontSize: isDesktop ? 36 : 32,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Text(
+                        "patients",
+                        style: TextStyle(color: t.textTertiary, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                );
+
+                final legend = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _legendItem(t.zakat, "Zakaat", s.zakat, zPct, "PKR ${s.zakat * 20}", "@ PKR 20"),
+                    const SizedBox(height: 12),
+                    _legendItem(t.nonZakat, "Non-Zakat", s.nonZakat, nPct, "PKR ${s.nonZakat * 100}", "@ PKR 100"),
+                    const SizedBox(height: 12),
+                    _legendItem(t.gmwf, "GMWF", s.gmwf, gPct, "Free", "No charge"),
+                  ],
+                );
+
+                if (isDesktop) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Donut on left
+                      donut,
+                      const SizedBox(width: 40),
+                      // Legend on right
+                      Expanded(child: legend),
+                    ],
+                  );
+                } else {
+                  return Column(
+                    children: [
+                      // Donut centered on mobile
+                      Center(child: donut),
+                      const SizedBox(height: 32),
+                      // Legend below
+                      legend,
+                    ],
+                  );
+                }
+              },
             ),
-            const SizedBox(width: 24),
-            Expanded(child: Column(children: [
-              _legendRow(t.zakat,    'Zakat',     s.zakat,    zPct,
-                  'PKR ${s.zakat * 20}',     '@PKR 20'),
-              const SizedBox(height: 10),
-              _legendRow(t.nonZakat, 'Non-Zakat', s.nonZakat, nPct,
-                  'PKR ${s.nonZakat * 100}', '@PKR 100'),
-              const SizedBox(height: 10),
-              _legendRow(t.gmwf,     'GMWF',      s.gmwf,     gPct,
-                  'Free',                    'No charge'),
-            ])),
-          ]),
-      ]),
+        ],
+      ),
     );
   }
 
-  Widget _legendRow(Color c, String label, int count, int pct,
-      String rev, String rate) =>
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: c.withOpacity(0.06), borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: c.withOpacity(0.18)),
-        ),
-        child: Row(children: [
-          Container(width: 10, height: 10,
-              decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(3))),
-          const SizedBox(width: 8),
-          Expanded(child: Text(label, style: TextStyle(
-              color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.w600))),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('$count', style: TextStyle(color: c, fontSize: 15, fontWeight: FontWeight.w800)),
-            Text(rev, style: TextStyle(color: c.withOpacity(0.7), fontSize: 9, fontWeight: FontWeight.w600)),
-          ]),
-          const SizedBox(width: 8),
+  Widget _legendItem(Color color, String label, int count, int pct, String rev, String rate) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.20)),
+      ),
+      child: Row(
+        children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-            decoration: BoxDecoration(color: c.withOpacity(0.12), borderRadius: BorderRadius.circular(6)),
-            child: Text('$pct%', style: TextStyle(color: c, fontSize: 10, fontWeight: FontWeight.w700)),
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
-        ]),
-      );
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "$count patients  •  $rev",
+                  style: TextStyle(color: t.textSecondary, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              "$pct%",
+              style: TextStyle(
+                color: color,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
-
 // ════════════════════════════════════════════════════════════════════════════════
 // SERVICE REVENUE CARD
 // ════════════════════════════════════════════════════════════════════════════════

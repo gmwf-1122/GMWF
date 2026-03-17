@@ -118,4 +118,6 @@ flutter:
     - assets/images/3.jpg
     - assets/images/moon.png
     - assets/images/rx.png
+    - assets/qr/anjuman.png
+    - assets/qr/gm.png
     - assets/fonts/NooriNastaliq.ttf

@@ -274,7 +274,6 @@ class HomeRouter extends StatelessWidget {
       case 'admin':
         return AdminScreen(branchId: branchId);
 
-      // Manager: same authority level as admin, branch-scoped
       case 'manager':
         return ManagerScreen(branchId: branchId, username: userName);
 
@@ -318,7 +317,6 @@ class HomeRouter extends StatelessWidget {
       case 'supervisor':
         return SupervisorScreen(branchId: branchId, supervisorId: uid);
 
-      // Dasterkhwaan: Office Boy
       case 'office boy':
       case 'dasterkhwaan office boy':
       case 'food token generator':
@@ -327,14 +325,17 @@ class HomeRouter extends StatelessWidget {
       case 'dasterkhwaan':
         return const DasterkhwaanOfficeBoy();
 
-      // Dasterkhwaan: Kitchen
       case 'kitchen':
       case 'dasterkhwaan kitchen':
         return const DasterkhwaanKitchen();
 
-      // Standalone Donations screen
+      // ✅ FIX: pass branchId, username and correct UserRole enum value
       case 'donations':
-        return DonationsScreen();
+        return DonationsScreen.embedded(
+          branchId:   branchId,
+          username:   userName,
+          role:       UserRole.staff,
+        );
 
       default:
         debugPrint("Unknown role: $role");

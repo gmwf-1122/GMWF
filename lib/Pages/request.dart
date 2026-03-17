@@ -164,7 +164,6 @@ class _StableRequestTabState extends State<_StableRequestTab>
   void initState() {
     super.initState();
 
-    // No orderBy → instant loading without index
     _editStream = FirebaseFirestore.instance
         .collection('branches')
         .doc(widget.branchId)
@@ -206,7 +205,20 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
         final editDocs = snapshot.data![0].docs;
         final dispenseDocs = snapshot.data![1].docs;
-        final allDocs = [...editDocs, ...dispenseDocs];
+        var allDocs = [...editDocs, ...dispenseDocs];
+
+        allDocs.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aTime = aData['requestedAt'] as Timestamp?;
+          final bTime = bData['requestedAt'] as Timestamp?;
+
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+
+          return bTime.compareTo(aTime);
+        });
 
         if (allDocs.isEmpty) {
           return Center(
@@ -259,9 +271,13 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final collection = doc.reference.parent.id;
 
     final patientName = data['patientName']?.toString() ?? '—';
-    final requesterId = data['requestedBy']?.toString();
     final ts = data['requestedAt'] as Timestamp?;
     final reason = data['reason']?.toString() ?? '';
+
+    // FIXED: Check for cached name first (requesterName), then fall back to
+    // UID lookup. Also handle both 'requestedBy' and legacy 'requester' field names.
+    final cachedName = (data['requesterName']?.toString() ?? '').trim();
+    final requesterId = (data['requestedBy']?.toString() ?? data['requester']?.toString() ?? '').trim();
 
     String amountText = '';
     if (requestType == 'token_reversal') {
@@ -275,17 +291,20 @@ class _StableRequestTabState extends State<_StableRequestTab>
       }
     }
 
-    final Future<String> requesterNameFuture = requesterId == null
-        ? Future.value('Unknown')
-        : FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('users')
-            .doc(requesterId)
-            .get()
-            .then((snap) => snap.data()?['username']?.toString() ?? 'User')
-            .timeout(const Duration(seconds: 5), onTimeout: () => 'User')
-            .catchError((_) => 'User');
+    // Use cached name if available; otherwise do Firestore lookup.
+    final Future<String> requesterNameFuture = cachedName.isNotEmpty
+        ? Future.value(cachedName)
+        : requesterId.isEmpty
+            ? Future.value('Unknown')
+            : FirebaseFirestore.instance
+                .collection('branches')
+                .doc(widget.branchId)
+                .collection('users')
+                .doc(requesterId)
+                .get()
+                .then((snap) => snap.data()?['username']?.toString() ?? 'User')
+                .timeout(const Duration(seconds: 5), onTimeout: () => 'User')
+                .catchError((_) => 'User');
 
     return FutureBuilder<String>(
       future: requesterNameFuture,
@@ -602,14 +621,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
   Widget _buildTokenReversalView(Map<String, dynamic> data) {
     final tokenSerial = data['tokenSerial']?.toString() ?? data['tokenId']?.toString() ?? '—';
     final patientId = data['patientId']?.toString() ?? '—';
-    final amountText = ''; // We now use the pre-calculated amountText from above
     final queueType = data['queueType']?.toString() ?? 'unknown';
-
-    // Only show amount if it's a token reversal
-    String displayAmount = '';
-    if (amountText.isNotEmpty) {
-      displayAmount = amountText;
-    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -619,11 +631,6 @@ class _StableRequestTabState extends State<_StableRequestTab>
         Text("Token Serial: $tokenSerial"),
         Text("Patient ID: $patientId"),
         Text("Queue: $queueType"),
-        if (displayAmount.isNotEmpty)
-          Text(
-            "Amount: $displayAmount",
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal.shade800),
-          ),
       ],
     );
   }

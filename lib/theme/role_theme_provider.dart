@@ -1,28 +1,8 @@
 // lib/theme/role_theme_provider.dart
-// Provides current role context to shared pages (Branches, Register, Users, etc.)
+
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// RoleThemeScope — InheritedWidget that propagates the active RoleTheme down
-// the entire widget tree.
-//
-// HOW IT WORKS:
-//   1. At login, convert the Firestore role string once:
-//        final role = RoleThemeData.fromString(userData['role']);
-//
-//   2. Wrap the top-level body of each role screen with RoleThemeScope:
-//        RoleThemeScope(role: role, child: YourScreen())
-//
-//   3. In EVERY sub-screen (Branches, Patients, Users, Downloads, etc.)
-//      read the theme with ONE line — no parameters needed:
-//        final t = RoleThemeScope.dataOf(context);
-//      Then use t.bg, t.accent, t.bgCard, etc. everywhere.
-//
-//   Result: CEO opens Branches → rose gold. Chairman opens same screen → gold.
-//           Admin/Manager open it → identical light palette. Zero duplication;
-//           no theme params passed through constructors.
-// ─────────────────────────────────────────────────────────────────────────────
 
 class RoleThemeScope extends InheritedWidget {
   final RoleTheme role;
@@ -33,16 +13,12 @@ class RoleThemeScope extends InheritedWidget {
     required super.child,
   });
 
-  /// Returns the active [RoleTheme] from the nearest [RoleThemeScope].
-  /// Falls back to [RoleTheme.admin] if no scope is found.
   static RoleTheme of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<RoleThemeScope>();
     return scope?.role ?? RoleTheme.admin;
   }
 
-  /// Returns the full [RoleThemeData] colour set for the signed-in role.
-  /// This is the primary call used by every screen and sub-screen:
-  ///   final t = RoleThemeScope.dataOf(context);
+
   static RoleThemeData dataOf(BuildContext context) {
     return RoleThemeData.of(of(context));
   }

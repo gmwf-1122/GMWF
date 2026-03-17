@@ -238,7 +238,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
           ),
         ]),
         actions: [
-          // Compact status dot
+          // Compact status dot — LAN
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
             width: 10, height: 10,
@@ -247,6 +247,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
               color: _connectionStatus.isConnected ? Colors.greenAccent : Colors.redAccent,
             ),
           ),
+          // Compact status dot — Internet
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
             width: 10, height: 10,
@@ -262,9 +263,18 @@ class _DispensarScreenState extends State<DispensarScreen> {
             )
           else
             IconButton(icon: const Icon(Icons.sync, color: Colors.white, size: 22), onPressed: _forceSync),
+          // ── Inventory: dispenser gets back button, NO Adjust button ──────
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 22),
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId))),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => InventoryPage(
+                  branchId: widget.branchId,
+                  isDispenser: true,
+                ),
+              ),
+            ),
           ),
           _isLoggingOut
               ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
@@ -273,7 +283,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
       );
     }
 
-    // Desktop AppBar (unchanged)
+    // Desktop AppBar
     return AppBar(
       backgroundColor: _teal,
       elevation: 10,
@@ -320,9 +330,18 @@ class _DispensarScreenState extends State<DispensarScreen> {
               : const Icon(Icons.sync, size: 32, color: Colors.white),
           onPressed: _isSyncing ? null : _forceSync,
         ),
+        // ── Inventory: dispenser gets back button, NO Adjust button ────────
         IconButton(
           icon: const Icon(Icons.inventory_2_outlined, size: 32, color: Colors.white),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId))),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => InventoryPage(
+                branchId: widget.branchId,
+                isDispenser: true,
+              ),
+            ),
+          ),
         ),
         _isLoggingOut
             ? const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))))
@@ -368,7 +387,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
   Widget _buildMobileLayout() {
     if (_showingForm && _selectedQueueEntry != null) {
       return Column(children: [
-        // Back button bar
         Container(
           color: Colors.white,
           child: Row(children: [

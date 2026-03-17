@@ -1,6 +1,4 @@
 // lib/pages/admin_screen.dart
-// Admin Portal — Slate Blue on Soft Warm White
-// Sidebar: Overview, Donations, Branches, Register User, Patients, Users, Download, Fix Patients
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -34,8 +32,7 @@ class _AdminScreenState extends State<AdminScreen>
   @override
   void initState() {
     super.initState();
-    _fadeCtrl = AnimationController(
-        duration: const Duration(milliseconds: 380), vsync: this);
+    _fadeCtrl = AnimationController(duration: const Duration(milliseconds: 380), vsync: this);
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
     _fadeCtrl.forward();
   }
@@ -52,31 +49,47 @@ class _AdminScreenState extends State<AdminScreen>
   void _goDashboard() { setState(() => _pageIndex = -2); _fadeCtrl.forward(from: 0); }
   void _goDonations() { setState(() => _pageIndex = -1); _fadeCtrl.forward(from: 0); }
 
+  static const _mobileNavItems = [
+    {'icon': Icons.home_outlined,              'activeIcon': Icons.home_rounded,              'label': 'Home',      'idx': -2},
+    {'icon': Icons.volunteer_activism_outlined,'activeIcon': Icons.volunteer_activism_rounded,'label': 'Donations', 'idx': -1},
+    {'icon': Icons.favorite_border_rounded,    'activeIcon': Icons.favorite_rounded,          'label': 'Patients',  'idx': 2},
+    {'icon': Icons.people_outline_rounded,     'activeIcon': Icons.people_rounded,            'label': 'Users',     'idx': 3},
+    {'icon': Icons.more_horiz_rounded,         'activeIcon': Icons.more_horiz_rounded,        'label': 'More',      'idx': 99},
+  ];
+
   @override
   Widget build(BuildContext context) {
-    final t       = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 820;
+    final t      = RoleThemeScope.dataOf(context);
+    final isWide = MediaQuery.of(context).size.width >= 820;
+
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: isMobile ? _appBar(t) : null,
-      drawer: isMobile
-          ? Drawer(backgroundColor: t.bgCard, child: _sidebar(t))
-          : null,
+      appBar: isWide ? null : _mobileAppBar(t),
+      drawer: isWide ? null : Drawer(backgroundColor: t.bgCard, child: _sidebarContent(t)),
       body: Row(children: [
-        if (!isMobile) _sidebar(t),
-        Expanded(child: FadeTransition(opacity: _fadeAnim, child: _buildBody(t))),
+        if (isWide) _desktopSidebar(t),
+        Expanded(
+          child: ClipRect(
+            child: FadeTransition(opacity: _fadeAnim, child: _buildBody(t, isWide)),
+          ),
+        ),
       ]),
+      bottomNavigationBar: isWide ? null : _mobileBottomNav(t),
     );
   }
 
-  Widget _buildBody(RoleThemeData t) {
+  Widget _buildBody(RoleThemeData t, bool isWide) {
     if (_pageIndex == -2) {
       return _AdminDashboard(t: t, branchId: widget.branchId, username: widget.username);
     }
     if (_pageIndex == -1) {
-      return FadeTransition(opacity: _fadeAnim,
-          child: DonationsScreen.embedded(
-              branchId: widget.branchId, username: widget.username));
+      return Material(
+        color: t.bg,
+        child: DonationsScreen.embedded(
+          branchId: widget.branchId,
+          username: widget.username,
+        ),
+      );
     }
     Widget page;
     switch (_pageIndex) {
@@ -90,78 +103,179 @@ class _AdminScreenState extends State<AdminScreen>
     }
     return RoleThemeScope(
       role: RoleTheme.admin,
-      child: FadeTransition(opacity: _fadeAnim,
-          child: _pageIndex == 1 ? page : Container(color: t.bg, child: page)),
+      child: _pageIndex == 1 ? page : Container(color: t.bg, child: page),
     );
   }
 
-  AppBar _appBar(RoleThemeData t) => AppBar(
-    backgroundColor: t.bgCard, elevation: 0, surfaceTintColor: Colors.transparent,
-    leading: Builder(builder: (ctx) => IconButton(
-        icon: Icon(Icons.menu_rounded, color: t.accent, size: 22),
-        onPressed: () => Scaffold.of(ctx).openDrawer())),
-    title: Row(children: [
-      Image.asset("assets/logo/gmwf.png", height: 28, width: 28),
-      const SizedBox(width: 10),
-      Text("Admin", style: TextStyle(
-          color: t.textPrimary, fontWeight: FontWeight.w700, fontSize: 18)),
-    ]),
-    actions: [
-      if (_pageIndex != -2)
-        IconButton(icon: Icon(Icons.home_outlined, color: t.accent, size: 22),
-            onPressed: _goDashboard),
-      IconButton(icon: Icon(Icons.logout_outlined, color: t.danger, size: 22),
-          onPressed: _logout),
-    ],
-    bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
-        child: Divider(height: 1, color: t.bgRule)),
-  );
+  PreferredSizeWidget _mobileAppBar(RoleThemeData t) {
+    final pageTitle = _getPageTitle();
+    return AppBar(
+      backgroundColor: t.bgCard,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      leading: Builder(builder: (ctx) => IconButton(
+          icon: Icon(Icons.menu_rounded, color: t.accent, size: 22),
+          onPressed: () => Scaffold.of(ctx).openDrawer())),
+      title: Row(children: [
+        Image.asset("assets/logo/gmwf.png", height: 26, width: 26),
+        const SizedBox(width: 10),
+        Text(pageTitle, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w700, fontSize: 17),
+            overflow: TextOverflow.ellipsis),
+      ]),
+      actions: [
+        if (_pageIndex != -2)
+          IconButton(icon: Icon(Icons.home_outlined, color: t.accent, size: 22), onPressed: _goDashboard),
+        IconButton(icon: Icon(Icons.logout_outlined, color: t.danger, size: 20), onPressed: _logout),
+      ],
+      bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
+          child: Container(height: 1, color: t.bgRule)),
+    );
+  }
 
-  Widget _sidebar(RoleThemeData t) => Container(
-    width: 256,
-    decoration: BoxDecoration(
-        color: t.bgCard, border: Border(right: BorderSide(color: t.bgRule))),
-    child: Column(children: [
+  String _getPageTitle() {
+    switch (_pageIndex) {
+      case -1: return 'Donations';
+      case 0:  return 'Branches';
+      case 1:  return 'Register User';
+      case 2:  return 'Patients';
+      case 3:  return 'Users';
+      case 4:  return 'Download';
+      case 5:  return 'Fix Patients';
+      default: return 'Admin Panel';
+    }
+  }
+
+  Widget _mobileBottomNav(RoleThemeData t) {
+    return Container(
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(top: BorderSide(color: t.bgRule)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, -3))],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: _mobileNavItems.map((item) {
+              final idx    = item['idx'] as int;
+              final active = _pageIndex == idx;
+              return GestureDetector(
+                onTap: () {
+                  if (idx == 99)       { _showMoreSheet(t); }
+                  else if (idx == -2)  { _goDashboard(); }
+                  else if (idx == -1)  { _goDonations(); }
+                  else                 { _go(idx); }
+                },
+                behavior: HitTestBehavior.opaque,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active ? t.accent.withOpacity(0.10) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(active ? item['activeIcon'] as IconData : item['icon'] as IconData,
+                        color: active ? t.accent : t.textTertiary, size: 22),
+                    const SizedBox(height: 3),
+                    Text(item['label'] as String,
+                        style: TextStyle(fontSize: 10, color: active ? t.accent : t.textTertiary,
+                            fontWeight: active ? FontWeight.w700 : FontWeight.w400)),
+                  ]),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showMoreSheet(RoleThemeData t) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: t.bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 36, height: 4,
+              decoration: BoxDecoration(color: t.bgRule, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 16),
+          Text('More Options', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: t.textPrimary)),
+          const SizedBox(height: 16),
+          _sheetTile(ctx, t, Icons.account_balance_outlined, 'Branches', 0),
+          _sheetTile(ctx, t, Icons.person_add_outlined, 'Register User', 1),
+          _sheetTile(ctx, t, Icons.download_outlined, 'Download', 4),
+          _sheetTile(ctx, t, Icons.build_outlined, 'Fix Patients', 5, danger: true),
+          const SizedBox(height: 8),
+          Divider(color: t.bgRule),
+          _sheetTile(ctx, t, Icons.logout_outlined, 'Sign Out', -999, danger: true),
+        ]),
+      ),
+    );
+  }
+
+  Widget _sheetTile(BuildContext ctx, RoleThemeData t, IconData icon, String label, int idx, {bool danger = false}) {
+    final color = danger ? t.danger : t.accent;
+    return ListTile(
+      leading: Container(padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: color.withOpacity(0.10), borderRadius: BorderRadius.circular(10)),
+          child: Icon(icon, color: color, size: 20)),
+      title: Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: danger ? t.danger : t.textPrimary)),
+      onTap: () {
+        Navigator.pop(ctx);
+        if (idx == -999) { _logout(); }
+        else { _go(idx); }
+      },
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+
+  Widget _desktopSidebar(RoleThemeData t) {
+    return Container(
+      width: 256,
+      decoration: BoxDecoration(color: t.bgCard, border: Border(right: BorderSide(color: t.bgRule))),
+      child: _sidebarContent(t),
+    );
+  }
+
+  Widget _sidebarContent(RoleThemeData t) {
+    return Column(children: [
       const SizedBox(height: 48),
       Padding(padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Container(padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: t.accentMuted,
-                  borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(12)),
               child: Image.asset("assets/logo/gmwf.png", height: 28, width: 28)),
           const SizedBox(height: 14),
-          Text('GMWF', style: TextStyle(
-              color: t.accent, fontSize: 16,
-              fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+          Text('GMWF', style: TextStyle(color: t.accent, fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 1.5)),
           Text('Admin Panel', style: TextStyle(color: t.textTertiary, fontSize: 12)),
         ]),
       ),
       const SizedBox(height: 24),
       Divider(height: 1, color: t.bgRule, indent: 24, endIndent: 24),
       const SizedBox(height: 12),
-      _navTile(t, Icons.home_outlined,              'Overview',  _pageIndex == -2, _goDashboard),
-      _navTile(t, Icons.volunteer_activism_rounded, 'Donations', _pageIndex == -1, _goDonations,
-          accentColor: _cDonation),
+      _navTile(t, Icons.home_outlined,              'Overview',      _pageIndex == -2, _goDashboard),
+      _navTile(t, Icons.volunteer_activism_rounded, 'Donations',     _pageIndex == -1, _goDonations, accentColor: _cDonation),
       const SizedBox(height: 8),
       Padding(padding: const EdgeInsets.only(left: 26, bottom: 8, top: 4),
-        child: Text('MANAGE', style: TextStyle(
-            color: t.textTertiary, fontSize: 10,
-            fontWeight: FontWeight.w700, letterSpacing: 2))),
+        child: Text('MANAGE', style: TextStyle(color: t.textTertiary, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 2))),
       Expanded(child: ListView(padding: EdgeInsets.zero, children: [
         _navTile(t, Icons.account_balance_outlined, 'Branches',     _pageIndex == 0, () => _go(0)),
         _navTile(t, Icons.person_add_outlined,      'Register User', _pageIndex == 1, () => _go(1)),
         _navTile(t, Icons.favorite_border_rounded,  'Patients',     _pageIndex == 2, () => _go(2)),
         _navTile(t, Icons.people_outline_rounded,   'Users',        _pageIndex == 3, () => _go(3)),
         _navTile(t, Icons.download_outlined,        'Download',     _pageIndex == 4, () => _go(4)),
-        _navTile(t, Icons.build_outlined,           'Fix Patients', _pageIndex == 5, () => _go(5),
-            accentColor: t.danger),
+        _navTile(t, Icons.build_outlined,           'Fix Patients', _pageIndex == 5, () => _go(5), accentColor: t.danger),
       ])),
       Divider(height: 1, color: t.bgRule, indent: 24, endIndent: 24),
       const SizedBox(height: 4),
       _navTile(t, Icons.logout_outlined, 'Sign Out', false, _logout, danger: true),
       const SizedBox(height: 24),
-    ]),
-  );
+    ]);
+  }
 
   Widget _navTile(RoleThemeData t, IconData icon, String label, bool active,
       VoidCallback onTap, {bool danger = false, Color? accentColor}) {
@@ -197,77 +311,98 @@ class _AdminDashboard extends StatelessWidget {
   const _AdminDashboard({required this.t, required this.branchId, required this.username});
 
   @override
-  Widget build(BuildContext context) => Container(
-    color: t.bg,
-    child: SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
-      child: SafeArea(child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _hero(),
-          const SizedBox(height: 28),
-          _kpiSection(),
-          const SizedBox(height: 28),
-          DashHeading("Today's Summary", t: t),
-          const SizedBox(height: 16),
-          _grandSummary(),
-          const SizedBox(height: 24),
-        ]),
-      )),
-    ),
-  );
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    return Container(
+      color: t.bg,
+      child: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        child: SafeArea(child: Padding(
+          padding: EdgeInsets.all(isMobile ? 16 : 24),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _hero(context, isMobile),
+            const SizedBox(height: 24),
+            _kpiSection(),
+            const SizedBox(height: 24),
+            DashHeading("Today's Summary", t: t),
+            const SizedBox(height: 14),
+            _grandSummary(),
+            const SizedBox(height: 24),
+          ]),
+        )),
+      ),
+    );
+  }
 
-  Widget _hero() => Container(
-    padding: const EdgeInsets.all(28),
+  Widget _hero(BuildContext context, bool isMobile) => Container(
+    padding: EdgeInsets.all(isMobile ? 20 : 28),
     decoration: BoxDecoration(
       gradient: LinearGradient(colors: [t.accent, t.accentLight],
           begin: Alignment.topLeft, end: Alignment.bottomRight),
-      borderRadius: BorderRadius.circular(22),
-      boxShadow: [BoxShadow(color: t.accent.withOpacity(0.28),
-          blurRadius: 32, offset: const Offset(0, 10))],
+      borderRadius: BorderRadius.circular(isMobile ? 18 : 22),
+      boxShadow: [BoxShadow(color: t.accent.withOpacity(0.28), blurRadius: 32, offset: const Offset(0, 10))],
     ),
-    child: Row(children: [
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-          decoration: BoxDecoration(color: Colors.white.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(20)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 12),
-            const SizedBox(width: 6),
-            Text(DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
-                style: const TextStyle(color: Colors.white70, fontSize: 12,
-                    fontWeight: FontWeight.w500)),
+    child: isMobile
+        ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 10),
+                  const SizedBox(width: 5),
+                  Text(DateFormat('EEE, d MMM yyyy').format(DateTime.now()),
+                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500)),
+                ]),
+              ),
+              const Spacer(),
+              Container(padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.16),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.25))),
+                  child: Image.asset("assets/logo/gmwf.png", height: 28, width: 28)),
+            ]),
+            const SizedBox(height: 14),
+            Text("Welcome back,", style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
+            const SizedBox(height: 3),
+            Text(username, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+            const SizedBox(height: 6),
+            Text("Full access · All branches", style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12)),
+          ])
+        : Row(children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 12),
+                  const SizedBox(width: 6),
+                  Text(DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
+                ]),
+              ),
+              const SizedBox(height: 16),
+              Text("Welcome back,", style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 14)),
+              const SizedBox(height: 4),
+              Text(username, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              const SizedBox(height: 8),
+              Text("Full access · All branches · All data", style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13)),
+            ])),
+            const SizedBox(width: 20),
+            Container(padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.16),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withOpacity(0.25))),
+                child: Image.asset("assets/logo/gmwf.png", height: 52, width: 52)),
           ]),
-        ),
-        const SizedBox(height: 16),
-        Text("Welcome back,",
-            style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 14)),
-        const SizedBox(height: 4),
-        Text(username, style: const TextStyle(
-            color: Colors.white, fontSize: 28,
-            fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-        const SizedBox(height: 8),
-        Text("Full access · All branches · All data",
-            style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13)),
-      ])),
-      const SizedBox(width: 20),
-      Container(padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.16),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.white.withOpacity(0.25)),
-          ),
-          child: Image.asset("assets/logo/gmwf.png", height: 52, width: 52)),
-    ]),
   );
 
   Widget _kpiSection() => StreamBuilder<QuerySnapshot>(
     stream: FirebaseFirestore.instance.collection('branches').snapshots(),
     builder: (_, snap) {
       if (!snap.hasData) return DashLoadingCard(t: t, height: 140);
-      final docs     = snap.data!.docs;
-      final ids      = docs.map((d) => d.id).toList();
+      final docs = snap.data!.docs;
+      final ids  = docs.map((d) => d.id).toList();
       final branches = docs.map((d) {
         final data = d.data() as Map<String, dynamic>;
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
@@ -291,8 +426,8 @@ class _AdminDashboard extends StatelessWidget {
     stream: FirebaseFirestore.instance.collection('branches').snapshots(),
     builder: (_, snap) {
       if (!snap.hasData) return DashLoadingCard(t: t, height: 300);
-      final docs     = snap.data!.docs;
-      final ids      = docs.map((d) => d.id).toList();
+      final docs = snap.data!.docs;
+      final ids  = docs.map((d) => d.id).toList();
       final branches = docs.map((d) {
         final data = d.data() as Map<String, dynamic>;
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
@@ -336,10 +471,8 @@ class _TopBranchFetcher extends StatelessWidget {
       if (!snap.hasData) return DashLoadingCard(t: t, height: 88);
       final d = snap.data!;
       if ((d['tokens'] as int) == 0) return const SizedBox.shrink();
-      return TopBranchBanner(
-        t: t, branchName: d['name'] as String,
-        revenue: d['revenue'] as int, patients: d['tokens'] as int,
-      );
+      return TopBranchBanner(t: t, branchName: d['name'] as String,
+          revenue: d['revenue'] as int, patients: d['tokens'] as int);
     },
   );
 

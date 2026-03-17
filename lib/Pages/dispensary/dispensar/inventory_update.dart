@@ -119,14 +119,14 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     if (!_formKey.currentState!.validate()) return;
     final name  = _nameCtrl.text.trim();
     final qty   = int.tryParse(_qtyCtrl.text) ?? 1;
-    final price = int.tryParse(_priceCtrl.text) ?? 0;
+    final priceStr = _priceCtrl.text.trim();
     final exp   = _expCtrl.text.trim();
     final dose  = _hasDoseDropdown
         ? (_selectedDose ?? '')
         : (_usesFreeTextDose ? _doseCtrl.text.trim() : '');
 
     final newItem = {'name': name, 'type': _type, 'dose': dose,
-        'quantity': qty, 'price': price, 'expiryDate': exp};
+        'quantity': qty, 'price': priceStr, 'expiryDate': exp};
     final isDupe = _itemsToAdd.any((i) =>
         i['name'] == name && i['type'] == _type &&
         i['dose'] == dose && i['expiryDate'] == exp);
@@ -183,7 +183,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(children: [
-                  _dlgField(eNameCtrl, 'Medicine Name', Icons.medication_rounded),
+                  _dlgField(eNameCtrl, 'Medicine Name', icon: Icons.medication_rounded),
                   const SizedBox(height: 13),
                   _dlgDropdown<String>(label: 'Type', value: eType, items: _allTypes,
                       onChanged: (v) { if (v != null) setS(() { eType = v; eDose = null; eDoseCtrl.clear(); }); }),
@@ -195,20 +195,21 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                   ],
                   if (hasFree) ...[
                     const SizedBox(height: 13),
-                    _dlgField(eDoseCtrl, 'Dose / Description', Icons.science_rounded),
+                    _dlgField(eDoseCtrl, 'Dose / Description', icon: Icons.science_rounded),
                   ],
                   const SizedBox(height: 13),
-                  Row(children: [
-                    Expanded(child: _dlgField(eQtyCtrl, 'Quantity', Icons.inventory_2_rounded,
+                    Row(children: [
+                    Expanded(child: _dlgField(eQtyCtrl, 'Quantity', prefix: const Icon(Icons.inventory_2_rounded, color: _teal, size: 17),
                         keyboard: TextInputType.number,
                         formatters: [FilteringTextInputFormatter.digitsOnly])),
                     const SizedBox(width: 12),
-                    Expanded(child: _dlgField(ePriceCtrl, 'Price (PKR)', Icons.currency_rupee_rounded,
-                        keyboard: TextInputType.number,
-                        formatters: [FilteringTextInputFormatter.digitsOnly])),
+                    Expanded(child: _dlgField(ePriceCtrl, 'Price', 
+                        prefix: const Padding(padding: EdgeInsets.only(left: 12, top: 14), child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12))),
+                        keyboard: const TextInputType.numberWithOptions(decimal: true),
+                        formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.a-zA-Z]'))])),
                   ]),
                   const SizedBox(height: 13),
-                  _dlgField(eExpCtrl, 'Expiry (dd-MM-yyyy)', Icons.calendar_today_rounded,
+                  _dlgField(eExpCtrl, 'Expiry (dd-MM-yyyy)', prefix: const Icon(Icons.calendar_today_rounded, color: _teal, size: 17),
                       keyboard: TextInputType.number,
                       formatters: [FilteringTextInputFormatter.digitsOnly, ExpiryDateFormatter()]),
                 ]),
@@ -236,7 +237,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                           'name': eNameCtrl.text.trim(), 'type': eType,
                           'dose': hasDd ? (eDose ?? '') : eDoseCtrl.text.trim(),
                           'quantity': int.tryParse(eQtyCtrl.text) ?? 1,
-                          'price': int.tryParse(ePriceCtrl.text) ?? 0,
+                          'price': ePriceCtrl.text.trim(),
                           'expiryDate': eExpCtrl.text,
                         };
                       });
@@ -275,8 +276,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           .collection('branches').doc(widget.branchId).collection('edit_requests')
           .add({
         'requestType':   'add_stock',
-        'requester':     user.uid,
-        'requesterName': username,
+        'requestedBy':   user.uid,    // FIXED: was 'requester'
+        'requesterName': username,    // consistent with request_page.dart
         'requestedAt':   FieldValue.serverTimestamp(),
         'status':        'pending',
         'items': _itemsToAdd.map((item) {
@@ -325,12 +326,12 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     _              => FontAwesomeIcons.pills,
   };
 
-  InputDecoration _inputDec(String label, IconData icon, {Widget? suffix, String? hint}) =>
+  InputDecoration _inputDec(String label, {IconData? icon, Widget? prefix, Widget? suffix, String? hint}) =>
       InputDecoration(
         labelText: label, hintText: hint,
         labelStyle: const TextStyle(color: _textLight, fontSize: 13),
         hintStyle:  const TextStyle(color: _textLight, fontSize: 13),
-        prefixIcon: Icon(icon, color: _teal, size: 18),
+        prefixIcon: prefix ?? (icon != null ? Icon(icon, color: _teal, size: 18) : null),
         suffixIcon: suffix != null
             ? Padding(padding: const EdgeInsets.all(13), child: suffix) : null,
         filled: true, fillColor: _green50,
@@ -348,14 +349,23 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       );
 
-  Widget _chip(String label, Color color) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+  Widget _chip(String label, Color color, {IconData? icon}) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.1),
-      borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: color.withOpacity(0.3)),
+      color: color.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: color.withOpacity(0.2)),
     ),
-    child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 6),
+        ],
+        Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+      ],
+    ),
   );
 
   Widget _iconBtn(IconData icon, Color color, VoidCallback fn) => InkWell(
@@ -367,8 +377,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     ),
   );
 
-  Widget _dlgField(TextEditingController ctrl, String label, IconData icon,
-      {TextInputType? keyboard, List<TextInputFormatter>? formatters}) =>
+  Widget _dlgField(TextEditingController ctrl, String label,
+      {IconData? icon, Widget? prefix, TextInputType? keyboard, List<TextInputFormatter>? formatters}) =>
       TextField(
         controller: ctrl, keyboardType: keyboard,
         inputFormatters: formatters, cursorColor: _teal,
@@ -376,7 +386,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         decoration: InputDecoration(
           labelText: label,
           labelStyle: const TextStyle(color: _textLight, fontSize: 13),
-          prefixIcon: Icon(icon, color: _teal, size: 17),
+          prefixIcon: prefix ?? (icon != null ? Icon(icon, color: _teal, size: 17) : null),
           filled: true, fillColor: _green50,
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide.none),
@@ -475,7 +485,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             controller: _nameCtrl,
             style: const TextStyle(color: _textDark, fontSize: 15),
             cursorColor: _teal,
-            decoration: _inputDec('Medicine Name', Icons.medication_rounded,
+            decoration: _inputDec('Medicine Name', icon: Icons.medication_rounded,
                 suffix: _isSearching
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: _teal))
@@ -490,7 +500,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               value: _type,
               dropdownColor: _white,
               style: const TextStyle(color: _textDark, fontSize: 14),
-              decoration: _inputDec('Type', FontAwesomeIcons.capsules),
+              decoration: _inputDec('Type', icon: FontAwesomeIcons.capsules),
               items: _allTypes.map((t) => DropdownMenuItem(value: t,
                   child: Row(children: [
                     Icon(_typeIcon(t), size: 13, color: _teal),
@@ -501,14 +511,16 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             const SizedBox(width: 12),
             Expanded(child: TextFormField(
               controller: _priceCtrl,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.a-zA-Z]'))],
               style: const TextStyle(color: _textDark, fontSize: 15),
               cursorColor: _teal,
-              decoration: _inputDec('Price (PKR)', Icons.currency_rupee_rounded),
+              decoration: _inputDec('Price', prefix: const Padding(padding: EdgeInsets.only(left: 12, top: 14), child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12)))),
               validator: (v) {
                 if (v?.trim().isEmpty ?? true) return 'Required';
-                if ((int.tryParse(v!) ?? 0) <= 0) return 'Invalid';
+                final trimmed = v!.trim().toLowerCase();
+                if (trimmed == 'free') return null;
+                if (double.tryParse(trimmed) == null) return 'Invalid';
                 return null;
               },
             )),
@@ -519,7 +531,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               value: _selectedDose,
               dropdownColor: _white,
               style: const TextStyle(color: _textDark, fontSize: 14),
-              decoration: _inputDec('Dose', Icons.science_rounded),
+              decoration: _inputDec('Dose', icon: Icons.science_rounded),
               hint: const Text('Select dose', style: TextStyle(color: _textLight)),
               items: doseList.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
               onChanged: (v) => setState(() => _selectedDose = v),
@@ -536,7 +548,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 _type == 'Nebulization'
                     ? 'Dose per session (e.g. 1ml Salbutamol + 2ml saline)'
                     : 'Dose / Variant (e.g. 500mg)',
-                Icons.science_rounded,
+                icon: Icons.science_rounded,
               ),
             ),
             const SizedBox(height: 14),
@@ -550,7 +562,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               cursorColor: _teal,
               decoration: _inputDec(
                 _type == 'Nebulization' ? 'Sessions (doses)' : 'Quantity',
-                Icons.inventory_2_rounded,
+                icon: Icons.inventory_2_rounded,
               ),
               validator: (v) => (int.tryParse(v ?? '') ?? 0) < 1 ? 'Min 1' : null,
             )),
@@ -561,7 +573,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               inputFormatters: [FilteringTextInputFormatter.digitsOnly, ExpiryDateFormatter()],
               style: const TextStyle(color: _textDark, fontSize: 15),
               cursorColor: _teal,
-              decoration: _inputDec('Expiry (dd-MM-yyyy)', Icons.calendar_today_rounded, hint: 'dd-MM-yyyy'),
+              decoration: _inputDec('Expiry (dd-MM-yyyy)', icon: Icons.calendar_today_rounded, hint: 'dd-MM-yyyy'),
               validator: ExpiryDateFormatter.validate,
             )),
           ]),
@@ -658,18 +670,18 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 Text(item['name'],
                     style: const TextStyle(color: _textDark, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 4),
-                Wrap(spacing: 6, runSpacing: 4, children: [
-                  _chip(item['type'], _teal),
-                  if ((item['dose'] as String).isNotEmpty) _chip(item['dose'], _textMid),
-                  _chip('Qty: ${item['quantity']}', _green600),
-                  _chip('PKR ${item['price']}', _orange),
+                Wrap(spacing: 8, runSpacing: 6, children: [
+                  _chip(item['type'], _teal, icon: _typeIcon(item['type'])),
+                  if ((item['dose'] as String).isNotEmpty) _chip(item['dose'], _textMid, icon: Icons.science_rounded),
+                  _chip('${item['quantity']} Units', _green600, icon: Icons.inventory_2_rounded),
+                  _chip('Price: PKR ${item['price']}', _orange, icon: Icons.payments_rounded),
                 ]),
-                const SizedBox(height: 4),
+                const SizedBox(height: 6),
                 Row(children: [
-                  Icon(Icons.calendar_today_rounded, size: 11, color: expColor),
-                  const SizedBox(width: 4),
-                  Text('Exp: ${item['expiryDate']}',
-                      style: TextStyle(color: expColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Icon(Icons.calendar_today_rounded, size: 12, color: expColor),
+                  const SizedBox(width: 6),
+                  Text('Expiry: ${item['expiryDate']}',
+                      style: TextStyle(color: expColor, fontSize: 12, fontWeight: FontWeight.bold)),
                 ]),
               ])),
               Column(children: [

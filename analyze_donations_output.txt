@@ -1,0 +1,80 @@
+Analyzing donations...                                          
+
+warning - Unused import: 'donations_screen.dart' - lib\pages\donations\credit_ledger.dart:11:8 - unused_import
+   info - Unnecessary use of multiple underscores - lib\pages\donations\credit_ledger.dart:267:37 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:304:52 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\pages\donations\credit_ledger.dart:331:37 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\pages\donations\credit_ledger.dart:443:37 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:481:52 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\pages\donations\credit_ledger.dart:506:37 - unnecessary_underscores
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:613:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:614:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:615:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:686:90 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:893:63 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:924:56 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\credit_ledger.dart:949:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\credit_ledger.dart:950:43 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\credit_ledger.dart:951:43 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:978:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:995:50 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1015:39 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1033:43 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1065:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1084:51 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1104:51 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1159:76 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\credit_ledger.dart:1179:81 - deprecated_member_use
+warning - Unused import: '../../services/local_storage_service.dart' - lib\pages\donations\donations_dashboard.dart:8:8 - unused_import
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:194:46 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\donations_dashboard.dart:220:13 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\donations_dashboard.dart:222:13 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:494:45 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:497:42 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:814:42 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:816:54 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\donations_dashboard.dart:876:44 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\pages\donations\donations_dashboard.dart:877:44 - curly_braces_in_flow_control_structures
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:891:52 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:898:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:937:49 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:975:29 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:977:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1010:37 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1013:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1099:50 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1111:51 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1114:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1158:42 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1162:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1289:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1292:52 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1428:36 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_dashboard.dart:1430:54 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_form.dart:281:49 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_form.dart:283:61 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:247:30 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:249:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:275:40 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:277:58 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:283:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:299:47 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:318:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:350:32 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:359:36 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_screen.dart:496:39 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\pages\donations\donations_screen.dart:511:33 - unnecessary_underscores
+   info - The import of 'dart:typed_data' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/services.dart' - lib\pages\donations\donations_shared.dart:1:8 - unnecessary_import
+warning - Unused import: 'package:flutter/foundation.dart' - lib\pages\donations\donations_shared.dart:11:8 - unused_import
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\pages\donations\donations_shared.dart:461:9 - deprecated_member_use
+   info - 'share' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\pages\donations\donations_shared.dart:461:15 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1049:38 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1190:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1240:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1256:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1258:53 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1307:21 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\pages\donations\donations_shared.dart:1310:48 - deprecated_member_use
+warning - The declaration '_metaCell' isn't referenced - lib\pages\donations\donations_shared.dart:1341:11 - unused_element
+
+76 issues found. (ran in 2.8s)

@@ -6,6 +6,12 @@
 //      with branchId at top level (not nested inside data).
 //   3. Removed FieldValue.serverTimestamp() from realtime payload — not serialisable.
 //   4. Entry status updated in local Hive after prescription edit.
+//
+// QUEUE TYPE FIX (Bug 3):
+//   • _updateFirestore no longer has a hardcoded 'zakat' fallback.
+//   • _normaliseQueueType() is the single resolver — mirrors all other files.
+//   • queueType is resolved from entryData → prescData → patient map, in order,
+//     then normalised before being used in any Firestore write path.
 
 import 'dart:async';
 
@@ -54,6 +60,17 @@ class _PatientQueueState extends State<PatientQueue>
   StreamSubscription<List<ConnectivityResult>>? _connSub;
 
   bool _isOnline = true;
+
+  // ─── Queue-type normaliser (FIX: single source of truth) ─────────────────
+  /// Mirrors _resolveQueueType in token_screen / sync_service / server_sync_manager.
+  static String _normaliseQueueType(String? raw) {
+    final s = (raw ?? '').toLowerCase().trim();
+    if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
+        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf')
+      return 'gmwf';
+    return 'zakat';
+  }
 
   @override
   void initState() {
@@ -134,11 +151,8 @@ class _PatientQueueState extends State<PatientQueue>
 
     for (final e in all) {
       final status = (e['status'] ?? '').toString().toLowerCase();
-      if (status == 'waiting') {
-        waiting.add(e);
-      } else {
-        others.add(e);
-      }
+      if (status == 'waiting') waiting.add(e);
+      else others.add(e);
     }
 
     waiting.sort((a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
@@ -166,27 +180,23 @@ class _PatientQueueState extends State<PatientQueue>
 
     if (!currentIsWaiting || currentSerial != smallestSerial) {
       debugPrint('[PatientQueue] Auto-selecting smallest waiting: $smallestSerial');
-      widget.onPatientSelected({
-        ...smallest,
-        'serial': smallestSerial,
-        'id': smallestSerial,
-      });
+      widget.onPatientSelected({...smallest, 'serial': smallestSerial, 'id': smallestSerial});
     }
   }
 
   // ─── Firestore sync ────────────────────────────────────────────────────────
   Future<void> _syncQueueFromFirestore() async {
     try {
-      final branchRef  = FirebaseFirestore.instance.collection('branches').doc(widget.branchId);
-      final serialsRef = branchRef.collection('serials').doc(_todayKey);
+      final serialsRef = FirebaseFirestore.instance
+          .collection('branches').doc(widget.branchId)
+          .collection('serials').doc(_todayKey);
 
       for (final type in ['zakat', 'non-zakat', 'gmwf']) {
         final snap = await serialsRef.collection(type).get();
         for (final doc in snap.docs) {
-          final data     = doc.data();
-          final serial   = doc.id;
-          final entryKey = '${widget.branchId}-$serial';
-          Hive.box(LocalStorageService.entriesBox).put(entryKey, {
+          final data   = doc.data();
+          final serial = doc.id;
+          Hive.box(LocalStorageService.entriesBox).put('${widget.branchId}-$serial', {
             ...data,
             'serial':    serial,
             'queueType': type,
@@ -203,7 +213,6 @@ class _PatientQueueState extends State<PatientQueue>
   String _getMedAbbrev(Map<String, dynamic> med) {
     final rawName = (med['name'] ?? '').toString().trim().toLowerCase();
     final rawType = (med['type'] ?? '').toString().trim().toLowerCase();
-
     final prefixes = {
       'syrup': 'syp.', 'syp': 'syp.',
       'capsule': 'cap.', 'cap': 'cap.',
@@ -211,7 +220,6 @@ class _PatientQueueState extends State<PatientQueue>
       'injection': 'inj.', 'inj': 'inj.',
       'drip': 'drip.', 'syringe': 'syr.', 'syr': 'syr.',
     };
-
     String? abbrev;
     for (var entry in prefixes.entries) {
       if (rawType.contains(entry.key) || rawName.contains(entry.key)) {
@@ -257,74 +265,59 @@ class _PatientQueueState extends State<PatientQueue>
       builder: (ctx) => AlertDialog(
         title: Text(isInventory ? 'Add Inventory Medicine' : 'Add Custom Medicine'),
         content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: nameCtrl, readOnly: isInventory,
+              decoration: InputDecoration(
+                labelText: 'Medicine name', border: const OutlineInputBorder(),
+                filled: isInventory, fillColor: isInventory ? Colors.grey[200] : null),
+            ),
+            const SizedBox(height: 12),
+            if (!isInjection) ...[
+              const Text('Timing (M+E+N):'),
+              const SizedBox(height: 6),
               TextField(
-                controller: nameCtrl,
-                readOnly: isInventory,
-                decoration: InputDecoration(
-                  labelText: 'Medicine name',
-                  border: const OutlineInputBorder(),
-                  filled: isInventory,
-                  fillColor: isInventory ? Colors.grey[200] : null,
-                ),
+                controller: timingCtrl, keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(3),
+                ],
+                decoration: const InputDecoration(hintText: 'e.g. 1+0+2', border: OutlineInputBorder()),
+                onChanged: (value) {
+                  final digits    = value.replaceAll('+', '');
+                  if (digits.length > 3) return;
+                  final formatted = digits.split('').join('+');
+                  if (timingCtrl.text != formatted) {
+                    timingCtrl.text = formatted;
+                    timingCtrl.selection = TextSelection.collapsed(offset: formatted.length);
+                  }
+                },
               ),
               const SizedBox(height: 12),
-              if (!isInjection) ...[
-                const Text('Timing (M+E+N):'),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: timingCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(3),
-                  ],
-                  decoration: const InputDecoration(
-                      hintText: 'e.g. 1+0+2', border: OutlineInputBorder()),
-                  onChanged: (value) {
-                    final digits    = value.replaceAll('+', '');
-                    if (digits.length > 3) return;
-                    final formatted = digits.split('').join('+');
-                    if (timingCtrl.text != formatted) {
-                      timingCtrl.text = formatted;
-                      timingCtrl.selection =
-                          TextSelection.collapsed(offset: formatted.length);
-                    }
-                  },
-                ),
+              DropdownButtonFormField<String>(
+                value: mealTiming,
+                decoration: const InputDecoration(
+                    labelText: 'Timing Instruction', border: OutlineInputBorder()),
+                items: ['Empty Stomach', 'Before Meal', 'During Meal', 'After Meal', 'Before Sleep']
+                    .map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
+                onChanged: (v) => mealTiming = v!,
+              ),
+              if (isSyrup) ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: mealTiming,
-                  decoration: const InputDecoration(
-                      labelText: 'Timing Instruction', border: OutlineInputBorder()),
-                  items: ['Empty Stomach', 'Before Meal', 'During Meal', 'After Meal', 'Before Sleep']
-                      .map((d) => DropdownMenuItem(value: d, child: Text(d)))
-                      .toList(),
-                  onChanged: (v) => mealTiming = v!,
+                  value: dosage,
+                  decoration: const InputDecoration(labelText: 'Dosage', border: OutlineInputBorder()),
+                  items: ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon']
+                      .map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
+                  onChanged: (v) => dosage = v!,
                 ),
-                if (isSyrup) ...[
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    value: dosage,
-                    decoration: const InputDecoration(
-                        labelText: 'Dosage', border: OutlineInputBorder()),
-                    items: ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon']
-                        .map((d) => DropdownMenuItem(value: d, child: Text(d)))
-                        .toList(),
-                    onChanged: (v) => dosage = v!,
-                  ),
-                ],
-              ] else
-                TextField(
-                  controller: qtyCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                      labelText: 'Quantity', border: OutlineInputBorder()),
-                ),
-            ],
-          ),
+              ],
+            ] else
+              TextField(
+                controller: qtyCtrl, keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Quantity', border: OutlineInputBorder()),
+              ),
+          ]),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -336,10 +329,8 @@ class _PatientQueueState extends State<PatientQueue>
               if (isInjection) {
                 final qty = int.tryParse(qtyCtrl.text) ?? 1;
                 if (qty <= 0) return;
-                newMed = {
-                  'name': name, 'quantity': qty, 'type': 'Injection',
-                  'inventoryId': inventoryMed?['id'],
-                };
+                newMed = {'name': name, 'quantity': qty, 'type': 'Injection',
+                    'inventoryId': inventoryMed?['id']};
               } else {
                 final digits = timingCtrl.text.replaceAll('+', '');
                 final m      = int.tryParse(digits.isNotEmpty ? digits[0] : '0') ?? 0;
@@ -348,12 +339,9 @@ class _PatientQueueState extends State<PatientQueue>
                 final sum    = m + e + n;
                 final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : sum;
                 if (qty == 0) return;
-                newMed = {
-                  'name': name, 'quantity': qty, 'timing': '$m+$e+$n',
-                  'meal': mealTiming, 'dosage': isSyrup ? dosage : '',
-                  'type': isSyrup ? 'Syrup' : 'Tablet',
-                  'inventoryId': inventoryMed?['id'],
-                };
+                newMed = {'name': name, 'quantity': qty, 'timing': '$m+$e+$n',
+                    'meal': mealTiming, 'dosage': isSyrup ? dosage : '',
+                    'type': isSyrup ? 'Syrup' : 'Tablet', 'inventoryId': inventoryMed?['id']};
               }
               Navigator.pop(ctx, newMed);
             },
@@ -363,23 +351,11 @@ class _PatientQueueState extends State<PatientQueue>
       ),
     );
 
-    nameCtrl.dispose();
-    timingCtrl.dispose();
-    qtyCtrl.dispose();
+    nameCtrl.dispose(); timingCtrl.dispose(); qtyCtrl.dispose();
     return result;
   }
 
-  // ─── FIXED: Prescription edit dialog ──────────────────────────────────────
-  // Priority order for loading prescription data:
-  //   1. Local Hive prescriptions box  (fastest, works offline)
-  //   2. Embedded in local Hive entries box (also local)
-  //   3. Firestore (network fallback only if both local sources empty)
-  //
-  // On save:
-  //   1. Saves updated prescription to local Hive prescriptions box
-  //   2. Updates entry status/prescription in local Hive entries box
-  //   3. Broadcasts via RealtimeManager to all connected devices
-  //   4. Writes to Firestore if online (fire-and-forget, non-blocking)
+  // ─── Prescription edit dialog ──────────────────────────────────────────────
   Future<void> _showPrescriptionDialog(Map<String, dynamic> patient) async {
     final serial   = (patient['serial'] ?? patient['id'] ?? '').toString().trim();
     final branchId = widget.branchId;
@@ -390,19 +366,16 @@ class _PatientQueueState extends State<PatientQueue>
       return;
     }
 
-    // ── Step 1: Load prescription from Hive (local-first) ──────────────────
     Map<String, dynamic> prescData = {};
     Map<String, dynamic> entryData = {};
 
-    // Check prescriptions box first
     final localPresc = LocalStorageService.getLocalPrescription(serial);
     if (localPresc != null && localPresc.isNotEmpty) {
       prescData = Map<String, dynamic>.from(localPresc);
       debugPrint('[PrescEdit] Loaded from local prescriptions box: $serial');
     } else {
-      // Check if embedded in entry
-      final entryKey    = '$branchId-$serial';
-      final entryRaw    = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+      final entryKey = '$branchId-$serial';
+      final entryRaw = Hive.box(LocalStorageService.entriesBox).get(entryKey);
       if (entryRaw != null) {
         entryData = Map<String, dynamic>.from(entryRaw);
         final embeddedPresc = entryData['prescription'] as Map<String, dynamic>?;
@@ -412,7 +385,6 @@ class _PatientQueueState extends State<PatientQueue>
         }
       }
 
-      // If still empty and online, fetch from Firestore
       if (prescData.isEmpty && _isOnline) {
         debugPrint('[PrescEdit] Falling back to Firestore for: $serial');
         try {
@@ -426,10 +398,10 @@ class _PatientQueueState extends State<PatientQueue>
             if (snap.exists) {
               final d = snap.data() ?? {};
               entryData = Map<String, dynamic>.from(d);
+              // Preserve collection name so queueType resolver works
+              entryData['queueType'] = type;
               final embeddedPresc = d['prescription'] as Map<String, dynamic>?;
-              if (embeddedPresc != null) {
-                prescData = Map<String, dynamic>.from(embeddedPresc);
-              }
+              if (embeddedPresc != null) prescData = Map<String, dynamic>.from(embeddedPresc);
               break;
             }
           }
@@ -441,19 +413,12 @@ class _PatientQueueState extends State<PatientQueue>
     }
 
     if (prescData.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('No prescription found for $serial'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('No prescription found for $serial'),
+          backgroundColor: Colors.orange));
       return;
     }
 
-    // ── Step 2: Resolve patient info for Firestore path ────────────────────
-    // Merge entry data into prescData gaps so we have a complete picture
     final String patientCnic = (
       prescData['patientCnic']?.toString() ??
       prescData['cnic']?.toString() ??
@@ -470,47 +435,37 @@ class _PatientQueueState extends State<PatientQueue>
       'Unknown Patient'
     );
 
-    final String queueType = (
+    // FIX (Bug 3): resolve through normaliser, not a hardcoded 'zakat' default
+    final String queueType = _normaliseQueueType(
       entryData['queueType']?.toString() ??
       prescData['queueType']?.toString() ??
-      patient['queueType']?.toString() ??
-      'zakat'
+      patient['queueType']?.toString(),
     );
 
-    // ── Step 3: Build controllers from loaded data ─────────────────────────
+    debugPrint('[PrescEdit] resolved queueType=$queueType for serial=$serial');
+
     final complaintCtrl = TextEditingController(
         text: prescData['condition'] ?? prescData['complaint'] ?? '');
-    final diagnosisCtrl = TextEditingController(
-        text: prescData['diagnosis'] ?? '');
+    final diagnosisCtrl = TextEditingController(text: prescData['diagnosis'] ?? '');
 
     List<Map<String, dynamic>> currentMeds = List<Map<String, dynamic>>.from(
         (prescData['prescriptions'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .toList() ??
-        []);
+            ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
     List<Map<String, dynamic>> currentLabs = List<Map<String, dynamic>>.from(
         (prescData['labResults'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map))
-            .toList() ??
-        []);
+            ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
 
-    final searchCtrl         = TextEditingController();
+    final searchCtrl = TextEditingController();
     List<Map<String, dynamic>> searchResults = [];
 
     void searchInventory(String q) {
       final query    = q.trim().toLowerCase();
       final allStock = LocalStorageService.getAllLocalStockItems(branchId: branchId);
-      searchResults  = query.isEmpty
-          ? []
-          : allStock
-              .where((m) => (m['name'] ?? '').toString().toLowerCase().contains(query))
-              .toList();
+      searchResults  = query.isEmpty ? []
+          : allStock.where((m) => (m['name'] ?? '').toString().toLowerCase().contains(query)).toList();
     }
 
-    searchCtrl.addListener(() {
-      searchInventory(searchCtrl.text);
-      if (mounted) setState(() {});
-    });
+    searchCtrl.addListener(() { searchInventory(searchCtrl.text); if (mounted) setState(() {}); });
 
     await showDialog(
       context: context,
@@ -518,177 +473,129 @@ class _PatientQueueState extends State<PatientQueue>
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: Row(
-            children: [
-              const Icon(Icons.edit_note, color: _teal),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Edit Prescription – $patientName ($serial)',
-                  style: const TextStyle(fontSize: 16),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
+          title: Row(children: [
+            const Icon(Icons.edit_note, color: _teal),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              'Edit Prescription – $patientName ($serial)',
+              style: const TextStyle(fontSize: 16), overflow: TextOverflow.ellipsis)),
+          ]),
           content: SizedBox(
-            width: 700,
-            height: 600,
+            width: 700, height: 600,
             child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: complaintCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Patient Complaint',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                      filled: true, fillColor: Colors.green[50],
-                    ),
-                    maxLines: 2,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: diagnosisCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Diagnosis',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                      filled: true, fillColor: Colors.green[50],
-                    ),
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text('Medicines',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: searchCtrl,
-                    autofocus: true,
-                    decoration: InputDecoration(
-                      hintText: 'Search inventory & add medicine...',
-                      prefixIcon: const Icon(Icons.search),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(30)),
-                      filled: true,
-                    ),
-                    onChanged: (q) {
-                      searchInventory(q);
-                      setDialogState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  if (searchResults.isNotEmpty)
-                    Container(
-                      constraints: const BoxConstraints(maxHeight: 200),
-                      decoration: BoxDecoration(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                TextField(
+                  controller: complaintCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Patient Complaint',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    filled: true, fillColor: Colors.green[50]),
+                  maxLines: 2),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: diagnosisCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Diagnosis',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    filled: true, fillColor: Colors.green[50]),
+                  maxLines: 3),
+                const SizedBox(height: 24),
+                const Text('Medicines', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: searchCtrl, autofocus: true,
+                  decoration: InputDecoration(
+                    hintText: 'Search inventory & add medicine...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(30)),
+                    filled: true),
+                  onChanged: (q) { searchInventory(q); setDialogState(() {}); }),
+                const SizedBox(height: 8),
+                if (searchResults.isNotEmpty)
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 200),
+                    decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: searchResults.length,
-                        itemBuilder: (ctx, i) {
-                          final med    = searchResults[i];
-                          final abbrev = _getMedAbbrev(med);
-                          final namePart = (med['name'] ?? '').trim();
-                          final label  = abbrev.isNotEmpty &&
-                                  !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
-                              ? '$abbrev $namePart'
-                              : namePart;
-                          return ListTile(
-                            title: Text(label),
-                            subtitle: Text('Stock: ${med['quantity'] ?? 0}'),
-                            onTap: () async {
-                              final newMed = await _showAddMedicineSubDialog(inventoryMed: med);
-                              if (newMed != null) {
-                                setDialogState(() {
-                                  currentMeds.add(newMed);
-                                  searchCtrl.clear();
-                                  searchResults = [];
-                                });
-                              }
-                            },
-                          );
-                        },
-                      ),
-                    )
-                  else if (searchCtrl.text.isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('No matching medicines in local inventory',
-                          style: TextStyle(color: Colors.grey)),
-                    ),
-                  const SizedBox(height: 12),
-                  if (currentMeds.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text('No medicines added yet',
-                          style: TextStyle(color: Colors.grey)),
-                    )
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: currentMeds.map((med) {
-                        final abbrev   = _getMedAbbrev(med);
+                        borderRadius: BorderRadius.circular(12)),
+                    child: ListView.builder(
+                      shrinkWrap: true, itemCount: searchResults.length,
+                      itemBuilder: (ctx, i) {
+                        final med    = searchResults[i];
+                        final abbrev = _getMedAbbrev(med);
                         final namePart = (med['name'] ?? '').trim();
-                        final qty      = med['quantity'] ?? 1;
-                        final label    = abbrev.isNotEmpty &&
+                        final label = abbrev.isNotEmpty &&
                                 !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
-                            ? '$abbrev $namePart ×$qty'
-                            : '$namePart ×$qty';
-                        return Chip(
-                          label: Text(label),
-                          backgroundColor: _teal,
-                          labelStyle: const TextStyle(color: Colors.white),
-                          onDeleted: () => setDialogState(() => currentMeds.remove(med)),
+                            ? '$abbrev $namePart' : namePart;
+                        return ListTile(
+                          title: Text(label),
+                          subtitle: Text('Stock: ${med['quantity'] ?? 0}'),
+                          onTap: () async {
+                            final newMed = await _showAddMedicineSubDialog(inventoryMed: med);
+                            if (newMed != null) {
+                              setDialogState(() {
+                                currentMeds.add(newMed);
+                                searchCtrl.clear(); searchResults = [];
+                              });
+                            }
+                          },
                         );
-                      }).toList(),
+                      },
                     ),
-                  const SizedBox(height: 16),
-                  const Text('Lab Tests',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    initialValue: currentLabs.map((l) => l['name']).join(', '),
-                    decoration: InputDecoration(
-                      hintText: 'Lab tests (comma separated)',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                      filled: true,
-                    ),
-                    onChanged: (value) {
-                      currentLabs = value
-                          .split(',')
-                          .map((e) => e.trim())
-                          .where((e) => e.isNotEmpty)
-                          .map((e) => {'name': e})
-                          .toList();
-                      setDialogState(() {});
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  // Show where data was loaded from — helpful debug info
-                  if (localPresc != null)
-                    Text('Source: local prescriptions',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]))
-                  else if (entryData.isNotEmpty)
-                    Text('Source: local entry cache',
-                        style: TextStyle(fontSize: 11, color: Colors.grey[500]))
-                  else
-                    Text('Source: Firestore (cloud)',
-                        style: TextStyle(fontSize: 11, color: Colors.orange[700])),
-                ],
-              ),
+                  )
+                else if (searchCtrl.text.isNotEmpty)
+                  const Padding(padding: EdgeInsets.all(16),
+                      child: Text('No matching medicines in local inventory',
+                          style: TextStyle(color: Colors.grey))),
+                const SizedBox(height: 12),
+                if (currentMeds.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: const Text('No medicines added yet', style: TextStyle(color: Colors.grey)))
+                else
+                  Wrap(
+                    spacing: 8, runSpacing: 8,
+                    children: currentMeds.map((med) {
+                      final abbrev   = _getMedAbbrev(med);
+                      final namePart = (med['name'] ?? '').trim();
+                      final qty      = med['quantity'] ?? 1;
+                      final label    = abbrev.isNotEmpty &&
+                              !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
+                          ? '$abbrev $namePart ×$qty' : '$namePart ×$qty';
+                      return Chip(
+                        label: Text(label),
+                        backgroundColor: _teal,
+                        labelStyle: const TextStyle(color: Colors.white),
+                        onDeleted: () => setDialogState(() => currentMeds.remove(med)));
+                    }).toList()),
+                const SizedBox(height: 16),
+                const Text('Lab Tests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 8),
+                TextFormField(
+                  initialValue: currentLabs.map((l) => l['name']).join(', '),
+                  decoration: InputDecoration(
+                    hintText: 'Lab tests (comma separated)',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                    filled: true),
+                  onChanged: (value) {
+                    currentLabs = value.split(',').map((e) => e.trim())
+                        .where((e) => e.isNotEmpty).map((e) => {'name': e}).toList();
+                    setDialogState(() {});
+                  }),
+                const SizedBox(height: 8),
+                if (localPresc != null)
+                  Text('Source: local prescriptions', style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+                else if (entryData.isNotEmpty)
+                  Text('Source: local entry cache', style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+                else
+                  Text('Source: Firestore (cloud)', style: TextStyle(fontSize: 11, color: Colors.orange[700])),
+              ]),
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: _teal),
               icon: const Icon(Icons.save, color: Colors.white),
@@ -696,15 +603,15 @@ class _PatientQueueState extends State<PatientQueue>
               onPressed: () async {
                 Navigator.pop(dialogContext);
                 await _savePrescriptionUpdate(
-                  serial:       serial,
-                  branchId:     branchId,
-                  patientCnic:  patientCnic,
-                  queueType:    queueType,
+                  serial:        serial,
+                  branchId:      branchId,
+                  patientCnic:   patientCnic,
+                  queueType:     queueType,
                   originalPresc: prescData,
-                  complaint:    complaintCtrl.text.trim(),
-                  diagnosis:    diagnosisCtrl.text.trim(),
-                  medicines:    currentMeds,
-                  labTests:     currentLabs,
+                  complaint:     complaintCtrl.text.trim(),
+                  diagnosis:     diagnosisCtrl.text.trim(),
+                  medicines:     currentMeds,
+                  labTests:      currentLabs,
                 );
               },
             ),
@@ -713,12 +620,10 @@ class _PatientQueueState extends State<PatientQueue>
       ),
     );
 
-    complaintCtrl.dispose();
-    diagnosisCtrl.dispose();
-    searchCtrl.dispose();
+    complaintCtrl.dispose(); diagnosisCtrl.dispose(); searchCtrl.dispose();
   }
 
-  // ─── Save prescription update to Hive + Firestore + Realtime ──────────────
+  // ─── Save prescription update ──────────────────────────────────────────────
   Future<void> _savePrescriptionUpdate({
     required String serial,
     required String branchId,
@@ -732,13 +637,13 @@ class _PatientQueueState extends State<PatientQueue>
   }) async {
     final now = DateTime.now().toIso8601String();
 
-    // Build the updated prescription map (no FieldValue — must be serialisable)
     final updatedPresc = <String, dynamic>{
       ...originalPresc,
       'serial':        serial,
       'branchId':      branchId,
+      'queueType':     queueType,   // explicit — not just from originalPresc spread
       'condition':     complaint,
-      'complaint':     complaint,   // keep both for compatibility
+      'complaint':     complaint,
       'diagnosis':     diagnosis,
       'prescriptions': medicines,
       'labResults':    labTests,
@@ -746,12 +651,12 @@ class _PatientQueueState extends State<PatientQueue>
       'updatedBy':     RealtimeManager().role ?? 'Doctor',
     };
 
-    // ── 1. Save to local Hive prescriptions box ────────────────────────────
+    // 1. Local Hive prescriptions box
     await LocalStorageService.saveLocalPrescription(updatedPresc);
     debugPrint('[PrescEdit] ✅ Saved to local prescriptions box: $serial');
 
-    // ── 2. Update entry in local Hive entries box ──────────────────────────
-    final entryKey  = '$branchId-$serial';
+    // 2. Hive entries box
+    final entryKey = '$branchId-$serial';
     final entryBox  = Hive.box(LocalStorageService.entriesBox);
     final existing  = entryBox.get(entryKey);
     if (existing != null) {
@@ -764,54 +669,44 @@ class _PatientQueueState extends State<PatientQueue>
       debugPrint('[PrescEdit] ✅ Updated entry in Hive entries box: $entryKey');
     }
 
-    // ── 3. Broadcast to all connected devices via RealtimeManager ─────────
-    // branchId MUST be at top level (not nested in data) per RealtimeEvents.payload()
-    RealtimeManager().sendMessage(
-      RealtimeEvents.payload(
-        type:     RealtimeEvents.savePrescription,
-        branchId: branchId,
-        data:     updatedPresc,
-      ),
-    );
-    debugPrint('[PrescEdit] ✅ Broadcasted save_prescription via RealtimeManager');
+    // 3. LAN broadcast
+    RealtimeManager().sendMessage(RealtimeEvents.payload(
+      type:     RealtimeEvents.savePrescription,
+      branchId: branchId,
+      data:     updatedPresc,
+    ));
+    debugPrint('[PrescEdit] ✅ Broadcasted save_prescription');
 
-    // ── 4. Write to Firestore (fire-and-forget, non-blocking) ─────────────
+    // 4. Firestore fire-and-forget
     if (_isOnline) {
       _updateFirestore(
-        serial:      serial,
-        branchId:    branchId,
-        patientCnic: patientCnic,
-        queueType:   queueType,
+        serial:       serial,
+        branchId:     branchId,
+        patientCnic:  patientCnic,
+        queueType:    queueType,
         updatedPresc: updatedPresc,
-        now:         now,
+        now:          now,
       );
-    } else {
-      debugPrint('[PrescEdit] Offline — Firestore update queued via ServerSyncManager on reconnect');
     }
 
-    // ── 5. Show success feedback ───────────────────────────────────────────
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(children: [
-            Icon(Icons.check_circle, color: Colors.white),
-            SizedBox(width: 8),
-            Text('Prescription updated successfully'),
-          ]),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 3),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Row(children: [
+          Icon(Icons.check_circle, color: Colors.white), SizedBox(width: 8),
+          Text('Prescription updated successfully'),
+        ]),
+        backgroundColor: Colors.green, duration: Duration(seconds: 3),
+      ));
       setState(() {});
     }
   }
 
-  // ─── Firestore write (runs in background) ─────────────────────────────────
+  // ─── Firestore write (FIX Bug 3) ─────────────────────────────────────────
   Future<void> _updateFirestore({
     required String serial,
     required String branchId,
     required String patientCnic,
-    required String queueType,
+    required String queueType,   // FIX: always normalised before reaching here
     required Map<String, dynamic> updatedPresc,
     required String now,
   }) async {
@@ -819,7 +714,6 @@ class _PatientQueueState extends State<PatientQueue>
       final ddmmyy = serial.split('-')[0];
       final db     = FirebaseFirestore.instance;
 
-      // Update prescription doc: /branches/{b}/prescriptions/{cnic}/prescriptions/{serial}
       final cleanCnic = patientCnic.isNotEmpty ? patientCnic : 'unknown_$serial';
       await db
           .collection('branches').doc(branchId)
@@ -828,22 +722,21 @@ class _PatientQueueState extends State<PatientQueue>
           .set(updatedPresc, SetOptions(merge: true));
       debugPrint('[PrescEdit] ✅ Firestore prescriptions updated: $serial');
 
-      // Update serial doc status and embedded prescription
-      // /branches/{b}/serials/{ddMMyy}/{queueType}/{serial}
+      // FIX (Bug 3): queueType is now always correctly resolved via
+      // _normaliseQueueType before reaching this method — no hardcoded fallback.
       await db
           .collection('branches').doc(branchId)
           .collection('serials').doc(ddmmyy)
-          .collection(queueType).doc(serial)
+          .collection(queueType)   // ← correct collection, not always 'zakat'
+          .doc(serial)
           .update({
         'prescription': updatedPresc,
         'status':       'completed',
         'updatedAt':    FieldValue.serverTimestamp(),
       });
-      debugPrint('[PrescEdit] ✅ Firestore serial doc updated: $serial');
+      debugPrint('[PrescEdit] ✅ Firestore serials/$ddmmyy/$queueType/$serial updated');
     } catch (e) {
       debugPrint('[PrescEdit] ❌ Firestore update failed (will retry on next sync): $e');
-      // Non-fatal: local + realtime already succeeded. ServerSyncManager will
-      // pick this up on next connectivity restore via its upload queue.
     }
   }
 
@@ -860,193 +753,132 @@ class _PatientQueueState extends State<PatientQueue>
         });
 
         if (allPatients.isEmpty) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.people_outline, size: 80, color: Colors.grey),
-                SizedBox(height: 16),
-                Text("No patients in today's queue",
-                    style: TextStyle(fontSize: 18, color: Colors.grey)),
-              ],
-            ),
-          );
+          return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Icon(Icons.people_outline, size: 80, color: Colors.grey),
+            SizedBox(height: 16),
+            Text("No patients in today's queue", style: TextStyle(fontSize: 18, color: Colors.grey)),
+          ]));
         }
 
-        final waiting   = allPatients
-            .where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting')
-            .toList();
-        final completed = allPatients
-            .where((p) => (p['status'] ?? '').toString().toLowerCase() != 'waiting')
-            .toList();
-
+        final waiting   = allPatients.where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting').toList();
+        final completed = allPatients.where((p) => (p['status'] ?? '').toString().toLowerCase() != 'waiting').toList();
         final waitingCount   = waiting.length;
         final completedCount = completed.length;
         final total          = allPatients.length;
 
         List<Map<String, dynamic>> list;
         switch (_filter) {
-          case 'waiting':   list = waiting;   break;
-          case 'completed': list = completed; break;
+          case 'waiting':   list = waiting;    break;
+          case 'completed': list = completed;  break;
           default:          list = allPatients;
         }
 
-        return Column(
-          children: [
-            // ── Header ──────────────────────────────────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              color: _teal,
-              child: Row(
-                children: [
-                  const Icon(Icons.people_alt, color: Colors.white, size: 26),
-                  const SizedBox(width: 10),
-                  const Text("Today's Queue",
-                      style: TextStyle(
-                          color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
-                  const Spacer(),
-                  IconButton(
-                    icon: const Icon(Icons.refresh, color: Colors.white, size: 24),
-                    onPressed: () {
-                      setState(() {});
-                      WidgetsBinding.instance.addPostFrameCallback(
-                          (_) => _tryAutoSelectSmallestWaiting());
-                    },
-                  ),
-                ],
-              ),
-            ),
+        return Column(children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            color: _teal,
+            child: Row(children: [
+              const Icon(Icons.people_alt, color: Colors.white, size: 26),
+              const SizedBox(width: 10),
+              const Text("Today's Queue", style: TextStyle(
+                  color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.refresh, color: Colors.white, size: 24),
+                onPressed: () {
+                  setState(() {});
+                  WidgetsBinding.instance.addPostFrameCallback(
+                      (_) => _tryAutoSelectSmallestWaiting());
+                }),
+            ]),
+          ),
 
-            // ── Filter tabs ─────────────────────────────────────────────────
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  GestureDetector(
-                    onTap: () => setState(() => _filter = 'waiting'),
-                    child: _buildFilterTab('Waiting', waitingCount, _amber, _filter == 'waiting'),
-                  ),
-                  GestureDetector(
-                    onTap: () => setState(() => _filter = 'completed'),
-                    child: _buildFilterTab('Done', completedCount, Colors.green[700]!, _filter == 'completed'),
-                  ),
-                  GestureDetector(
-                    onTap: () => setState(() => _filter = 'all'),
-                    child: _buildFilterTab('Total', total, _purple, _filter == 'all'),
-                  ),
-                ],
-              ),
-            ),
+          // Filter tabs
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+              GestureDetector(onTap: () => setState(() => _filter = 'waiting'),
+                  child: _buildFilterTab('Waiting', waitingCount, _amber, _filter == 'waiting')),
+              GestureDetector(onTap: () => setState(() => _filter = 'completed'),
+                  child: _buildFilterTab('Done', completedCount, Colors.green[700]!, _filter == 'completed')),
+              GestureDetector(onTap: () => setState(() => _filter = 'all'),
+                  child: _buildFilterTab('Total', total, _purple, _filter == 'all')),
+            ]),
+          ),
 
-            // ── Patient list ─────────────────────────────────────────────────
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-                itemCount: list.length,
-                itemBuilder: (context, index) {
-                  final patient = list[index];
-                  final serial  = patient['serial']?.toString() ??
-                      patient['id']?.toString() ?? 'N/A';
-                  final name    = patient['patientName'] ?? 'Unknown Patient';
+          // Patient list
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              itemCount: list.length,
+              itemBuilder: (context, index) {
+                final patient = list[index];
+                final serial  = patient['serial']?.toString() ?? patient['id']?.toString() ?? 'N/A';
+                final name    = patient['patientName'] ?? 'Unknown Patient';
 
-                  final isSelected = widget.selectedPatient?['serial']?.toString() == serial ||
-                      widget.selectedPatient?['id']?.toString() == serial;
+                final isSelected = widget.selectedPatient?['serial']?.toString() == serial ||
+                    widget.selectedPatient?['id']?.toString() == serial;
 
-                  final status    = (patient['status'] ?? '').toString().toLowerCase();
-                  final isWaiting = status == 'waiting';
+                final status    = (patient['status'] ?? '').toString().toLowerCase();
+                final isWaiting = status == 'waiting';
 
-                  final smallestWaitingSerial = waiting.isNotEmpty
-                      ? (waiting.first['serial']?.toString() ??
-                          waiting.first['id']?.toString() ?? '')
-                      : '';
-                  final isSmallestWaiting = isWaiting && serial == smallestWaitingSerial;
-                  final isSelectable      = isSmallestWaiting && !widget.isSaving;
-                  final hasPrescription   = patient['prescription'] != null ||
-                      LocalStorageService.getLocalPrescription(serial) != null;
+                final smallestWaitingSerial = waiting.isNotEmpty
+                    ? (waiting.first['serial']?.toString() ?? waiting.first['id']?.toString() ?? '') : '';
+                final isSmallestWaiting = isWaiting && serial == smallestWaitingSerial;
+                final isSelectable      = isSmallestWaiting && !widget.isSaving;
+                final hasPrescription   = patient['prescription'] != null ||
+                    LocalStorageService.getLocalPrescription(serial) != null;
 
-                  final Color dotColor = isWaiting ? _amber : Colors.green[700]!;
+                final Color dotColor = isWaiting ? _amber : Colors.green[700]!;
 
-                  Widget dot = Container(
+                Widget dot = Container(
                     width: 10, height: 10,
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-                  );
-                  if (isWaiting) {
-                    dot = ScaleTransition(scale: _pulseAnimation, child: dot);
-                  }
+                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle));
+                if (isWaiting) dot = ScaleTransition(scale: _pulseAnimation, child: dot);
 
-                  return AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isSelected ? _amber.withOpacity(0.15) : Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? _amber.withOpacity(0.15) : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
                         color: isSelected ? _amber : dotColor.withOpacity(0.4),
-                        width: isSelected ? 2.0 : 1.2,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black12.withOpacity(0.08),
-                            blurRadius: 3,
-                            offset: const Offset(0, 1)),
-                      ],
-                    ),
-                    child: InkWell(
-                      onTap: isSelectable
-                          ? () => widget.onPatientSelected({
-                                ...patient,
-                                'serial': serial,
-                                'id': serial,
-                              })
-                          : null,
-                      child: Row(
-                        children: [
-                          Icon(
-                            isWaiting ? Icons.person : Icons.check_circle,
-                            color: dotColor, size: 26,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  name,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w600, fontSize: 15,
-                                    color: (!isWaiting) ? Colors.grey : Colors.black87,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  'Serial: $serial',
-                                  style: TextStyle(
-                                    color: isSelected ? _teal : (!isWaiting ? Colors.grey : Colors.black54),
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // Edit button only for completed patients with prescriptions
-                          if (!isWaiting && hasPrescription)
-                            IconButton(
-                              icon: const Icon(Icons.edit, color: Colors.orange, size: 20),
-                              tooltip: 'Edit Prescription',
-                              onPressed: () => _showPrescriptionDialog(patient),
-                            ),
-                          dot,
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
+                        width: isSelected ? 2.0 : 1.2),
+                    boxShadow: [BoxShadow(
+                        color: Colors.black12.withOpacity(0.08), blurRadius: 3,
+                        offset: const Offset(0, 1))]),
+                  child: InkWell(
+                    onTap: isSelectable ? () => widget.onPatientSelected(
+                        {...patient, 'serial': serial, 'id': serial}) : null,
+                    child: Row(children: [
+                      Icon(isWaiting ? Icons.person : Icons.check_circle,
+                          color: dotColor, size: 26),
+                      const SizedBox(width: 10),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(name, style: TextStyle(
+                            fontWeight: FontWeight.w600, fontSize: 15,
+                            color: (!isWaiting) ? Colors.grey : Colors.black87)),
+                        const SizedBox(height: 3),
+                        Text('Serial: $serial', style: TextStyle(
+                            color: isSelected ? _teal : (!isWaiting ? Colors.grey : Colors.black54),
+                            fontSize: 12)),
+                      ])),
+                      if (!isWaiting && hasPrescription)
+                        IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.orange, size: 20),
+                          tooltip: 'Edit Prescription',
+                          onPressed: () => _showPrescriptionDialog(patient)),
+                      dot,
+                    ]),
+                  ),
+                );
+              },
             ),
-          ],
-        );
+          ),
+        ]);
       },
     );
   }
@@ -1060,19 +892,12 @@ class _PatientQueueState extends State<PatientQueue>
         borderRadius: BorderRadius.circular(30),
         boxShadow: isActive
             ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))]
-            : null,
-      ),
-      child: Column(
-        children: [
-          Text(label,
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-          const SizedBox(height: 2),
-          Text('$count',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-        ],
-      ),
+            : null),
+      child: Column(children: [
+        Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+        const SizedBox(height: 2),
+        Text('$count', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+      ]),
     );
   }
 }

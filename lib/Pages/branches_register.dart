@@ -52,7 +52,6 @@ class _BranchesRegisterState extends State<BranchesRegister>
   late AnimationController _animController;
   late Animation<double>   _fadeAnim;
 
-  // ── Role definitions ──────────────────────────────────────────────────────
   static const List<Map<String, dynamic>> _roleItems = [
     {'label': 'Manager',              'icon': Icons.manage_accounts_outlined,    'type': 'crown'},
     {'label': 'Supervisor',           'icon': Icons.supervisor_account_outlined, 'type': 'normal'},
@@ -263,24 +262,23 @@ class _BranchesRegisterState extends State<BranchesRegister>
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final isDoctor = _selectedRole?.toLowerCase() == 'doctor';
+    final isWide = MediaQuery.of(context).size.width > 700;
+    final screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
       backgroundColor: t.bg,
       body: Stack(
         children: [
-          // ── Header gradient using role accent ──────────────────────────
+          // Header gradient
           Positioned(
             top: 0, left: 0, right: 0,
             child: Container(
-              height: 210,
+              height: isWide ? 210 : 180,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    t.accent.withOpacity(0.9),
-                    t.accentLight,
-                  ],
+                  colors: [t.accent.withOpacity(0.9), t.accentLight],
                 ),
               ),
             ),
@@ -289,9 +287,9 @@ class _BranchesRegisterState extends State<BranchesRegister>
           SafeArea(
             child: Column(
               children: [
-                // ── Header ──────────────────────────────────────────────
+                // Header
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 16, 16, 0),
+                  padding: EdgeInsets.fromLTRB(8, isWide ? 16 : 12, 16, 0),
                   child: Row(
                     children: [
                       GestureDetector(
@@ -306,9 +304,17 @@ class _BranchesRegisterState extends State<BranchesRegister>
                         ),
                       ),
                       const SizedBox(width: 14),
-                      const Text(
-                        'Register New Branch',
-                        style: TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                      Expanded(
+                        child: Text(
+                          'Register New Branch',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: isWide ? 21 : 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.2,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -321,182 +327,17 @@ class _BranchesRegisterState extends State<BranchesRegister>
                     opacity: _fadeAnim,
                     child: SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 48),
+                      padding: EdgeInsets.fromLTRB(
+                        isWide ? 24 : 12,
+                        0,
+                        isWide ? 24 : 12,
+                        48,
+                      ),
                       child: Form(
                         key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildAvatarCard(t),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Branch Details',
-                              icon: Icons.apartment_rounded,
-                              accent: t.accent,
-                              child: Column(children: [
-                                _buildField(t,
-                                  controller: _branchController,
-                                  label: 'Branch Name',
-                                  icon: Icons.store_rounded,
-                                  required: true,
-                                  validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
-                                ),
-                                const SizedBox(height: 14),
-                                _buildRoleDropdown(t),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Account Information',
-                              icon: Icons.person_outline_rounded,
-                              accent: t.accentLight,
-                              child: Column(children: [
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _usernameController,
-                                      label: 'Username',
-                                      icon: Icons.alternate_email_rounded,
-                                      required: true,
-                                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                  _buildField(t,
-                                      controller: _phoneController,
-                                      label: 'Phone',
-                                      icon: Icons.phone_outlined,
-                                      keyboardType: TextInputType.phone,
-                                      inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
-                                ]),
-                                const SizedBox(height: 14),
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _emailController,
-                                      label: 'Email',
-                                      icon: Icons.mail_outline_rounded,
-                                      required: true,
-                                      keyboardType: TextInputType.emailAddress,
-                                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                  _buildField(t,
-                                      controller: _passwordController,
-                                      label: 'Password',
-                                      icon: Icons.lock_outline_rounded,
-                                      isPassword: true,
-                                      required: true,
-                                      validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
-                                ]),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Contact & Address',
-                              icon: Icons.contact_mail_outlined,
-                              accent: const Color(0xFFE65100),
-                              child: Column(children: [
-                                _buildField(t,
-                                    controller: _identificationController,
-                                    label: 'CNIC / ID Number',
-                                    icon: Icons.credit_card_outlined),
-                                const SizedBox(height: 14),
-                                _buildField(t,
-                                    controller: _addressController,
-                                    label: 'Address',
-                                    icon: Icons.home_outlined,
-                                    maxLines: 3),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Financial Details',
-                              icon: Icons.account_balance_wallet_outlined,
-                              accent: t.accent,
-                              child: Column(children: [
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _bankNameController,
-                                      label: 'Bank Name',
-                                      icon: Icons.account_balance_outlined),
-                                  _buildField(t,
-                                      controller: _bankAccountController,
-                                      label: 'Account No.',
-                                      icon: Icons.numbers_outlined,
-                                      keyboardType: TextInputType.number),
-                                ]),
-                                const SizedBox(height: 14),
-                                _buildField(t,
-                                    controller: _salaryController,
-                                    label: 'Base Salary (PKR)',
-                                    icon: Icons.payments_outlined,
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
-                              ]),
-                            ),
-
-                            if (isDoctor) ...[
-                              const SizedBox(height: 16),
-                              _buildCard(t,
-                                title: 'Medical Qualifications',
-                                icon: Icons.local_hospital_outlined,
-                                accent: const Color(0xFF00695C),
-                                child: Column(children: [
-                                  _buildSimpleDropdown(t,
-                                    value: _selectedDegree,
-                                    items: _degrees,
-                                    hint: 'Select Degree *',
-                                    icon: Icons.school_outlined,
-                                    onChanged: (v) => setState(() {
-                                      _selectedDegree = v;
-                                      if (v != 'Other') _customDegreeController.clear();
-                                    }),
-                                    validator: (v) => v == null ? 'Required' : null,
-                                  ),
-                                  if (_selectedDegree == 'Other') ...[
-                                    const SizedBox(height: 14),
-                                    _buildField(t,
-                                        controller: _customDegreeController,
-                                        label: 'Specify Degree',
-                                        icon: Icons.edit_outlined,
-                                        required: true,
-                                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                  ],
-                                ]),
-                              ),
-                            ],
-
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Documents',
-                              icon: Icons.folder_outlined,
-                              accent: const Color(0xFF37474F),
-                              child: Column(children: [
-                                _buildFileCard(t,
-                                  title: 'Identification Document',
-                                  subtitle: 'CNIC, Passport, or Government ID',
-                                  file: _identificationFile,
-                                  onTap: () => _pickDocument('identification'),
-                                  onRemove: () => setState(() => _identificationFile = null),
-                                  icon: Icons.badge_outlined,
-                                ),
-                                if (isDoctor) ...[
-                                  const SizedBox(height: 12),
-                                  _buildFileCard(t,
-                                    title: 'Degree Certificate',
-                                    subtitle: 'Medical degree / diploma',
-                                    file: _degreeFile,
-                                    onTap: () => _pickDocument('degree'),
-                                    onRemove: () => setState(() => _degreeFile = null),
-                                    icon: Icons.school_outlined,
-                                  ),
-                                ],
-                              ]),
-                            ),
-
-                            const SizedBox(height: 32),
-                            _buildSubmitButton(t),
-                          ],
-                        ),
+                        child: isWide
+                            ? _buildWideLayout(t, isDoctor)
+                            : _buildNarrowLayout(t, isDoctor),
                       ),
                     ),
                   ),
@@ -539,6 +380,351 @@ class _BranchesRegisterState extends State<BranchesRegister>
     );
   }
 
+  // ── Wide Layout (tablet/desktop) ─────────────────────────────────────────
+  Widget _buildWideLayout(RoleThemeData t, bool isDoctor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildAvatarCard(t),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(children: [
+                _buildCard(t,
+                  title: 'Branch Details',
+                  icon: Icons.apartment_rounded,
+                  accent: t.accent,
+                  child: Column(children: [
+                    _buildField(t,
+                      controller: _branchController,
+                      label: 'Branch Name',
+                      icon: Icons.store_rounded,
+                      required: true,
+                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
+                    ),
+                    const SizedBox(height: 14),
+                    _buildRoleDropdown(t),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                _buildCard(t,
+                  title: 'Contact & Address',
+                  icon: Icons.contact_mail_outlined,
+                  accent: const Color(0xFFE65100),
+                  child: Column(children: [
+                    _buildField(t,
+                        controller: _identificationController,
+                        label: 'CNIC / ID Number',
+                        icon: Icons.credit_card_outlined),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _addressController,
+                        label: 'Address',
+                        icon: Icons.home_outlined,
+                        maxLines: 3),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                _buildCard(t,
+                  title: 'Documents',
+                  icon: Icons.folder_outlined,
+                  accent: const Color(0xFF37474F),
+                  child: Column(children: [
+                    _buildFileCard(t,
+                      title: 'Identification Document',
+                      subtitle: 'CNIC, Passport, or Government ID',
+                      file: _identificationFile,
+                      onTap: () => _pickDocument('identification'),
+                      onRemove: () => setState(() => _identificationFile = null),
+                      icon: Icons.badge_outlined,
+                    ),
+                    if (isDoctor) ...[
+                      const SizedBox(height: 12),
+                      _buildFileCard(t,
+                        title: 'Degree Certificate',
+                        subtitle: 'Medical degree / diploma',
+                        file: _degreeFile,
+                        onTap: () => _pickDocument('degree'),
+                        onRemove: () => setState(() => _degreeFile = null),
+                        icon: Icons.school_outlined,
+                      ),
+                    ],
+                  ]),
+                ),
+              ]),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(children: [
+                _buildCard(t,
+                  title: 'Account Information',
+                  icon: Icons.person_outline_rounded,
+                  accent: t.accentLight,
+                  child: Column(children: [
+                    _buildField(t,
+                        controller: _usernameController,
+                        label: 'Username',
+                        icon: Icons.alternate_email_rounded,
+                        required: true,
+                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _phoneController,
+                        label: 'Phone',
+                        icon: Icons.phone_outlined,
+                        keyboardType: TextInputType.phone,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _emailController,
+                        label: 'Email',
+                        icon: Icons.mail_outline_rounded,
+                        required: true,
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _passwordController,
+                        label: 'Password',
+                        icon: Icons.lock_outline_rounded,
+                        isPassword: true,
+                        required: true,
+                        validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                _buildCard(t,
+                  title: 'Financial Details',
+                  icon: Icons.account_balance_wallet_outlined,
+                  accent: t.accent,
+                  child: Column(children: [
+                    _buildField(t,
+                        controller: _bankNameController,
+                        label: 'Bank Name',
+                        icon: Icons.account_balance_outlined),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _bankAccountController,
+                        label: 'Account No.',
+                        icon: Icons.numbers_outlined,
+                        keyboardType: TextInputType.number),
+                    const SizedBox(height: 14),
+                    _buildField(t,
+                        controller: _salaryController,
+                        label: 'Base Salary (PKR)',
+                        icon: Icons.payments_outlined,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
+                  ]),
+                ),
+                if (isDoctor) ...[
+                  const SizedBox(height: 16),
+                  _buildCard(t,
+                    title: 'Medical Qualifications',
+                    icon: Icons.local_hospital_outlined,
+                    accent: const Color(0xFF00695C),
+                    child: Column(children: [
+                      _buildSimpleDropdown(t,
+                        value: _selectedDegree,
+                        items: _degrees,
+                        hint: 'Select Degree *',
+                        icon: Icons.school_outlined,
+                        onChanged: (v) => setState(() {
+                          _selectedDegree = v;
+                          if (v != 'Other') _customDegreeController.clear();
+                        }),
+                        validator: (v) => v == null ? 'Required' : null,
+                      ),
+                      if (_selectedDegree == 'Other') ...[
+                        const SizedBox(height: 14),
+                        _buildField(t,
+                            controller: _customDegreeController,
+                            label: 'Specify Degree',
+                            icon: Icons.edit_outlined,
+                            required: true,
+                            validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+                      ],
+                    ]),
+                  ),
+                ],
+              ]),
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+        _buildSubmitButton(t),
+      ],
+    );
+  }
+
+  // ── Narrow Layout (mobile) ──────────────────────────────────────────────
+  Widget _buildNarrowLayout(RoleThemeData t, bool isDoctor) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildAvatarCard(t),
+        const SizedBox(height: 14),
+        _buildCard(t,
+          title: 'Branch Details',
+          icon: Icons.apartment_rounded,
+          accent: t.accent,
+          child: Column(children: [
+            _buildField(t,
+              controller: _branchController,
+              label: 'Branch Name',
+              icon: Icons.store_rounded,
+              required: true,
+              validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
+            ),
+            const SizedBox(height: 14),
+            _buildRoleDropdown(t),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(t,
+          title: 'Account Information',
+          icon: Icons.person_outline_rounded,
+          accent: t.accentLight,
+          child: Column(children: [
+            _buildField(t,
+                controller: _usernameController,
+                label: 'Username',
+                icon: Icons.alternate_email_rounded,
+                required: true,
+                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _phoneController,
+                label: 'Phone',
+                icon: Icons.phone_outlined,
+                keyboardType: TextInputType.phone,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _emailController,
+                label: 'Email',
+                icon: Icons.mail_outline_rounded,
+                required: true,
+                keyboardType: TextInputType.emailAddress,
+                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _passwordController,
+                label: 'Password',
+                icon: Icons.lock_outline_rounded,
+                isPassword: true,
+                required: true,
+                validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(t,
+          title: 'Contact & Address',
+          icon: Icons.contact_mail_outlined,
+          accent: const Color(0xFFE65100),
+          child: Column(children: [
+            _buildField(t,
+                controller: _identificationController,
+                label: 'CNIC / ID Number',
+                icon: Icons.credit_card_outlined),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _addressController,
+                label: 'Address',
+                icon: Icons.home_outlined,
+                maxLines: 3),
+          ]),
+        ),
+        const SizedBox(height: 14),
+        _buildCard(t,
+          title: 'Financial Details',
+          icon: Icons.account_balance_wallet_outlined,
+          accent: t.accent,
+          child: Column(children: [
+            _buildField(t,
+                controller: _bankNameController,
+                label: 'Bank Name',
+                icon: Icons.account_balance_outlined),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _bankAccountController,
+                label: 'Account No.',
+                icon: Icons.numbers_outlined,
+                keyboardType: TextInputType.number),
+            const SizedBox(height: 14),
+            _buildField(t,
+                controller: _salaryController,
+                label: 'Base Salary (PKR)',
+                icon: Icons.payments_outlined,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
+          ]),
+        ),
+        if (isDoctor) ...[
+          const SizedBox(height: 14),
+          _buildCard(t,
+            title: 'Medical Qualifications',
+            icon: Icons.local_hospital_outlined,
+            accent: const Color(0xFF00695C),
+            child: Column(children: [
+              _buildSimpleDropdown(t,
+                value: _selectedDegree,
+                items: _degrees,
+                hint: 'Select Degree *',
+                icon: Icons.school_outlined,
+                onChanged: (v) => setState(() {
+                  _selectedDegree = v;
+                  if (v != 'Other') _customDegreeController.clear();
+                }),
+                validator: (v) => v == null ? 'Required' : null,
+              ),
+              if (_selectedDegree == 'Other') ...[
+                const SizedBox(height: 14),
+                _buildField(t,
+                    controller: _customDegreeController,
+                    label: 'Specify Degree',
+                    icon: Icons.edit_outlined,
+                    required: true,
+                    validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
+              ],
+            ]),
+          ),
+        ],
+        const SizedBox(height: 14),
+        _buildCard(t,
+          title: 'Documents',
+          icon: Icons.folder_outlined,
+          accent: const Color(0xFF37474F),
+          child: Column(children: [
+            _buildFileCard(t,
+              title: 'Identification Document',
+              subtitle: 'CNIC, Passport, or Government ID',
+              file: _identificationFile,
+              onTap: () => _pickDocument('identification'),
+              onRemove: () => setState(() => _identificationFile = null),
+              icon: Icons.badge_outlined,
+            ),
+            if (isDoctor) ...[
+              const SizedBox(height: 12),
+              _buildFileCard(t,
+                title: 'Degree Certificate',
+                subtitle: 'Medical degree / diploma',
+                file: _degreeFile,
+                onTap: () => _pickDocument('degree'),
+                onRemove: () => setState(() => _degreeFile = null),
+                icon: Icons.school_outlined,
+              ),
+            ],
+          ]),
+        ),
+        const SizedBox(height: 28),
+        _buildSubmitButton(t),
+      ],
+    );
+  }
+
   // ── Widgets ───────────────────────────────────────────────────────────────
 
   Widget _buildAvatarCard(RoleThemeData t) {
@@ -549,7 +735,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
         border: Border.all(color: t.bgRule),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 18, offset: const Offset(0, 4))],
       ),
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
       child: Column(children: [
         GestureDetector(
           onTap: _pickProfileImage,
@@ -562,14 +748,14 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 boxShadow: [BoxShadow(color: t.accent.withOpacity(0.15), blurRadius: 18, offset: const Offset(0, 6))],
               ),
               child: CircleAvatar(
-                radius: 54,
+                radius: 50,
                 backgroundColor: t.accentMuted,
                 backgroundImage: _profileImageBytes != null ? MemoryImage(_profileImageBytes!) : null,
                 child: _profileImageBytes == null
                     ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withOpacity(0.5)),
+                        Icon(Icons.person_outline_rounded, size: 34, color: t.accent.withOpacity(0.5)),
                         const SizedBox(height: 4),
-                        Text('Add Photo', style: TextStyle(fontSize: 11, color: t.textTertiary, fontWeight: FontWeight.w500)),
+                        Text('Add Photo', style: TextStyle(fontSize: 10, color: t.textTertiary, fontWeight: FontWeight.w500)),
                       ])
                     : null,
               ),
@@ -587,7 +773,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                   ),
                   child: Icon(
                     _profileImageBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
-                    color: Colors.white, size: 14,
+                    color: Colors.white, size: 13,
                   ),
                 ),
               ),
@@ -704,17 +890,8 @@ class _BranchesRegisterState extends State<BranchesRegister>
             Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: 0.1)),
           ]),
         ),
-        Padding(padding: const EdgeInsets.all(18), child: child),
+        Padding(padding: const EdgeInsets.all(16), child: child),
       ]),
-    );
-  }
-
-  Widget _buildRow(List<Widget> children) {
-    return Row(
-      children: children
-          .expand((w) => [Expanded(child: w), const SizedBox(width: 12)])
-          .toList()
-        ..removeLast(),
     );
   }
 
@@ -808,7 +985,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           color: has ? t.accentMuted : t.bgCardAlt,
           borderRadius: BorderRadius.circular(14),
@@ -816,20 +993,20 @@ class _BranchesRegisterState extends State<BranchesRegister>
         ),
         child: Row(children: [
           Container(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               color: has ? t.accent.withOpacity(0.15) : t.bgRule.withOpacity(0.5),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(has ? Icons.check_rounded : icon, color: has ? t.accent : t.textTertiary, size: 22),
+            child: Icon(has ? Icons.check_rounded : icon, color: has ? t.accent : t.textTertiary, size: 20),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: has ? t.accent : t.textPrimary)),
-              const SizedBox(height: 3),
+              Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: has ? t.accent : t.textPrimary)),
+              const SizedBox(height: 2),
               Text(has ? file.name : subtitle,
-                  style: TextStyle(fontSize: 12, color: has ? t.accent.withOpacity(0.7) : t.textTertiary),
+                  style: TextStyle(fontSize: 11, color: has ? t.accent.withOpacity(0.7) : t.textTertiary),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
             ]),
           ),
@@ -839,11 +1016,11 @@ class _BranchesRegisterState extends State<BranchesRegister>
               child: Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(color: t.danger.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
-                child: Icon(Icons.close_rounded, color: t.danger, size: 18),
+                child: Icon(Icons.close_rounded, color: t.danger, size: 16),
               ),
             )
           else
-            Icon(Icons.upload_file_rounded, color: t.textTertiary, size: 22),
+            Icon(Icons.upload_file_rounded, color: t.textTertiary, size: 20),
         ]),
       ),
     );
@@ -853,7 +1030,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
     return GestureDetector(
       onTap: _loading ? null : _registerBranch,
       child: Container(
-        height: 58,
+        height: 56,
         decoration: BoxDecoration(
           gradient: LinearGradient(
               colors: [t.accent, t.accentLight],

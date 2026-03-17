@@ -39,12 +39,12 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   final priceCtrl          = TextEditingController();
   final expiryCtrl         = TextEditingController();
   final classificationCtrl = TextEditingController();
-  final reasonCtrl         = TextEditingController();
 
   Map<String, dynamic>? selectedItem;
   String?               selectedType;
   String?               _branchName;
   String?               _selectedDose;
+  bool                  _isLoading = false;
 
   late AnimationController _slideCtrl;
   late Animation<Offset>   _slideAnim;
@@ -80,7 +80,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
     _slideCtrl.dispose();
     searchCtrl.dispose(); nameCtrl.dispose(); doseCtrl.dispose();
     quantityCtrl.dispose(); priceCtrl.dispose(); expiryCtrl.dispose();
-    classificationCtrl.dispose(); reasonCtrl.dispose();
+    classificationCtrl.dispose();
     super.dispose();
   }
 
@@ -98,10 +98,10 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           .collection('branches').doc(widget.branchId).collection('inventory').get();
       final items = snap.docs.map((doc) {
         final data = doc.data();
-        data['id'] = doc.id; // FIX: real Firestore doc ID
+        data['id'] = doc.id;
         return data;
       }).toList();
-      setState(() { inventoryItems = items; searchResults = List.from(items); });
+      if (mounted) setState(() { inventoryItems = items; searchResults = List.from(items); });
     } catch (e) { _snack('Failed to load inventory', err: true); }
   }
 
@@ -123,7 +123,6 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
       priceCtrl.text       = (item['price'] ?? 0).toString();
       expiryCtrl.text      = item['expiryDate'] ?? '';
       classificationCtrl.text = item['classification'] ?? '';
-      reasonCtrl.clear();
       if (_hasDd(type)) {
         _selectedDose = _doseOptions[type]!.contains(dose) ? dose : null;
         doseCtrl.clear();
@@ -140,177 +139,181 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   void _clearSelection() => setState(() {
     selectedItem = null; selectedType = null; _selectedDose = null;
     nameCtrl.clear(); doseCtrl.clear(); quantityCtrl.clear();
-    priceCtrl.clear(); expiryCtrl.clear(); classificationCtrl.clear(); reasonCtrl.clear();
+    priceCtrl.clear(); expiryCtrl.clear(); classificationCtrl.clear();
   });
 
-  // ── Submit edit ───────────────────────────────────────────────────────────
+  // ── Submit edit — direct Firestore update ─────────────────────────────────
   Future<void> _submitAdjustment() async {
     if (selectedItem == null) return;
     final newName  = nameCtrl.text.trim();
     final newType  = selectedType!;
     final newQty   = int.tryParse(quantityCtrl.text.trim());
     final newPrice = int.tryParse(priceCtrl.text.trim());
-    final reason   = reasonCtrl.text.trim();
-    if (newName.isEmpty || newQty == null || newPrice == null || reason.isEmpty) {
+
+    if (newName.isEmpty || newQty == null || newPrice == null) {
       _snack('Please fill all required fields', err: true); return;
     }
+
     String newDose = '';
     if (_hasDd(newType))   newDose = _selectedDose ?? '';
     if (_hasFree(newType)) newDose = doseCtrl.text.trim();
 
-    final confirmed = await _showConfirmDialog(newName, newType, newQty, newPrice, newDose, reason);
+    final confirmed = await _showConfirmDialog(newName, newType, newQty, newPrice, newDose);
     if (!confirmed) return;
 
+    setState(() => _isLoading = true);
     try {
       final user = FirebaseAuth.instance.currentUser!;
-      final userDoc = await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId).collection('users').doc(user.uid).get();
-      final username = userDoc.data()?['username'] ?? user.email ?? 'Unknown';
+      final itemId = selectedItem!['id'] as String;
+
+      final updatedData = {
+        'name':           newName,
+        'name_lower':     newName.toLowerCase(),
+        'type':           newType,
+        'dose':           newDose,
+        'quantity':       newQty,
+        'price':          newPrice,
+        'expiryDate':     expiryCtrl.text.trim(),
+        'classification': classificationCtrl.text.trim(),
+        'lastUpdatedBy':  user.uid,
+        'lastUpdatedAt':  FieldValue.serverTimestamp(),
+      };
 
       await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId).collection('edit_requests').add({
-        'requestType':   'edit_medicine',
-        'requester':     user.uid,
-        'requesterName': username,
-        'requestedAt':   FieldValue.serverTimestamp(),
-        'status':        'pending',
-        'reason':        reason,
-        'items': [{
-          'id':             selectedItem!['id'],
-          'name':           newName,
-          'name_lower':     newName.toLowerCase(),
-          'type':           newType,
-          'dose':           newDose,
-          'quantity':       newQty,
-          'price':          newPrice,
-          'expiryDate':     expiryCtrl.text.trim(),
-          'classification': classificationCtrl.text.trim(),
-        }],
-      });
-      _snack('Edit request sent for approval!');
-      if (mounted) Navigator.pop(context);
-    } catch (e) { _snack('Error: $e', err: true); }
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory')
+          .doc(itemId)
+          .update(updatedData);
+
+      _snack('Inventory updated successfully!');
+      await _loadInventory();
+      if (mounted) _clearSelection();
+    } catch (e) {
+      _snack('Error updating inventory: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  // ── Submit delete ─────────────────────────────────────────────────────────
+  // ── Submit delete — direct Firestore delete ───────────────────────────────
   Future<void> _submitDelete() async {
     if (selectedItem == null) return;
-    final reason = reasonCtrl.text.trim();
-    if (reason.isEmpty) { _snack('Reason is required for deletion', err: true); return; }
+
+    setState(() => _isLoading = true);
     try {
-      final user = FirebaseAuth.instance.currentUser!;
-      final userDoc = await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId).collection('users').doc(user.uid).get();
-      final username = userDoc.data()?['username'] ?? user.email ?? 'Unknown';
+      final user    = FirebaseAuth.instance.currentUser!;
+      final itemId  = selectedItem!['id'] as String;
+      final itemName = selectedItem!['name'] ?? '';
 
       await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId).collection('edit_requests').add({
-        'requestType':   'delete_medicine',
-        'requester':     user.uid,
-        'requesterName': username,
-        'requestedAt':   FieldValue.serverTimestamp(),
-        'status':        'pending',
-        'reason':        reason,
-        'items': [{
-          'id':             selectedItem!['id'],
-          'name':           selectedItem!['name'] ?? '',
-          'name_lower':     (selectedItem!['name'] ?? '').toString().toLowerCase(),
-          'type':           selectedItem!['type'] ?? '',
-          'dose':           selectedItem!['dose'] ?? '',
-          'quantity':       selectedItem!['quantity'] ?? 0,
-          'price':          selectedItem!['price'] ?? 0,
-          'expiryDate':     selectedItem!['expiryDate'] ?? '',
-          'classification': selectedItem!['classification'] ?? '',
-        }],
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory')
+          .doc(itemId)
+          .delete();
+
+      // Optional: log the deletion for audit purposes
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('deletion_log')
+          .add({
+        'deletedItem':  itemName,
+        'deletedBy':    user.uid,
+        'deletedAt':    FieldValue.serverTimestamp(),
+        'itemSnapshot': selectedItem,
       });
-      _snack('Delete request sent for approval!');
-      if (mounted) Navigator.pop(context);
-    } catch (e) { _snack('Error: $e', err: true); }
+
+      _snack('$itemName removed from inventory.');
+      await _loadInventory();
+      if (mounted) _clearSelection();
+    } catch (e) {
+      _snack('Error deleting item: $e', err: true);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   // ── Dialogs ───────────────────────────────────────────────────────────────
-  Future<bool> _showConfirmDialog(String name, String type, int qty,
-      int price, String dose, String reason) async {
+  Future<bool> _showConfirmDialog(
+      String name, String type, int qty, int price, String dose) async {
     return await showDialog<bool>(
           context: context,
           builder: (ctx) => Dialog(
             backgroundColor: _white,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: Padding(
-              padding: const EdgeInsets.all(0),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: const BoxDecoration(
-                    color: _teal,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                  ),
-                  child: Row(children: [
-                    const Icon(Icons.fact_check_rounded, color: Colors.white, size: 20),
-                    const SizedBox(width: 10),
-                    const Text('Confirm Edit Request',
-                        style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                  ]),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              // Header
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: _teal,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
                 ),
-                // Content
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    _confirmRow('Medicine', name),
-                    _confirmRow('Type', type),
-                    if (dose.isNotEmpty) _confirmRow('Dose', dose),
-                    _confirmRow('Quantity', qty.toString()),
-                    _confirmRow('Price', 'PKR $price'),
-                    _confirmRow('Reason', reason),
-                    const SizedBox(height: 14),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _green50,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: _green100),
-                      ),
-                      child: Row(children: [
-                        const Icon(Icons.info_outline_rounded, color: _teal, size: 16),
-                        const SizedBox(width: 8),
-                        const Expanded(child: Text(
-                          'This will be sent to your supervisor for approval.',
-                          style: TextStyle(color: _teal, fontSize: 12),
-                        )),
-                      ]),
+                child: const Row(children: [
+                  Icon(Icons.fact_check_rounded, color: Colors.white, size: 20),
+                  SizedBox(width: 10),
+                  Text('Confirm Changes',
+                      style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                ]),
+              ),
+              // Content
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _confirmRow('Medicine', name),
+                  _confirmRow('Type', type),
+                  if (dose.isNotEmpty) _confirmRow('Dose', dose),
+                  _confirmRow('Quantity', qty.toString()),
+                  _confirmRow('Price', 'PKR $price'),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _green50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _green100),
                     ),
-                  ]),
-                ),
-                // Buttons
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                  child: Row(children: [
-                    Expanded(child: OutlinedButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: _teal),
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      child: const Text('Back', style: TextStyle(color: _teal, fontWeight: FontWeight.w600)),
-                    )),
-                    const SizedBox(width: 12),
-                    Expanded(child: ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _teal,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        elevation: 0,
-                      ),
-                      child: const Text('Submit',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    )),
-                  ]),
-                ),
-              ]),
-            ),
+                    child: const Row(children: [
+                      Icon(Icons.bolt_rounded, color: _teal, size: 16),
+                      SizedBox(width: 8),
+                      Expanded(child: Text(
+                        'Changes will be applied to inventory immediately.',
+                        style: TextStyle(color: _teal, fontSize: 12, fontWeight: FontWeight.w500),
+                      )),
+                    ]),
+                  ),
+                ]),
+              ),
+              // Buttons
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Row(children: [
+                  Expanded(child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: _teal),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    child: const Text('Cancel', style: TextStyle(color: _teal, fontWeight: FontWeight.w600)),
+                  )),
+                  const SizedBox(width: 12),
+                  Expanded(child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _teal,
+                      padding: const EdgeInsets.symmetric(vertical: 13),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                    child: const Text('Confirm',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  )),
+                ]),
+              ),
+            ]),
           ),
         ) ??
         false;
@@ -327,7 +330,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: _redLight, shape: BoxShape.circle),
+              decoration: const BoxDecoration(color: _redLight, shape: BoxShape.circle),
               child: const Icon(Icons.delete_forever_rounded, color: _red, size: 32),
             ),
             const SizedBox(height: 16),
@@ -335,7 +338,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                 style: TextStyle(color: _textDark, fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text(
-              '${selectedItem?['name'] ?? ''} will be permanently removed after supervisor approval.',
+              '${selectedItem?['name'] ?? ''} will be permanently removed from inventory. This cannot be undone.',
               textAlign: TextAlign.center,
               style: const TextStyle(color: _textMid, fontSize: 14),
             ),
@@ -410,7 +413,9 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
     shadowColor: _shadow,
     leading: IconButton(
       icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
-      onPressed: selectedItem != null ? _clearSelection : () => Navigator.pop(context),
+      onPressed: _isLoading
+          ? null
+          : selectedItem != null ? _clearSelection : () => Navigator.pop(context),
     ),
     title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const Text('Adjust Inventory',
@@ -569,7 +574,9 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                 Icon(_typeIcon(t), size: 13, color: _teal),
                 const SizedBox(width: 8), Text(t),
               ]))).toList(),
-          onChanged: (v) { if (v != null) setState(() { selectedType = v; _selectedDose = null; doseCtrl.clear(); }); },
+          onChanged: _isLoading ? null : (v) {
+            if (v != null) setState(() { selectedType = v; _selectedDose = null; doseCtrl.clear(); });
+          },
         ),
         const SizedBox(height: 13),
 
@@ -581,7 +588,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
             decoration: _inputDec('Dose *', Icons.science_rounded),
             hint: const Text('Select dose', style: TextStyle(color: _textLight)),
             items: doseList.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
-            onChanged: (v) => setState(() => _selectedDose = v),
+            onChanged: _isLoading ? null : (v) => setState(() => _selectedDose = v),
           ),
           const SizedBox(height: 13),
         ],
@@ -602,38 +609,26 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
         _field(expiryCtrl, 'Expiry Date', Icons.calendar_today_rounded),
         const SizedBox(height: 13),
         _field(classificationCtrl, 'Classification', Icons.label_rounded),
-        const SizedBox(height: 20),
+        const SizedBox(height: 28),
 
-        _sectionLabel('Reason for Adjustment *', color: _orange),
-        const SizedBox(height: 10),
-        TextField(
-          controller: reasonCtrl,
-          maxLines: 4, cursorColor: _teal,
-          style: const TextStyle(color: _textDark, fontSize: 15),
-          decoration: InputDecoration(
-            hintText: 'Explain why you are making this adjustment...',
-            hintStyle: const TextStyle(color: _textLight, fontSize: 13),
-            filled: true, fillColor: _green50,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _border)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _teal, width: 1.5)),
-            contentPadding: const EdgeInsets.all(14),
-          ),
-        ),
-        const SizedBox(height: 24),
-
+        // Submit button
         SizedBox(
           width: double.infinity,
           child: ElevatedButton.icon(
-            onPressed: _submitAdjustment,
-            icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-            label: const Text('Submit Edit Request',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+            onPressed: _isLoading ? null : _submitAdjustment,
+            icon: _isLoading
+                ? const SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Icon(Icons.save_rounded, color: Colors.white, size: 18),
+            label: Text(
+              _isLoading ? 'Saving...' : 'Save Changes',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _teal,
+              disabledBackgroundColor: _teal.withOpacity(0.6),
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               elevation: 2,
@@ -641,12 +636,14 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           ),
         ),
         const SizedBox(height: 12),
+
+        // Delete button
         SizedBox(
           width: double.infinity,
           child: OutlinedButton.icon(
-            onPressed: _showDeleteConfirmation,
+            onPressed: _isLoading ? null : _showDeleteConfirmation,
             icon: const Icon(Icons.delete_forever_rounded, color: _red, size: 18),
-            label: const Text('Request Deletion',
+            label: const Text('Delete from Inventory',
                 style: TextStyle(color: _red, fontWeight: FontWeight.bold, fontSize: 15)),
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: _red.withOpacity(0.6), width: 1.5),
@@ -677,7 +674,10 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   Widget _field(TextEditingController ctrl, String label, IconData icon,
       {TextInputType? keyboard}) =>
       TextField(
-        controller: ctrl, keyboardType: keyboard, cursorColor: _teal,
+        controller: ctrl,
+        keyboardType: keyboard,
+        cursorColor: _teal,
+        enabled: !_isLoading,
         style: const TextStyle(color: _textDark, fontSize: 15),
         decoration: _inputDec(label, icon),
       );

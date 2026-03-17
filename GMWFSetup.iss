@@ -5,7 +5,7 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}   ; Unique ID (keep this same forever)
 AppName=GMWF
-AppVersion=1.0.5
+AppVersion=1.1.1
 AppPublisher=GMWF Pvt. Ltd
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -13,7 +13,7 @@ AppUpdatesURL=https://gmwf.pk/
 DefaultDirName={pf}\GMWF
 DefaultGroupName=GMWF
 OutputDir=installer
-OutputBaseFilename=GMWF_Setup_1_0_5
+OutputBaseFilename=GMWF_Setup_1_1_1
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=admin

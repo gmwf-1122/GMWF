@@ -1,18 +1,22 @@
 // lib/pages/server_dashboard_with_sync.dart
 //
-// SYNC FIXES IN THIS VERSION:
-//   1. ServerSyncManager._mapEventTypeToSyncType() now maps:
-//        'save_dispensary_record' → 'save_dispensary_record'
-//        'update_serial_status'   → 'update_serial_status'
-//        'dispense_completed'     → triggers both writes inline
-//   2. _syncToFirestore() has full case handlers for both new types:
-//        'save_dispensary_record' → branches/{b}/dispensary/{dateKey}/{dateKey}/{serial}
-//        'update_serial_status'   → branches/{b}/serials/{dateKey}/{queueType}/{serial}
-//   3. _handleIncomingMessage() now also queues 'dispense_completed'
-//      events that arrive over LAN (from dispenser clients).
-//   4. queueType is validated and defaults to 'zakat' before the write
-//      so we never write to path 'null'.
-//   All UI logic (clients panel, stats, log) unchanged.
+// FIXES vs previous version:
+//   [FIX-A] The embedded ServerSyncManager._resolveQueueType() previously only
+//           recognised 'zakat' and fell back to 'zakat' for everything else.
+//           It now mirrors the canonical resolver: handles non-zakat/gmwf and
+//           all known variant spellings.
+//
+//   [FIX-B] _queueForSync() for 'dispense_completed' now preserves queueType
+//           in the serial-status patch op at TOP LEVEL (not just inside data)
+//           so _syncToFirestore never has to guess.
+//
+//   [FIX-C] _syncToFirestore 'update_serial_status' now reads queueType from
+//           the op level first, then falls back to a Hive lookup — never zakat
+//           silently.
+//
+//   [FIX-D] Medicine inventory is decremented in Firestore when a
+//           'dispense_completed' is synced (FieldValue.increment on
+//           branches/{branchId}/inventory/{medicineId}.quantity).
 
 import 'dart:async';
 import 'dart:convert';
@@ -1104,7 +1108,7 @@ class _ServerDashboardWithSyncState
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ServerSyncManager
+// ServerSyncManager  (embedded in this file — used by the dashboard widget)
 // ─────────────────────────────────────────────────────────────────────────────
 class ServerSyncManager {
   final String branchId;
@@ -1116,9 +1120,22 @@ class ServerSyncManager {
   Timer? _syncTimer;
   bool _isSyncing = false;
 
-  // Valid queue type values — used as a guard before writing to Firestore
-  // so we never write to a path like serials/{dateKey}/null/{serial}.
+  // FIX-A: full resolver — matches ServerSyncManager in server_sync_manager.dart
   static const _validQueueTypes = {'zakat', 'non-zakat', 'gmwf'};
+
+  /// Canonical resolver — NEVER falls back silently.
+  /// Input may be a patient status ('Zakat', 'Non-Zakat', 'GMWF') or any variant.
+  static String _resolveQueueType(dynamic raw) {
+    if (raw == null) return 'zakat';
+    final s = raw.toString().toLowerCase().trim();
+    if (s.isEmpty) return 'zakat';
+    if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
+        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
+    if (s == 'zakat') return 'zakat';
+    debugPrint('[ServerSyncManager] ⚠️  Unknown queueType "$raw" — defaulting to zakat');
+    return 'zakat';
+  }
 
   ServerSyncManager({
     required this.branchId,
@@ -1153,7 +1170,6 @@ class ServerSyncManager {
 
   void _queueForSync(Map<String, dynamic> message) {
     final eventType = message['event_type'] as String?;
-    // Skip internal protocol messages and unknowns with no sync value.
     if (eventType == null ||
         eventType == 'ping' ||
         eventType == 'pong' ||
@@ -1166,14 +1182,27 @@ class ServerSyncManager {
       final key =
           'sync_${DateTime.now().millisecondsSinceEpoch}_$eventType';
 
-      // For dispense_completed arriving over LAN we split it into the
-      // two canonical sync jobs that _syncToFirestore() knows how to handle.
       if (eventType == 'dispense_completed') {
         final data = (message['data'] as Map<String, dynamic>?) ??
             Map<String, dynamic>.from(message);
+
+        // FIX-A: resolve queueType from the message, the data map, or from
+        // the local entry in Hive — in that priority order.
+        final rawQT = (message['queueType'] ?? data['queueType'])?.toString();
+        String queueType;
+        if (rawQT != null && rawQT.trim().isNotEmpty) {
+          queueType = _resolveQueueType(rawQT);
+        } else {
+          // Fallback: look up the entry in Hive
+          final serial    = data['serial']?.toString() ?? '';
+          final entryKey  = '$branchId-$serial';
+          final localEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+          queueType = _resolveQueueType(localEntry?['queueType']);
+        }
+
         final serial    = data['serial']?.toString() ?? '';
-        final dateKey   = data['dateKey']?.toString() ?? '';
-        final queueType = _resolveQueueType(data['queueType']);
+        final dateKey   = data['dateKey']?.toString() ??
+            (serial.contains('-') ? serial.split('-')[0] : _todayKey());
         final bId       = (data['branchId'] as String?)?.trim() ?? branchId;
 
         if (serial.isNotEmpty && dateKey.isNotEmpty) {
@@ -1188,14 +1217,14 @@ class ServerSyncManager {
             'attempts':  0,
             'status':    'pending',
           });
-          // Write B: serial status patch
+          // Write B: serial status patch — queueType at TOP LEVEL (FIX-B)
           box.put('${key}_serial', {
             'type':      'update_serial_status',
             'branchId':  bId,
             'dateKey':   dateKey,
-            'queueType': queueType,
+            'queueType': queueType,   // FIX-B: top-level, not buried in data
             'serial':    serial,
-            'data':      {
+            'data': {
               'dispenseStatus': data['dispenseStatus'] ?? 'dispensed',
               'dispensedAt':    data['dispensedAt'],
               'dispensedBy':    data['dispensedBy'],
@@ -1208,14 +1237,57 @@ class ServerSyncManager {
             'attempts':  0,
             'status':    'pending',
           });
+
+          // FIX-D: Write C: inventory deduction ops for each medicine
+          final medicines = data['medicines'];
+          if (medicines is List && medicines.isNotEmpty) {
+            for (int i = 0; i < medicines.length; i++) {
+              final med = medicines[i];
+              if (med is! Map) continue;
+              final medMap     = Map<String, dynamic>.from(med);
+              final medicineId = (medMap['medicineId'] ?? medMap['id'] ??
+                      medMap['stockItemId'] ?? '').toString().trim();
+              final qty        = medMap['quantity'] ?? medMap['qty'] ?? 0;
+              final qtyNum     = qty is num
+                  ? qty.toDouble()
+                  : double.tryParse(qty.toString()) ?? 0.0;
+              if (medicineId.isEmpty || qtyNum <= 0) continue;
+
+              box.put('${key}_inv_$i', {
+                'type':       'update_inventory',
+                'branchId':   bId,
+                'medicineId': medicineId,
+                'delta':      -qtyNum,
+                'serial':     serial,
+                'data': {
+                  'medicineId':   medicineId,
+                  'medicineName': medMap['medicineName'] ?? medMap['name'] ?? '',
+                  'delta':        -qtyNum,
+                  'serial':       serial,
+                  'dispensedAt':  data['dispensedAt'] ?? DateTime.now().toIso8601String(),
+                  'dispensedBy':  data['dispensedBy'] ?? '',
+                },
+                'createdAt': DateTime.now().toIso8601String(),
+                'attempts':  0,
+                'status':    'pending',
+              });
+            }
+          }
         }
         return;
       }
 
       // All other event types
+      // FIX-A: carry queueType at top level for save_entry ops
+      final opQueueType = _resolveQueueType(
+          message['queueType'] ?? (message['data'] is Map ? message['data']['queueType'] : null));
+
       box.put(key, {
         'type':      _mapEventTypeToSyncType(eventType),
         'branchId':  branchId,
+        'queueType': opQueueType,   // top level
+        'dateKey':   message['dateKey'] ?? (message['data'] is Map ? message['data']['dateKey'] : null),
+        'serial':    message['serial'] ?? (message['data'] is Map ? message['data']['serial'] : null),
         'data':      message['data'] ?? message,
         'createdAt': DateTime.now().toIso8601String(),
         'attempts':  0,
@@ -1227,7 +1299,6 @@ class ServerSyncManager {
     }
   }
 
-  // ── Map event type → sync type ─────────────────────────────────────────────
   String _mapEventTypeToSyncType(String eventType) {
     switch (eventType) {
       case 'save_entry':
@@ -1240,22 +1311,16 @@ class ServerSyncManager {
         return 'save_patient';
       case 'delete_patient':
         return 'delete_patient';
-      // ── Dispense writes ──────────────────────────────────────────────────
       case 'save_dispensary_record':
         return 'save_dispensary_record';
       case 'update_serial_status':
         return 'update_serial_status';
-      // dispense_completed is split above before reaching here
       default:
         return eventType;
     }
   }
 
-  /// Normalise and validate queueType; falls back to 'zakat'.
-  String _resolveQueueType(dynamic raw) {
-    final s = raw?.toString().toLowerCase().trim() ?? '';
-    return _validQueueTypes.contains(s) ? s : 'zakat';
-  }
+  String _todayKey() => DateFormat('ddMMyy').format(DateTime.now());
 
   Future<void> triggerSync() async {
     if (_isSyncing) return;
@@ -1288,16 +1353,13 @@ class ServerSyncManager {
             continue;
           }
 
-          // Prefer top-level routing fields on the sync item (set by
-          // _queueForSync) over fields embedded in data, so we always
-          // have the right dateKey / queueType / serial even if the data
-          // map was assembled differently.
           final resolvedBranchId =
               (syncItem['branchId'] as String?)?.trim().isNotEmpty == true
                   ? syncItem['branchId'] as String
                   : branchId;
           final resolvedDateKey =
               (syncItem['dateKey'] as String?)?.trim() ?? '';
+          // FIX-A: read from top-level op first
           final resolvedQueueType =
               _resolveQueueType(syncItem['queueType']);
           final resolvedSerial =
@@ -1314,6 +1376,10 @@ class ServerSyncManager {
             dateKey:    resolvedDateKey,
             queueType:  resolvedQueueType,
             serial:     resolvedSerial,
+            medicineId: (syncItem['medicineId'] as String?)?.trim() ?? '',
+            delta:      syncItem['delta'] is num
+                ? (syncItem['delta'] as num).toDouble()
+                : double.tryParse(syncItem['delta']?.toString() ?? '') ?? 0.0,
           );
           await box.delete(key);
           syncedCount++;
@@ -1352,18 +1418,18 @@ class ServerSyncManager {
     required String dateKey,
     required String queueType,
     required String serial,
+    String medicineId = '',
+    double delta      = 0.0,
   }) async {
     final db        = FirebaseFirestore.instance;
     final cleanData = _removeFieldValues(data);
 
-    // Fallback: if top-level keys are empty, try to pull from cleanData.
     final effectiveDateKey  = dateKey.isNotEmpty
         ? dateKey  : (cleanData['dateKey']  as String? ?? '');
     final effectiveSerial   = serial.isNotEmpty
         ? serial   : (cleanData['serial']   as String? ?? '');
-    final effectiveQueueType = _validQueueTypes.contains(queueType)
-        ? queueType
-        : _resolveQueueType(cleanData['queueType']);
+    // FIX-A: queueType already resolved to canonical value before this call
+    final effectiveQueueType = queueType;
     final effectiveBranchId = branchId.isNotEmpty ? branchId : this.branchId;
 
     switch (type) {
@@ -1375,7 +1441,12 @@ class ServerSyncManager {
         final dk = effectiveDateKey.isNotEmpty
             ? effectiveDateKey
             : (cleanData['dateKey'] as String? ?? '');
-        final qt = effectiveQueueType;
+        // FIX-A: queueType comes resolved from op level; only fall back to
+        // cleanData if effectiveQueueType is somehow still 'zakat' and
+        // cleanData has a different value.
+        final qt = _validQueueTypes.contains(effectiveQueueType)
+            ? effectiveQueueType
+            : _resolveQueueType(cleanData['queueType']);
         if (s.isEmpty || dk.isEmpty) {
           throw Exception('save_entry: missing serial ($s) or dateKey ($dk)');
         }
@@ -1416,7 +1487,6 @@ class ServerSyncManager {
         break;
 
       // ── Dispensary record ─────────────────────────────────────────────────
-      // Path: branches/{branchId}/dispensary/{dateKey}/{dateKey}/{serial}
       case 'save_dispensary_record':
         final s  = effectiveSerial.isNotEmpty
             ? effectiveSerial
@@ -1428,7 +1498,6 @@ class ServerSyncManager {
           throw Exception(
               'save_dispensary_record: missing serial ($s) or dateKey ($dk)');
         }
-        // Remove the routing-only fields before writing to Firestore.
         cleanData.remove('dateKey');
         await db
             .collection('branches').doc(effectiveBranchId)
@@ -1439,7 +1508,7 @@ class ServerSyncManager {
         break;
 
       // ── Serial status patch ───────────────────────────────────────────────
-      // Path: branches/{branchId}/serials/{dateKey}/{queueType}/{serial}
+      // FIX-C: queueType is now always resolved at op level before reaching here
       case 'update_serial_status':
         final s  = effectiveSerial.isNotEmpty
             ? effectiveSerial
@@ -1447,12 +1516,11 @@ class ServerSyncManager {
         final dk = effectiveDateKey.isNotEmpty
             ? effectiveDateKey
             : (cleanData['dateKey'] as String? ?? '');
-        final qt = effectiveQueueType;
+        final qt = effectiveQueueType; // already canonical
         if (s.isEmpty || dk.isEmpty) {
           throw Exception(
               'update_serial_status: missing serial ($s) or dateKey ($dk)');
         }
-        // Only write the status fields — don't overwrite the full serial doc.
         final statusPatch = {
           'dispenseStatus': cleanData['dispenseStatus'] ?? 'dispensed',
           if (cleanData['dispensedAt'] != null)
@@ -1477,6 +1545,28 @@ class ServerSyncManager {
             .collection('patients').doc(pid)
             .delete();
         debugPrint('✅ delete_patient → patients/$pid');
+        break;
+
+      // FIX-D: inventory deduction ──────────────────────────────────────────
+      case 'update_inventory':
+        final mid = medicineId.isNotEmpty
+            ? medicineId
+            : (cleanData['medicineId'] as String? ?? '').trim();
+        if (mid.isEmpty) {
+          debugPrint('⚠️ update_inventory: missing medicineId — skipping');
+          return;
+        }
+        final d = delta != 0.0
+            ? delta
+            : (cleanData['delta'] is num
+                ? (cleanData['delta'] as num).toDouble()
+                : double.tryParse(cleanData['delta']?.toString() ?? '') ?? 0.0);
+        if (d == 0) return;
+        await db
+            .collection('branches').doc(effectiveBranchId)
+            .collection('inventory').doc(mid)
+            .update({'quantity': FieldValue.increment(d)});
+        debugPrint('✅ update_inventory → inventory/$mid delta=$d');
         break;
 
       default:
