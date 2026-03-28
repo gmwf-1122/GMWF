@@ -1,3 +1,15 @@
+// lib/services/firestore_service.dart
+//
+// CHANGES IN THIS VERSION:
+//   FIX: savePatient() now follows local-first pattern:
+//     1. Save to Hive (always, instant)
+//     2. Try direct Firestore write with 5s timeout (fast path when online)
+//     3. On failure, enqueue for SyncService retry — no patient is ever lost
+//     4. LAN broadcast for same-network devices
+//     5. triggerUpload() to flush queue immediately if online
+//   Previously the method only called enqueueSync(), which was silently
+//   dropped because SyncService had no 'save_patient' handler.
+
 import 'dart:io' show Platform;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -15,11 +27,9 @@ class FirestoreService {
 
   static DateTime _toDateTime(dynamic value) {
     if (value is Timestamp) return value.toDate();
-    if (value is DateTime) return value;
+    if (value is DateTime)  return value;
     if (value is String) {
-      try {
-        return DateTime.parse(value);
-      } catch (_) {}
+      try { return DateTime.parse(value); } catch (_) {}
     }
     return DateTime.now();
   }
@@ -34,177 +44,220 @@ class FirestoreService {
     }
   }
 
-Future<void> savePatient({
-  required String branchId,
-  required String patientId,
-  required Map<String, dynamic> patientData,
-}) async {
-  if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
-    print("ERROR: savePatient → branchId or patientId empty");
-    return;
-  }
+  // ── Save patient ──────────────────────────────────────────────────────────
 
-  final data = Map<String, dynamic>.from(patientData);
-  data['branchId'] = branchId;
-  data['patientId'] = patientId;
-  data.remove('id');
-
-  if (data['dob'] is String) {
-    try {
-      data['dob'] = Timestamp.fromDate(DateTime.parse(data['dob']));
-    } catch (e) {
-      print('Invalid DOB format: ${data['dob']} → $e');
+  Future<void> savePatient({
+    required String branchId,
+    required String patientId,
+    required Map<String, dynamic> patientData,
+  }) async {
+    if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
+      print("ERROR: savePatient → branchId or patientId empty");
+      return;
     }
-  } else if (data['dob'] is DateTime) {
-    data['dob'] = Timestamp.fromDate(data['dob']);
-  }
 
-  print('Saving patient locally → patientId: $patientId | Name: ${data['name'] ?? 'unknown'}');
+    final data = Map<String, dynamic>.from(patientData);
+    data['branchId']  = branchId;
+    data['patientId'] = patientId;
+    data.remove('id');
 
-  await LocalStorageService.saveLocalPatient(data);
+    // Normalise dob to ISO string for Hive storage.
+    // SyncService converts it back to Timestamp before writing to Firestore.
+    if (data['dob'] is DateTime) {
+      data['dob'] = (data['dob'] as DateTime).toIso8601String();
+    } else if (data['dob'] is Timestamp) {
+      data['dob'] = (data['dob'] as Timestamp).toDate().toIso8601String();
+    }
 
-  RealtimeManager().sendMessage(
-    RealtimeEvents.payload(
-      type: RealtimeEvents.savePatient,
-      data: {
-        'branchId': branchId,
-        'patientId': patientId,
-        'data': data,
-      },
-    ),
-  );
+    print('[FirestoreService] savePatient → $patientId | ${data['name'] ?? 'unknown'}');
 
-  final action = {
-    'type': 'save_patient',
-    'branchId': branchId,
-    'patientId': patientId,
-    'data': data,
-  };
+    // STEP 1 — Hive: always save locally first (works offline, instant)
+    await LocalStorageService.saveLocalPatient(data);
+    print('[FirestoreService] ✅ Hive write: $patientId');
 
-  await LocalStorageService.enqueueSync(action);
-
-  print("Patient enqueued → $patientId | queue size now: ${Hive.box(LocalStorageService.syncBox).length}");
-
-  SyncService().triggerUpload();
-  print("triggerUpload called after patient enqueue");
-}
-
-Future<void> saveEntry({
-  required String branchId,
-  required String patientId,
-  required Map<String, dynamic> vitals,
-}) async {
-  if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
-    print('ERROR: Cannot save entry — branchId or patientId empty');
-    return;
-  }
-
-  final dateKey = DateFormat('ddMMyy').format(DateTime.now());
-  final serial = await _generateNextSerial(branchId, dateKey);
-
-  final now = DateTime.now();
-
-  String queueType = 'zakat';
-  String patientName = 'Unknown Patient';
-  String patientCnic = '';
-  String guardianCnic = '';
-
-  try {
-    final patientData = Hive.box(LocalStorageService.patientsBox).get(patientId);
-    if (patientData is Map) {
-      final status = (patientData['status'] as String?)?.toLowerCase().trim() ?? 'zakat';
-      patientName = (patientData['name'] as String?)?.trim() ?? 'Unknown Patient';
-      patientCnic = (patientData['cnic'] as String?)?.trim() ?? '';
-      guardianCnic = (patientData['guardianCnic'] as String?)?.trim() ?? '';
-
-      if (status.contains('non-zakat') || status == 'non zakat') {
-        queueType = 'non-zakat';
-      } else if (status.contains('gmwf') || status == 'gm wf') {
-        queueType = 'gmwf';
+    // STEP 2 — Try direct Firestore write (fast path when online)
+    bool wroteDirectly = false;
+    try {
+      final fsData = Map<String, dynamic>.from(data);
+      if (fsData['dob'] is String) {
+        try {
+          fsData['dob'] = Timestamp.fromDate(DateTime.parse(fsData['dob'] as String));
+        } catch (_) {}
       }
-    }
-  } catch (e) {
-    print('Could not fetch patient from Hive for $patientId: $e');
-  }
+      fsData.remove('syncStatus');
+      fsData.remove('hiveKey');
 
-  if (patientCnic.isEmpty && guardianCnic.isEmpty && patientName == 'Unknown Patient') {
-    try {
-      final patientDoc = await _db
+      await _db
           .collection('branches')
           .doc(branchId)
           .collection('patients')
           .doc(patientId)
-          .get();
+          .set(fsData, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 5));
 
-      if (patientDoc.exists) {
-        final data = patientDoc.data()!;
-        patientName = data['name']?.toString().trim() ?? 'Unknown Patient';
-        patientCnic = data['cnic']?.toString().trim() ?? '';
-        guardianCnic = data['guardianCnic']?.toString().trim() ?? '';
-      }
+      // Mark confirmed-synced so SyncService backfill skips this patient
+      await Hive.box('app_flags').put('patient_synced_$patientId', true);
+
+      wroteDirectly = true;
+      print('[FirestoreService] ✅ Direct Firestore write: $patientId');
     } catch (e) {
-      print('Firestore fallback for patient $patientId failed: $e');
+      print('[FirestoreService] Direct write failed ($e) → queuing for retry');
     }
+
+    // STEP 3 — Queue for retry if direct write failed (offline / timeout)
+    if (!wroteDirectly) {
+      final sanitized = LocalStorageService.sanitize(data);
+      await LocalStorageService.enqueueSync({
+        'type':      'save_patient',
+        'branchId':  branchId,
+        'patientId': patientId,
+        'data':      sanitized,
+      });
+      print('[FirestoreService] 📥 Queued for sync: $patientId'
+          ' | queue: ${Hive.box(LocalStorageService.syncBox).length}');
+    }
+
+    // STEP 4 — LAN broadcast so same-network devices get it instantly
+    try {
+      RealtimeManager().sendMessage(
+        RealtimeEvents.payload(
+          type: RealtimeEvents.savePatient,
+          data: {
+            'branchId':  branchId,
+            'patientId': patientId,
+            'data':      data,
+          },
+        ),
+      );
+    } catch (e) {
+      print('[FirestoreService] LAN broadcast failed: $e');
+    }
+
+    // STEP 5 — Flush queue in background (no-op if already running / offline)
+    SyncService().triggerUpload();
+    print('[FirestoreService] triggerUpload called after savePatient');
   }
 
-  final data = {
-    'serial': serial,
-    'patientId': patientId,
-    'patientName': patientName,
-    'patientCnic': patientCnic,
-    'guardianCnic': guardianCnic,
-    'branchId': branchId,
-    'vitals': vitals,
-    'dateKey': dateKey,
-    'queueType': queueType,        // FIX 1: added to data map so sync_service can read queueType as fallback
-    'timestamp': now.toIso8601String(),
-    'createdAt': now.toIso8601String(),
-    'status': 'waiting',
-  };
+  // ── Save entry ────────────────────────────────────────────────────────────
 
-  print('Saving entry locally → Serial: $serial | Patient: $patientName | CNIC: $patientCnic | Guardian CNIC: $guardianCnic');
+  Future<void> saveEntry({
+    required String branchId,
+    required String patientId,
+    required Map<String, dynamic> vitals,
+  }) async {
+    if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
+      print('ERROR: Cannot save entry — branchId or patientId empty');
+      return;
+    }
 
-  await LocalStorageService.saveEntryLocal(branchId, serial, data);
+    final dateKey = DateFormat('ddMMyy').format(DateTime.now());
+    final serial  = await _generateNextSerial(branchId, dateKey);
+    final now     = DateTime.now();
 
-  RealtimeManager().sendMessage(
-    RealtimeEvents.payload(
-      type: RealtimeEvents.saveEntry,
-      data: {
-        'branchId': branchId,
-        'datePart': dateKey,
-        'queueType': queueType,
-        'serial': serial,
-        'data': data,
-      },
-    ),
-  );
+    String queueType    = 'zakat';
+    String patientName  = 'Unknown Patient';
+    String patientCnic  = '';
+    String guardianCnic = '';
 
-  // FIX 2: was 'datePart' — sync_service._uploadPending() reads 'dateKey'
-  final action = {
-    'type': 'save_entry',
-    'branchId': branchId,
-    'dateKey': dateKey,
-    'queueType': queueType,
-    'serial': serial,
-    'data': data,
-  };
+    try {
+      final patientData =
+          Hive.box(LocalStorageService.patientsBox).get(patientId);
+      if (patientData is Map) {
+        final status = (patientData['status'] as String?)?.toLowerCase().trim() ?? 'zakat';
+        patientName  = (patientData['name'] as String?)?.trim() ?? 'Unknown Patient';
+        patientCnic  = (patientData['cnic'] as String?)?.trim() ?? '';
+        guardianCnic = (patientData['guardianCnic'] as String?)?.trim() ?? '';
 
-  await LocalStorageService.enqueueSync(action);
+        if (status.contains('non-zakat') || status == 'non zakat') {
+          queueType = 'non-zakat';
+        } else if (status.contains('gmwf') || status == 'gm wf') {
+          queueType = 'gmwf';
+        }
+      }
+    } catch (e) {
+      print('Could not fetch patient from Hive for $patientId: $e');
+    }
 
-  print("Entry enqueued → serial: $serial | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
+    if (patientCnic.isEmpty &&
+        guardianCnic.isEmpty &&
+        patientName == 'Unknown Patient') {
+      try {
+        final patientDoc = await _db
+            .collection('branches')
+            .doc(branchId)
+            .collection('patients')
+            .doc(patientId)
+            .get();
 
-  SyncService().triggerUpload();
-  print("triggerUpload called after entry enqueue");
-}
+        if (patientDoc.exists) {
+          final d      = patientDoc.data()!;
+          patientName  = d['name']?.toString().trim() ?? 'Unknown Patient';
+          patientCnic  = d['cnic']?.toString().trim() ?? '';
+          guardianCnic = d['guardianCnic']?.toString().trim() ?? '';
+        }
+      } catch (e) {
+        print('Firestore fallback for patient $patientId failed: $e');
+      }
+    }
+
+    final data = {
+      'serial':       serial,
+      'patientId':    patientId,
+      'patientName':  patientName,
+      'patientCnic':  patientCnic,
+      'guardianCnic': guardianCnic,
+      'branchId':     branchId,
+      'vitals':       vitals,
+      'dateKey':      dateKey,
+      'queueType':    queueType,
+      'timestamp':    now.toIso8601String(),
+      'createdAt':    now.toIso8601String(),
+      'status':       'waiting',
+    };
+
+    print('Saving entry locally → Serial: $serial | Patient: $patientName'
+        ' | CNIC: $patientCnic | Guardian CNIC: $guardianCnic');
+
+    await LocalStorageService.saveEntryLocal(branchId, serial, data);
+
+    RealtimeManager().sendMessage(
+      RealtimeEvents.payload(
+        type: RealtimeEvents.saveEntry,
+        data: {
+          'branchId':  branchId,
+          'datePart':  dateKey,
+          'queueType': queueType,
+          'serial':    serial,
+          'data':      data,
+        },
+      ),
+    );
+
+    await LocalStorageService.enqueueSync({
+      'type':      'save_entry',
+      'branchId':  branchId,
+      'dateKey':   dateKey,
+      'queueType': queueType,
+      'serial':    serial,
+      'data':      data,
+    });
+
+    print("Entry enqueued → serial: $serial"
+        " | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
+
+    SyncService().triggerUpload();
+    print("triggerUpload called after entry enqueue");
+  }
 
   Future<String> _generateNextSerial(String branchId, String dateKey) async {
     final localCount = LocalStorageService.getLocalEntries(branchId)
         .where((e) => (e['dateKey'] as String?) == dateKey)
         .length;
-
     final nextNumber = localCount + 1;
     return '$dateKey-${nextNumber.toString().padLeft(3, '0')}';
   }
+
+  // ── User / patient / token helpers (unchanged) ────────────────────────────
 
   Future<Map<String, dynamic>?> getUserByEmail(String email) async {
     if (!await _isFirestoreAvailable()) {
@@ -316,7 +369,9 @@ Future<void> saveEntry({
         .snapshots()
         .map((s) => s.docs.map((d) {
               final data = d.data();
-              if (data['timestamp'] != null) data['timestamp'] = _toDateTime(data['timestamp']);
+              if (data['timestamp'] != null) {
+                data['timestamp'] = _toDateTime(data['timestamp']);
+              }
               return data;
             }).toList());
   }
@@ -325,7 +380,7 @@ Future<void> saveEntry({
     required String branchId,
     required Map<String, dynamic> prescriptionData,
   }) async {
-    final id = prescriptionData['id']?.toString()?.trim();
+    final id = prescriptionData['id']?.toString().trim();
     if (id == null || id.isEmpty) {
       print('ERROR: Cannot save prescription — missing or empty ID');
       return;
@@ -342,17 +397,17 @@ Future<void> saveEntry({
         type: RealtimeEvents.savePrescription,
         data: {
           'branchId': branchId,
-          'serial': id,
-          'data': sanitized,
+          'serial':   id,
+          'data':     sanitized,
         },
       ),
     );
 
     await LocalStorageService.enqueueSync({
-      'type': 'save_prescription',
+      'type':     'save_prescription',
       'branchId': branchId,
-      'serial': id,
-      'data': sanitized,
+      'serial':   id,
+      'data':     sanitized,
     });
 
     print('Prescription enqueued → ID: $id');

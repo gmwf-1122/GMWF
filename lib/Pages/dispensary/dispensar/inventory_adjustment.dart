@@ -22,7 +22,6 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   static const _green600  = Color(0xFF43A047);
   static const _red       = Color(0xFFC62828);
   static const _redLight  = Color(0xFFFFEBEE);
-  static const _orange    = Color(0xFFE65100);
   static const _textDark  = Color(0xFF1B2631);
   static const _textMid   = Color(0xFF4A5568);
   static const _textLight = Color(0xFF718096);
@@ -64,6 +63,19 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   bool _hasDd(String? t)   => _doseOptions.containsKey(t);
   bool _hasFree(String? t) =>
       t != null && !_doseOptions.containsKey(t) && t != 'Drip Set' && t != 'Syringe';
+
+  // ── Decimal price helper ──────────────────────────────────────────────────
+  /// Parses price from Firestore (can be int, double, or String).
+  double _parsePrice(dynamic v) {
+    if (v is double) return v;
+    if (v is int)    return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  /// Formats price for display: shows decimals only when needed.
+  String _fmtPrice(double price) =>
+      price == price.floorToDouble() ? price.toInt().toString() : price.toStringAsFixed(2);
 
   @override
   void initState() {
@@ -113,15 +125,16 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   });
 
   void _selectItem(Map<String, dynamic> item) {
-    final type = item['type'] ?? 'Others';
-    final dose = (item['dose'] ?? '').toString().trim();
+    final type  = item['type'] ?? 'Others';
+    final dose  = (item['dose'] ?? '').toString().trim();
+    final price = _parsePrice(item['price']);
     setState(() {
-      selectedItem         = Map.from(item);
-      selectedType         = type;
-      nameCtrl.text        = item['name'] ?? '';
-      quantityCtrl.text    = (item['quantity'] ?? 0).toString();
-      priceCtrl.text       = (item['price'] ?? 0).toString();
-      expiryCtrl.text      = item['expiryDate'] ?? '';
+      selectedItem            = Map.from(item);
+      selectedType            = type;
+      nameCtrl.text           = item['name'] ?? '';
+      quantityCtrl.text       = (item['quantity'] ?? 0).toString();
+      priceCtrl.text          = _fmtPrice(price);
+      expiryCtrl.text         = item['expiryDate'] ?? '';
       classificationCtrl.text = item['classification'] ?? '';
       if (_hasDd(type)) {
         _selectedDose = _doseOptions[type]!.contains(dose) ? dose : null;
@@ -148,7 +161,8 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
     final newName  = nameCtrl.text.trim();
     final newType  = selectedType!;
     final newQty   = int.tryParse(quantityCtrl.text.trim());
-    final newPrice = int.tryParse(priceCtrl.text.trim());
+    // Parse price as double to support decimals
+    final newPrice = double.tryParse(priceCtrl.text.trim());
 
     if (newName.isEmpty || newQty == null || newPrice == null) {
       _snack('Please fill all required fields', err: true); return;
@@ -163,20 +177,20 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
 
     setState(() => _isLoading = true);
     try {
-      final user = FirebaseAuth.instance.currentUser!;
+      final user   = FirebaseAuth.instance.currentUser!;
       final itemId = selectedItem!['id'] as String;
 
       final updatedData = {
-        'name':           newName,
-        'name_lower':     newName.toLowerCase(),
-        'type':           newType,
-        'dose':           newDose,
-        'quantity':       newQty,
-        'price':          newPrice,
-        'expiryDate':     expiryCtrl.text.trim(),
+        'name'          : newName,
+        'name_lower'    : newName.toLowerCase(),
+        'type'          : newType,
+        'dose'          : newDose,
+        'quantity'      : newQty,
+        'price'         : newPrice,   // stored as double
+        'expiryDate'    : expiryCtrl.text.trim(),
         'classification': classificationCtrl.text.trim(),
-        'lastUpdatedBy':  user.uid,
-        'lastUpdatedAt':  FieldValue.serverTimestamp(),
+        'lastUpdatedBy' : user.uid,
+        'lastUpdatedAt' : FieldValue.serverTimestamp(),
       };
 
       await FirebaseFirestore.instance
@@ -202,8 +216,8 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
 
     setState(() => _isLoading = true);
     try {
-      final user    = FirebaseAuth.instance.currentUser!;
-      final itemId  = selectedItem!['id'] as String;
+      final user     = FirebaseAuth.instance.currentUser!;
+      final itemId   = selectedItem!['id'] as String;
       final itemName = selectedItem!['name'] ?? '';
 
       await FirebaseFirestore.instance
@@ -213,15 +227,14 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           .doc(itemId)
           .delete();
 
-      // Optional: log the deletion for audit purposes
       await FirebaseFirestore.instance
           .collection('branches')
           .doc(widget.branchId)
           .collection('deletion_log')
           .add({
-        'deletedItem':  itemName,
-        'deletedBy':    user.uid,
-        'deletedAt':    FieldValue.serverTimestamp(),
+        'deletedItem' : itemName,
+        'deletedBy'   : user.uid,
+        'deletedAt'   : FieldValue.serverTimestamp(),
         'itemSnapshot': selectedItem,
       });
 
@@ -237,7 +250,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
 
   // ── Dialogs ───────────────────────────────────────────────────────────────
   Future<bool> _showConfirmDialog(
-      String name, String type, int qty, int price, String dose) async {
+      String name, String type, int qty, double price, String dose) async {
     return await showDialog<bool>(
           context: context,
           builder: (ctx) => Dialog(
@@ -266,7 +279,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                   _confirmRow('Type', type),
                   if (dose.isNotEmpty) _confirmRow('Dose', dose),
                   _confirmRow('Quantity', qty.toString()),
-                  _confirmRow('Price', 'PKR $price'),
+                  _confirmRow('Price', 'PKR ${_fmtPrice(price)}'),
                   const SizedBox(height: 14),
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -466,6 +479,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                   final item   = searchResults[i];
                   final qty    = item['quantity'] ?? 0;
                   final type   = item['type'] ?? '';
+                  final price  = _parsePrice(item['price']);
                   final lowStk = (type == 'Big Bottle' ? qty < 3 : qty < 10);
                   return Container(
                     margin: const EdgeInsets.only(bottom: 10),
@@ -506,6 +520,9 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                                   color: lowStk ? _red : _green600,
                                   fontWeight: FontWeight.bold, fontSize: 13)),
                             ]),
+                            const SizedBox(height: 2),
+                            Text('PKR ${_fmtPrice(price)}',
+                                style: const TextStyle(color: _textMid, fontSize: 11)),
                             const SizedBox(height: 4),
                             const Icon(Icons.chevron_right_rounded, color: _teal, size: 20),
                           ]),
@@ -524,6 +541,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
     final hasDd   = _hasDd(selectedType);
     final hasFree = _hasFree(selectedType);
     final doseList = _doseOptions[selectedType] ?? [];
+    final origPrice = _parsePrice(selectedItem?['price']);
 
     return SingleChildScrollView(
       key: const ValueKey('form'),
@@ -549,8 +567,10 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
               Text(selectedItem?['name'] ?? '',
                   style: const TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 15)),
               const SizedBox(height: 2),
-              Text('Original: Qty ${selectedItem?['quantity'] ?? 0} • PKR ${selectedItem?['price'] ?? 0}',
-                  style: const TextStyle(color: _textMid, fontSize: 12)),
+              Text(
+                'Original: Qty ${selectedItem?['quantity'] ?? 0} • PKR ${_fmtPrice(origPrice)}',
+                style: const TextStyle(color: _textMid, fontSize: 12),
+              ),
             ])),
             const Icon(Icons.edit_note_rounded, color: _teal, size: 20),
           ]),
@@ -602,8 +622,9 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           Expanded(child: _field(quantityCtrl, 'Quantity *', Icons.inventory_2_rounded,
               keyboard: TextInputType.number)),
           const SizedBox(width: 12),
+          // Price field — decimal keyboard
           Expanded(child: _field(priceCtrl, 'Price (PKR) *', Icons.currency_rupee_rounded,
-              keyboard: TextInputType.number)),
+              keyboard: const TextInputType.numberWithOptions(decimal: true))),
         ]),
         const SizedBox(height: 13),
         _field(expiryCtrl, 'Expiry Date', Icons.calendar_today_rounded),

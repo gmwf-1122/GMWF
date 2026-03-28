@@ -1,15 +1,11 @@
 // lib/pages/patient_form.dart
-// FIXES vs previous version:
-//   [FIX-INV] Inventory deduction on dispense:
-//     • _dispenseOnly() now calls _deductInventoryLocally() immediately after
-//       saving to Hive, which decrements Hive stock quantities and enqueues
-//       'update_inventory' ops for Firestore sync.
-//     • The LAN broadcast now includes 'medicines' in the payload so that a
-//       separate server machine's SSM can also sync inventory (it only fires
-//       if it receives the list explicitly — it won't double-count on the same
-//       device because SSM._maybeDeductInventoryFromRemote skips messages
-//       without _serverPush:false AND an explicit medicines list).
-//   [FIX-QT] All previous queueType fixes retained unchanged.
+// CHANGES IN THIS VERSION:
+//   • When daysOfMedicine > 1 a teal banner is shown at the top of the
+//     prescription content: "Medicines for X days — total quantities below".
+//   • Medicine quantities shown in the dispenser view are the TOTAL for all
+//     days (already multiplied by the doctor at save time). A small per-day
+//     note is added below each item when quantityPerDay is available.
+// All previous fixes (FIX-INV, FIX-QT) are retained unchanged.
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -65,8 +61,7 @@ class _PatientFormState extends State<PatientForm> {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
         s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
-    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf')
-      return 'gmwf';
+    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     return 'zakat';
   }
 
@@ -87,52 +82,50 @@ class _PatientFormState extends State<PatientForm> {
         if (v.isNotEmpty) return v;
       }
     }
-    debugPrint('[PatientForm] ⚠️ Could not resolve serial. '
-        'queueEntry keys: ${widget.queueEntry.keys.toList()}');
     return '';
   }
 
   // ─── Queue-type resolver ──────────────────────────────────────────────────
   String get _resolvedQueueType {
     final serial = _resolvedSerial;
-
-    // 1. Hive entry box — most authoritative
     if (serial.isNotEmpty) {
       final raw = Hive.box(LocalStorageService.entriesBox)
-          .get('${widget.branchId}-$serial')?['queueType']
-          ?.toString();
+          .get('${widget.branchId}-$serial')?['queueType']?.toString();
       if (raw != null && raw.isNotEmpty) return _normaliseQueueType(raw);
     }
-
-    // 2. queueEntry passed from dispenser screen
     final fromQueue = widget.queueEntry['queueType']?.toString();
-    if (fromQueue != null && fromQueue.isNotEmpty)
-      return _normaliseQueueType(fromQueue);
-
-    // 3. Loaded prescription _data
+    if (fromQueue != null && fromQueue.isNotEmpty) return _normaliseQueueType(fromQueue);
     final fromData = _data['queueType']?.toString();
-    if (fromData != null && fromData.isNotEmpty)
-      return _normaliseQueueType(fromData);
-
-    debugPrint('[PatientForm] ⚠️ queueType unresolvable for serial=$serial — defaulting to zakat');
+    if (fromData != null && fromData.isNotEmpty) return _normaliseQueueType(fromData);
     return 'zakat';
+  }
+
+  // ─── Days of medicine ─────────────────────────────────────────────────────
+  int get _daysOfMedicine {
+    // From loaded prescription data
+    final fromData = _data['daysOfMedicine'];
+    if (fromData is int && fromData > 1) return fromData;
+    // From embedded prescription in queue entry
+    final embedded = widget.queueEntry['prescription'];
+    if (embedded is Map) {
+      final d = embedded['daysOfMedicine'];
+      if (d is int && d > 1) return d;
+    }
+    // From top-level entry
+    final topLevel = widget.queueEntry['daysOfMedicine'];
+    if (topLevel is int && topLevel > 1) return topLevel;
+    return 1;
   }
 
   @override
   void initState() {
     super.initState();
-    debugPrint('[PatientForm] opened — queueEntry keys: '
-        '${widget.queueEntry.keys.toList()} '
-        '| serial: ${widget.queueEntry['serial']} '
-        '| queueType: ${widget.queueEntry['queueType']} '
-        '| branch: ${widget.branchId}');
-
     _loadBranchName();
     _loadPrescription();
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
-      final type = event['event_type'] as String?;
-      final data = event['data'] as Map<String, dynamic>? ?? {};
+      final type  = event['event_type'] as String?;
+      final data  = event['data'] as Map<String, dynamic>? ?? {};
       if (type == null) return;
 
       final eventSerial = data['serial']?.toString().trim().toLowerCase();
@@ -141,10 +134,8 @@ class _PatientFormState extends State<PatientForm> {
       final myBranch    = widget.branchId.toLowerCase().trim();
 
       if (eventBranch != null && eventBranch != myBranch) return;
-      if (eventSerial != null &&
-          eventSerial.isNotEmpty &&
-          mySerial.isNotEmpty &&
-          eventSerial != mySerial) return;
+      if (eventSerial != null && eventSerial.isNotEmpty &&
+          mySerial.isNotEmpty && eventSerial != mySerial) return;
 
       if (type == RealtimeEvents.savePrescription ||
           type == RealtimeEvents.saveEntry ||
@@ -170,7 +161,7 @@ class _PatientFormState extends State<PatientForm> {
       final doc = await FirebaseFirestore.instance
           .collection('branches').doc(widget.branchId).get();
       if (mounted) setState(() {
-        _branchName = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
+        _branchName    = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
         _loadingBranch = false;
       });
     } catch (_) {
@@ -196,64 +187,36 @@ class _PatientFormState extends State<PatientForm> {
       if (v.isNotEmpty && v != '0000000000000') { cnic = v; break; }
     }
 
-    debugPrint('[PatientForm] loading prescription serial=$serial cnic=$cnic');
-
     Map<String, dynamic> found = {};
 
     found = _searchHive(serial, cnic);
-    if (found.isNotEmpty) debugPrint('[PatientForm] ✅ found in Hive');
-
     if (found.isEmpty) {
       final entryKey = '${widget.branchId}-$serial';
       final entry    = Hive.box(LocalStorageService.entriesBox).get(entryKey);
       final embedded = (entry is Map) ? entry['prescription'] : null;
       if (embedded is Map && embedded.isNotEmpty) {
         found = Map<String, dynamic>.from(embedded);
-        debugPrint('[PatientForm] ✅ found embedded in entries box');
       }
     }
-
     if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty) {
       found = await _fetchFromPrescriptionsByCnic(serial, cnic);
-      if (found.isNotEmpty) {
-        debugPrint('[PatientForm] ✅ found in Firestore prescriptions/{cnic}');
-        await LocalStorageService.saveLocalPrescription(found);
-      }
+      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
-
     if (found.isEmpty && serial.isNotEmpty) {
       found = await _fetchFromPrescriptionsScanAll(serial);
-      if (found.isNotEmpty) {
-        debugPrint('[PatientForm] ✅ found by scanning all CNIC docs');
-        await LocalStorageService.saveLocalPrescription(found);
-      }
+      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
-
     if (found.isEmpty && serial.isNotEmpty) {
       found = await _fetchFromSerialsEmbedded(serial);
-      if (found.isNotEmpty) {
-        debugPrint('[PatientForm] ✅ found in Firestore serials (embedded)');
-        await LocalStorageService.saveLocalPrescription(found);
-      }
+      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
+    if (found.isEmpty) found = _searchHive(serial, cnic);
 
-    if (found.isEmpty) {
-      found = _searchHive(serial, cnic);
-      if (found.isNotEmpty) debugPrint('[PatientForm] ✅ found in Hive after sync');
-    }
-
-    if (found.isEmpty) {
-      debugPrint('[PatientForm] ❌ no prescription found for serial: $serial');
-    } else {
-      debugPrint('[PatientForm] meds: ${(found['prescriptions'] as List?)?.length ?? 0} '
-          'labs: ${(found['labResults'] as List?)?.length ?? 0}');
-    }
-
-    final vitals = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
-    final gender = found['patientGender']?.toString() ??
+    final vitals  = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
+    final gender  = found['patientGender']?.toString() ??
         widget.queueEntry['patientGender']?.toString() ??
         vitals['gender']?.toString() ?? 'N/A';
-    final age = found['patientAge']?.toString() ??
+    final age     = found['patientAge']?.toString() ??
         widget.queueEntry['patientAge']?.toString() ??
         vitals['age']?.toString() ?? 'N/A';
 
@@ -271,7 +234,6 @@ class _PatientFormState extends State<PatientForm> {
     });
   }
 
-  // ─── Hive search ──────────────────────────────────────────────────────────
   Map<String, dynamic> _searchHive(String serial, String cnic) {
     final box = Hive.box(LocalStorageService.prescriptionsBox);
     if (cnic.isNotEmpty && serial.isNotEmpty) {
@@ -304,9 +266,7 @@ class _PatientFormState extends State<PatientForm> {
     return {};
   }
 
-  // ─── Firestore fetchers ───────────────────────────────────────────────────
-  Future<Map<String, dynamic>> _fetchFromPrescriptionsByCnic(
-      String serial, String cnic) async {
+  Future<Map<String, dynamic>> _fetchFromPrescriptionsByCnic(String serial, String cnic) async {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('branches').doc(widget.branchId)
@@ -327,8 +287,7 @@ class _PatientFormState extends State<PatientForm> {
           .collection('branches').doc(widget.branchId)
           .collection('prescriptions').get();
       for (final cnicDoc in cnicDocs.docs) {
-        final prescSnap = await cnicDoc.reference
-            .collection('prescriptions').doc(serial).get();
+        final prescSnap = await cnicDoc.reference.collection('prescriptions').doc(serial).get();
         if (prescSnap.exists && prescSnap.data() != null) {
           final d = Map<String, dynamic>.from(prescSnap.data()!);
           d['id'] = prescSnap.id; d['serial'] = prescSnap.id;
@@ -406,7 +365,6 @@ class _PatientFormState extends State<PatientForm> {
           onLayout: (_) => pdfBytes,
           name: 'Slip_${_resolvedSerial.isNotEmpty ? _resolvedSerial : 'unknown'}.pdf');
     } catch (e) {
-      debugPrint('[PatientForm] print error: $e');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Print failed: $e'), backgroundColor: Colors.red));
     } finally {
@@ -414,28 +372,34 @@ class _PatientFormState extends State<PatientForm> {
     }
   }
 
-  // ─── Inventory deduction (FIX-INV) ───────────────────────────────────────
-  // Called by _dispenseOnly() on the dispenser device — this is the SINGLE
-  // source of inventory deduction.  The server's SSM.deductInventory() only
-  // fires for remote dispensers that explicitly send a 'medicines' list in
-  // the LAN payload, so there is no double-deduction.
+  // ─── Inventory deduction ──────────────────────────────────────────────────
+  // Tablets / capsules / syrups: deduct quantity × days (N days' supply).
+  // Injections / drips / nebulisation: always × 1 — one-time use only.
+  static bool _isInjectableType(String? type) {
+    final t = (type ?? '').toLowerCase();
+    return t.contains('injection') || t.contains('inj') ||
+        t.contains('drip') || t.contains('syringe') || t.contains('nebulization');
+  }
+
   Future<void> _deductInventoryLocally(
-      String branchId, String serial, List<dynamic> medicines) async {
+      String branchId, String serial, List<dynamic> medicines, int days) async {
     for (final med in medicines) {
       if (med is! Map) continue;
       final medMap     = Map<String, dynamic>.from(med);
       final medicineId = (medMap['inventoryId'] ??
-              medMap['medicineId'] ??
-              medMap['id'] ??
-              '')
-          .toString()
-          .trim();
-      final qty    = medMap['quantity'] ?? medMap['qty'] ?? 0;
-      final qtyNum = qty is num ? qty.toDouble() : double.tryParse(qty.toString()) ?? 0.0;
+              medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
+      final perDayRaw  = medMap['quantity'] ?? medMap['qty'] ?? 0;
+      final perDay     = perDayRaw is num
+          ? perDayRaw.toDouble()
+          : double.tryParse(perDayRaw.toString()) ?? 0.0;
+      if (medicineId.isEmpty || perDay <= 0) continue;
 
-      if (medicineId.isEmpty || qtyNum <= 0) continue;
+      // Injections/drips always × 1; oral/syrup × days
+      final multiplier = _isInjectableType(medMap['type']?.toString()) ? 1 : days;
+      final qtyNum     = perDay * multiplier;
 
-      // 1. Hive — instant local update
+      debugPrint('[PatientForm] deduct $medicineId: ${perDay}/day × $multiplier = $qtyNum');
+
       try {
         final stockBox = Hive.box('stock_items');
         final existing = stockBox.get(medicineId);
@@ -450,7 +414,6 @@ class _PatientFormState extends State<PatientForm> {
         debugPrint('[PatientForm] Hive stock decrement failed $medicineId: $e');
       }
 
-      // 2. Firestore — direct write, queued if offline
       bool firestoreWritten = false;
       try {
         final conn   = await Connectivity().checkConnectivity();
@@ -469,17 +432,10 @@ class _PatientFormState extends State<PatientForm> {
 
       if (!firestoreWritten) {
         await LocalStorageService.enqueueSync({
-          'type':       'update_inventory',
-          'branchId':   branchId,
-          'medicineId': medicineId,
-          'delta':      -qtyNum,
-          'serial':     serial,
-          'data': {
-            'medicineId':   medicineId,
-            'medicineName': medMap['name'] ?? '',
-            'delta':        -qtyNum,
-            'serial':       serial,
-          },
+          'type': 'update_inventory', 'branchId': branchId,
+          'medicineId': medicineId, 'delta': -qtyNum, 'serial': serial,
+          'data': {'medicineId': medicineId, 'medicineName': medMap['name'] ?? '',
+              'delta': -qtyNum, 'serial': serial},
         });
         debugPrint('[PatientForm] 📥 Queued inventory deduction: $medicineId -= $qtyNum');
       }
@@ -490,11 +446,15 @@ class _PatientFormState extends State<PatientForm> {
   Future<void> _dispenseOnly() async {
     if (_isDispensed) return;
 
+    final days = _daysOfMedicine;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Confirm Dispense'),
-        content: const Text('Mark this prescription as dispensed? This cannot be undone.'),
+        content: Text(days > 1
+            ? 'Give $days days\' supply of each medicine (tablets/capsules/syrups ×$days). '
+              'Injections and drips are given once only.\n\nThis cannot be undone.'
+            : 'Mark this prescription as dispensed? This cannot be undone.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
@@ -519,8 +479,6 @@ class _PatientFormState extends State<PatientForm> {
       final nowIso        = now.toIso8601String();
       final dispenserName = widget.dispenserName ?? 'Unknown Dispenser';
 
-      debugPrint('[PatientForm] dispensing serial=$serial queueType=$queueType');
-
       final doctorName = _firstNonEmpty([
         _data['doctorName'], _data['prescribedBy'], _data['updatedBy'],
         widget.queueEntry['doctorName'], 'Unknown',
@@ -539,9 +497,9 @@ class _PatientFormState extends State<PatientForm> {
         'dateKey':        dateKey,
         'queueType':      queueType,
         'branchId':       widget.branchId,
+        'daysOfMedicine': days,
       };
 
-      // 1. Update Hive entry box
       final entryKey     = '${widget.branchId}-$serial';
       final currentEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
       if (currentEntry != null) {
@@ -549,7 +507,6 @@ class _PatientFormState extends State<PatientForm> {
         await Hive.box(LocalStorageService.entriesBox).put(entryKey, updated);
       }
 
-      // 2. Save dispensary record to Hive
       final dispensaryRecord = {
         ...Map<String, dynamic>.from(widget.queueEntry),
         ...Map<String, dynamic>.from(_data),
@@ -567,82 +524,63 @@ class _PatientFormState extends State<PatientForm> {
         'prescribedBy':   doctorName,
         'tokenBy':        tokenBy,
         'createdByName':  tokenBy,
+        'daysOfMedicine': days,
       };
       await Hive.box(LocalStorageService.dispensaryBox)
           .put('${widget.branchId}_${dateKey}_$serial', dispensaryRecord);
 
-      // FIX-INV: Deduct inventory immediately on this device (single source of truth).
-      // Must happen before the LAN broadcast so local Hive stock is correct
-      // when the dispenser UI re-renders.
       final medicines = (_data['prescriptions'] as List?)
           ?.where((m) => m is Map &&
-              (m['inventoryId'] != null ||
-               m['medicineId'] != null ||
-               m['id'] != null))
+              (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
           .toList() ?? [];
-
       if (medicines.isNotEmpty) {
-        await _deductInventoryLocally(widget.branchId, serial, medicines);
+        // Pass days so tab/cap/syrup are deducted × days; injectables always × 1
+        await _deductInventoryLocally(widget.branchId, serial, medicines, days);
       }
 
-      // 3. LAN broadcast — include 'medicines' so a separate server machine's
-      //    SSM can also update inventory (it guards against double-counting).
       RealtimeManager().sendMessage(RealtimeEvents.payload(
         type: 'dispense_completed',
         data: {
-          'branchId':  widget.branchId,
-          'serial':    serial,
-          'dateKey':   dateKey,
+          'branchId': widget.branchId,
+          'serial':   serial,
+          'dateKey':  dateKey,
           ...minimalUpdate,
-          // FIX-INV: include the medicines list so remote SSM can sync inventory
           if (medicines.isNotEmpty) 'medicines': medicines,
         },
       ));
 
-      // 4a. Firestore direct write
       try {
         final branchRef = FirebaseFirestore.instance
             .collection('branches').doc(widget.branchId);
-
         await branchRef.collection('dispensary').doc(dateKey)
             .collection(dateKey).doc(serial)
             .set(dispensaryRecord, SetOptions(merge: true));
-
         await branchRef.collection('serials').doc(dateKey)
-            .collection(queueType)
-            .doc(serial)
+            .collection(queueType).doc(serial)
             .set(minimalUpdate, SetOptions(merge: true));
-
-        debugPrint('[PatientForm] ✅ Firestore dispensary + serials/$dateKey/$queueType/$serial');
       } catch (e) {
-        debugPrint('[PatientForm] ⚠️ Firestore write failed, queuing: $e');
         await LocalStorageService.enqueueSync({
-          'type':     'save_dispensary_record',
-          'branchId': widget.branchId,
-          'dateKey':  dateKey,
-          'serial':   serial,
-          'data':     dispensaryRecord,
+          'type': 'save_dispensary_record', 'branchId': widget.branchId,
+          'dateKey': dateKey, 'serial': serial, 'data': dispensaryRecord,
         });
       }
 
-      // 4b. Enqueued status patch
       await LocalStorageService.enqueueSync({
-        'type':      'update_serial_status',
-        'branchId':  widget.branchId,
-        'dateKey':   dateKey,
-        'queueType': queueType,
-        'serial':    serial,
-        'data':      minimalUpdate,
+        'type': 'update_serial_status', 'branchId': widget.branchId,
+        'dateKey': dateKey, 'queueType': queueType, 'serial': serial,
+        'data': minimalUpdate,
       });
 
       SyncService().triggerUpload();
 
       if (mounted) setState(() => _isDispensed = true);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Dispensed successfully'), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(days > 1
+              ? 'Dispensed $days-day supply successfully'
+              : 'Dispensed successfully'),
+          backgroundColor: Colors.green));
       widget.onDispensed?.call();
     } catch (e) {
-      debugPrint('[PatientForm] dispense error: $e');
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: Colors.red));
     } finally {
@@ -673,6 +611,9 @@ class _PatientFormState extends State<PatientForm> {
         )).toList(),
       );
     }
+
+    final days = _daysOfMedicine;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: items.map((item) {
@@ -681,41 +622,125 @@ class _PatientFormState extends State<PatientForm> {
         final displayName = '$abbrev $rawName'.trim();
         final urduLine    = PatientFormHelper.buildUrduDosageLine(item);
         final mealUrdu    = PatientFormHelper.getMealUrdu(item['meal']?.toString() ?? '');
+        final isInj       = _isInjectableType(item['type']?.toString());
+        // Per-day quantity as prescribed by the doctor
+        final perDayQty   = ((item['quantity'] ?? 1) as num).toInt();
+        // Total given at dispense time (injections/drips always ×1)
+        final totalQty    = isInj ? perDayQty : perDayQty * days;
+
         return Container(
-          padding: EdgeInsets.only(top: isMobile ? 4 : 6, bottom: isMobile ? 10 : 12),
+          padding: EdgeInsets.only(
+              top: isMobile ? 4 : 6, bottom: isMobile ? 10 : 12),
           decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: Colors.grey.shade100, width: 1))),
+              border: Border(
+                  bottom: BorderSide(color: Colors.grey.shade100, width: 1))),
           child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(flex: 4, child: Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(displayName,
-                  style: PatientFormHelper.robotoBold(size: isMobile ? 13 : 16)),
-            )),
-            Expanded(flex: 4, child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (urduLine.isNotEmpty)
-                  Text(urduLine,
-                    textAlign: TextAlign.right,
-                    textDirection: ui.TextDirection.rtl,
-                    style: PatientFormHelper.nooriRegular(
-                        size: isMobile ? 14 : 16, color: PatientFormHelper.textBlack)
-                        .copyWith(height: 1.7)),
-                if (mealUrdu.isNotEmpty)
-                  Padding(padding: const EdgeInsets.only(top: 3), child: Text(mealUrdu,
-                    textAlign: TextAlign.right,
-                    textDirection: ui.TextDirection.rtl,
-                    style: PatientFormHelper.nooriRegular(
-                        size: isMobile ? 12 : 14, color: Colors.grey.shade600)
-                        .copyWith(height: 1.7))),
-              ],
-            )),
+            Expanded(
+              flex: 4,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(displayName,
+                        style: PatientFormHelper.robotoBold(
+                            size: isMobile ? 13 : 16)),
+                    const SizedBox(height: 2),
+                    // For multi-day non-injectable: show per-day timing and
+                    // a teal note saying how many days total are being dispensed.
+                    if (days > 1 && !isInj)
+                      Container(
+                        margin: const EdgeInsets.only(top: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _teal.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                              color: _teal.withOpacity(0.25)),
+                        ),
+                        child: Text(
+                          '$perDayQty/day · $days days · give $totalQty total',
+                          style: TextStyle(
+                              fontSize: isMobile ? 10 : 11,
+                              color: _teal.withOpacity(0.9),
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 4,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  // Urdu dosage line shows per-day instruction unchanged
+                  if (urduLine.isNotEmpty)
+                    Text(
+                      urduLine,
+                      textAlign: TextAlign.right,
+                      textDirection: ui.TextDirection.rtl,
+                      style: PatientFormHelper.nooriRegular(
+                              size: isMobile ? 14 : 16,
+                              color: PatientFormHelper.textBlack)
+                          .copyWith(height: 1.7),
+                    ),
+                  if (mealUrdu.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        mealUrdu,
+                        textAlign: TextAlign.right,
+                        textDirection: ui.TextDirection.rtl,
+                        style: PatientFormHelper.nooriRegular(
+                                size: isMobile ? 12 : 14,
+                                color: Colors.grey.shade600)
+                            .copyWith(height: 1.7),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ]),
         );
       }).toList(),
     );
   }
 
+  // ─── "Medicines for X days" banner ────────────────────────────────────────
+  Widget _buildDaysBanner({required bool isMobile}) {
+    final days = _daysOfMedicine;
+    if (days <= 1) return const SizedBox.shrink();
+    return Container(
+      margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
+      padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 16, vertical: isMobile ? 10 : 12),
+      decoration: BoxDecoration(
+        color: _teal,
+        borderRadius: BorderRadius.circular(isMobile ? 8 : 12),
+      ),
+      child: Row(children: [
+        Icon(Icons.calendar_month_rounded,
+            color: Colors.white, size: isMobile ? 18 : 22),
+        SizedBox(width: isMobile ? 8 : 12),
+        Expanded(
+          child: Text(
+            'Medicines for $days days\n'
+            'Dosage below is per day — give $days days\' supply of each tablet/capsule/syrup',
+            style: TextStyle(
+                color: Colors.white,
+                fontSize: isMobile ? 12 : 13,
+                fontWeight: FontWeight.w600,
+                height: 1.4),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  // ─── Header / footer ──────────────────────────────────────────────────────
   Widget _buildHeader({required bool isMobile}) => ClipRRect(
     borderRadius: BorderRadius.vertical(top: Radius.circular(isMobile ? 12 : 20)),
     child: Container(
@@ -772,6 +797,7 @@ class _PatientFormState extends State<PatientForm> {
   );
 
   Widget _buildActionBar({required bool isMobile}) {
+    final days    = _daysOfMedicine;
     final printBtn = ElevatedButton.icon(
       onPressed: _hasPrintableContent && !_isPrinting ? _printOnly : null,
       icon: _isPrinting
@@ -779,13 +805,21 @@ class _PatientFormState extends State<PatientForm> {
               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           : const Icon(Icons.print, color: Colors.white),
       label: Text(_isPrinting ? 'Printing...' : 'Print Slip',
-          style: TextStyle(color: Colors.white, fontSize: isMobile ? 13 : 16,
-              fontWeight: FontWeight.bold)),
+          style: TextStyle(color: Colors.white,
+              fontSize: isMobile ? 13 : 16, fontWeight: FontWeight.bold)),
       style: ElevatedButton.styleFrom(
         backgroundColor: _hasPrintableContent ? _teal : Colors.grey.shade400,
         padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: isMobile ? 14 : 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 8),
     );
+
+    final dispenseLabel = _isDispensed
+        ? 'Already Dispensed'
+        : _isDispensing
+            ? 'Dispensing...'
+            : days > 1
+                ? 'Dispense ($days days\' supply)'
+                : 'Dispense Medicine';
 
     final dispenseBtn = ElevatedButton.icon(
       onPressed: _isDispensed || _isDispensing ? null : _dispenseOnly,
@@ -793,10 +827,9 @@ class _PatientFormState extends State<PatientForm> {
           ? const SizedBox(width: 18, height: 18,
               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           : const Icon(Icons.check_circle, color: Colors.white),
-      label: Text(
-        _isDispensed ? 'Already Dispensed' : (_isDispensing ? 'Dispensing...' : 'Dispense Medicine'),
-        style: TextStyle(color: Colors.white, fontSize: isMobile ? 13 : 16,
-            fontWeight: FontWeight.bold)),
+      label: Text(dispenseLabel,
+          style: TextStyle(color: Colors.white,
+              fontSize: isMobile ? 13 : 16, fontWeight: FontWeight.bold)),
       style: ElevatedButton.styleFrom(
         backgroundColor: _isDispensed ? Colors.grey.shade600 : _teal,
         padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: isMobile ? 14 : 20),
@@ -805,7 +838,8 @@ class _PatientFormState extends State<PatientForm> {
 
     return Container(
       width: double.infinity, color: Colors.white,
-      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 20),
+      padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 20),
       child: isMobile
           ? Column(mainAxisSize: MainAxisSize.min, children: [
               SizedBox(width: double.infinity, child: printBtn),
@@ -845,6 +879,8 @@ class _PatientFormState extends State<PatientForm> {
     ]);
 
     Widget medicineBody = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Days banner
+      _buildDaysBanner(isMobile: isMobile),
       patientInfo,
       if (diagnosis.isNotEmpty) ...[
         SizedBox(height: isMobile ? 10 : 20),
@@ -936,7 +972,8 @@ class _PatientFormState extends State<PatientForm> {
             constraints: isMobile ? const BoxConstraints() : const BoxConstraints(maxWidth: 850),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(isMobile ? 12 : 20),
-              boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))]),
+              boxShadow: [BoxShadow(
+                  color: Colors.grey.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))]),
             clipBehavior: Clip.antiAlias,
             child: Column(children: [
               _buildHeader(isMobile: isMobile),

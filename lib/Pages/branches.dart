@@ -128,7 +128,7 @@ class PatientSummaryCard extends StatelessWidget {
             Opacity(
               opacity: showRevenue ? 1.0 : 0.0,
               child: Row(children: [
-                const Icon(Icons.attach_money, size: 15, color: Colors.white70),
+                const Icon(Icons.payments_rounded, size: 15, color: Colors.white70),
                 const SizedBox(width: 4),
                 Text(
                   "PKR ${NumberFormat('#,##0').format(revenue)}",
@@ -242,28 +242,58 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
 
   // ── Data fetchers ─────────────────────────────────────────────────────────
 
+  /// Tokens summary — revenue = base price × daysOfMedicine per token.
+  /// Zakat: PKR 20/day, Non-zakat: PKR 100/day, GMWF: PKR 0.
   Future<Map<String, int>> _tokensFuture(String branchId) async {
     try {
       final days   = _dateStrings(effectiveStart, effectiveEnd);
       final queues = ['zakat', 'non-zakat', 'gmwf'];
-      final futures = <Future<AggregateQuerySnapshot>>[];
+
+      int zakat = 0, nonZakat = 0, gmwf = 0;
+      int revenue = 0;
+
       for (final ds in days) {
         final base = FirebaseFirestore.instance
-            .collection('branches').doc(branchId).collection('serials').doc(ds);
-        for (final q in queues) futures.add(base.collection(q).count().get());
+            .collection('branches').doc(branchId)
+            .collection('serials').doc(ds);
+
+        // Fetch all three queues for this day in parallel
+        final snaps = await Future.wait(
+          queues.map((q) => base.collection(q).get()),
+        );
+
+        for (int qi = 0; qi < queues.length; qi++) {
+          final q    = queues[qi];
+          final snap = snaps[qi];
+          final cnt  = snap.docs.length;
+
+          if (q == 'zakat') {
+            zakat += cnt;
+            // Zakat: PKR 20 × daysOfMedicine per token
+            for (final doc in snap.docs) {
+              final d = (doc.data()['daysOfMedicine'] as num?)?.toInt() ?? 1;
+              revenue += 20 * d;
+            }
+          } else if (q == 'non-zakat') {
+            nonZakat += cnt;
+            // Non-zakat: PKR 100 × daysOfMedicine per token
+            for (final doc in snap.docs) {
+              final d = (doc.data()['daysOfMedicine'] as num?)?.toInt() ?? 1;
+              revenue += 100 * d;
+            }
+          } else if (q == 'gmwf') {
+            gmwf += cnt;
+            // GMWF: PKR 0
+          }
+        }
       }
-      final results = await Future.wait(futures);
-      int zakat = 0, nonZakat = 0, gmwf = 0;
-      for (int i = 0; i < results.length; i++) {
-        final cnt = results[i].count ?? 0;
-        if (i % 3 == 0)      zakat    += cnt;
-        else if (i % 3 == 1) nonZakat += cnt;
-        else                 gmwf     += cnt;
-      }
+
       return {
-        'v1': zakat, 'v2': nonZakat, 'v3': gmwf,
+        'v1': zakat,
+        'v2': nonZakat,
+        'v3': gmwf,
         'total': zakat + nonZakat + gmwf,
-        'revenue': zakat * 20 + nonZakat * 100,
+        'revenue': revenue,
       };
     } catch (_) { return {}; }
   }
@@ -279,7 +309,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         for (final q in queues) snapFutures.add(base.collection(q).get());
       }
       final allSnaps = await Future.wait(snapFutures);
-      final entries = <Map<String, dynamic>>[];
+      final entries  = <Map<String, dynamic>>[];
       for (final snap in allSnaps) {
         for (final doc in snap.docs) {
           final data   = doc.data() as Map<String, dynamic>;
@@ -288,7 +318,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           final statusOnDoc = data['status']?.toString().toLowerCase().trim() ?? '';
           String rawCnic = '';
           for (final key in ['patientCnic', 'cnic', 'guardianCnic', 'patientCNIC', 'guardianCNIC']) {
-            final v = data[key]?.toString().trim() ?? '';
+            final v       = data[key]?.toString().trim() ?? '';
             final stripped = v.replaceAll('-', '').replaceAll(' ', '');
             if (stripped.isNotEmpty && stripped != '0000000000000') { rawCnic = v; break; }
           }
@@ -326,7 +356,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
 
   Future<Map<String, int>> _dispensaryCountFuture(String branchId) async {
     try {
-      final days = _dateStrings(effectiveStart, effectiveEnd);
+      final days        = _dateStrings(effectiveStart, effectiveEnd);
       final countFutures = days.map((ds) => FirebaseFirestore.instance
           .collection('branches/$branchId/dispensary/$ds/$ds').count().get());
       final results = await Future.wait(countFutures);
@@ -335,37 +365,49 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
     } catch (_) { return {}; }
   }
 
-  Future<int> _getTotalVisits(String branchId, List<String> possibleIds) async {
-    if (possibleIds.isEmpty) return 0;
-    try {
-      final now   = DateTime.now();
-      final start = DateTime(now.year, now.month, now.day - 90);
-      final end   = DateTime(now.year, now.month, now.day + 1);
-      final days  = _dateStrings(start, end);
-      final Set<String> uniqueSerials = {};
-      for (final dk in days) {
-        try {
-          final snap = await FirebaseFirestore.instance
-              .collection('branches/$branchId/dispensary/$dk/$dk')
-              .get()
-              .timeout(const Duration(seconds: 3));
-          for (final doc in snap.docs) {
-            final data = doc.data();
-            final pid  = _resolvePatientId(data);
-            if (possibleIds.contains(pid)) {
-              final serial = data['serial']?.toString() ?? '';
-              if (serial.isNotEmpty) uniqueSerials.add(serial);
-            }
-          }
-        } catch (_) { continue; }
-      }
-      return uniqueSerials.length;
-    } catch (e) {
-      debugPrint('[Branches] _getTotalVisits error: $e');
-      return 0;
+Future<int> _getTotalVisits(String branchId, List<String> possibleIds) async {
+  if (possibleIds.isEmpty) return 0;
+  try {
+    // Determine the date range for counting visits
+    DateTime visitStart;
+    DateTime visitEnd;
+    
+    if (selectedStartDate == null && selectedEndDate == null) {
+      // If "Today" filter is active, count visits in last 7 days
+      final now = DateTime.now();
+      visitEnd = DateTime(now.year, now.month, now.day + 1);
+      visitStart = DateTime(now.year, now.month, now.day - 7);
+    } else {
+      // If custom date range is selected, use that range
+      visitStart = effectiveStart;
+      visitEnd = effectiveEnd;
     }
+    
+    final days = _dateStrings(visitStart, visitEnd);
+    final Set<String> uniqueSerials = {};
+    
+    for (final dk in days) {
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('branches/$branchId/dispensary/$dk/$dk')
+            .get()
+            .timeout(const Duration(seconds: 3));
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          final pid  = _resolvePatientId(data);
+          if (possibleIds.contains(pid)) {
+            final serial = data['serial']?.toString() ?? '';
+            if (serial.isNotEmpty) uniqueSerials.add(serial);
+          }
+        }
+      } catch (_) { continue; }
+    }
+    return uniqueSerials.length;
+  } catch (e) {
+    debugPrint('[Branches] _getTotalVisits error: $e');
+    return 0;
   }
-
+}
   Future<Map<String, dynamic>> _dispensaryFuture(String branchId) async {
     try {
       final days          = _dateStrings(effectiveStart, effectiveEnd);
@@ -390,15 +432,23 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         return {'v1': 0, 'v2': 0, 'total': 0, 'dispensed': <Map<String, dynamic>>[]};
       }
 
+      // ── Fetch prescription metadata (doctor, tokenBy, daysOfMedicine) ───
       final serialToDoctor  = <String, String>{};
       final serialToTokenBy = <String, String>{};
+      final serialToDays    = <String, int>{};
       final presRoot = FirebaseFirestore.instance
           .collection('branches').doc(branchId).collection('prescriptions');
       final fallbackFutures = <Future>[];
       for (final item in rawList) {
         final serial = item['serial']?.toString() ?? '';
         if (serial.isEmpty) continue;
-        final existingDoctor = _firstNonEmpty([item['doctorName'], item['prescribedBy'], item['updatedBy']]);
+
+        // daysOfMedicine from dispensary record itself
+        final days = (item['daysOfMedicine'] as num?)?.toInt() ?? 1;
+        if (days > 1) serialToDays[serial] = days;
+
+        final existingDoctor = _firstNonEmpty(
+            [item['doctorName'], item['prescribedBy'], item['updatedBy']]);
         if (existingDoctor.isEmpty) {
           final cnicCandidates = <String>{};
           for (final f in ['patientCnic', 'cnic', 'guardianCnic']) {
@@ -413,16 +463,21 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
             fallbackFutures.add(
               presRoot.doc(cnic).collection('prescriptions').doc(serial).get().then((snap) {
                 if (snap.exists) {
-                  final doctor = _firstNonEmpty([
-                    snap.data()?['doctorName'], snap.data()?['prescribedBy'], snap.data()?['updatedBy']
-                  ]);
+                  final d      = snap.data()!;
+                  final doctor = _firstNonEmpty([d['doctorName'], d['prescribedBy'], d['updatedBy']]);
                   if (doctor.isNotEmpty) serialToDoctor[serial] = doctor;
+                  // Also pull daysOfMedicine from the prescription doc if missing
+                  if (!serialToDays.containsKey(serial)) {
+                    final pd = (d['daysOfMedicine'] as num?)?.toInt() ?? 1;
+                    if (pd > 1) serialToDays[serial] = pd;
+                  }
                 }
               }).catchError((_) {}),
             );
           }
         }
-        final existingToken = _firstNonEmpty([item['createdByName'], item['tokenBy'], item['createdBy']]);
+        final existingToken = _firstNonEmpty(
+            [item['createdByName'], item['tokenBy'], item['createdBy']]);
         if (existingToken.isEmpty) {
           final dateKey = item['dateKey']?.toString() ?? '';
           if (dateKey.isNotEmpty) {
@@ -433,10 +488,15 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     .collection('serials').doc(dateKey).collection(q).doc(serial).get()
                     .then((snap) {
                   if (snap.exists) {
-                    final tokenBy = _firstNonEmpty([
-                      snap.data()?['createdByName'], snap.data()?['tokenBy'], snap.data()?['createdBy']
-                    ]);
+                    final sd      = snap.data()!;
+                    final tokenBy = _firstNonEmpty(
+                        [sd['createdByName'], sd['tokenBy'], sd['createdBy']]);
                     if (tokenBy.isNotEmpty) serialToTokenBy[serial] = tokenBy;
+                    // Pull daysOfMedicine from the serial doc if still missing
+                    if (!serialToDays.containsKey(serial)) {
+                      final pd = (sd['daysOfMedicine'] as num?)?.toInt() ?? 1;
+                      if (pd > 1) serialToDays[serial] = pd;
+                    }
                   }
                 }).catchError((_) {}),
               );
@@ -490,46 +550,20 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         final p      = pid.isNotEmpty ? patientMap[pid] : null;
         final serial = data['serial']?.toString() ?? '';
 
-        // ── vitals map (nested) ───────────────────────────────────────────
-        // age, gender and name can live either at the top level or inside
-        // the vitals sub-map. We check both and take the first non-empty value.
         final vitals = data['vitals'] as Map<String, dynamic>? ?? {};
 
         final name = _firstNonEmpty([
-          data['patientName'],
-          data['name'],
-          vitals['name'],          // vitals.name fallback
-          p?['name'],
-          'Unknown',
+          data['patientName'], data['name'], vitals['name'], p?['name'], 'Unknown',
         ]);
-
-        final phone = _firstNonEmpty([
-          data['phone'],
-          p?['phone'],
-          'N/A',
+        final phone = _firstNonEmpty([data['phone'], p?['phone'], 'N/A']);
+        final age   = _firstNonEmpty([
+          data['patientAge'], data['age'], vitals['age']?.toString(), p?['age']?.toString(), 'N/A',
         ]);
-
-        final age = _firstNonEmpty([
-          data['patientAge'],
-          data['age'],
-          vitals['age']?.toString(),   // vitals.age fallback
-          p?['age']?.toString(),
-          'N/A',
-        ]);
-
         final gender = _firstNonEmpty([
-          data['patientGender'],
-          data['gender'],
-          vitals['gender'],            // vitals.gender fallback
-          p?['gender'],
-          'N/A',
+          data['patientGender'], data['gender'], vitals['gender'], p?['gender'], 'N/A',
         ]);
-
         final bloodGroup = _firstNonEmpty([
-          data['bloodGroup'],
-          vitals['bloodGroup'],        // vitals.bloodGroup fallback
-          p?['bloodGroup'],
-          'N/A',
+          data['bloodGroup'], vitals['bloodGroup'], p?['bloodGroup'], 'N/A',
         ]);
 
         String  displayCnic = 'N/A';
@@ -541,9 +575,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           displayCnic = directCnic;
           isChild     = false;
         } else {
-          final gcnic  = _firstNonEmpty([data['guardianCnic'], p?['guardianCnic']?.toString().trim()]);
-          displayCnic  = gcnic.isNotEmpty ? gcnic : 'N/A';
-          isChild      = true;
+          final gcnic = _firstNonEmpty([data['guardianCnic'], p?['guardianCnic']?.toString().trim()]);
+          displayCnic = gcnic.isNotEmpty ? gcnic : 'N/A';
+          isChild     = true;
           if (gcnic.isNotEmpty) guardianName = guardianNames[gcnic];
         }
 
@@ -552,22 +586,39 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         if (directCnic.isNotEmpty && directCnic != 'N/A') possibleIds.add(directCnic);
         if (isChild && displayCnic != 'N/A') possibleIds.add(displayCnic);
 
+        // Days of medicine resolved from fallback maps
+        final medicDays = serialToDays[serial] ?? 1;
+
+        // Total amount paid for this token: base price × days
+        final type = _resolveType(data);
+        int tokenAmount = 0;
+        if (type == 'zakat')     tokenAmount = 20  * medicDays;
+        if (type == 'non-zakat') tokenAmount = 100 * medicDays;
+
         enriched.add({
           ...data,
-          'name':          name,
-          'phone':         phone,
-          'age':           age,
-          'gender':        gender,
-          'bloodGroup':    bloodGroup,
-          'displayCnic':   displayCnic,
-          'isChild':       isChild,
+          'name':           name,
+          'phone':          phone,
+          'age':            age,
+          'gender':         gender,
+          'bloodGroup':     bloodGroup,
+          'displayCnic':    displayCnic,
+          'isChild':        isChild,
           if (guardianName != null) 'guardianName': guardianName,
-          'patientId':     pid,
-          'possibleIds':   possibleIds.toList(),
-          'doctorName':    _firstNonEmpty([data['doctorName'], data['prescribedBy'], data['updatedBy'], serialToDoctor[serial], 'Unknown']),
-          'dispenserName': _firstNonEmpty([data['dispenserName'], data['dispensedBy'], 'Unknown']),
-          'tokenBy':       _firstNonEmpty([data['createdByName'], data['tokenBy'], serialToTokenBy[serial], data['createdBy'], 'Unknown']),
-          'frequentFlag':  p?['frequentFlag'] ?? false,
+          'patientId':      pid,
+          'possibleIds':    possibleIds.toList(),
+          'doctorName':     _firstNonEmpty([
+            data['doctorName'], data['prescribedBy'], data['updatedBy'],
+            serialToDoctor[serial], 'Unknown',
+          ]),
+          'dispenserName':  _firstNonEmpty([data['dispenserName'], data['dispensedBy'], 'Unknown']),
+          'tokenBy':        _firstNonEmpty([
+            data['createdByName'], data['tokenBy'], serialToTokenBy[serial],
+            data['createdBy'], 'Unknown',
+          ]),
+          'frequentFlag':   p?['frequentFlag'] ?? false,
+          'daysOfMedicine': medicDays,
+          'tokenAmount':    tokenAmount,
         });
       }
       return {'v1': 0, 'v2': enriched.length, 'total': enriched.length, 'dispensed': enriched};
@@ -842,8 +893,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisAlignment: MainAxisAlignment.center, children: [
               Container(width: 36, height: 4,
-                  decoration: BoxDecoration(
-                      color: t.bgRule, borderRadius: BorderRadius.circular(2))),
+                  decoration: BoxDecoration(color: t.bgRule, borderRadius: BorderRadius.circular(2))),
             ]),
             const SizedBox(height: 16),
             Text('Select Date Range',
@@ -1041,8 +1091,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
               const SizedBox(width: 8),
               Expanded(child: Text(
                 '${cp.streakDays} consecutive days — frequent patient alert',
-                style: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w700, color: streakColor),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: streakColor),
               )),
               if (isManager)
                 GestureDetector(
@@ -1061,15 +1110,13 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                           ElevatedButton(
                             onPressed: () => Navigator.pop(ctx, true),
                             style: ElevatedButton.styleFrom(backgroundColor: streakColor),
-                            child: const Text('Revert',
-                                style: TextStyle(color: Colors.white)),
+                            child: const Text('Revert', style: TextStyle(color: Colors.white)),
                           ),
                         ],
                       ),
                     );
                     if (confirm == true) {
-                      await _revertFrequentFlag(
-                          branchId, p['patientId']?.toString() ?? '');
+                      await _revertFrequentFlag(branchId, p['patientId']?.toString() ?? '');
                     }
                   },
                   child: Container(
@@ -1083,10 +1130,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                       Icon(Icons.undo_rounded, size: 13, color: streakColor),
                       const SizedBox(width: 4),
                       Text('Revert',
-                          style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: streakColor)),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: streakColor)),
                     ]),
                   ),
                 ),
@@ -1100,17 +1144,14 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     color: streakColor, size: 20),
                 const SizedBox(width: 8),
                 Expanded(child: Text(p['name'] ?? 'Unknown',
-                    style: TextStyle(fontSize: 15,
-                        fontWeight: FontWeight.w700, color: t.textPrimary))),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary))),
               ]),
               Divider(height: 14, color: t.bgRule),
               _infoRow(context, Icons.badge_rounded,
                   '${isChild ? "Guardian CNIC" : "CNIC"}: ${p['displayCnic'] ?? 'N/A'}',
                   copy: p['displayCnic']),
-              _infoRow(context, Icons.phone_rounded,
-                  'Phone: ${p['phone'] ?? 'N/A'}', copy: p['phone']),
-              _infoRow(context, Icons.calendar_today_rounded,
-                  'Last visit: ${p['dispenseDate'] ?? 'N/A'}'),
+              _infoRow(context, Icons.phone_rounded, 'Phone: ${p['phone'] ?? 'N/A'}', copy: p['phone']),
+              _infoRow(context, Icons.calendar_today_rounded, 'Last visit: ${p['dispenseDate'] ?? 'N/A'}'),
             ]),
           ),
         ],
@@ -1131,7 +1172,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // ── Header ───────────────────────────────────────────────────
+              // ── Header ────────────────────────────────────────────────────
               if (isMobile) ...[
                 Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1148,9 +1189,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                         icon: Icons.inventory_rounded, label: "Inventory", color: t.nonZakat,
                         onPressed: () => Navigator.push(context,
                             MaterialPageRoute(builder: (_) => InventoryPage(
-                              branchId: branchId,
-                              isDispenser: false,
-                            ))))),
+                              branchId: branchId, isDispenser: false))))),
                     const SizedBox(width: 10),
                     Expanded(child: _actionButton(t,
                         icon: Icons.account_balance_wallet_rounded, label: "Assets", color: t.gmwf,
@@ -1174,9 +1213,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                             label: "Inventory", color: t.nonZakat,
                             onPressed: () => Navigator.push(context,
                                 MaterialPageRoute(builder: (_) => InventoryPage(
-                                  branchId: branchId,
-                                  isDispenser: false,
-                                )))),
+                                  branchId: branchId, isDispenser: false)))),
                         const SizedBox(width: 10),
                         _actionButton(t, icon: Icons.account_balance_wallet_rounded,
                             label: "Assets", color: t.gmwf,
@@ -1364,13 +1401,15 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: filtered.length,
                     itemBuilder: (context, i) {
-                      final p       = filtered[i];
-                      final isChild = p['isChild'] == true;
-                      final pid     = p['patientId']?.toString() ?? '';
+                      final p          = filtered[i];
+                      final isChild    = p['isChild'] == true;
+                      final pid        = p['patientId']?.toString() ?? '';
                       final possibleIds = (p['possibleIds'] as List?)?.cast<String>() ?? <String>[];
-
                       final isFrequent = !_revertedPatientIds.contains(pid) &&
                                          (p['frequentFlag'] == true);
+
+                      final medicDays  = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
+                      final tokenAmount = (p['tokenAmount'] as num?)?.toInt() ?? 0;
 
                       Color typeColor;
                       if (p['type'] == 'zakat')          typeColor = t.zakat;
@@ -1407,14 +1446,35 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                   child: const Text('🔥', style: TextStyle(fontSize: 14)),
                                 ),
                               ),
+                            // Days badge — ×2 or ×3 when more than one day
+                            if (medicDays > 1)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.deepOrange.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(color: Colors.deepOrange.withOpacity(0.4)),
+                                  ),
+                                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                    const Icon(Icons.calendar_month_rounded,
+                                        size: 11, color: Colors.deepOrange),
+                                    const SizedBox(width: 3),
+                                    Text('$medicDays days',
+                                        style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.deepOrange)),
+                                  ]),
+                                ),
+                              ),
                             FutureBuilder<int>(
                               future: _getTotalVisits(branchId, possibleIds),
                               builder: (context, visitSnap) {
                                 if (visitSnap.connectionState == ConnectionState.waiting) {
-                                  return const SizedBox(
-                                    width: 14, height: 14,
-                                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                                  );
+                                  return const SizedBox(width: 14, height: 14,
+                                      child: CircularProgressIndicator(strokeWidth: 1.5));
                                 }
                                 final totalVisits = visitSnap.data ?? 0;
                                 if (totalVisits > 1) {
@@ -1427,14 +1487,10 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(color: Colors.blue.withOpacity(0.3)),
                                       ),
-                                      child: Text(
-                                        '$totalVisits visits',
-                                        style: const TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.blue,
-                                        ),
-                                      ),
+                                      child: Text('$totalVisits visits',
+                                          style: const TextStyle(
+                                              fontSize: 10, fontWeight: FontWeight.w700,
+                                              color: Colors.blue)),
                                     ),
                                   );
                                 }
@@ -1460,19 +1516,37 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                             ),
                           ]),
                           Divider(height: 14, color: t.bgRule),
-                          _infoRow(context, Icons.calendar_today_rounded, 'Date: ${p['dispenseDate'] ?? 'N/A'}'),
+                          _infoRow(context, Icons.calendar_today_rounded,
+                              'Date: ${p['dispenseDate'] ?? 'N/A'}'),
                           _infoRow(context, Icons.badge_rounded,
                               '${isChild ? "Guardian CNIC" : "CNIC"}: ${p['displayCnic'] ?? 'N/A'}',
                               copy: p['displayCnic']),
                           if (isChild)
-                            _infoRow(context, Icons.family_restroom_rounded, 'Guardian: ${p['guardianName'] ?? 'N/A'}'),
-                          _infoRow(context, Icons.phone_rounded, 'Phone: ${p['phone'] ?? 'N/A'}', copy: p['phone']),
-                          _infoRow(context, Icons.cake_rounded, 'Age: ${p['age'] ?? 'N/A'} · Gender: ${p['gender'] ?? 'N/A'}'),
-                          _infoRow(context, Icons.bloodtype_rounded, 'Blood Group: ${p['bloodGroup'] ?? 'N/A'}'),
-                          _infoRow(context, Icons.medical_services_rounded, 'Prescribed by: ${p['doctorName'] ?? 'Unknown'}'),
-                          _infoRow(context, Icons.confirmation_number_rounded, 'Token by: ${p['tokenBy'] ?? 'Unknown'}'),
-                          _infoRow(context, Icons.local_pharmacy_rounded, 'Dispensed by: ${p['dispenserName'] ?? 'Unknown'}'),
-                          _infoRow(context, Icons.tag_rounded, 'Serial: ${p['serial'] ?? 'N/A'}'),
+                            _infoRow(context, Icons.family_restroom_rounded,
+                                'Guardian: ${p['guardianName'] ?? 'N/A'}'),
+                          _infoRow(context, Icons.phone_rounded,
+                              'Phone: ${p['phone'] ?? 'N/A'}', copy: p['phone']),
+                          _infoRow(context, Icons.cake_rounded,
+                              'Age: ${p['age'] ?? 'N/A'} · Gender: ${p['gender'] ?? 'N/A'}'),
+                          _infoRow(context, Icons.bloodtype_rounded,
+                              'Blood Group: ${p['bloodGroup'] ?? 'N/A'}'),
+                          _infoRow(context, Icons.medical_services_rounded,
+                              'Prescribed by: ${p['doctorName'] ?? 'Unknown'}'),
+                          _infoRow(context, Icons.confirmation_number_rounded,
+                              'Token by: ${p['tokenBy'] ?? 'Unknown'}'),
+                          _infoRow(context, Icons.local_pharmacy_rounded,
+                              'Dispensed by: ${p['dispenserName'] ?? 'Unknown'}'),
+                          _infoRow(context, Icons.tag_rounded,
+                              'Serial: ${p['serial'] ?? 'N/A'}'),
+                          // Medicine days row — only when > 1 day
+                          if (medicDays > 1)
+                            _infoRow(context, Icons.calendar_month_rounded,
+                                'Medicine: $medicDays days'),
+                          // Amount row — shown for zakat and non-zakat
+                          if (tokenAmount > 0)
+                            _infoRow(context, Icons.payments_rounded,
+                                'Amount charged: PKR $tokenAmount'
+                                '${medicDays > 1 ? ' ($medicDays days)' : ''}'),
                         ]),
                       );
                     },
@@ -1495,7 +1569,8 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         backgroundColor: color.withOpacity(0.1), elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10), side: BorderSide(color: color.withOpacity(0.3))),
+            borderRadius: BorderRadius.circular(10),
+            side: BorderSide(color: color.withOpacity(0.3))),
       ),
       onPressed: onPressed,
     );
@@ -1568,7 +1643,8 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     indicatorColor: t.accent,
                     indicatorWeight: 2,
                     labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                    unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+                    unselectedLabelStyle:
+                        const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
                     tabs: branches.map((e) => Tab(text: e.key)).toList(),
                   )),
                   if (widget.showRegisterButton)
@@ -1582,12 +1658,15 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                               tooltip: 'New Branch',
                             )
                           : ElevatedButton.icon(
-                              icon: Icon(Icons.add_business_rounded, size: 16, color: t.bgCard),
+                              icon: Icon(Icons.add_business_rounded,
+                                  size: 16, color: t.bgCard),
                               label: Text("New Branch", style: TextStyle(
                                   color: t.bgCard, fontWeight: FontWeight.w800, fontSize: 12)),
-                              style: ElevatedButton.styleFrom(backgroundColor: t.accent, elevation: 0,
+                              style: ElevatedButton.styleFrom(
+                                  backgroundColor: t.accent, elevation: 0,
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8))),
                               onPressed: () => Navigator.push(context,
                                   MaterialPageRoute(builder: (_) => const BranchesRegister())),
                             ),
@@ -1609,7 +1688,8 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
       icon: Icon(Icons.add_business_rounded, color: t.bgCard),
       label: Text("Register New Branch",
           style: TextStyle(color: t.bgCard, fontWeight: FontWeight.w800)),
-      style: ElevatedButton.styleFrom(backgroundColor: t.accent, elevation: 0,
+      style: ElevatedButton.styleFrom(
+          backgroundColor: t.accent, elevation: 0,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
       onPressed: () => Navigator.push(

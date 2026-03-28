@@ -1,17 +1,18 @@
 // lib/pages/patient_queue.dart
-// FIXES:
-//   1. _showPrescriptionDialog now reads from local Hive prescriptions first,
-//      falls back to Firestore, and on save writes to BOTH Hive AND Firestore.
-//   2. RealtimeManager broadcast uses correct RealtimeEvents.payload() structure
-//      with branchId at top level (not nested inside data).
-//   3. Removed FieldValue.serverTimestamp() from realtime payload — not serialisable.
-//   4. Entry status updated in local Hive after prescription edit.
+// CHANGES IN THIS VERSION:
+//   NEW: Prescription edit dialog now includes a days-of-medicine selector
+//        (1 / 2 / 3 days). The chosen value is saved to:
+//          • Hive prescriptions box (inside updatedPresc)
+//          • Hive entries box (top-level 'daysOfMedicine')
+//          • Firestore serial doc and prescriptions doc (via _updateFirestore)
+//          • LAN broadcast payload
+//        Revenue pricing: Zakat = PKR 20 × days, Non-zakat = PKR 100 × days,
+//        GMWF = PKR 0. The extra charge beyond day-1 is shown in the dialog.
 //
-// QUEUE TYPE FIX (Bug 3):
-//   • _updateFirestore no longer has a hardcoded 'zakat' fallback.
-//   • _normaliseQueueType() is the single resolver — mirrors all other files.
-//   • queueType is resolved from entryData → prescData → patient map, in order,
-//     then normalised before being used in any Firestore write path.
+// All previous fixes retained:
+//   • _normaliseQueueType single source of truth
+//   • queueType resolved from entryData → prescData → patient map
+//   • Firestore writes to correct sub-collection
 
 import 'dart:async';
 
@@ -61,8 +62,14 @@ class _PatientQueueState extends State<PatientQueue>
 
   bool _isOnline = true;
 
-  // ─── Queue-type normaliser (FIX: single source of truth) ─────────────────
-  /// Mirrors _resolveQueueType in token_screen / sync_service / server_sync_manager.
+  // ── Pricing: base PKR per day per queue type ───────────────────────────────
+  static const Map<String, int> _baseDayPrice = {
+    'zakat':     20,
+    'non-zakat': 100,
+    'gmwf':      0,
+  };
+
+  // ─── Queue-type normaliser ─────────────────────────────────────────────────
   static String _normaliseQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
@@ -282,14 +289,16 @@ class _PatientQueueState extends State<PatientQueue>
                   FilteringTextInputFormatter.digitsOnly,
                   LengthLimitingTextInputFormatter(3),
                 ],
-                decoration: const InputDecoration(hintText: 'e.g. 1+0+2', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                    hintText: 'e.g. 1+0+2', border: OutlineInputBorder()),
                 onChanged: (value) {
                   final digits    = value.replaceAll('+', '');
                   if (digits.length > 3) return;
                   final formatted = digits.split('').join('+');
                   if (timingCtrl.text != formatted) {
                     timingCtrl.text = formatted;
-                    timingCtrl.selection = TextSelection.collapsed(offset: formatted.length);
+                    timingCtrl.selection =
+                        TextSelection.collapsed(offset: formatted.length);
                   }
                 },
               ),
@@ -306,7 +315,8 @@ class _PatientQueueState extends State<PatientQueue>
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
                   value: dosage,
-                  decoration: const InputDecoration(labelText: 'Dosage', border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                      labelText: 'Dosage', border: OutlineInputBorder()),
                   items: ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon']
                       .map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
                   onChanged: (v) => dosage = v!,
@@ -315,7 +325,8 @@ class _PatientQueueState extends State<PatientQueue>
             ] else
               TextField(
                 controller: qtyCtrl, keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Quantity', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                    labelText: 'Quantity', border: OutlineInputBorder()),
               ),
           ]),
         ),
@@ -329,8 +340,10 @@ class _PatientQueueState extends State<PatientQueue>
               if (isInjection) {
                 final qty = int.tryParse(qtyCtrl.text) ?? 1;
                 if (qty <= 0) return;
-                newMed = {'name': name, 'quantity': qty, 'type': 'Injection',
-                    'inventoryId': inventoryMed?['id']};
+                newMed = {
+                  'name': name, 'quantity': qty, 'type': 'Injection',
+                  'inventoryId': inventoryMed?['id'],
+                };
               } else {
                 final digits = timingCtrl.text.replaceAll('+', '');
                 final m      = int.tryParse(digits.isNotEmpty ? digits[0] : '0') ?? 0;
@@ -339,9 +352,12 @@ class _PatientQueueState extends State<PatientQueue>
                 final sum    = m + e + n;
                 final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : sum;
                 if (qty == 0) return;
-                newMed = {'name': name, 'quantity': qty, 'timing': '$m+$e+$n',
-                    'meal': mealTiming, 'dosage': isSyrup ? dosage : '',
-                    'type': isSyrup ? 'Syrup' : 'Tablet', 'inventoryId': inventoryMed?['id']};
+                newMed = {
+                  'name': name, 'quantity': qty, 'timing': '$m+$e+$n',
+                  'meal': mealTiming, 'dosage': isSyrup ? dosage : '',
+                  'type': isSyrup ? 'Syrup' : 'Tablet',
+                  'inventoryId': inventoryMed?['id'],
+                };
               }
               Navigator.pop(ctx, newMed);
             },
@@ -353,6 +369,123 @@ class _PatientQueueState extends State<PatientQueue>
 
     nameCtrl.dispose(); timingCtrl.dispose(); qtyCtrl.dispose();
     return result;
+  }
+
+  // ─── Days selector widget ──────────────────────────────────────────────────
+  /// Inline 1 / 2 / 3 day segmented button used inside the edit dialog.
+  /// [queueType] is used to compute the extra charge hint.
+  Widget _buildDaysSelectorDialog({
+    required int selectedDays,
+    required String queueType,
+    required void Function(int) onChanged,
+  }) {
+    final pricePerDay = _baseDayPrice[queueType] ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.calendar_month_rounded, color: _teal, size: 18),
+          const SizedBox(width: 8),
+          const Text('Days of Medicine',
+              style: TextStyle(
+                  fontWeight: FontWeight.bold, fontSize: 15, color: _teal)),
+          if (pricePerDay > 0 && selectedDays > 1) ...[
+            const Spacer(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Text(
+                'Extra: PKR ${(selectedDays - 1) * pricePerDay}',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange.shade800),
+              ),
+            ),
+          ],
+        ]),
+        const SizedBox(height: 8),
+        Row(
+          children: [1, 2, 3].map((day) {
+            final isSelected = selectedDays == day;
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: day < 3 ? 8 : 0),
+                child: GestureDetector(
+                  onTap: () => onChanged(day),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? _teal : Colors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: isSelected ? _teal : Colors.grey.shade300,
+                          width: isSelected ? 2 : 1),
+                      boxShadow: isSelected
+                          ? [BoxShadow(
+                              color: _teal.withOpacity(0.22),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2))]
+                          : [],
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '$day',
+                          style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected
+                                  ? Colors.white
+                                  : Colors.grey.shade700),
+                        ),
+                        Text(
+                          day == 1 ? 'day' : 'days',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: isSelected
+                                  ? Colors.white70
+                                  : Colors.grey.shade500),
+                        ),
+                        // Hint: extra charge for paying types
+                        if (pricePerDay > 0 && day > 1)
+                          Text(
+                            '+PKR ${(day - 1) * pricePerDay}',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: isSelected
+                                    ? Colors.white70
+                                    : Colors.orange.shade600,
+                                fontWeight: FontWeight.w600),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          pricePerDay > 0
+              ? 'Day-1 fee (PKR $pricePerDay) collected at token desk.'
+                  '${selectedDays > 1 ? ' Extra PKR ${(selectedDays - 1) * pricePerDay} will be charged.' : ''}'
+              : 'No charge for $queueType patients.',
+          style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+              fontStyle: FontStyle.italic),
+        ),
+      ],
+    );
   }
 
   // ─── Prescription edit dialog ──────────────────────────────────────────────
@@ -390,22 +523,21 @@ class _PatientQueueState extends State<PatientQueue>
         try {
           final ddmmyy = serial.split('-')[0];
           for (final type in ['zakat', 'non-zakat', 'gmwf']) {
-            final candidate = FirebaseFirestore.instance
+            final snap = await FirebaseFirestore.instance
                 .collection('branches').doc(branchId)
                 .collection('serials').doc(ddmmyy)
-                .collection(type).doc(serial);
-            final snap = await candidate.get();
+                .collection(type).doc(serial).get();
             if (snap.exists) {
               final d = snap.data() ?? {};
               entryData = Map<String, dynamic>.from(d);
-              // Preserve collection name so queueType resolver works
               entryData['queueType'] = type;
               final embeddedPresc = d['prescription'] as Map<String, dynamic>?;
-              if (embeddedPresc != null) prescData = Map<String, dynamic>.from(embeddedPresc);
+              if (embeddedPresc != null) {
+                prescData = Map<String, dynamic>.from(embeddedPresc);
+              }
               break;
             }
           }
-          debugPrint('[PrescEdit] Firestore fetch complete. prescData empty: ${prescData.isEmpty}');
         } catch (e) {
           debugPrint('[PrescEdit] Firestore fetch failed: $e');
         }
@@ -435,7 +567,6 @@ class _PatientQueueState extends State<PatientQueue>
       'Unknown Patient'
     );
 
-    // FIX (Bug 3): resolve through normaliser, not a hardcoded 'zakat' default
     final String queueType = _normaliseQueueType(
       entryData['queueType']?.toString() ??
       prescData['queueType']?.toString() ??
@@ -444,16 +575,30 @@ class _PatientQueueState extends State<PatientQueue>
 
     debugPrint('[PrescEdit] resolved queueType=$queueType for serial=$serial');
 
+    // ── Restore existing days (default 1) ──────────────────────────────────
+    int editDays = (() {
+      final d = prescData['daysOfMedicine'] ??
+          entryData['daysOfMedicine'] ??
+          (entryData['prescription'] is Map
+              ? entryData['prescription']['daysOfMedicine']
+              : null);
+      if (d is int && d >= 1 && d <= 3) return d;
+      return 1;
+    })();
+
     final complaintCtrl = TextEditingController(
         text: prescData['condition'] ?? prescData['complaint'] ?? '');
-    final diagnosisCtrl = TextEditingController(text: prescData['diagnosis'] ?? '');
+    final diagnosisCtrl = TextEditingController(
+        text: prescData['diagnosis'] ?? '');
 
     List<Map<String, dynamic>> currentMeds = List<Map<String, dynamic>>.from(
         (prescData['prescriptions'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ?? []);
     List<Map<String, dynamic>> currentLabs = List<Map<String, dynamic>>.from(
         (prescData['labResults'] as List<dynamic>?)
-            ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
+            ?.map((e) => Map<String, dynamic>.from(e as Map))
+            .toList() ?? []);
 
     final searchCtrl = TextEditingController();
     List<Map<String, dynamic>> searchResults = [];
@@ -462,165 +607,245 @@ class _PatientQueueState extends State<PatientQueue>
       final query    = q.trim().toLowerCase();
       final allStock = LocalStorageService.getAllLocalStockItems(branchId: branchId);
       searchResults  = query.isEmpty ? []
-          : allStock.where((m) => (m['name'] ?? '').toString().toLowerCase().contains(query)).toList();
+          : allStock
+              .where((m) => (m['name'] ?? '').toString().toLowerCase().contains(query))
+              .toList();
     }
-
-    searchCtrl.addListener(() { searchInventory(searchCtrl.text); if (mounted) setState(() {}); });
 
     await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-          title: Row(children: [
-            const Icon(Icons.edit_note, color: _teal),
-            const SizedBox(width: 8),
-            Expanded(child: Text(
-              'Edit Prescription – $patientName ($serial)',
-              style: const TextStyle(fontSize: 16), overflow: TextOverflow.ellipsis)),
-          ]),
-          content: SizedBox(
-            width: 700, height: 600,
-            child: SingleChildScrollView(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                TextField(
-                  controller: complaintCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Patient Complaint',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                    filled: true, fillColor: Colors.green[50]),
-                  maxLines: 2),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: diagnosisCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Diagnosis',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                    filled: true, fillColor: Colors.green[50]),
-                  maxLines: 3),
-                const SizedBox(height: 24),
-                const Text('Medicines', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: searchCtrl, autofocus: true,
-                  decoration: InputDecoration(
-                    hintText: 'Search inventory & add medicine...',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(30)),
-                    filled: true),
-                  onChanged: (q) { searchInventory(q); setDialogState(() {}); }),
-                const SizedBox(height: 8),
-                if (searchResults.isNotEmpty)
-                  Container(
-                    constraints: const BoxConstraints(maxHeight: 200),
-                    decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(12)),
-                    child: ListView.builder(
-                      shrinkWrap: true, itemCount: searchResults.length,
-                      itemBuilder: (ctx, i) {
-                        final med    = searchResults[i];
-                        final abbrev = _getMedAbbrev(med);
-                        final namePart = (med['name'] ?? '').trim();
-                        final label = abbrev.isNotEmpty &&
-                                !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
-                            ? '$abbrev $namePart' : namePart;
-                        return ListTile(
-                          title: Text(label),
-                          subtitle: Text('Stock: ${med['quantity'] ?? 0}'),
-                          onTap: () async {
-                            final newMed = await _showAddMedicineSubDialog(inventoryMed: med);
-                            if (newMed != null) {
-                              setDialogState(() {
-                                currentMeds.add(newMed);
-                                searchCtrl.clear(); searchResults = [];
-                              });
-                            }
-                          },
-                        );
+        builder: (context, setDialogState) {
+          searchCtrl.addListener(() {
+            searchInventory(searchCtrl.text);
+            setDialogState(() {});
+          });
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: Row(children: [
+              const Icon(Icons.edit_note, color: _teal),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Edit Prescription – $patientName ($serial)',
+                  style: const TextStyle(fontSize: 16),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ]),
+            content: SizedBox(
+              width: 700,
+              height: 640,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Complaint ───────────────────────────────────────────
+                    TextField(
+                      controller: complaintCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Patient Complaint',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        filled: true,
+                        fillColor: Colors.green[50],
+                      ),
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // ── Diagnosis ───────────────────────────────────────────
+                    TextField(
+                      controller: diagnosisCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Diagnosis',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        filled: true,
+                        fillColor: Colors.green[50],
+                      ),
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ── Days selector ───────────────────────────────────────
+                    _buildDaysSelectorDialog(
+                      selectedDays: editDays,
+                      queueType:    queueType,
+                      onChanged:    (d) => setDialogState(() => editDays = d),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // ── Medicines ───────────────────────────────────────────
+                    const Text('Medicines',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: searchCtrl,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Search inventory & add medicine...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(30)),
+                        filled: true,
+                      ),
+                      onChanged: (q) {
+                        searchInventory(q);
+                        setDialogState(() {});
                       },
                     ),
-                  )
-                else if (searchCtrl.text.isNotEmpty)
-                  const Padding(padding: EdgeInsets.all(16),
-                      child: Text('No matching medicines in local inventory',
-                          style: TextStyle(color: Colors.grey))),
-                const SizedBox(height: 12),
-                if (currentMeds.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(8)),
-                    child: const Text('No medicines added yet', style: TextStyle(color: Colors.grey)))
-                else
-                  Wrap(
-                    spacing: 8, runSpacing: 8,
-                    children: currentMeds.map((med) {
-                      final abbrev   = _getMedAbbrev(med);
-                      final namePart = (med['name'] ?? '').trim();
-                      final qty      = med['quantity'] ?? 1;
-                      final label    = abbrev.isNotEmpty &&
-                              !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
-                          ? '$abbrev $namePart ×$qty' : '$namePart ×$qty';
-                      return Chip(
-                        label: Text(label),
-                        backgroundColor: _teal,
-                        labelStyle: const TextStyle(color: Colors.white),
-                        onDeleted: () => setDialogState(() => currentMeds.remove(med)));
-                    }).toList()),
-                const SizedBox(height: 16),
-                const Text('Lab Tests', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                const SizedBox(height: 8),
-                TextFormField(
-                  initialValue: currentLabs.map((l) => l['name']).join(', '),
-                  decoration: InputDecoration(
-                    hintText: 'Lab tests (comma separated)',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
-                    filled: true),
-                  onChanged: (value) {
-                    currentLabs = value.split(',').map((e) => e.trim())
-                        .where((e) => e.isNotEmpty).map((e) => {'name': e}).toList();
-                    setDialogState(() {});
-                  }),
-                const SizedBox(height: 8),
-                if (localPresc != null)
-                  Text('Source: local prescriptions', style: TextStyle(fontSize: 11, color: Colors.grey[500]))
-                else if (entryData.isNotEmpty)
-                  Text('Source: local entry cache', style: TextStyle(fontSize: 11, color: Colors.grey[500]))
-                else
-                  Text('Source: Firestore (cloud)', style: TextStyle(fontSize: 11, color: Colors.orange[700])),
-              ]),
+                    const SizedBox(height: 8),
+                    if (searchResults.isNotEmpty)
+                      Container(
+                        constraints: const BoxConstraints(maxHeight: 200),
+                        decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey[300]!),
+                            borderRadius: BorderRadius.circular(12)),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: searchResults.length,
+                          itemBuilder: (ctx, i) {
+                            final med      = searchResults[i];
+                            final abbrev   = _getMedAbbrev(med);
+                            final namePart = (med['name'] ?? '').trim();
+                            final label    = abbrev.isNotEmpty &&
+                                    !namePart.toLowerCase().startsWith(
+                                        abbrev.toLowerCase())
+                                ? '$abbrev $namePart'
+                                : namePart;
+                            return ListTile(
+                              title: Text(label),
+                              subtitle: Text('Stock: ${med['quantity'] ?? 0}'),
+                              onTap: () async {
+                                final newMed =
+                                    await _showAddMedicineSubDialog(inventoryMed: med);
+                                if (newMed != null) {
+                                  setDialogState(() {
+                                    currentMeds.add(newMed);
+                                    searchCtrl.clear();
+                                    searchResults = [];
+                                  });
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      )
+                    else if (searchCtrl.text.isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('No matching medicines in local inventory',
+                            style: TextStyle(color: Colors.grey)),
+                      ),
+                    const SizedBox(height: 12),
+                    if (currentMeds.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey[300]!),
+                            borderRadius: BorderRadius.circular(8)),
+                        child: const Text('No medicines added yet',
+                            style: TextStyle(color: Colors.grey)))
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: currentMeds.map((med) {
+                          final abbrev   = _getMedAbbrev(med);
+                          final namePart = (med['name'] ?? '').trim();
+                          final qty      = med['quantity'] ?? 1;
+                          final label    = abbrev.isNotEmpty &&
+                                  !namePart
+                                      .toLowerCase()
+                                      .startsWith(abbrev.toLowerCase())
+                              ? '$abbrev $namePart ×$qty'
+                              : '$namePart ×$qty';
+                          return Chip(
+                            label: Text(label),
+                            backgroundColor: _teal,
+                            labelStyle: const TextStyle(color: Colors.white),
+                            onDeleted: () =>
+                                setDialogState(() => currentMeds.remove(med)),
+                          );
+                        }).toList(),
+                      ),
+                    const SizedBox(height: 16),
+
+                    // ── Lab tests ───────────────────────────────────────────
+                    const Text('Lab Tests',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    TextFormField(
+                      initialValue: currentLabs.map((l) => l['name']).join(', '),
+                      decoration: InputDecoration(
+                        hintText: 'Lab tests (comma separated)',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        filled: true,
+                      ),
+                      onChanged: (value) {
+                        currentLabs = value
+                            .split(',')
+                            .map((e) => e.trim())
+                            .where((e) => e.isNotEmpty)
+                            .map((e) => {'name': e})
+                            .toList();
+                        setDialogState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 8),
+
+                    // ── Source indicator ────────────────────────────────────
+                    if (localPresc != null)
+                      Text('Source: local prescriptions',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+                    else if (entryData.isNotEmpty)
+                      Text('Source: local entry cache',
+                          style: TextStyle(fontSize: 11, color: Colors.grey[500]))
+                    else
+                      Text('Source: Firestore (cloud)',
+                          style: TextStyle(fontSize: 11, color: Colors.orange[700])),
+                  ],
+                ),
+              ),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: _teal),
-              icon: const Icon(Icons.save, color: Colors.white),
-              label: const Text('Update', style: TextStyle(color: Colors.white)),
-              onPressed: () async {
-                Navigator.pop(dialogContext);
-                await _savePrescriptionUpdate(
-                  serial:        serial,
-                  branchId:      branchId,
-                  patientCnic:   patientCnic,
-                  queueType:     queueType,
-                  originalPresc: prescData,
-                  complaint:     complaintCtrl.text.trim(),
-                  diagnosis:     diagnosisCtrl.text.trim(),
-                  medicines:     currentMeds,
-                  labTests:      currentLabs,
-                );
-              },
-            ),
-          ],
-        ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: _teal),
+                icon: const Icon(Icons.save, color: Colors.white),
+                label: const Text('Update', style: TextStyle(color: Colors.white)),
+                onPressed: () async {
+                  Navigator.pop(dialogContext);
+                  await _savePrescriptionUpdate(
+                    serial:        serial,
+                    branchId:      branchId,
+                    patientCnic:   patientCnic,
+                    queueType:     queueType,
+                    originalPresc: prescData,
+                    complaint:     complaintCtrl.text.trim(),
+                    diagnosis:     diagnosisCtrl.text.trim(),
+                    medicines:     currentMeds,
+                    labTests:      currentLabs,
+                    daysOfMedicine: editDays,
+                  );
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
 
-    complaintCtrl.dispose(); diagnosisCtrl.dispose(); searchCtrl.dispose();
+    complaintCtrl.dispose();
+    diagnosisCtrl.dispose();
+    searchCtrl.dispose();
   }
 
   // ─── Save prescription update ──────────────────────────────────────────────
@@ -634,28 +859,32 @@ class _PatientQueueState extends State<PatientQueue>
     required String diagnosis,
     required List<Map<String, dynamic>> medicines,
     required List<Map<String, dynamic>> labTests,
+    required int daysOfMedicine,
   }) async {
-    final now = DateTime.now().toIso8601String();
+    final now         = DateTime.now().toIso8601String();
+    final pricePerDay = _baseDayPrice[queueType] ?? 0;
+    final extraCharge = (daysOfMedicine - 1) * pricePerDay; // PKR beyond day-1
 
     final updatedPresc = <String, dynamic>{
       ...originalPresc,
-      'serial':        serial,
-      'branchId':      branchId,
-      'queueType':     queueType,   // explicit — not just from originalPresc spread
-      'condition':     complaint,
-      'complaint':     complaint,
-      'diagnosis':     diagnosis,
-      'prescriptions': medicines,
-      'labResults':    labTests,
-      'updatedAt':     now,
-      'updatedBy':     RealtimeManager().role ?? 'Doctor',
+      'serial':          serial,
+      'branchId':        branchId,
+      'queueType':       queueType,
+      'condition':       complaint,
+      'complaint':       complaint,
+      'diagnosis':       diagnosis,
+      'prescriptions':   medicines,
+      'labResults':      labTests,
+      'daysOfMedicine':  daysOfMedicine,
+      'updatedAt':       now,
+      'updatedBy':       RealtimeManager().role ?? 'Doctor',
     };
 
-    // 1. Local Hive prescriptions box
+    // 1. Hive prescriptions box
     await LocalStorageService.saveLocalPrescription(updatedPresc);
     debugPrint('[PrescEdit] ✅ Saved to local prescriptions box: $serial');
 
-    // 2. Hive entries box
+    // 2. Hive entries box — also update top-level daysOfMedicine
     final entryKey = '$branchId-$serial';
     final entryBox  = Hive.box(LocalStorageService.entriesBox);
     final existing  = entryBox.get(entryKey);
@@ -665,8 +894,9 @@ class _PatientQueueState extends State<PatientQueue>
       updated['prescriptionId'] = serial;
       updated['status']         = 'completed';
       updated['completedAt']    = updatedPresc['completedAt'] ?? now;
+      updated['daysOfMedicine'] = daysOfMedicine; // top-level for summary cards
       await entryBox.put(entryKey, updated);
-      debugPrint('[PrescEdit] ✅ Updated entry in Hive entries box: $entryKey');
+      debugPrint('[PrescEdit] ✅ Updated entry in Hive: $entryKey');
     }
 
     // 3. LAN broadcast
@@ -675,46 +905,53 @@ class _PatientQueueState extends State<PatientQueue>
       branchId: branchId,
       data:     updatedPresc,
     ));
-    debugPrint('[PrescEdit] ✅ Broadcasted save_prescription');
+    debugPrint('[PrescEdit] ✅ Broadcasted save_prescription (days=$daysOfMedicine)');
 
     // 4. Firestore fire-and-forget
     if (_isOnline) {
       _updateFirestore(
-        serial:       serial,
-        branchId:     branchId,
-        patientCnic:  patientCnic,
-        queueType:    queueType,
-        updatedPresc: updatedPresc,
-        now:          now,
+        serial:         serial,
+        branchId:       branchId,
+        patientCnic:    patientCnic,
+        queueType:      queueType,
+        updatedPresc:   updatedPresc,
+        daysOfMedicine: daysOfMedicine,
+        now:            now,
       );
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      final daysTxt = daysOfMedicine > 1 ? ' ($daysOfMedicine days)' : '';
+      final chargeTxt = extraCharge > 0 ? ' | Extra: PKR $extraCharge' : '';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Row(children: [
-          Icon(Icons.check_circle, color: Colors.white), SizedBox(width: 8),
-          Text('Prescription updated successfully'),
+          const Icon(Icons.check_circle, color: Colors.white),
+          const SizedBox(width: 8),
+          Text('Prescription updated$daysTxt$chargeTxt'),
         ]),
-        backgroundColor: Colors.green, duration: Duration(seconds: 3),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 3),
       ));
       setState(() {});
     }
   }
 
-  // ─── Firestore write (FIX Bug 3) ─────────────────────────────────────────
+  // ─── Firestore write ───────────────────────────────────────────────────────
   Future<void> _updateFirestore({
     required String serial,
     required String branchId,
     required String patientCnic,
-    required String queueType,   // FIX: always normalised before reaching here
+    required String queueType,
     required Map<String, dynamic> updatedPresc,
+    required int daysOfMedicine,
     required String now,
   }) async {
     try {
-      final ddmmyy = serial.split('-')[0];
-      final db     = FirebaseFirestore.instance;
-
+      final ddmmyy    = serial.split('-')[0];
+      final db        = FirebaseFirestore.instance;
       final cleanCnic = patientCnic.isNotEmpty ? patientCnic : 'unknown_$serial';
+
+      // Path A: prescriptions/{cnic}/prescriptions/{serial}
       await db
           .collection('branches').doc(branchId)
           .collection('prescriptions').doc(cleanCnic)
@@ -722,19 +959,21 @@ class _PatientQueueState extends State<PatientQueue>
           .set(updatedPresc, SetOptions(merge: true));
       debugPrint('[PrescEdit] ✅ Firestore prescriptions updated: $serial');
 
-      // FIX (Bug 3): queueType is now always correctly resolved via
-      // _normaliseQueueType before reaching this method — no hardcoded fallback.
+      // Path B: serials/{dateKey}/{queueType}/{serial}
+      // Patch daysOfMedicine so revenue reports compute base × days correctly.
       await db
           .collection('branches').doc(branchId)
           .collection('serials').doc(ddmmyy)
-          .collection(queueType)   // ← correct collection, not always 'zakat'
+          .collection(queueType)
           .doc(serial)
           .update({
-        'prescription': updatedPresc,
-        'status':       'completed',
-        'updatedAt':    FieldValue.serverTimestamp(),
+        'prescription':   updatedPresc,
+        'status':         'completed',
+        'daysOfMedicine': daysOfMedicine,
+        'updatedAt':      FieldValue.serverTimestamp(),
       });
-      debugPrint('[PrescEdit] ✅ Firestore serials/$ddmmyy/$queueType/$serial updated');
+      debugPrint('[PrescEdit] ✅ Firestore serials/$ddmmyy/$queueType/$serial updated '
+          '(days=$daysOfMedicine)');
     } catch (e) {
       debugPrint('[PrescEdit] ❌ Firestore update failed (will retry on next sync): $e');
     }
@@ -753,15 +992,23 @@ class _PatientQueueState extends State<PatientQueue>
         });
 
         if (allPatients.isEmpty) {
-          return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.people_outline, size: 80, color: Colors.grey),
-            SizedBox(height: 16),
-            Text("No patients in today's queue", style: TextStyle(fontSize: 18, color: Colors.grey)),
-          ]));
+          return const Center(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.people_outline, size: 80, color: Colors.grey),
+              SizedBox(height: 16),
+              Text("No patients in today's queue",
+                  style: TextStyle(fontSize: 18, color: Colors.grey)),
+            ],
+          ));
         }
 
-        final waiting   = allPatients.where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting').toList();
-        final completed = allPatients.where((p) => (p['status'] ?? '').toString().toLowerCase() != 'waiting').toList();
+        final waiting   = allPatients
+            .where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting')
+            .toList();
+        final completed = allPatients
+            .where((p) => (p['status'] ?? '').toString().toLowerCase() != 'waiting')
+            .toList();
         final waitingCount   = waiting.length;
         final completedCount = completed.length;
         final total          = allPatients.length;
@@ -774,15 +1021,18 @@ class _PatientQueueState extends State<PatientQueue>
         }
 
         return Column(children: [
-          // Header
+          // ── Header ──────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             color: _teal,
             child: Row(children: [
               const Icon(Icons.people_alt, color: Colors.white, size: 26),
               const SizedBox(width: 10),
-              const Text("Today's Queue", style: TextStyle(
-                  color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)),
+              const Text("Today's Queue",
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold)),
               const Spacer(),
               IconButton(
                 icon: const Icon(Icons.refresh, color: Colors.white, size: 24),
@@ -794,47 +1044,75 @@ class _PatientQueueState extends State<PatientQueue>
             ]),
           ),
 
-          // Filter tabs
+          // ── Filter tabs ──────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-              GestureDetector(onTap: () => setState(() => _filter = 'waiting'),
-                  child: _buildFilterTab('Waiting', waitingCount, _amber, _filter == 'waiting')),
-              GestureDetector(onTap: () => setState(() => _filter = 'completed'),
-                  child: _buildFilterTab('Done', completedCount, Colors.green[700]!, _filter == 'completed')),
-              GestureDetector(onTap: () => setState(() => _filter = 'all'),
-                  child: _buildFilterTab('Total', total, _purple, _filter == 'all')),
-            ]),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                GestureDetector(
+                  onTap: () => setState(() => _filter = 'waiting'),
+                  child: _buildFilterTab(
+                      'Waiting', waitingCount, _amber, _filter == 'waiting')),
+                GestureDetector(
+                  onTap: () => setState(() => _filter = 'completed'),
+                  child: _buildFilterTab('Done', completedCount,
+                      Colors.green[700]!, _filter == 'completed')),
+                GestureDetector(
+                  onTap: () => setState(() => _filter = 'all'),
+                  child: _buildFilterTab(
+                      'Total', total, _purple, _filter == 'all')),
+              ],
+            ),
           ),
 
-          // Patient list
+          // ── Patient list ─────────────────────────────────────────────────
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
               itemCount: list.length,
               itemBuilder: (context, index) {
                 final patient = list[index];
-                final serial  = patient['serial']?.toString() ?? patient['id']?.toString() ?? 'N/A';
-                final name    = patient['patientName'] ?? 'Unknown Patient';
+                final serial  = patient['serial']?.toString() ??
+                    patient['id']?.toString() ?? 'N/A';
+                final name = patient['patientName'] ?? 'Unknown Patient';
 
-                final isSelected = widget.selectedPatient?['serial']?.toString() == serial ||
+                final isSelected =
+                    widget.selectedPatient?['serial']?.toString() == serial ||
                     widget.selectedPatient?['id']?.toString() == serial;
 
                 final status    = (patient['status'] ?? '').toString().toLowerCase();
                 final isWaiting = status == 'waiting';
 
                 final smallestWaitingSerial = waiting.isNotEmpty
-                    ? (waiting.first['serial']?.toString() ?? waiting.first['id']?.toString() ?? '') : '';
-                final isSmallestWaiting = isWaiting && serial == smallestWaitingSerial;
-                final isSelectable      = isSmallestWaiting && !widget.isSaving;
-                final hasPrescription   = patient['prescription'] != null ||
+                    ? (waiting.first['serial']?.toString() ??
+                        waiting.first['id']?.toString() ?? '')
+                    : '';
+                final isSmallestWaiting =
+                    isWaiting && serial == smallestWaitingSerial;
+                final isSelectable = isSmallestWaiting && !widget.isSaving;
+                final hasPrescription = patient['prescription'] != null ||
                     LocalStorageService.getLocalPrescription(serial) != null;
+
+                // Days badge for prescriptions with > 1 day
+                final prescDays = (() {
+                  final d = patient['daysOfMedicine'];
+                  if (d is int && d > 1) return d;
+                  final presc = patient['prescription'];
+                  if (presc is Map) {
+                    final pd = presc['daysOfMedicine'];
+                    if (pd is int && pd > 1) return pd;
+                  }
+                  return 1;
+                })();
 
                 final Color dotColor = isWaiting ? _amber : Colors.green[700]!;
 
                 Widget dot = Container(
-                    width: 10, height: 10,
-                    decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle));
+                    width: 10,
+                    height: 10,
+                    decoration:
+                        BoxDecoration(color: dotColor, shape: BoxShape.circle));
                 if (isWaiting) dot = ScaleTransition(scale: _pulseAnimation, child: dot);
 
                 return AnimatedContainer(
@@ -847,30 +1125,71 @@ class _PatientQueueState extends State<PatientQueue>
                     border: Border.all(
                         color: isSelected ? _amber : dotColor.withOpacity(0.4),
                         width: isSelected ? 2.0 : 1.2),
-                    boxShadow: [BoxShadow(
-                        color: Colors.black12.withOpacity(0.08), blurRadius: 3,
-                        offset: const Offset(0, 1))]),
+                    boxShadow: [
+                      BoxShadow(
+                          color: Colors.black12.withOpacity(0.08),
+                          blurRadius: 3,
+                          offset: const Offset(0, 1))
+                    ],
+                  ),
                   child: InkWell(
-                    onTap: isSelectable ? () => widget.onPatientSelected(
-                        {...patient, 'serial': serial, 'id': serial}) : null,
+                    onTap: isSelectable
+                        ? () => widget.onPatientSelected(
+                            {...patient, 'serial': serial, 'id': serial})
+                        : null,
                     child: Row(children: [
                       Icon(isWaiting ? Icons.person : Icons.check_circle,
                           color: dotColor, size: 26),
                       const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(name, style: TextStyle(
-                            fontWeight: FontWeight.w600, fontSize: 15,
-                            color: (!isWaiting) ? Colors.grey : Colors.black87)),
-                        const SizedBox(height: 3),
-                        Text('Serial: $serial', style: TextStyle(
-                            color: isSelected ? _teal : (!isWaiting ? Colors.grey : Colors.black54),
-                            fontSize: 12)),
-                      ])),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 15,
+                                    color: (!isWaiting)
+                                        ? Colors.grey
+                                        : Colors.black87)),
+                            const SizedBox(height: 3),
+                            Row(children: [
+                              Text('Serial: $serial',
+                                  style: TextStyle(
+                                      color: isSelected
+                                          ? _teal
+                                          : (!isWaiting
+                                              ? Colors.grey
+                                              : Colors.black54),
+                                      fontSize: 12)),
+                              // ×2 / ×3 days badge
+                              if (prescDays > 1) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: Colors.deepOrange,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text('×$prescDays',
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ]),
+                          ],
+                        ),
+                      ),
                       if (!isWaiting && hasPrescription)
                         IconButton(
-                          icon: const Icon(Icons.edit, color: Colors.orange, size: 20),
+                          icon: const Icon(Icons.edit,
+                              color: Colors.orange, size: 20),
                           tooltip: 'Edit Prescription',
-                          onPressed: () => _showPrescriptionDialog(patient)),
+                          onPressed: () => _showPrescriptionDialog(patient),
+                        ),
                       dot,
                     ]),
                   ),
@@ -883,7 +1202,8 @@ class _PatientQueueState extends State<PatientQueue>
     );
   }
 
-  Widget _buildFilterTab(String label, int count, Color color, bool isActive) {
+  Widget _buildFilterTab(
+      String label, int count, Color color, bool isActive) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -891,12 +1211,24 @@ class _PatientQueueState extends State<PatientQueue>
         color: isActive ? color : color.withOpacity(0.6),
         borderRadius: BorderRadius.circular(30),
         boxShadow: isActive
-            ? [BoxShadow(color: color.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))]
-            : null),
+            ? [BoxShadow(
+                color: color.withOpacity(0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 4))]
+            : null,
+      ),
       child: Column(children: [
-        Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+        Text(label,
+            style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12)),
         const SizedBox(height: 2),
-        Text('$count', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text('$count',
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold)),
       ]),
     );
   }

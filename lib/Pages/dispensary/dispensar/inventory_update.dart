@@ -14,12 +14,13 @@ class InventoryUpdatePage extends StatefulWidget {
 
 class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     with TickerProviderStateMixin {
-  final _formKey   = GlobalKey<FormState>();
-  final _nameCtrl  = TextEditingController();
-  final _qtyCtrl   = TextEditingController(text: '1');
-  final _expCtrl   = TextEditingController();
-  final _priceCtrl = TextEditingController();
-  final _doseCtrl  = TextEditingController();
+  final _formKey      = GlobalKey<FormState>();
+  final _formulaCtrl  = TextEditingController(); // ← NEW
+  final _nameCtrl     = TextEditingController();
+  final _qtyCtrl      = TextEditingController(text: '1');
+  final _expCtrl      = TextEditingController();
+  final _priceCtrl    = TextEditingController();
+  final _doseCtrl     = TextEditingController();
 
   String  _type         = 'Tablet';
   String? _selectedDose;
@@ -73,6 +74,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   @override
   void dispose() {
     _fadeCtrl.dispose();
+    _formulaCtrl.dispose(); // ← NEW
     _nameCtrl.dispose(); _qtyCtrl.dispose(); _expCtrl.dispose();
     _priceCtrl.dispose(); _doseCtrl.dispose();
     super.dispose();
@@ -98,12 +100,13 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   void _selectMedicine(Map<String, dynamic> med) {
     final newType = med['type'] ?? 'Tablet';
     setState(() {
-      _nameCtrl.text  = med['name'] ?? '';
-      _type           = newType;
-      _selectedDose   = null;
+      _formulaCtrl.text = med['formula'] ?? '';          // ← NEW
+      _nameCtrl.text    = med['name'] ?? '';
+      _type             = newType;
+      _selectedDose     = null;
       _doseCtrl.clear();
-      _priceCtrl.text = (med['price'] ?? '').toString();
-      _searchResults  = [];
+      _priceCtrl.text   = (med['price'] ?? '').toString();
+      _searchResults    = [];
       if (_hasDoseDropdown) {
         final d    = med['dose']?.toString().trim();
         final list = _doseOptions[_type] ?? [];
@@ -117,16 +120,20 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   // ── Add / edit / remove ───────────────────────────────────────────────────
   void _addItem() {
     if (!_formKey.currentState!.validate()) return;
-    final name  = _nameCtrl.text.trim();
-    final qty   = int.tryParse(_qtyCtrl.text) ?? 1;
+    final formula  = _formulaCtrl.text.trim();           // ← NEW
+    final name     = _nameCtrl.text.trim();
+    final qty      = int.tryParse(_qtyCtrl.text) ?? 1;
     final priceStr = _priceCtrl.text.trim();
-    final exp   = _expCtrl.text.trim();
-    final dose  = _hasDoseDropdown
+    final exp      = _expCtrl.text.trim();
+    final dose     = _hasDoseDropdown
         ? (_selectedDose ?? '')
         : (_usesFreeTextDose ? _doseCtrl.text.trim() : '');
 
-    final newItem = {'name': name, 'type': _type, 'dose': dose,
-        'quantity': qty, 'price': priceStr, 'expiryDate': exp};
+    final newItem = {
+      'formula': formula,                                 // ← NEW
+      'name': name, 'type': _type, 'dose': dose,
+      'quantity': qty, 'price': priceStr, 'expiryDate': exp,
+    };
     final isDupe = _itemsToAdd.any((i) =>
         i['name'] == name && i['type'] == _type &&
         i['dose'] == dose && i['expiryDate'] == exp);
@@ -135,6 +142,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   }
 
   void _resetForm() {
+    _formulaCtrl.clear();                                 // ← NEW
     _nameCtrl.clear(); _qtyCtrl.text = '1'; _expCtrl.clear();
     _priceCtrl.clear(); _doseCtrl.clear();
     _type = 'Tablet'; _selectedDose = null; _searchResults = [];
@@ -143,14 +151,15 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   void _removeItem(int i) => setState(() => _itemsToAdd.removeAt(i));
 
   void _editItem(int index) {
-    final item         = Map<String, dynamic>.from(_itemsToAdd[index]);
-    final eNameCtrl    = TextEditingController(text: item['name']);
-    final eQtyCtrl     = TextEditingController(text: item['quantity'].toString());
-    final ePriceCtrl   = TextEditingController(text: item['price'].toString());
-    final eExpCtrl     = TextEditingController(text: item['expiryDate']);
-    final eDoseCtrl    = TextEditingController(text: item['dose'] ?? '');
-    String eType       = item['type'];
-    String? eDose      = item['dose'];
+    final item          = Map<String, dynamic>.from(_itemsToAdd[index]);
+    final eFormulaCtrl  = TextEditingController(text: item['formula'] ?? ''); // ← NEW
+    final eNameCtrl     = TextEditingController(text: item['name']);
+    final eQtyCtrl      = TextEditingController(text: item['quantity'].toString());
+    final ePriceCtrl    = TextEditingController(text: item['price'].toString());
+    final eExpCtrl      = TextEditingController(text: item['expiryDate']);
+    final eDoseCtrl     = TextEditingController(text: item['dose'] ?? '');
+    String eType        = item['type'];
+    String? eDose       = item['dose'];
 
     showDialog(
       context: context,
@@ -183,7 +192,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(children: [
-                  _dlgField(eNameCtrl, 'Medicine Name', icon: Icons.medication_rounded),
+                  // ── Formula (NEW) ──
+                  _dlgField(eFormulaCtrl, 'Formula', icon: Icons.biotech_rounded),
+                  const SizedBox(height: 13),
+                  // ── Brand Name (renamed) ──
+                  _dlgField(eNameCtrl, 'Brand Name', icon: Icons.medication_rounded),
                   const SizedBox(height: 13),
                   _dlgDropdown<String>(label: 'Type', value: eType, items: _allTypes,
                       onChanged: (v) { if (v != null) setS(() { eType = v; eDose = null; eDoseCtrl.clear(); }); }),
@@ -198,18 +211,23 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                     _dlgField(eDoseCtrl, 'Dose / Description', icon: Icons.science_rounded),
                   ],
                   const SizedBox(height: 13),
-                    Row(children: [
-                    Expanded(child: _dlgField(eQtyCtrl, 'Quantity', prefix: const Icon(Icons.inventory_2_rounded, color: _teal, size: 17),
+                  Row(children: [
+                    Expanded(child: _dlgField(eQtyCtrl, 'Quantity',
+                        prefix: const Icon(Icons.inventory_2_rounded, color: _teal, size: 17),
                         keyboard: TextInputType.number,
                         formatters: [FilteringTextInputFormatter.digitsOnly])),
                     const SizedBox(width: 12),
-                    Expanded(child: _dlgField(ePriceCtrl, 'Price', 
-                        prefix: const Padding(padding: EdgeInsets.only(left: 12, top: 14), child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12))),
+                    Expanded(child: _dlgField(ePriceCtrl, 'Price',
+                        prefix: const Padding(
+                          padding: EdgeInsets.only(left: 12, top: 14),
+                          child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ),
                         keyboard: const TextInputType.numberWithOptions(decimal: true),
                         formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.a-zA-Z]'))])),
                   ]),
                   const SizedBox(height: 13),
-                  _dlgField(eExpCtrl, 'Expiry (dd-MM-yyyy)', prefix: const Icon(Icons.calendar_today_rounded, color: _teal, size: 17),
+                  _dlgField(eExpCtrl, 'Expiry (dd-MM-yyyy)',
+                      prefix: const Icon(Icons.calendar_today_rounded, color: _teal, size: 17),
                       keyboard: TextInputType.number,
                       formatters: [FilteringTextInputFormatter.digitsOnly, ExpiryDateFormatter()]),
                 ]),
@@ -234,6 +252,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                       if (err != null) { _snack(err, err: true); return; }
                       setState(() {
                         _itemsToAdd[index] = {
+                          'formula': eFormulaCtrl.text.trim(),   // ← NEW
                           'name': eNameCtrl.text.trim(), 'type': eType,
                           'dose': hasDd ? (eDose ?? '') : eDoseCtrl.text.trim(),
                           'quantity': int.tryParse(eQtyCtrl.text) ?? 1,
@@ -276,13 +295,15 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           .collection('branches').doc(widget.branchId).collection('edit_requests')
           .add({
         'requestType':   'add_stock',
-        'requestedBy':   user.uid,    // FIXED: was 'requester'
-        'requesterName': username,    // consistent with request_page.dart
+        'requestedBy':   user.uid,
+        'requesterName': username,
         'requestedAt':   FieldValue.serverTimestamp(),
         'status':        'pending',
         'items': _itemsToAdd.map((item) {
           final d = Map<String, dynamic>.from(item);
           d['name_lower'] = item['name'].toString().toLowerCase();
+          // formula_lower for optional search support
+          d['formula_lower'] = (item['formula'] ?? '').toString().toLowerCase(); // ← NEW
           return d;
         }).toList(),
       });
@@ -480,21 +501,33 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           _sectionLabel('Medicine Details'),
           const SizedBox(height: 18),
-          // Name with search
+
+          // ── Formula (NEW — above Brand Name) ──────────────────────────────
+          TextFormField(
+            controller: _formulaCtrl,
+            style: const TextStyle(color: _textDark, fontSize: 15),
+            cursorColor: _teal,
+            decoration: _inputDec('Formula', icon: Icons.biotech_rounded,
+                hint: 'e.g. Amoxicillin 500mg'),
+          ),
+          const SizedBox(height: 14),
+
+          // ── Brand Name (was Medicine Name) ────────────────────────────────
           TextFormField(
             controller: _nameCtrl,
             style: const TextStyle(color: _textDark, fontSize: 15),
             cursorColor: _teal,
-            decoration: _inputDec('Medicine Name', icon: Icons.medication_rounded,
+            decoration: _inputDec('Brand Name', icon: Icons.medication_rounded,
                 suffix: _isSearching
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: _teal))
                     : null),
             onChanged: _searchMedicine,
-            validator: (v) => v?.trim().isEmpty ?? true ? 'Name is required' : null,
+            validator: (v) => v?.trim().isEmpty ?? true ? 'Brand name is required' : null,
           ),
           if (_searchResults.isNotEmpty) _buildSuggestions(),
           const SizedBox(height: 14),
+
           Row(children: [
             Expanded(child: DropdownButtonFormField<String>(
               value: _type,
@@ -515,7 +548,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.a-zA-Z]'))],
               style: const TextStyle(color: _textDark, fontSize: 15),
               cursorColor: _teal,
-              decoration: _inputDec('Price', prefix: const Padding(padding: EdgeInsets.only(left: 12, top: 14), child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12)))),
+              decoration: _inputDec('Price',
+                  prefix: const Padding(
+                    padding: EdgeInsets.only(left: 12, top: 14),
+                    child: Text('PKR', style: TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12)),
+                  )),
               validator: (v) {
                 if (v?.trim().isEmpty ?? true) return 'Required';
                 final trimmed = v!.trim().toLowerCase();
@@ -573,7 +610,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               inputFormatters: [FilteringTextInputFormatter.digitsOnly, ExpiryDateFormatter()],
               style: const TextStyle(color: _textDark, fontSize: 15),
               cursorColor: _teal,
-              decoration: _inputDec('Expiry (dd-MM-yyyy)', icon: Icons.calendar_today_rounded, hint: 'dd-MM-yyyy'),
+              decoration: _inputDec('Expiry (dd-MM-yyyy)',
+                  icon: Icons.calendar_today_rounded, hint: 'dd-MM-yyyy'),
               validator: ExpiryDateFormatter.validate,
             )),
           ]),
@@ -629,6 +667,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(med['name'] ?? '',
                       style: const TextStyle(color: _textDark, fontWeight: FontWeight.w600, fontSize: 14)),
+                  // Show formula in subtitle if available
+                  if ((med['formula'] ?? '').toString().isNotEmpty)
+                    Text(med['formula'],
+                        style: const TextStyle(color: _teal, fontSize: 11, fontStyle: FontStyle.italic)),
                   Text('${med['type'] ?? ''} ${med['dose'] ?? ''}'.trim(),
                       style: const TextStyle(color: _textLight, fontSize: 12)),
                 ])),
@@ -667,12 +709,17 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               ),
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // ── Formula line (NEW) ──
+                if ((item['formula'] as String? ?? '').isNotEmpty)
+                  Text(item['formula'],
+                      style: const TextStyle(color: _teal, fontSize: 11, fontStyle: FontStyle.italic)),
                 Text(item['name'],
                     style: const TextStyle(color: _textDark, fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 4),
                 Wrap(spacing: 8, runSpacing: 6, children: [
                   _chip(item['type'], _teal, icon: _typeIcon(item['type'])),
-                  if ((item['dose'] as String).isNotEmpty) _chip(item['dose'], _textMid, icon: Icons.science_rounded),
+                  if ((item['dose'] as String).isNotEmpty)
+                    _chip(item['dose'], _textMid, icon: Icons.science_rounded),
                   _chip('${item['quantity']} Units', _green600, icon: Icons.inventory_2_rounded),
                   _chip('Price: PKR ${item['price']}', _orange, icon: Icons.payments_rounded),
                 ]),

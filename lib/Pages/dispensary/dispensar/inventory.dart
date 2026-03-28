@@ -1,5 +1,6 @@
 // lib/pages/inventory.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
@@ -45,11 +46,12 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
   static const _border    = Color(0xFFB2DFDB);
   static const _shadow    = Color(0x1800695C);
 
-  // Inventory-only request types — anything outside this set is irrelevant to
-  // the inventory screen and is hidden from both Pending and History tabs.
+  /// Manager = not admin AND not dispenser. Only managers can directly edit stock.
+  bool get _isManager => !widget.isAdmin && !widget.isDispenser;
+
+  // Inventory-only request types
   static const _inventoryTypes = {'add_stock', 'edit_medicine', 'delete_medicine'};
 
-  // Per-type badge color
   static Color _typeColor(String t) => switch (t) {
     'Tablet'       => const Color(0xFF1565C0),
     'Capsule'      => const Color(0xFF6A1B9A),
@@ -91,6 +93,18 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
   int _asInt(dynamic v) => v is int ? v
       : v is double ? v.toInt()
       : v is String ? (int.tryParse(v) ?? 0) : 0;
+
+  /// Parses price from Firestore safely as double regardless of stored type.
+  double _parsePrice(dynamic v) {
+    if (v is double) return v;
+    if (v is int)    return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  /// Formats a double price for display — no trailing .0 for whole numbers.
+  String _fmtPrice(double price) =>
+      price == price.floorToDouble() ? price.toInt().toString() : price.toStringAsFixed(2);
 
   Widget _typeIconWidget(String t, {double size = 14, Color? color}) {
     final c = color ?? _teal;
@@ -149,16 +163,19 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     return DateTime(3000);
   }
 
+  // ── Group raw Firestore docs into batch rows ───────────────────────────────
   List<Map<String, dynamic>> _groupByBatch(List<QueryDocumentSnapshot> docs) {
     final Map<String, Map<String, dynamic>> map = {};
     for (final doc in docs) {
-      final data   = doc.data() as Map<String, dynamic>;
-      final name   = (data['name'] ?? '').toString().trim();
-      final type   = data['type'] ?? '';
-      final dose   = (data['dose'] ?? '').toString().trim();
-      final expiry = data['expiryDate']?.toString().trim() ?? '';
-      final qty    = _asInt(data['quantity']);
-      final price  = _asInt(data['price']);
+      final data    = doc.data() as Map<String, dynamic>;
+      final name    = (data['name'] ?? '').toString().trim();
+      final type    = data['type'] ?? '';
+      final dose    = (data['dose'] ?? '').toString().trim();
+      final expiry  = data['expiryDate']?.toString().trim() ?? '';
+      final qty     = _asInt(data['quantity']);
+      final price   = _parsePrice(data['price']);
+      // ── NEW: extract formula ──────────────────────────────────────────────
+      final formula = (data['formula'] ?? '').toString().trim();
 
       String monthYear = '';
       if (expiry.length == 10 && expiry[2] == '-' && expiry[5] == '-') {
@@ -170,11 +187,15 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
 
       final key = '$name|$type|$dose|$monthYear';
       if (map.containsKey(key)) {
-        map[key]!['quantity'] += qty;
+        map[key]!['quantity'] = (map[key]!['quantity'] as int) + qty;
+        (map[key]!['_docIds'] as List<String>).add(doc.id);
       } else {
         map[key] = {
           'name': name, 'type': type, 'dose': doseDisplay,
-          'expiryDate': monthYear, 'quantity': qty, 'price': price, 'batchKey': key,
+          'formula': formula,                              // ── NEW
+          'expiryDate': monthYear, 'quantity': qty, 'price': price,
+          'batchKey': key,
+          '_docIds': <String>[doc.id],
         };
       }
     }
@@ -231,9 +252,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     backgroundColor: _teal,
     elevation: 4,
     shadowColor: _shadow,
-    // ── Back button: shown for ALL roles ─────────────────────────────────
-    // Dispenser   → pushReplacement to DispensarScreen
-    // All others  → Navigator.pop() (returns to their sidebar/parent screen)
     automaticallyImplyLeading: false,
     leading: IconButton(
       icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
@@ -253,8 +271,22 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       const SizedBox(width: 10),
       const Text('Inventory',
           style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+      if (_isManager) ...[
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.18),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.edit_rounded, size: 10, color: Colors.white70),
+            SizedBox(width: 3),
+            Text('editable', style: TextStyle(color: Colors.white70, fontSize: 10)),
+          ]),
+        ),
+      ],
     ]),
-    // ── Adjust button: hidden for dispensers, shown for all other roles ───
     actions: widget.isDispenser ? [] : [
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -295,6 +327,24 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       color: _white,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
       child: Column(children: [
+        if (_isManager)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE3F2FD),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF90CAF9)),
+            ),
+            child: const Row(children: [
+              Icon(Icons.touch_app_rounded, size: 15, color: Color(0xFF1565C0)),
+              SizedBox(width: 8),
+              Expanded(child: Text(
+                'Tap any medicine row to edit it directly.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF1565C0), fontWeight: FontWeight.w500),
+              )),
+            ]),
+          ),
         TextField(
           controller: _searchCtrl, cursorColor: _teal,
           style: const TextStyle(color: _textDark, fontSize: 14),
@@ -345,9 +395,12 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
 
           final batches     = _groupByBatch(docs);
           var   preFiltered = batches.where((b) {
-            final name = b['name'].toString().toLowerCase();
-            final type = b['type'];
-            return name.contains(_searchCtrl.text.toLowerCase()) &&
+            final name    = b['name'].toString().toLowerCase();
+            final formula = (b['formula'] ?? '').toString().toLowerCase();
+            final type    = b['type'];
+            final query   = _searchCtrl.text.toLowerCase();
+            // ── NEW: search also matches formula ──────────────────────────
+            return (name.contains(query) || formula.contains(query)) &&
                 (_filterType == 'All' || type == _filterType);
           }).toList();
 
@@ -360,9 +413,12 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
           filtered.sort((a, b) {
             int cmp = switch (_sortField) {
               'name'     => a['name'].toString().toLowerCase().compareTo(b['name'].toString().toLowerCase()),
+              // ── NEW: sort by formula ──────────────────────────────────────
+              'formula'  => (a['formula'] ?? '').toString().toLowerCase()
+                                .compareTo((b['formula'] ?? '').toString().toLowerCase()),
               'dose'     => (a['dose'] ?? '').toString().compareTo((b['dose'] ?? '').toString()),
               'quantity' => (a['quantity'] as int).compareTo(b['quantity'] as int),
-              'price'    => (a['price'] as int).compareTo(b['price'] as int),
+              'price'    => (a['price'] as double).compareTo(b['price'] as double),
               'expiry'   => _parseExpiry(a['expiryDate']).compareTo(_parseExpiry(b['expiryDate'])),
               _          => 0,
             };
@@ -410,15 +466,18 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
         ),
       );
 
+  // ── Stock Table (wide screens) ─────────────────────────────────────────────
   Widget _stockTable(List<Map<String, dynamic>> data, int start, double w) {
+    // ── NEW: added Formula column, redistributed widths ────────────────────
     final cols = [
-      _Col('#',      w * 0.05, null),
-      _Col('Name',   w * 0.22, 'name'),
-      _Col('Type',   w * 0.14, null),
-      _Col('Dose',   w * 0.17, 'dose'),
-      _Col('Qty',    w * 0.09, 'quantity'),
-      _Col('Price',  w * 0.13, 'price'),
-      _Col('Expiry', w * 0.20, 'expiry'),
+      _Col('#',       w * 0.04, null),
+      _Col('Name',    w * 0.18, 'name'),
+      _Col('Formula', w * 0.15, 'formula'),
+      _Col('Type',    w * 0.11, null),
+      _Col('Dose',    w * 0.14, 'dose'),
+      _Col('Qty',     w * 0.08, 'quantity'),
+      _Col('Price',   w * 0.11, 'price'),
+      _Col('Expiry',  w * 0.19, 'expiry'),
     ];
     return Column(children: [
       Container(
@@ -434,11 +493,14 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
           final b        = data[i];
           final qty      = b['quantity'] as int;
           final type     = b['type'] as String;
+          final price    = b['price'] as double;
+          final formula  = (b['formula'] ?? '').toString();      // ── NEW
           final lowStock = type == 'Big Bottle' ? qty < 3 : qty < 10;
           final expSoon  = _isExpiringSoon(b['expiryDate'] as String?);
           final expText  = _formatDate(b['expiryDate'] as String?);
           final rowColor = i % 2 == 0 ? _white : const Color(0xFFF0FAF4);
-          return Container(
+
+          final rowContent = Container(
             decoration: BoxDecoration(
               color: rowColor,
               border: const Border(bottom: BorderSide(color: Color(0xFFDCEDDE), width: 0.8)),
@@ -446,22 +508,49 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
             child: Row(children: [
               _dCell(cols[0].w, Text('${start+i+1}',
                   style: const TextStyle(color: _textLight, fontSize: 12))),
-              _dCell(cols[1].w, Text(b['name'],
-                  style: const TextStyle(color: _textDark, fontWeight: FontWeight.w700, fontSize: 13),
-                  overflow: TextOverflow.ellipsis)),
-              _dCell(cols[2].w, _typePill(type)),
-              _dCell(cols[3].w, Text(b['dose'] ?? '—',
+              _dCell(cols[1].w, Row(children: [
+                Expanded(child: Text(b['name'],
+                    style: const TextStyle(color: _textDark, fontWeight: FontWeight.w700, fontSize: 13),
+                    overflow: TextOverflow.ellipsis)),
+                if (_isManager)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: Icon(Icons.edit_rounded, size: 12, color: _teal),
+                  ),
+              ])),
+              // ── NEW: Formula cell ─────────────────────────────────────────
+              _dCell(cols[2].w, Text(
+                formula.isNotEmpty ? formula : '—',
+                style: TextStyle(
+                  color: formula.isNotEmpty ? _teal : _textLight,
+                  fontSize: 11,
+                  fontStyle: formula.isNotEmpty ? FontStyle.italic : FontStyle.normal,
+                ),
+                overflow: TextOverflow.ellipsis,
+              )),
+              _dCell(cols[3].w, _typePill(type)),
+              _dCell(cols[4].w, Text(b['dose'] ?? '—',
                   style: const TextStyle(color: _textMid, fontSize: 12), overflow: TextOverflow.ellipsis)),
-              _dCell(cols[4].w, _qtyBadge(qty, lowStock)),
-              _dCell(cols[5].w, _priceBadge(b['price'] as int)),
-              _dCell(cols[6].w, _expBadge(expText, expSoon)),
+              _dCell(cols[5].w, _qtyBadge(qty, lowStock)),
+              _dCell(cols[6].w, _priceBadge(price)),
+              _dCell(cols[7].w, _expBadge(expText, expSoon)),
             ]),
           );
+
+          if (_isManager) {
+            return InkWell(
+              onTap: () => _showEditSheet(b),
+              hoverColor: _teal.withOpacity(0.05),
+              child: rowContent,
+            );
+          }
+          return rowContent;
         },
       )),
     ]);
   }
 
+  // ── Stock Cards (narrow screens) ──────────────────────────────────────────
   Widget _stockCards(List<Map<String, dynamic>> data, int start) =>
       ListView.builder(
         padding: const EdgeInsets.all(12),
@@ -470,16 +559,23 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
           final b        = data[i];
           final qty      = b['quantity'] as int;
           final type     = b['type'] as String;
+          final price    = b['price'] as double;
+          final formula  = (b['formula'] ?? '').toString();      // ── NEW
           final lowStock = type == 'Big Bottle' ? qty < 3 : qty < 10;
           final expSoon  = _isExpiringSoon(b['expiryDate'] as String?);
           final expText  = _formatDate(b['expiryDate'] as String?);
-          return Container(
+
+          final card = Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: _white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: lowStock ? _red.withOpacity(0.25) : _green100),
+              border: Border.all(
+                color: _isManager
+                    ? _teal.withOpacity(0.25)
+                    : (lowStock ? _red.withOpacity(0.25) : _green100),
+              ),
               boxShadow: [BoxShadow(color: _shadow, blurRadius: 6, offset: const Offset(0, 2))],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -490,22 +586,71 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
                   child: _typeIconWidget(type, size: 13),
                 ),
                 const SizedBox(width: 10),
-                Expanded(child: Text('${start+i+1}. ${b['name']}',
-                    style: const TextStyle(color: _textDark, fontWeight: FontWeight.bold, fontSize: 14))),
-                _qtyBadge(qty, lowStock),
+                // ── NEW: stacked name + formula ───────────────────────────
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${start+i+1}. ${b['name']}',
+                        style: const TextStyle(color: _textDark, fontWeight: FontWeight.bold, fontSize: 14)),
+                    if (formula.isNotEmpty)
+                      Text(formula,
+                          style: const TextStyle(color: _teal, fontSize: 11, fontStyle: FontStyle.italic),
+                          overflow: TextOverflow.ellipsis),
+                  ],
+                )),
+                if (_isManager)
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: _teal.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.edit_rounded, size: 14, color: _teal),
+                  )
+                else
+                  _qtyBadge(qty, lowStock),
               ]),
+              if (_isManager) ...[
+                const SizedBox(height: 6),
+                _qtyBadge(qty, lowStock),
+              ],
               const SizedBox(height: 10),
               Wrap(spacing: 8, runSpacing: 6, children: [
                 _typePill(type),
                 if ((b['dose'] ?? '').toString().isNotEmpty) _infoBadge(b['dose'].toString(), _textMid),
-                _priceBadge(b['price'] as int),
+                _priceBadge(price),
                 _expBadge(expText, expSoon),
               ]),
             ]),
           );
+
+          if (_isManager) {
+            return GestureDetector(onTap: () => _showEditSheet(b), child: card);
+          }
+          return card;
         },
       );
 
+  // ── Edit Bottom Sheet (Manager only) ─────────────────────────────────────
+  void _showEditSheet(Map<String, dynamic> batchData) {
+    final docIds = List<String>.from(batchData['_docIds'] as List? ?? []);
+    if (docIds.isEmpty) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditMedicineSheet(
+        branchId: widget.branchId,
+        docIds: docIds,
+        initial: batchData,
+        medicineTypes: _types.where((t) => t != 'All').toList(),
+        formatDate: _formatDate,
+      ),
+    );
+  }
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
   Widget _pagination(int page, int total) => Container(
     color: _white,
     padding: const EdgeInsets.symmetric(vertical: 10),
@@ -534,8 +679,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
   );
 
   // ── Pending Tab ───────────────────────────────────────────────────────────
-  // Shows only inventory-related requests (add_stock, edit_medicine, delete_medicine).
-  // Latest first.
   Widget _pendingTab() => StreamBuilder<QuerySnapshot>(
     stream: FirebaseFirestore.instance
         .collection('branches').doc(widget.branchId)
@@ -548,7 +691,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       }
       var docs = snap.data?.docs ?? [];
 
-      // Keep only inventory-related request types
       docs = docs.where((d) {
         final t = (d.data() as Map<String, dynamic>)['requestType']?.toString() ?? '';
         return _inventoryTypes.contains(t);
@@ -556,7 +698,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
 
       if (docs.isEmpty) return _emptyState(Icons.pending_actions_rounded, 'No pending requests');
 
-      // Latest first
       docs.sort((a, b) {
         final ta = (a.data() as Map<String,dynamic>)['requestedAt'] as Timestamp?;
         final tb = (b.data() as Map<String,dynamic>)['requestedAt'] as Timestamp?;
@@ -598,7 +739,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     ]),
   );
 
-  // Shows only inventory-related requests. Latest first.
   Widget _historyList(String status) => StreamBuilder<QuerySnapshot>(
     stream: FirebaseFirestore.instance
         .collection('branches').doc(widget.branchId)
@@ -611,7 +751,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       }
       var docs = snap.data?.docs ?? [];
 
-      // Keep only inventory-related request types
       docs = docs.where((d) {
         final t = (d.data() as Map<String, dynamic>)['requestType']?.toString() ?? '';
         return _inventoryTypes.contains(t);
@@ -621,7 +760,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
           status == 'approved' ? Icons.check_circle_outline : Icons.cancel_outlined,
           'No $status requests');
 
-      // Latest first
       docs.sort((a, b) {
         final ta = (a.data() as Map<String,dynamic>)['requestedAt'] as Timestamp?;
         final tb = (b.data() as Map<String,dynamic>)['requestedAt'] as Timestamp?;
@@ -641,7 +779,7 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     },
   );
 
-  // ── Rich request card (mirrors request.dart layout) ───────────────────────
+  // ── Request Card ──────────────────────────────────────────────────────────
   Widget _requestCard(Map<String, dynamic> data, String status) {
     final requestType   = data['requestType']?.toString() ?? '';
     final reason        = data['reason']?.toString() ?? '';
@@ -650,7 +788,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     final requesterId   = (data['requestedBy']?.toString() ??
                            data['requester']?.toString() ?? '').trim();
 
-    // Resolve requester name: use cached value or look up from Firestore
     final Future<String> nameFuture = cachedName.isNotEmpty
         ? Future.value(cachedName)
         : requesterId.isEmpty
@@ -665,7 +802,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
                 .timeout(const Duration(seconds: 5), onTimeout: () => 'User')
                 .catchError((_) => 'User');
 
-    // Badge colours per request type
     Color badgeBg = switch (requestType) {
       'add_stock'       => _green50,
       'edit_medicine'   => const Color(0xFFF3E5F5),
@@ -696,7 +832,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       _          => Icons.pending_rounded,
     };
 
-    // Items: prefer draftItems for pending, otherwise items
     final rawItems = status == 'pending'
         ? (data['draftItems'] as List?) ?? (data['items'] as List?) ?? []
         : (data['items'] as List?) ?? [];
@@ -709,7 +844,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // ── Header row ─────────────────────────────────────────────────
           Row(children: [
             Expanded(
               child: Text(
@@ -719,7 +853,7 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
                   'delete_medicine' => 'Delete Medicine Request',
                   _                 => 'Inventory Request',
                 },
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 16, fontWeight: FontWeight.bold, color: _tealDark),
               ),
             ),
@@ -732,23 +866,19 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
             ),
           ]),
           const SizedBox(height: 10),
-
-          // ── Requester name ──────────────────────────────────────────────
           FutureBuilder<String>(
             future: nameFuture,
             builder: (_, snap) => Row(children: [
-              Icon(Icons.person_rounded, size: 15, color: _teal),
+              const Icon(Icons.person_rounded, size: 15, color: _teal),
               const SizedBox(width: 6),
               Text('By: ${snap.data ?? '…'}',
                   style: const TextStyle(fontSize: 13, color: _textDark)),
             ]),
           ),
           const SizedBox(height: 4),
-
-          // ── Timestamp ───────────────────────────────────────────────────
           if (ts != null)
             Row(children: [
-              Icon(Icons.access_time_rounded, size: 14, color: _textLight),
+              const Icon(Icons.access_time_rounded, size: 14, color: _textLight),
               const SizedBox(width: 6),
               Text(
                 DateFormat('dd MMM yyyy, hh:mm a').format(ts.toDate()),
@@ -756,11 +886,7 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
               ),
             ]),
           const SizedBox(height: 12),
-
-          // ── Items list ──────────────────────────────────────────────────
           if (items.isNotEmpty) _buildItemsList(items),
-
-          // ── Reason ─────────────────────────────────────────────────────
           if (reason.isNotEmpty) ...[
             const SizedBox(height: 10),
             Container(
@@ -773,7 +899,7 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.comment_rounded, size: 14, color: _textLight),
+                  const Icon(Icons.comment_rounded, size: 14, color: _textLight),
                   const SizedBox(width: 8),
                   Expanded(child: Text('Reason: $reason',
                       style: const TextStyle(fontSize: 13, color: _textDark))),
@@ -781,10 +907,7 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
               ),
             ),
           ],
-
           const SizedBox(height: 14),
-
-          // ── Status chip (approved / rejected) ──────────────────────────
           Align(
             alignment: Alignment.centerRight,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -808,7 +931,6 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     );
   }
 
-  // ── Items list inside request card ────────────────────────────────────────
   Widget _buildItemsList(List<Map<String, dynamic>> items) {
     final isWide = MediaQuery.of(context).size.width > 600;
     return isWide ? _itemsTable(items) : _itemsCompact(items);
@@ -823,31 +945,43 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
         dataRowMaxHeight: 44,
         columnSpacing: 16,
         columns: const [
-          DataColumn(label: Text('Name',   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          DataColumn(label: Text('Type',   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          DataColumn(label: Text('Dose',   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          DataColumn(label: Text('Qty',    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          DataColumn(label: Text('Price',  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-          DataColumn(label: Text('Expiry', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Name',    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Formula', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Type',    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Dose',    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Qty',     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Price',   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(label: Text('Expiry',  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
         ],
-        rows: items.map((m) => DataRow(cells: [
-          DataCell(Text(m['name']?.toString() ?? '—',
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
-          DataCell(Row(children: [
-            _typeIconWidget(m['type'] ?? '', size: 12, color: _teal),
-            const SizedBox(width: 5),
-            Text(m['type']?.toString() ?? '—',
-                style: const TextStyle(fontSize: 12)),
-          ])),
-          DataCell(Text(m['dose']?.toString() ?? '—',
-              style: const TextStyle(fontSize: 12))),
-          DataCell(Text('${m['quantity'] ?? 0}',
-              style: const TextStyle(fontSize: 12))),
-          DataCell(Text('PKR ${m['price'] ?? 0}',
-              style: const TextStyle(fontSize: 12, color: _green600, fontWeight: FontWeight.w600))),
-          DataCell(Text(_formatDate(m['expiryDate']?.toString()),
-              style: const TextStyle(fontSize: 12))),
-        ])).toList(),
+        rows: items.map((m) {
+          final p       = _parsePrice(m['price']);
+          final formula = (m['formula'] ?? '').toString();
+          return DataRow(cells: [
+            DataCell(Text(m['name']?.toString() ?? '—',
+                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12))),
+            // ── NEW: formula cell in request cards table ──────────────────
+            DataCell(Text(formula.isNotEmpty ? formula : '—',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontStyle: formula.isNotEmpty ? FontStyle.italic : FontStyle.normal,
+                  color: formula.isNotEmpty ? _teal : _textLight,
+                ))),
+            DataCell(Row(children: [
+              _typeIconWidget(m['type'] ?? '', size: 12, color: _teal),
+              const SizedBox(width: 5),
+              Text(m['type']?.toString() ?? '—',
+                  style: const TextStyle(fontSize: 12)),
+            ])),
+            DataCell(Text(m['dose']?.toString() ?? '—',
+                style: const TextStyle(fontSize: 12))),
+            DataCell(Text('${m['quantity'] ?? 0}',
+                style: const TextStyle(fontSize: 12))),
+            DataCell(Text('PKR ${_fmtPrice(p)}',
+                style: const TextStyle(fontSize: 12, color: _green600, fontWeight: FontWeight.w600))),
+            DataCell(Text(_formatDate(m['expiryDate']?.toString()),
+                style: const TextStyle(fontSize: 12))),
+          ]);
+        }).toList(),
       ),
     );
   }
@@ -855,12 +989,13 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
   Widget _itemsCompact(List<Map<String, dynamic>> items) {
     return Column(
       children: items.map((m) {
-        final name   = m['name']?.toString() ?? '—';
-        final type   = m['type']?.toString() ?? '';
-        final dose   = (m['dose']?.toString().isNotEmpty == true) ? ' · ${m['dose']}' : '';
-        final qty    = m['quantity'] ?? 0;
-        final price  = m['price'] ?? 0;
-        final expiry = _formatDate(m['expiryDate']?.toString());
+        final name    = m['name']?.toString() ?? '—';
+        final type    = m['type']?.toString() ?? '';
+        final dose    = (m['dose']?.toString().isNotEmpty == true) ? ' · ${m['dose']}' : '';
+        final qty     = m['quantity'] ?? 0;
+        final price   = _parsePrice(m['price']);
+        final expiry  = _formatDate(m['expiryDate']?.toString());
+        final formula = (m['formula'] ?? '').toString();          // ── NEW
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
           child: Row(children: [
@@ -873,11 +1008,16 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
             ),
             const SizedBox(width: 10),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // ── NEW: show formula above name in compact view ──────────────
+              if (formula.isNotEmpty)
+                Text(formula,
+                    style: const TextStyle(color: _teal, fontSize: 10, fontStyle: FontStyle.italic),
+                    overflow: TextOverflow.ellipsis),
               Text('$name ($type$dose) × $qty',
                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: _textDark)),
               const SizedBox(height: 2),
               Row(children: [
-                _miniChip('PKR $price', _green600),
+                _miniChip('PKR ${_fmtPrice(price)}', _green600),
                 const SizedBox(width: 6),
                 _miniChip(expiry, _textMid),
               ]),
@@ -928,14 +1068,14 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
     );
   }
 
-  Widget _priceBadge(int price) => Container(
+  Widget _priceBadge(double price) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
     decoration: BoxDecoration(
       color: const Color(0xFFF3FCF4),
       borderRadius: BorderRadius.circular(7),
       border: Border.all(color: const Color(0xFF81C784).withOpacity(0.6)),
     ),
-    child: Text('PKR $price', style: const TextStyle(
+    child: Text('PKR ${_fmtPrice(price)}', style: const TextStyle(
         color: Color(0xFF2E7D32), fontWeight: FontWeight.w800, fontSize: 12)),
   );
 
@@ -989,6 +1129,354 @@ class _InventoryPageState extends State<InventoryPage> with TickerProviderStateM
       Text(msg, style: const TextStyle(color: _textLight, fontSize: 15)),
     ]),
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Edit Medicine Bottom Sheet — Manager only
+// ═══════════════════════════════════════════════════════════════════════════════
+class _EditMedicineSheet extends StatefulWidget {
+  final String branchId;
+  final List<String> docIds;
+  final Map<String, dynamic> initial;
+  final List<String> medicineTypes;
+  final String Function(String?) formatDate;
+
+  const _EditMedicineSheet({
+    required this.branchId,
+    required this.docIds,
+    required this.initial,
+    required this.medicineTypes,
+    required this.formatDate,
+  });
+
+  @override
+  State<_EditMedicineSheet> createState() => _EditMedicineSheetState();
+}
+
+class _EditMedicineSheetState extends State<_EditMedicineSheet> {
+  static const _teal      = Color(0xFF00695C);
+  static const _tealDark  = Color(0xFF004D40);
+  static const _green50   = Color(0xFFE8F5E9);
+  static const _green600  = Color(0xFF2E7D32);
+  static const _red       = Color(0xFFC62828);
+  static const _border    = Color(0xFFB2DFDB);
+  static const _textDark  = Color(0xFF1B2631);
+  static const _textLight = Color(0xFF718096);
+
+  late final TextEditingController _formulaCtrl;   // ── NEW
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _doseCtrl;
+  late final TextEditingController _qtyCtrl;
+  late final TextEditingController _priceCtrl;
+  late final TextEditingController _expiryCtrl;
+  late String _selectedType;
+
+  bool _saving = false;
+  final _formKey = GlobalKey<FormState>();
+
+  double _parsePrice(dynamic v) {
+    if (v is double) return v;
+    if (v is int)    return v.toDouble();
+    if (v is String) return double.tryParse(v) ?? 0.0;
+    return 0.0;
+  }
+
+  String _fmtPrice(double p) =>
+      p == p.floorToDouble() ? p.toInt().toString() : p.toStringAsFixed(2);
+
+  @override
+  void initState() {
+    super.initState();
+    final initialPrice = _parsePrice(widget.initial['price']);
+    // ── NEW: pre-populate formula ─────────────────────────────────────────
+    _formulaCtrl = TextEditingController(text: widget.initial['formula']?.toString() ?? '');
+    _nameCtrl    = TextEditingController(text: widget.initial['name']?.toString() ?? '');
+    _doseCtrl    = TextEditingController(text: widget.initial['dose']?.toString() ?? '');
+    _qtyCtrl     = TextEditingController(text: '${widget.initial['quantity'] ?? 0}');
+    _priceCtrl   = TextEditingController(text: _fmtPrice(initialPrice));
+    _expiryCtrl  = TextEditingController(text: widget.initial['expiryDate']?.toString() ?? '');
+    _selectedType = widget.medicineTypes.contains(widget.initial['type'])
+        ? widget.initial['type'].toString()
+        : widget.medicineTypes.first;
+  }
+
+  @override
+  void dispose() {
+    _formulaCtrl.dispose();  // ── NEW
+    _nameCtrl.dispose(); _doseCtrl.dispose(); _qtyCtrl.dispose();
+    _priceCtrl.dispose(); _expiryCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _saving = true);
+
+    try {
+      final col = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory');
+
+      final batch = FirebaseFirestore.instance.batch();
+      final qty   = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
+      final price = double.tryParse(_priceCtrl.text.trim()) ?? 0.0;
+      final perDoc    = (qty / widget.docIds.length).floor();
+      final remainder = qty - perDoc * widget.docIds.length;
+
+      for (int i = 0; i < widget.docIds.length; i++) {
+        final ref = col.doc(widget.docIds[i]);
+        batch.update(ref, {
+          'formula'   : _formulaCtrl.text.trim(),        // ── NEW
+          'name'      : _nameCtrl.text.trim(),
+          'type'      : _selectedType,
+          'dose'      : _doseCtrl.text.trim(),
+          'quantity'  : perDoc + (i == 0 ? remainder : 0),
+          'price'     : price,
+          'expiryDate': _expiryCtrl.text.trim(),
+          'updatedAt' : FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(children: [
+            Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 10),
+            Text('Medicine updated successfully'),
+          ]),
+          backgroundColor: _green600,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    } catch (e) {
+      setState(() => _saving = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update: $e'),
+          backgroundColor: _red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).viewInsets.bottom;
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, bottom + 24),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // ── Drag handle ──────────────────────────────────────────────────
+        Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            width: 40, height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[300],
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+
+        // ── Header ───────────────────────────────────────────────────────
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _teal.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.edit_rounded, color: _teal, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Edit Medicine', style: TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.bold, color: _tealDark)),
+              Text('${widget.docIds.length} batch doc(s) will be updated',
+                  style: const TextStyle(fontSize: 11, color: _textLight)),
+            ]),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close_rounded, color: _textLight),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ]),
+        const SizedBox(height: 16),
+        const Divider(height: 1),
+        const SizedBox(height: 16),
+
+        // ── Form ─────────────────────────────────────────────────────────
+        Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(children: [
+
+              // ── NEW: Formula field (above Name) ───────────────────────
+              _field(
+                controller: _formulaCtrl,
+                label: 'Formula (e.g. Amoxicillin 500mg)',
+                icon: Icons.biotech_rounded,
+              ),
+              const SizedBox(height: 12),
+
+              // Name
+              _field(
+                controller: _nameCtrl,
+                label: 'Brand Name',
+                icon: Icons.medication_rounded,
+                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              ),
+              const SizedBox(height: 12),
+
+              // Type dropdown
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Type', style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600, color: _textLight)),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: _green50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _border),
+                  ),
+                  child: DropdownButton<String>(
+                    value: _selectedType,
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    dropdownColor: Colors.white,
+                    style: const TextStyle(color: _textDark, fontSize: 14),
+                    icon: const Icon(Icons.expand_more_rounded, color: _teal),
+                    items: widget.medicineTypes.map((t) => DropdownMenuItem(
+                        value: t, child: Text(t))).toList(),
+                    onChanged: (v) => setState(() => _selectedType = v ?? _selectedType),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 12),
+
+              // Dose
+              _field(
+                controller: _doseCtrl,
+                label: 'Dose (e.g. 500mg, 5ml)',
+                icon: Icons.vaccines_rounded,
+              ),
+              const SizedBox(height: 12),
+
+              // Quantity + Price side by side
+              Row(children: [
+                Expanded(child: _field(
+                  controller: _qtyCtrl,
+                  label: 'Total Quantity',
+                  icon: Icons.numbers_rounded,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                )),
+                const SizedBox(width: 12),
+                Expanded(child: _field(
+                  controller: _priceCtrl,
+                  label: 'Price (PKR)',
+                  icon: Icons.payments_rounded,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+                  ],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    if (double.tryParse(v.trim()) == null) return 'Invalid price';
+                    return null;
+                  },
+                )),
+              ]),
+              const SizedBox(height: 12),
+
+              // Expiry date
+              _field(
+                controller: _expiryCtrl,
+                label: 'Expiry (MM-YYYY or DD-MM-YYYY)',
+                icon: Icons.calendar_today_rounded,
+              ),
+              const SizedBox(height: 24),
+
+              // Save button
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton.icon(
+                  onPressed: _saving ? null : _save,
+                  icon: _saving
+                      ? const SizedBox(width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.save_rounded, color: Colors.white, size: 18),
+                  label: Text(_saving ? 'Saving…' : 'Save Changes',
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _teal,
+                    disabledBackgroundColor: _teal.withOpacity(0.5),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 3,
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    TextInputType keyboardType = TextInputType.text,
+    List<TextInputFormatter>? inputFormatters,
+    String? Function(String?)? validator,
+  }) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(
+            fontSize: 12, fontWeight: FontWeight.w600, color: _textLight)),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          keyboardType: keyboardType,
+          inputFormatters: inputFormatters,
+          validator: validator,
+          cursorColor: _teal,
+          style: const TextStyle(color: _textDark, fontSize: 14),
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, size: 17, color: _teal),
+            filled: true,
+            fillColor: _green50,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+            enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _border)),
+            focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _teal, width: 1.5)),
+            errorBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: _red)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          ),
+        ),
+      ]);
 }
 
 class _Col {

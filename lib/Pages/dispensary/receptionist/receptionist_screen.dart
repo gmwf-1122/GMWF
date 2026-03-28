@@ -1,15 +1,9 @@
 // lib/pages/receptionist_screen.dart
 //
-// ARCHITECTURE FIX:
-//   The receptionist is a pure LAN CLIENT — not a server.
-//   The dedicated server device runs ServerDashboardWithSync.
-//   This screen now connects via ConnectionManager (LanDiscovery → WebSocket)
-//   exactly the same way as the doctor and dispenser screens.
-//
-//   REMOVED: All LanHostManager.startHost() / LanHostManager.stopHost() calls.
-//   ConnectionManager.start() handles everything.
-//
-// MOBILE TAB ORDER: Token (0) | Log (1) | Register (2)
+// CHANGES IN THIS VERSION:
+//   • Token log shows a ×2 / ×3 badge and PKR total when daysOfMedicine > 1.
+//   • Summary cards: Zakat = PKR 20 × days, Non-Zakat = PKR 100 × days,
+//     GMWF = PKR 0. Totals are always correct for multi-day prescriptions.
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -50,8 +44,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     with SingleTickerProviderStateMixin {
   String? _username;
   String? _branchName;
-  String _pendingCnic    = '';
-  String _activeSection  = 'token'; // desktop toggle
+  String _pendingCnic   = '';
+  String _activeSection = 'token';
 
   final GlobalKey<PatientRegisterPageState> _registerKey =
       GlobalKey<PatientRegisterPageState>();
@@ -74,8 +68,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   static const Color _teal = Color(0xFF00695C);
 
-  // ── Tab indices (mobile) ─────────────────────────────────────────────────────
-  // 0 = Token  |  1 = Log  |  2 = Register
   static const int _tabToken    = 0;
   static const int _tabLog      = 1;
   static const int _tabRegister = 2;
@@ -93,18 +85,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     _listenConnectivity();
     _startBackgroundSync();
 
-    // ── LAN connection (pure client — same as doctor / dispenser) ────────────
-    _connectionSub =
-        ConnectionManager().statusStream.listen((status) {
+    _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Connect as a regular client to the dedicated server.
-      ConnectionManager().start(
-        role:     'receptionist',
-        branchId: widget.branchId,
-      );
+      ConnectionManager().start(role: 'receptionist', branchId: widget.branchId);
     });
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
@@ -123,7 +109,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     try {
       await lss.LocalStorageService.downloadTodayTokens(widget.branchId);
       final settings = Hive.box('app_settings');
-      final key = 'initial_download_done_${widget.branchId}';
+      final key      = 'initial_download_done_${widget.branchId}';
       if (!settings.get(key, defaultValue: false)) {
         SyncService().initialFullDownload(widget.branchId).then((_) {
           settings.put(key, true);
@@ -135,10 +121,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   void _listenConnectivity() {
-    _connSub =
-        Connectivity().onConnectivityChanged.listen((results) {
-      final isOnline =
-          results.any((r) => r != ConnectivityResult.none);
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      final isOnline = results.any((r) => r != ConnectivityResult.none);
       if (_online != isOnline && mounted) {
         setState(() => _online = isOnline);
         if (isOnline) _forceSync();
@@ -148,12 +132,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   Future<void> _fetchReceptionistName() async {
     try {
-      final user = lss.LocalStorageService.getLocalUserByUid(
-          widget.receptionistId);
-      if (mounted) {
-        setState(() =>
-            _username = user?['username'] ?? widget.receptionistName);
-      }
+      final user = lss.LocalStorageService.getLocalUserByUid(widget.receptionistId);
+      if (mounted) setState(() => _username = user?['username'] ?? widget.receptionistName);
     } catch (_) {
       if (mounted) setState(() => _username = widget.receptionistName);
     }
@@ -161,32 +141,17 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   Future<void> _loadBranchName() async {
     if (widget.branchId.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _branchName   = 'Free Dispensary';
-          _loadingBranch = false;
-        });
-      }
+      if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
       return;
     }
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .get();
-      if (mounted) {
-        setState(() {
-          _branchName   = doc.data()?['name'] ?? 'Free Dispensary';
-          _loadingBranch = false;
-        });
-      }
+      final doc = await FirebaseFirestore.instance.collection('branches').doc(widget.branchId).get();
+      if (mounted) setState(() {
+        _branchName    = doc.data()?['name'] ?? 'Free Dispensary';
+        _loadingBranch = false;
+      });
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _branchName   = 'Free Dispensary';
-          _loadingBranch = false;
-        });
-      }
+      if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
     }
   }
 
@@ -217,33 +182,21 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   Future<void> _logout() async {
-    // Stop LAN client connection.
     await ConnectionManager().stop();
     await AuthService().signOut();
-    if (mounted) {
-      Navigator.of(context)
-          .pushNamedAndRemoveUntil('/login', (r) => false);
-    }
+    if (mounted) Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
   }
 
-  // ── Patient-not-found → open Register tab (index 2 on mobile) ────────────────
   void _handlePatientNotFound(String cnic) {
-    setState(() {
-      _pendingCnic  = cnic;
-      _activeSection = 'register';
-    });
+    setState(() { _pendingCnic = cnic; _activeSection = 'register'; });
     _mobileTabController.animateTo(_tabRegister);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _registerKey.currentState?.prefillCnic(cnic);
     });
   }
 
-  // ── After registration → back to Token tab (index 0 on mobile) ───────────────
   void _onPatientRegistered(String patientId) {
-    setState(() {
-      _pendingCnic  = '';
-      _activeSection = 'token';
-    });
+    setState(() { _pendingCnic = ''; _activeSection = 'token'; });
     _mobileTabController.animateTo(_tabToken);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tokenKey.currentState?.focusAndFillCnic(patientId);
@@ -251,46 +204,37 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   Future<void> _requestTokenReverse(Map<String, dynamic> entry) async {
-    final serial      = entry['serial'] as String?      ?? 'N/A';
+    final serial      = entry['serial'] as String? ?? 'N/A';
     final patientName = entry['patientName'] as String? ?? 'Unknown';
     final reasonCtrl  = TextEditingController();
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Request Token Reversal',
-            style: TextStyle(color: Colors.orange)),
+        title: const Text('Request Token Reversal', style: TextStyle(color: Colors.orange)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Token: #$serial',
-                style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('Token: #$serial', style: const TextStyle(fontWeight: FontWeight.bold)),
             Text('Patient: $patientName'),
             const SizedBox(height: 16),
             TextField(
               controller: reasonCtrl,
-              decoration: const InputDecoration(
-                  labelText: 'Reason (optional)',
-                  border: OutlineInputBorder()),
+              decoration: const InputDecoration(labelText: 'Reason (optional)', border: OutlineInputBorder()),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop(false);
-            },
+            onPressed: () { if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop(false); },
             child: const Text('Cancel'),
           ),
           ElevatedButton.icon(
-            icon:  const Icon(Icons.undo),
+            icon: const Icon(Icons.undo),
             label: const Text('Send Request'),
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange[800]),
-            onPressed: () {
-              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop(true);
-            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.orange[800]),
+            onPressed: () { if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop(true); },
           ),
         ],
       ),
@@ -300,26 +244,23 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     try {
       await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('edit_requests')
-          .add({
-        'type':              'token_reversal',
-        'status':            'pending',
-        'branchId':          widget.branchId,
-        'receptionistId':    widget.receptionistId,
-        'receptionistName':  _username ?? 'Unknown',
-        'tokenSerial':       serial,
-        'patientId':         entry['patientId'] ?? '',
-        'patientName':       patientName,
-        'queueType':         entry['queueType'] ?? 'unknown',
+          .collection('branches').doc(widget.branchId)
+          .collection('edit_requests').add({
+        'type':             'token_reversal',
+        'status':           'pending',
+        'branchId':         widget.branchId,
+        'receptionistId':   widget.receptionistId,
+        'receptionistName': _username ?? 'Unknown',
+        'tokenSerial':      serial,
+        'patientId':        entry['patientId'] ?? '',
+        'patientName':      patientName,
+        'queueType':        entry['queueType'] ?? 'unknown',
         'originalCreatedAt': entry['createdAt'],
-        'reason':
-            reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : null,
-        'requestedAt': FieldValue.serverTimestamp(),
-        'reviewedAt':  null,
-        'reviewedBy':  null,
-        'decision':    null,
+        'reason':           reasonCtrl.text.trim().isNotEmpty ? reasonCtrl.text.trim() : null,
+        'requestedAt':      FieldValue.serverTimestamp(),
+        'reviewedAt':       null,
+        'reviewedBy':       null,
+        'decision':         null,
       });
       if (mounted) {
         Flushbar(
@@ -339,7 +280,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     }
   }
 
-  // ── AppBar ────────────────────────────────────────────────────────────────────
+  // ── AppBar ─────────────────────────────────────────────────────────────────
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     if (isMobile) {
       return AppBar(
@@ -352,26 +293,20 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           Expanded(
             child: Text(
               'Receptionist – ${_username ?? '...'}',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
               overflow: TextOverflow.ellipsis,
             ),
           ),
         ]),
         actions: [
-          // LAN status dot
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
             width: 9, height: 9,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _connectionStatus.isConnected
-                  ? Colors.greenAccent : Colors.redAccent,
+              color: _connectionStatus.isConnected ? Colors.greenAccent : Colors.redAccent,
             ),
           ),
-          // Internet status dot
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
             width: 9, height: 9,
@@ -383,10 +318,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           if (_isSyncing)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 6, vertical: 16),
-              child: SizedBox(
-                  width: 20, height: 20,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2)),
+              child: SizedBox(width: 20, height: 20,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
             )
           else
             IconButton(
@@ -403,18 +336,16 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           indicatorColor: Colors.white,
           labelColor: Colors.white,
           unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(
-              fontSize: 11, fontWeight: FontWeight.bold),
+          labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
           tabs: const [
-            Tab(icon: Icon(Icons.token, size: 18),      text: 'Token'),
-            Tab(icon: Icon(Icons.list_alt, size: 18),   text: 'Log'),
+            Tab(icon: Icon(Icons.token, size: 18), text: 'Token'),
+            Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Log'),
             Tab(icon: Icon(Icons.person_add, size: 18), text: 'Register'),
           ],
         ),
       );
     }
 
-    // Desktop AppBar
     return AppBar(
       backgroundColor: _teal,
       elevation: 10,
@@ -429,18 +360,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                'Receptionist – ${_username ?? 'Loading...'}',
-                style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white),
-              ),
+              Text('Receptionist – ${_username ?? 'Loading...'}',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
               if (!_loadingBranch)
-                Text(
-                  _branchName ?? 'Free Dispensary',
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
-                ),
+                Text(_branchName ?? 'Free Dispensary',
+                    style: const TextStyle(fontSize: 16, color: Colors.white70)),
             ],
           ),
         ),
@@ -448,37 +372,27 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       centerTitle: false,
       actions: [
         ConnectionStatusBadge(
-          status:  _connectionStatus,
+          status: _connectionStatus,
           onRetry: () => ConnectionManager().reconnectNow(),
         ),
         Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: _online
-                ? Colors.blue.shade700 : Colors.grey.shade600,
+            color: _online ? Colors.blue.shade700 : Colors.grey.shade600,
             borderRadius: BorderRadius.circular(30),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_online ? Icons.cloud : Icons.cloud_off,
-                color: Colors.white, size: 20),
+            Icon(_online ? Icons.cloud : Icons.cloud_off, color: Colors.white, size: 20),
             const SizedBox(width: 8),
-            Text(
-              _online ? 'Internet' : 'No Internet',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-            ),
+            Text(_online ? 'Internet' : 'No Internet',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
           ]),
         ),
         IconButton(
           icon: _isSyncing
-              ? const SizedBox(
-                  width: 28, height: 28,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 3))
+              ? const SizedBox(width: 28, height: 28,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
               : const Icon(Icons.sync, size: 32, color: Colors.white),
           onPressed: _isSyncing ? null : _forceSync,
         ),
@@ -491,36 +405,47 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
   }
 
-  // ── Summary cards ─────────────────────────────────────────────────────────────
+  // ── Summary cards ──────────────────────────────────────────────────────────
+  // Revenue: Zakat = PKR 20 × days, Non-zakat = PKR 100 × days, GMWF = PKR 0
   Widget _buildSummaryCards(bool isMobile) {
-    final today = DateFormat('ddMMyy').format(DateTime.now());
-    final allEntries =
-        lss.LocalStorageService.getLocalEntries(widget.branchId);
-    final todayEntries =
-        allEntries.where((e) => (e['dateKey'] as String?) == today).toList();
+    final today      = DateFormat('ddMMyy').format(DateTime.now());
+    final allEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+    final todayEntries = allEntries.where((e) => (e['dateKey'] as String?) == today).toList();
 
     int zakat = 0, nonZakat = 0, gmwf = 0;
-    for (var e in todayEntries) {
-      final qt =
-          (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+    int zakatAmount = 0, nonZakatAmount = 0;
+
+    for (final e in todayEntries) {
+      final qt   = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+      final days = _getDaysOfMedicine(e);
       switch (qt) {
-        case 'zakat':     zakat++;    break;
-        case 'non-zakat': nonZakat++; break;
-        case 'gmwf':      gmwf++;     break;
-        default:          zakat++;
+        case 'zakat':
+          zakat++;
+          zakatAmount += 20 * days;
+          break;
+        case 'non-zakat':
+          nonZakat++;
+          nonZakatAmount += 100 * days;
+          break;
+        case 'gmwf':
+          gmwf++;
+          break;
+        default:
+          zakat++;
+          zakatAmount += 20 * days;
       }
     }
-    final total  = zakat + nonZakat + gmwf;
-    final amount = zakat * 20 + nonZakat * 100;
+    final total       = zakat + nonZakat + gmwf;
+    final totalAmount = zakatAmount + nonZakatAmount;
 
     final cards = [
-      _compactSummaryCard('Zakat',     zakat,    'Rs. ${zakat * 20}',
+      _compactSummaryCard('Zakat',     zakat,    'PKR $zakatAmount',
           Colors.green[600]!, Icons.volunteer_activism, isMobile: isMobile),
-      _compactSummaryCard('Non-Zakat', nonZakat, 'Rs. ${nonZakat * 100}',
+      _compactSummaryCard('Non-Zakat', nonZakat, 'PKR $nonZakatAmount',
           Colors.blue[600]!, Icons.person_outline, isMobile: isMobile),
-      _compactSummaryCard('GMWF',      gmwf,     'Rs. 0',
+      _compactSummaryCard('GMWF',      gmwf,     'PKR 0',
           Colors.orange[600]!, null, isImage: true, isMobile: isMobile),
-      _compactSummaryCard('Total',     total,    'Rs. $amount',
+      _compactSummaryCard('Total',     total,    'PKR $totalAmount',
           Colors.teal[700]!, Icons.people, isMobile: isMobile),
     ];
 
@@ -528,13 +453,24 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       children: cards
           .map((c) => Expanded(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(
-                      horizontal: isMobile ? 2 : 6),
+                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 2 : 6),
                   child: c,
                 ),
               ))
           .toList(),
     );
+  }
+
+  /// Reads daysOfMedicine from entry → nested prescription → default 1.
+  int _getDaysOfMedicine(Map<String, dynamic> entry) {
+    final topLevel = entry['daysOfMedicine'];
+    if (topLevel is int) return topLevel.clamp(1, 99);
+    final presc = entry['prescription'];
+    if (presc is Map) {
+      final nested = presc['daysOfMedicine'];
+      if (nested is int) return nested.clamp(1, 99);
+    }
+    return 1;
   }
 
   Widget _compactSummaryCard(
@@ -551,39 +487,26 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             if (isImage)
-              Image.asset('assets/logo/gmwf.png',
-                  height: isMobile ? 18 : 22)
+              Image.asset('assets/logo/gmwf.png', height: isMobile ? 18 : 22)
             else if (icon != null)
-              Icon(icon,
-                  size: isMobile ? 16 : 22, color: Colors.white),
+              Icon(icon, size: isMobile ? 16 : 22, color: Colors.white),
             const SizedBox(height: 2),
-            Text(
-              title,
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: isMobile ? 9 : 11,
-                  fontWeight: FontWeight.bold),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              '$count',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: isMobile ? 18 : 22,
-                  fontWeight: FontWeight.bold),
-            ),
+            Text(title,
+                style: TextStyle(
+                    color: Colors.white, fontSize: isMobile ? 9 : 11, fontWeight: FontWeight.bold),
+                maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text('$count',
+                style: TextStyle(
+                    color: Colors.white, fontSize: isMobile ? 18 : 22, fontWeight: FontWeight.bold)),
             if (!isMobile)
-              Text(amount,
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 9)),
+              Text(amount, style: const TextStyle(color: Colors.white70, fontSize: 9)),
           ],
         ),
       ),
     );
   }
 
-  // ── Token log ─────────────────────────────────────────────────────────────────
+  // ── Token log ──────────────────────────────────────────────────────────────
   Widget _buildTokenLog(bool isMobile) {
     final today = DateFormat('ddMMyy').format(DateTime.now());
     var entries = lss.LocalStorageService.getLocalEntries(widget.branchId)
@@ -600,30 +523,34 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     if (entries.isEmpty) {
       return const Center(
-          child: Text('No tokens issued today',
-              style: TextStyle(fontSize: 16, color: Colors.grey)));
+          child: Text('No tokens issued today', style: TextStyle(fontSize: 16, color: Colors.grey)));
     }
 
     return ListView.separated(
       itemCount: entries.length,
-      separatorBuilder: (_, __) =>
-          Divider(height: 1, color: Colors.grey[200]),
+      separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey[200]),
       itemBuilder: (context, i) {
         final e            = entries[i];
         final serial       = e['serial'] as String?      ?? 'N/A';
         final name         = e['patientName'] as String? ?? 'Unknown Patient';
         final cnic         = (e['cnic'] as String?)?.trim()         ?? '';
         final guardianCnic = (e['guardianCnic'] as String?)?.trim() ?? '';
-        final queueTypeRaw =
-            (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
-        final timestamp    =
-            DateTime.tryParse(e['createdAt'] as String? ?? '') ?? DateTime.now();
-        final hasPrescription =
-            e['prescriptionId'] != null &&
-                (e['prescriptionId'] as String?)?.isNotEmpty == true;
+        final queueTypeRaw = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+        final timestamp    = DateTime.tryParse(e['createdAt'] as String? ?? '') ?? DateTime.now();
+        final hasPrescription = e['prescriptionId'] != null &&
+            (e['prescriptionId'] as String?)?.isNotEmpty == true;
         final isPending = !hasPrescription &&
             (e['status'] as String?)?.toLowerCase() != 'prescribed' &&
             (e['status'] as String?)?.toLowerCase() != 'completed';
+
+        // Days badge
+        final days = _getDaysOfMedicine(e);
+
+        // Amount for this token: base price × days (GMWF = 0)
+        int tokenAmount = 0;
+        if (queueTypeRaw == 'zakat')     tokenAmount = 20  * days;
+        if (queueTypeRaw == 'non-zakat') tokenAmount = 100 * days;
+        final hasExtraDays = days > 1 && tokenAmount > 0;
 
         Color  badgeColor;
         String displayType;
@@ -640,41 +567,64 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
         final displayCnic = cnic.isNotEmpty
             ? cnic
-            : guardianCnic.isNotEmpty
-                ? guardianCnic
-                : '-';
+            : guardianCnic.isNotEmpty ? guardianCnic : '-';
 
         if (isMobile) {
           return Card(
             margin: const EdgeInsets.symmetric(vertical: 3),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 4),
-              leading: CircleAvatar(
-                backgroundColor: badgeColor,
-                radius: 20,
-                child: Text(
-                  serial.split('-').last.padLeft(3, '0'),
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12),
-                ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              leading: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: badgeColor,
+                    radius: 20,
+                    child: Text(
+                      serial.split('-').last.padLeft(3, '0'),
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                    ),
+                  ),
+                  // ×2 / ×3 badge
+                  if (days > 1)
+                    Positioned(
+                      right: -4, top: -4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('×$days',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                ],
               ),
               title: Text(name,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   overflow: TextOverflow.ellipsis),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(displayCnic,
-                      style: const TextStyle(fontSize: 11)),
-                  Text(DateFormat('hh:mm a').format(timestamp),
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
+                  Text(displayCnic, style: const TextStyle(fontSize: 11)),
+                  Row(children: [
+                    Text(DateFormat('hh:mm a').format(timestamp),
+                        style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                    if (hasExtraDays) ...[
+                      const SizedBox(width: 6),
+                      Text('PKR $tokenAmount',
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.orange.shade700,
+                              fontWeight: FontWeight.bold)),
+                    ],
+                  ]),
                 ],
               ),
               trailing: Column(
@@ -682,63 +632,91 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 children: [
                   Chip(
                     label: Text(displayType,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 10)),
+                        style: const TextStyle(color: Colors.white, fontSize: 10)),
                     backgroundColor: badgeColor,
                     visualDensity: VisualDensity.compact,
-                    materialTapTargetSize:
-                        MaterialTapTargetSize.shrinkWrap,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   if (isPending)
                     GestureDetector(
                       onTap: () => _requestTokenReverse(e),
-                      child: const Icon(Icons.undo,
-                          color: Colors.redAccent, size: 18),
+                      child: const Icon(Icons.undo, color: Colors.redAccent, size: 18),
                     ),
                 ],
               ),
             ),
           );
-        } else {      // Desktop row
+        } else {
+          // Desktop row
           return Card(
             elevation: 2,
             margin: const EdgeInsets.symmetric(vertical: 4),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
-              leading: CircleAvatar(
-                backgroundColor: badgeColor,
-                radius: 28,
-                child: Text(
-                  serial.split('-').last.padLeft(3, '0'),
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18),
-                ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              leading: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    backgroundColor: badgeColor,
+                    radius: 28,
+                    child: Text(
+                      serial.split('-').last.padLeft(3, '0'),
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                    ),
+                  ),
+                  // ×2 / ×3 badge
+                  if (days > 1)
+                    Positioned(
+                      right: -6, top: -6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.deepOrange,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: Text('×$days',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                ],
               ),
               title: Text(name,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 18)),
-              subtitle: Text(
-                '$displayCnic  •  ${DateFormat('hh:mm a').format(timestamp)}',
-                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$displayCnic  •  ${DateFormat('hh:mm a').format(timestamp)}',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  ),
+                  if (hasExtraDays)
+                    Text(
+                      'PKR $tokenAmount total ($days-day prescription)',
+                      style: TextStyle(
+                          color: Colors.orange.shade700,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600),
+                    ),
+                ],
               ),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Chip(
-                      label: Text(displayType,
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 12)),
-                      backgroundColor: badgeColor),
+                    label: Text(displayType,
+                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                    backgroundColor: badgeColor,
+                  ),
                   if (isPending) ...[
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.undo,
-                          color: Colors.redAccent, size: 24),
+                      icon: const Icon(Icons.undo, color: Colors.redAccent, size: 24),
                       onPressed: () => _requestTokenReverse(e),
                     ),
                   ],
@@ -751,18 +729,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
   }
 
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile   = screenWidth < 800;
+    final isMobile    = screenWidth < 800;
 
     return Scaffold(
       appBar: _buildAppBar(isMobile),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.topCenter, end: Alignment.bottomCenter,
             colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
           ),
         ),
@@ -771,14 +749,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
   }
 
-  // ── Mobile TabBarView ─────────────────────────────────────────────────────────
   Widget _buildMobileBody() {
     return Column(children: [
       Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
         child: ValueListenableBuilder<Box>(
-          valueListenable:
-              Hive.box(lss.LocalStorageService.entriesBox).listenable(),
+          valueListenable: Hive.box(lss.LocalStorageService.entriesBox).listenable(),
           builder: (context, _, __) => _buildSummaryCards(true),
         ),
       ),
@@ -786,13 +762,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         child: TabBarView(
           controller: _mobileTabController,
           children: [
-            // Tab 0: Token
             Padding(
               padding: const EdgeInsets.all(8),
               child: Card(
                 elevation: 4,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: TokenScreen(
@@ -805,47 +779,36 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 ),
               ),
             ),
-
-            // Tab 1: Log
             Padding(
               padding: const EdgeInsets.all(8),
               child: Column(children: [
                 Row(children: [
                   Text("Today's Tokens",
                       style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: _teal)),
+                          fontSize: 16, fontWeight: FontWeight.bold, color: _teal)),
                   const Spacer(),
                   IconButton(
                     icon: Icon(
-                      _sortNewestFirst
-                          ? Icons.arrow_downward_rounded
-                          : Icons.arrow_upward_rounded,
+                      _sortNewestFirst ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
                       color: _teal, size: 20,
                     ),
-                    onPressed: () => setState(
-                        () => _sortNewestFirst = !_sortNewestFirst),
+                    onPressed: () => setState(() => _sortNewestFirst = !_sortNewestFirst),
                   ),
                 ]),
                 const SizedBox(height: 4),
                 Expanded(
                   child: ValueListenableBuilder<Box>(
-                    valueListenable: Hive.box(
-                        lss.LocalStorageService.entriesBox).listenable(),
+                    valueListenable: Hive.box(lss.LocalStorageService.entriesBox).listenable(),
                     builder: (context, _, __) => _buildTokenLog(true),
                   ),
                 ),
               ]),
             ),
-
-            // Tab 2: Register
             Padding(
               padding: const EdgeInsets.all(8),
               child: Card(
                 elevation: 4,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: PatientRegisterPage(
@@ -864,7 +827,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     ]);
   }
 
-  // ── Desktop layout ────────────────────────────────────────────────────────────
   Widget _buildDesktopBody() {
     return Center(
       child: ConstrainedBox(
@@ -875,125 +837,96 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const SizedBox(height: 24),
-              // Main content area
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Left section - Toggle button above Token/Register card
                     Expanded(
                       flex: 3,
-                      child: Column(
-                        children: [
-                          // Toggle button centered above the card
-                          Center(child: _buildDesktopToggle()),
-                          const SizedBox(height: 16),
-                          // Token/Register card
-                          Expanded(
-                            child: Card(
-                              elevation: 12,
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(36)),
-                              child: Padding(
-                                padding: const EdgeInsets.all(32),
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 500),
-                                  child: _activeSection == 'register'
-                                      ? PatientRegisterPage(
-                                            key: _registerKey,
-                                            branchId: widget.branchId,
-                                            receptionistId: widget.receptionistId,
-                                            initialCnic: _pendingCnic,
-                                            onPatientRegistered:
-                                                _onPatientRegistered,
-                                          )
-                                      : TokenScreen(
-                                            key: _tokenKey,
-                                            branchId: widget.branchId,
-                                            receptionistId: widget.receptionistId,
-                                            receptionistName: widget.receptionistName,
-                                            onPatientNotFound:
-                                                _handlePatientNotFound,
-                                          ),
-                                ),
+                      child: Column(children: [
+                        Center(child: _buildDesktopToggle()),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: Card(
+                            elevation: 12,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 500),
+                                child: _activeSection == 'register'
+                                    ? PatientRegisterPage(
+                                          key: _registerKey,
+                                          branchId: widget.branchId,
+                                          receptionistId: widget.receptionistId,
+                                          initialCnic: _pendingCnic,
+                                          onPatientRegistered: _onPatientRegistered,
+                                        )
+                                    : TokenScreen(
+                                          key: _tokenKey,
+                                          branchId: widget.branchId,
+                                          receptionistId: widget.receptionistId,
+                                          receptionistName: widget.receptionistName,
+                                          onPatientNotFound: _handlePatientNotFound,
+                                        ),
                               ),
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ]),
                     ),
                     const SizedBox(width: 24),
-                    // Right section - Summary cards above Today's Tokens card
                     Expanded(
                       flex: 2,
                       child: ValueListenableBuilder<Box>(
-                        valueListenable: Hive.box(
-                            lss.LocalStorageService.entriesBox).listenable(),
+                        valueListenable: Hive.box(lss.LocalStorageService.entriesBox).listenable(),
                         builder: (context, box, _) {
-                          final today =
-                              DateFormat('ddMMyy').format(DateTime.now());
+                          final today = DateFormat('ddMMyy').format(DateTime.now());
                           final todayCount = lss.LocalStorageService
                               .getLocalEntries(widget.branchId)
-                              .where((e) =>
-                                  (e['dateKey'] as String?) == today)
+                              .where((e) => (e['dateKey'] as String?) == today)
                               .length;
-                          return Column(
-                            children: [
-                              // Summary cards positioned higher to align with toggle button
-                              SizedBox(height: 0), // Minimal top spacing
-                              _buildSummaryCards(false),
-                              const SizedBox(height: 16),
-                              // Today's Tokens card - now matches height with Token screen card
-                              Expanded(
-                                child: Card(
-                                  elevation: 8,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(24)),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20),
-                                    child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          // Today's Tokens header
-                                          Row(children: [
-                                            Icon(Icons.list_alt,
-                                                color: _teal, size: 32),
-                                            const SizedBox(width: 16),
-                                            const Text(
-                                              "Today's Tokens",
-                                              style: TextStyle(
-                                                  fontSize: 22,
-                                                  fontWeight: FontWeight.bold,
-                                                  color: _teal),
-                                            ),
-                                            const Spacer(),
-                                            IconButton(
-                                              icon: Icon(
-                                                _sortNewestFirst
-                                                    ? Icons.arrow_downward_rounded
-                                                    : Icons.arrow_upward_rounded,
-                                                color: _teal,
-                                              ),
-                                              onPressed: () => setState(() =>
-                                                  _sortNewestFirst =
-                                                      !_sortNewestFirst)),
-                                            ],
+                          return Column(children: [
+                            const SizedBox(height: 0),
+                            _buildSummaryCards(false),
+                            const SizedBox(height: 16),
+                            Expanded(
+                              child: Card(
+                                elevation: 8,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(20),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(children: [
+                                        Icon(Icons.list_alt, color: _teal, size: 32),
+                                        const SizedBox(width: 16),
+                                        const Text("Today's Tokens",
+                                            style: TextStyle(
+                                                fontSize: 22, fontWeight: FontWeight.bold, color: _teal)),
+                                        const Spacer(),
+                                        IconButton(
+                                          icon: Icon(
+                                            _sortNewestFirst
+                                                ? Icons.arrow_downward_rounded
+                                                : Icons.arrow_upward_rounded,
+                                            color: _teal,
                                           ),
-                                          Text('$todayCount total',
-                                              style: const TextStyle(
-                                                  color: Colors.grey,
-                                                  fontSize: 16)),
-                                          const Divider(height: 36),
-                                          // Today's Tokens list
-                                          Expanded(
-                                              child: _buildTokenLog(false)),
-                                        ]),
+                                          onPressed: () => setState(
+                                              () => _sortNewestFirst = !_sortNewestFirst),
+                                        ),
+                                      ]),
+                                      Text('$todayCount total',
+                                          style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                                      const Divider(height: 36),
+                                      Expanded(child: _buildTokenLog(false)),
+                                    ],
                                   ),
                                 ),
                               ),
-                            ],
-                          );
+                            ),
+                          ]);
                         },
                       ),
                     ),
@@ -1013,47 +946,34 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(32),
-        boxShadow: const [
-          BoxShadow(
-              color: Colors.black12,
-              blurRadius: 10,
-              offset: Offset(0, 5))
-        ],
+        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 10, offset: Offset(0, 5))],
       ),
       child: ToggleButtons(
         borderRadius: BorderRadius.circular(32),
         selectedColor: Colors.white,
         fillColor: const Color(0xFF004D40),
         color: const Color(0xFF00695C),
-        constraints:
-            const BoxConstraints(minHeight: 52, minWidth: 190),
+        constraints: const BoxConstraints(minHeight: 52, minWidth: 190),
         isSelected: [!isToken, isToken],
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 24, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
             child: Row(children: const [
               Icon(Icons.person_add, size: 22),
               SizedBox(width: 10),
-              Text('Register Patient',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
+              Text('Register Patient', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ]),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 24, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
             child: Row(children: const [
               Icon(Icons.token, size: 22),
               SizedBox(width: 10),
-              Text('Issue Token',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
+              Text('Issue Token', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
             ]),
           ),
         ],
-        onPressed: (index) => setState(
-            () => _activeSection = index == 0 ? 'register' : 'token'),
+        onPressed: (index) => setState(() => _activeSection = index == 0 ? 'register' : 'token'),
       ),
     );
   }
