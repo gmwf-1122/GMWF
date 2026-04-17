@@ -104,7 +104,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 builder: (context, snapshot) {
                   final users = snapshot.data?.docs ?? [];
                   return DropdownButtonFormField<String>(
-                    initialValue: _selectedReceiverId,
+                    value: _selectedReceiverId,
                     hint: const Text("Select User"),
                     items: users
                         .map((doc) => DropdownMenuItem(
@@ -119,7 +119,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
               ),
             if (widget.role == 'admin')
               DropdownButtonFormField<String>(
-                initialValue: _selectedReceiverRole,
+                value: _selectedReceiverRole,
                 hint: const Text("Select Role (Optional)"),
                 items: ['doctor', 'receptionist', 'dispenser', 'supervisor']
                     .map((role) => DropdownMenuItem(
@@ -145,7 +145,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
               child: const Text("Cancel")),
           ElevatedButton(
             onPressed: _sendNotification,
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
             child: const Text("Send", style: TextStyle(color: Colors.white)),
           )
         ],

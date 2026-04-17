@@ -53,7 +53,8 @@ class _BranchesRegisterState extends State<BranchesRegister>
   late Animation<double>   _fadeAnim;
 
   static const List<Map<String, dynamic>> _roleItems = [
-    {'label': 'Manager',              'icon': Icons.manage_accounts_outlined,    'type': 'crown'},
+    {'label': 'HQ Manager',           'icon': Icons.business_center_rounded,     'type': 'crown'},
+    {'label': 'Branch Manager',       'icon': Icons.manage_accounts_rounded,     'type': 'crown'},
     {'label': 'Supervisor',           'icon': Icons.supervisor_account_outlined, 'type': 'normal'},
     {'label': 'Doctor',               'icon': Icons.medical_services_outlined,   'type': 'normal'},
     {'label': 'Receptionist',         'icon': Icons.support_agent_rounded,       'type': 'normal'},

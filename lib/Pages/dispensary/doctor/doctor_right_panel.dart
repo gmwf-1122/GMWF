@@ -1,17 +1,4 @@
-// lib/pages/doctor_right_panel.dart
-// CHANGES IN THIS VERSION:
-//   NEW: Days-of-medicine selector (1 / 2 / 3 days).
-//        • Default is 1 day (existing behaviour unchanged).
-//        • Medicine quantities are MULTIPLIED by the chosen days before saving,
-//          so the dispenser and patient receive the correct total quantity.
-//        • For non-zakat patients, each *additional* day beyond day-1 costs
-//          PKR 100 (day-1 fee is already collected at the token desk).
-//        • Zakat and GMWF patients pay PKR 0 regardless of days selected.
-//        • 'daysOfMedicine' and 'extraCharge' stored on fullPrescriptionData.
-//        • Extra charge enqueued as 'save_dispensary_charge' sync op.
-//        • PKR label used throughout (no rupee icon).
-//   NEW: Formula displayed in medicine search results (subtitle) and
-//        in the Add Medicine dialog for inventory medicines.
+// lib/Pages/dispensary/doctor/doctor_right_panel.dart
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -90,12 +77,22 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   /// Number of days of medicine to dispense (1 = default, 2, 3)
   int _daysOfMedicine = 1;
 
+  // ── FIX: Cross-patient reserved quantities ─────────────────────────────
+  // Maps inventoryId → total quantity already prescribed across ALL
+  // pending (not-yet-dispensed) patients in Hive.
+  // Rebuilt by _buildReservedQuantities() on load and before each add.
+  Map<String, int> _reservedQuantities = {};
+
   static const Color _teal     = Color(0xFF00695C);
   static const Color _orange   = Color(0xFFFF6D00);
   static const Color _blueGrey = Color(0xFF455A64);
 
+  // Dose pill colours (teal ramp)
+  static const Color _dosePillBg     = Color(0xFFE1F5EE);
+  static const Color _dosePillBorder = Color(0xFF5DCAA5);
+  static const Color _dosePillText   = Color(0xFF0F6E56);
+
   // Base price per day per queue type
-  // Zakat: PKR 20/day, Non-zakat: PKR 100/day, GMWF: PKR 0
   static const Map<String, int> _baseDayPrice = {
     'zakat':     20,
     'non-zakat': 100,
@@ -119,9 +116,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
 
   // ── Derived: extra charge (PKR) ────────────────────────────────────────────
-  // Day-1 fee is collected at the token desk.
-  // Each extra day costs the base daily rate for the queue type.
-  // GMWF is always PKR 0 regardless of days.
   int get _extraCharge {
     final pricePerDay = _baseDayPrice[widget.queueType] ?? 0;
     if (pricePerDay == 0) return 0;
@@ -168,6 +162,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (mounted) setState(() {});
     }
 
+    // ── FIX: Rebuild reserved quantities when any dispense or prescription
+    //         save happens on the LAN, so stock counts stay accurate.
+    if (type == 'dispense_completed' || type == RealtimeEvents.savePrescription) {
+      _buildReservedQuantities();
+    }
+
     if (type == RealtimeEvents.savePrescription) {
       setState(() {
         widget.complaintController.text = data['complaint'] ?? data['condition'] ?? '';
@@ -208,7 +208,81 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
   void _loadInventory() async {
     final items = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId);
-    if (mounted) setState(() => _allInventory = items);
+    if (mounted) {
+      setState(() => _allInventory = items);
+    }
+    // Build reserved map after inventory is loaded
+    await _buildReservedQuantities();
+  }
+
+  // ── FIX: Scan ALL pending prescriptions in Hive and sum up reserved qty ──
+  // A prescription is "pending" (reserved) when:
+  //   • it exists in the prescriptions box (doctor has saved it), AND
+  //   • the corresponding entry in entriesBox does NOT have
+  //     dispenseStatus == 'dispensed'.
+  // We skip the current patient's serial so their own session counts
+  // are handled separately by _getAvailableStock().
+  Future<void> _buildReservedQuantities() async {
+    final Map<String, int> reserved = {};
+
+    try {
+      final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      final mySerial   = widget.serialId.trim().toLowerCase();
+
+      for (final key in prescBox.keys) {
+        final raw = prescBox.get(key);
+        if (raw is! Map) continue;
+        final presc = Map<String, dynamic>.from(raw);
+
+        // Skip the current patient — their session is handled in _getAvailableStock
+        final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
+            .toString().trim().toLowerCase();
+        if (prescSerial == mySerial) continue;
+
+        // Check if already dispensed — look up in entriesBox
+        final entryKey = '${widget.branchId}-$prescSerial';
+        final entry    = entriesBox.get(entryKey);
+        if (entry is Map) {
+          final dispenseStatus =
+              (entry['dispenseStatus'] ?? '').toString().toLowerCase();
+          if (dispenseStatus == 'dispensed') continue;
+        }
+
+        // Also check dispenseStatus on the prescription itself
+        final dispenseStatusOnPresc =
+            (presc['dispenseStatus'] ?? '').toString().toLowerCase();
+        if (dispenseStatusOnPresc == 'dispensed') continue;
+
+        // Sum up quantities for each inventory medicine
+        final meds = presc['prescriptions'];
+        if (meds is! List) continue;
+
+        for (final med in meds) {
+          if (med is! Map) continue;
+          final inventoryId = (med['inventoryId'] ?? '').toString().trim();
+          if (inventoryId.isEmpty) continue;
+
+          final qty = ((med['quantity'] ?? 0) as num).toInt();
+          // For multi-day prescriptions, account for the multiplier
+          // (injections/drips are always × 1)
+          final days = (presc['daysOfMedicine'] as int?) ?? 1;
+          final type = (med['type'] ?? '').toString().toLowerCase();
+          final isInj = type.contains('injection') || type.contains('inj') ||
+              type.contains('drip') || type.contains('syringe') ||
+              type.contains('nebulization');
+          final effectiveQty = isInj ? qty : qty * days;
+
+          reserved[inventoryId] = (reserved[inventoryId] ?? 0) + effectiveQty;
+        }
+      }
+    } catch (e) {
+      debugPrint('[DoctorPanel] _buildReservedQuantities error: $e');
+    }
+
+    if (mounted) {
+      setState(() => _reservedQuantities = reserved);
+    }
   }
 
   @override
@@ -230,7 +304,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       return (m['name'] ?? '').toString().toLowerCase().contains(query) ||
           (m['type'] ?? '').toString().toLowerCase().contains(query) ||
           (m['dose'] ?? '').toString().toLowerCase().contains(query) ||
-          (m['formula'] ?? '').toString().toLowerCase().contains(query); // ── NEW: search by formula
+          (m['formula'] ?? '').toString().toLowerCase().contains(query);
     }).toList();
     setState(() => _searchResults = filtered);
   }
@@ -286,20 +360,35 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         (inventoryId == null || m['inventoryId'] == inventoryId));
   }
 
+  // ── FIX: Available stock = total stock − reserved by other patients
+  //         − already added in this session
   int _getAvailableStock(Map<String, dynamic>? inventoryMed) {
     if (inventoryMed == null) return 999999;
-    final totalStock = ((inventoryMed['quantity'] ?? 0) as num).toInt();
-    final inventoryId = inventoryMed['id'];
-    int alreadyPrescribed = 0;
+
+    final totalStock  = ((inventoryMed['quantity'] ?? 0) as num).toInt();
+    final inventoryId = inventoryMed['id']?.toString() ?? '';
+
+    // Quantity reserved by OTHER pending patients (from Hive scan)
+    final reservedByOthers = _reservedQuantities[inventoryId] ?? 0;
+
+    // Quantity already added in THIS doctor session for this patient
+    int sessionQty = 0;
     for (final med in widget.prescriptions) {
-      if (med['inventoryId'] == inventoryId) {
-        alreadyPrescribed += ((med['quantity'] ?? 0) as num).toInt();
+      if (med['inventoryId']?.toString() == inventoryId) {
+        sessionQty += ((med['quantity'] ?? 0) as num).toInt();
       }
     }
-    return totalStock - alreadyPrescribed;
+
+    final available = totalStock - reservedByOthers - sessionQty;
+    return available < 0 ? 0 : available;
   }
 
   Future<void> _addMedicineDialog({Map<String, dynamic>? inventoryMed}) async {
+    // ── FIX: Refresh reserved quantities right before showing the dialog
+    //         so we have the freshest picture of stock even if another
+    //         patient was just saved while this doctor was typing.
+    await _buildReservedQuantities();
+
     final isInventory = inventoryMed != null;
 
     if (isInventory) {
@@ -307,7 +396,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (availableStock <= 0) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text(availableStock == 0 ? '⚠️ Out of Stock!' : '⚠️ Stock Limit Exceeded! Available: $availableStock'),
+            content: Text(availableStock == 0
+                ? '⚠️ Out of Stock! (reserved by pending patients)'
+                : '⚠️ Stock Limit Exceeded! Available: $availableStock'),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 3),
           ));
@@ -324,7 +415,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     bool isSyrup      = false;
     bool isInjection  = false;
 
-    // ── NEW: extract formula for display in dialog ─────────────────────────
     final formula = isInventory
         ? (inventoryMed['formula'] ?? '').toString().trim()
         : '';
@@ -360,7 +450,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   controller: nameCtrl,
                   readOnly: isInventory,
                   decoration: InputDecoration(
-                    labelText: 'Medicine name',
+                    labelText: 'Formula',
                     border: const OutlineInputBorder(),
                     filled: isInventory,
                     fillColor: isInventory ? Colors.grey[200] : null,
@@ -381,8 +471,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    // ── FIX: Show how many are reserved by other patients
+                    if ((_reservedQuantities[inventoryMed['id']?.toString() ?? ''] ?? 0) > 0) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '(${_reservedQuantities[inventoryMed['id']?.toString() ?? '']} reserved)',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange.shade700,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                   ]),
-                  // ── NEW: show formula below stock if available ─────────────
                   if (formula.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Row(
@@ -604,8 +705,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           children: meds.map((m) {
             final abbrev   = _getMedAbbrev(m);
             final namePart = _getFormattedMedicine(m);
-            // Show per-day quantity (what the doctor entered) — the multiplied
-            // total is only applied at save time.
             final label = abbrev.isNotEmpty &&
                     !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
                 ? '$abbrev $namePart ×${m['quantity']}'
@@ -628,7 +727,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   // ── Days-of-medicine selector ──────────────────────────────────────────────
   Widget _buildDaysSelector(bool compact) {
     final pricePerDay = _baseDayPrice[widget.queueType] ?? 0;
-    final isPaying    = pricePerDay > 0; // zakat and non-zakat both pay
+    final isPaying    = pricePerDay > 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -660,7 +759,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         ]),
         const SizedBox(height: 8),
 
-        // Segmented 1 / 2 / 3 days buttons
         Row(
           children: [1, 2, 3].map((day) {
             final isSelected = _daysOfMedicine == day;
@@ -698,7 +796,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               fontSize: compact ? 10 : 12,
                               color: isSelected ? Colors.white70 : Colors.grey.shade500),
                         ),
-                        // Show extra charge hint inside button
                         if ((_baseDayPrice[widget.queueType] ?? 0) > 0 && day > 1)
                           Padding(
                             padding: const EdgeInsets.only(top: 3),
@@ -720,7 +817,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         ),
         const SizedBox(height: 6),
 
-        // Helper text
         Text(
           () {
             final pricePerDay = _baseDayPrice[widget.queueType] ?? 0;
@@ -736,7 +832,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               fontStyle: FontStyle.italic),
         ),
 
-        // Info: medicine is prescribed per-day; dispenser gives N days' worth
         if (_daysOfMedicine > 1) ...[
           const SizedBox(height: 8),
           Container(
@@ -784,6 +879,46 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       return;
     }
 
+    // ── FIX: Final stock check at save time to catch any race conditions
+    for (final med in widget.prescriptions) {
+      final inventoryId = med['inventoryId']?.toString() ?? '';
+      if (inventoryId.isEmpty) continue;
+
+      // Refresh reserved quantities one more time before saving
+      await _buildReservedQuantities();
+
+      final inventoryMed = _allInventory.firstWhere(
+        (m) => m['id']?.toString() == inventoryId,
+        orElse: () => {},
+      );
+      if (inventoryMed.isEmpty) continue;
+
+      final available = _getAvailableStock(inventoryMed);
+      // At save time we include THIS session's qty in available (since
+      // _getAvailableStock subtracts session qty already), so compare
+      // against the raw per-day qty.
+      final perDayQty = ((med['quantity'] ?? 0) as num).toInt();
+      // Re-add session qty to get "others only" available
+      final othersOnly = available + perDayQty;
+
+      final isInj = _isInjectionOrDrip(med);
+      final required = isInj ? perDayQty : perDayQty * _daysOfMedicine;
+
+      if (required > othersOnly) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+              '⚠️ "${med['name']}" stock insufficient! '
+              'Need $required but only $othersOnly available after reservations.',
+            ),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ));
+        }
+        return;
+      }
+    }
+
     try {
       final patientData = Map<String, dynamic>.from(widget.selectedPatientData ?? {});
 
@@ -811,11 +946,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final serialClean = widget.serialId.trim().toLowerCase();
       final dateKey     = serialClean.split('-')[0];
 
-      // ── Save quantities as-is (per-day dosage) ───────────────────────
-      // The doctor enters the daily amount (e.g. 1+1+1 → quantity 3/day).
-      // The dispenser will give N days' worth of each non-injectable,
-      // but the prescription itself always shows the per-day dose.
-      // Injections/drips are always for 1 day only — not multiplied.
       final medicineList = widget.prescriptions.map((m) {
         return {
           'name':        m['name'],
@@ -870,10 +1000,32 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         'doctorName':      doctorName,
         'prescribedBy':    doctorName,
         'updatedBy':       doctorName,
+        // ── FIX: Mark as not yet dispensed so _buildReservedQuantities
+        //         picks it up correctly for subsequent patients
+        'dispenseStatus':  'pending',
       };
 
       // 1. Hive prescriptions box
       await LocalStorageService.saveLocalPrescription(fullPrescriptionData);
+
+      // Save medicine restriction for multi-day prescriptions
+      if (days > 1) {
+        // Use the unique patientId (Individual identifier) instead of just CNIC.
+        // This ensures children (who share guardian CNIC) are restricted individually.
+        final pId = patientData['patientId']?.toString().trim() ?? 
+                    patientData['id']?.toString().trim() ?? '';
+        
+        if (pId.isNotEmpty) {
+          await LocalStorageService.saveMedicineRestriction(
+            branchId:    widget.branchId,
+            patientId:   pId,
+            daysCovered: days,
+          );
+          debugPrint('[DoctorPanel] ✅ Individual restriction saved for: $pId ($days days)');
+        } else {
+          debugPrint('[DoctorPanel] ⚠️ Cannot save restriction: No patientId found.');
+        }
+      }
 
       // 2. Embed into Hive entry
       final entriesBox = Hive.box(LocalStorageService.entriesBox);
@@ -890,6 +1042,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         updated['doctorId']       = doctorId;
         updated['daysOfMedicine'] = days;
         updated['extraCharge']    = extraCharge;
+        // ── FIX: Explicitly NOT 'dispensed' yet so reserved qty is counted
+        updated['dispenseStatus'] = 'pending';
         await entriesBox.put(entryKey, updated);
       }
 
@@ -951,6 +1105,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           nowIso:      nowIso,
         );
       }
+
+      // 7. ── FIX: Rebuild reserved quantities so the NEXT patient the
+      //           doctor opens immediately sees accurate stock numbers
+      await _buildReservedQuantities();
+
     } catch (e, stack) {
       debugPrint('[DoctorPanel] Save failed: $e\n$stack');
       if (mounted) {
@@ -1031,6 +1190,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               'daysOfMedicine':  fullData['daysOfMedicine'],
               'extraCharge':     fullData['extraCharge'],
               'prescription':    medicalData,
+              'dispenseStatus':  'pending',
             }, SetOptions(merge: true));
       } else {
         await _enqueueSync(dateKey, queueType, serial, patientCnic, fullData, medicalData);
@@ -1062,6 +1222,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           'daysOfMedicine':  fullData['daysOfMedicine'],
           'extraCharge':     fullData['extraCharge'],
           'prescription':    medicalData,
+          'dispenseStatus':  'pending',
         },
       });
       SyncService().triggerUpload();
@@ -1199,7 +1360,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               if (_searchResults.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Container(
-                  constraints: const BoxConstraints(maxHeight: 260), // ── slightly taller for subtitles
+                  constraints: const BoxConstraints(maxHeight: 260),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(16),
@@ -1212,10 +1373,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     itemBuilder: (_, i) {
                       final m              = _searchResults[i];
                       final availableStock = _getAvailableStock(m);
-                      final label          = _getFormattedMedicine(m);
                       final isOutOfStock   = availableStock <= 0;
-                      // ── NEW: extract formula for subtitle ─────────────
                       final formula        = (m['formula'] ?? '').toString().trim();
+                      final dose           = (m['dose'] ?? '').toString().trim();
+                      final medicineName   = (m['name'] ?? '').toString().trim();
+                      // ── FIX: Show reserved count in trailing label
+                      final reservedCount  = _reservedQuantities[m['id']?.toString() ?? ''] ?? 0;
 
                       return ListTile(
                         dense: compact,
@@ -1224,15 +1387,50 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           color: isOutOfStock ? Colors.grey : _teal,
                           size: 16,
                         ),
-                        title: Text(
-                          label,
-                          style: TextStyle(
-                            fontSize: compact ? 13 : 14,
-                            color: isOutOfStock ? Colors.grey : Colors.black,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        // ── NEW: Name + dose pill badge side by side ──────────
+                        title: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                medicineName,
+                                style: TextStyle(
+                                  fontSize: compact ? 13 : 14,
+                                  color: isOutOfStock ? Colors.grey : Colors.black87,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (dose.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: isOutOfStock
+                                      ? Colors.grey.shade200
+                                      : _dosePillBg,
+                                  border: Border.all(
+                                    color: isOutOfStock
+                                        ? Colors.grey.shade400
+                                        : _dosePillBorder,
+                                    width: 0.5,
+                                  ),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Text(
+                                  dose,
+                                  style: TextStyle(
+                                    fontSize: compact ? 10 : 11,
+                                    fontWeight: FontWeight.w500,
+                                    color: isOutOfStock
+                                        ? Colors.grey.shade600
+                                        : _dosePillText,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                        // ── NEW: formula subtitle ─────────────────────────
                         subtitle: formula.isNotEmpty
                             ? Text(
                                 formula,
@@ -1246,17 +1444,33 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                 overflow: TextOverflow.ellipsis,
                               )
                             : null,
-                        trailing: Text(
-                          isOutOfStock ? 'Out of Stock' : 'Stock: $availableStock',
-                          style: TextStyle(
-                            color: isOutOfStock
-                                ? Colors.red
-                                : availableStock < 10
-                                    ? Colors.orange
-                                    : Colors.black87,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              isOutOfStock ? 'Out of Stock' : 'Avail: $availableStock',
+                              style: TextStyle(
+                                color: isOutOfStock
+                                    ? Colors.red
+                                    : availableStock < 10
+                                        ? Colors.orange
+                                        : Colors.black87,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                              ),
+                            ),
+                            // ── FIX: Show reserved count if any
+                            if (reservedCount > 0)
+                              Text(
+                                '$reservedCount reserved',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.orange.shade700,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                          ],
                         ),
                         enabled: !isOutOfStock,
                         onTap: isOutOfStock ? null : () => _addMedicineDialog(inventoryMed: m),
@@ -1388,15 +1602,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             ? 'Save Prescription  (+PKR $_extraCharge)'
                             : 'Save Prescription',
                     style: TextStyle(
-                        color: Colors.white,
                         fontSize: compact ? 14 : 16,
                         fontWeight: FontWeight.bold),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _teal,
+                    foregroundColor: Colors.white,
                     padding: EdgeInsets.symmetric(
                         horizontal: 24, vertical: compact ? 14 : 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24)),
                     elevation: 6,
                   ),
                 ),

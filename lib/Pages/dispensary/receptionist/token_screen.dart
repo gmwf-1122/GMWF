@@ -1,26 +1,10 @@
-// lib/pages/dispensary/receptionist/token_screen.dart
-// FIXES:
-//   1. TokenScreenState is PUBLIC — receptionist_screen.dart GlobalKey works.
-//   2. _syncToFirestoreInBackground ALWAYS writes to serials/{dateKey}/{queueType}/{serial}
-//      and falls back to sync queue on offline/error — never silently drops.
-//   3. _resolveQueueType is single source of truth for queue categorisation.
-//   4. entryData has 'queueType' at top level for SyncService.
-//
-// QUEUE TYPE BUG FIX:
-//   Root cause: patient['status'] could be 'Zakat', 'Non-Zakat', 'GMWF' (any case/format).
-//   The resolver already handled this correctly, BUT the Hive save in _generateToken
-//   was NOT storing queueType inside the entryData map key 'queueType' reliably enough
-//   for offline sync to pick it up.  Now:
-//     • entryData['queueType'] = queueType  (already was there — confirmed)
-//     • enqueueSync carries 'queueType' at TOP LEVEL (not buried inside 'data')
-//     • Hive.box put also stores queueType explicitly
-//   This ensures SyncService.resolveQueueType never falls back to 'zakat' for
-//   non-zakat or gmwf patients.
+// lib/Pages/dispensary/receptionist/token_screen.dart
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:another_flushbar/flushbar.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -62,6 +46,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   String? _guardianCnic;
   Map<String, dynamic>? _guardianPatient;
   String? _errorMessage;
+  Map<String, dynamic>? _medicineRestriction;
+  bool _isExceptionPending = false;
 
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
 
@@ -80,20 +66,55 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       });
     }
 
-    _realtimeSub = RealtimeManager().messageStream.listen((message) {
+    _realtimeSub = RealtimeManager().messageStream.listen((message) async {
       final type = message['event_type'] as String?;
       final data = message['data'] as Map<String, dynamic>? ?? {};
       if (!mounted) return;
       final eventBranch = data['branchId']?.toString().toLowerCase().trim();
       final myBranch    = widget.branchId.toLowerCase().trim();
       if (eventBranch != null && eventBranch != myBranch) return;
-      if (type == RealtimeEvents.saveEntry || type == 'token_created') {
+      if (type == RealtimeEvents.saveEntry ||
+          type == 'token_created' ||
+          type == RealtimeEvents.savePrescription) {
         _instantRefresh();
       } else if (type == 'token_reversal_approved') {
         if (_patientData?['patientId'] != null) {
           _checkIfTokenStillExists(_patientData!['patientId'] as String);
         }
         _instantRefresh();
+      } else if (type == RealtimeEvents.tokenExceptionApproved) {
+        final patientId = data['patientId'] as String?;
+        final reason    = data['reason'] as String? ?? 'No reason provided';
+
+        // Match against current patient (either patientId or cleaned CNIC)
+        final myPId       = _patientData?['patientId']?.toString();
+        final myCleanCnic = _getRestrictionId(_patientData ?? {});
+
+        if (patientId != null && (myPId == patientId || myCleanCnic == patientId)) {
+          // ── FIRESTORE FIX: Clear local restriction immediately on approval ──
+          await LocalStorageService.clearMedicineRestriction(widget.branchId, patientId);
+
+          setState(() {
+            _hasTokenToday = false;
+          });
+          _checkMedicineRestriction(_patientData!);
+          _instantRefresh();
+
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              Flushbar(
+                title: '✅ Token Exception Approved',
+                message: 'Reason: $reason',
+                backgroundColor: Colors.green.shade700,
+                duration: const Duration(seconds: 4),
+                flushbarPosition: FlushbarPosition.TOP,
+                margin: const EdgeInsets.all(12),
+                borderRadius: BorderRadius.circular(12),
+                icon: const Icon(Icons.check_circle, color: Colors.white),
+              ).show(context);
+            }
+          });
+        }
       }
     });
   }
@@ -141,11 +162,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     setState(() => _isRefreshing = true);
     try {
       await LocalStorageService.downloadTodayTokens(widget.branchId);
+      // ── FIRESTORE FIX: always refresh restrictions on every update ────────
+      await LocalStorageService.downloadMedicineRestrictions(widget.branchId);
       _estimateNextSerial();
       if (_patientData?['patientId'] != null) {
-        final stillHas =
-            await _tokenExistsToday(_patientData!['patientId'] as String);
+        final patientId = _patientData!['patientId'] as String;
+        final stillHas = await _tokenExistsToday(patientId);
         setState(() => _hasTokenToday = stillHas);
+        _checkMedicineRestriction(_patientData!);
       }
       if (mounted) setState(() {});
     } catch (e) {
@@ -158,6 +182,26 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   Future<void> _checkIfTokenStillExists(String patientId) async {
     final stillHas = await _tokenExistsToday(patientId);
     if (mounted) setState(() => _hasTokenToday = stillHas);
+    if (_patientData != null) _checkMedicineRestriction(_patientData!);
+  }
+
+  /// Checks restriction from local Hive (already refreshed from Firestore
+  /// by the caller — _selectPatient or _instantRefresh).
+  void _checkMedicineRestriction(Map<String, dynamic> patient) {
+    if (!mounted) return;
+    final rId = _getRestrictionId(patient);
+
+    // Individual-based check: uses patientId (CNIC for adults, CNIC_child_Name for kids)
+    final restriction = LocalStorageService.isPatientBlockedByMedicine(widget.branchId, rId);
+
+    setState(() {
+      _medicineRestriction = restriction;
+    });
+  }
+
+  String _getRestrictionId(Map<String, dynamic> p) {
+    // Individual identification: uses patientId (CNIC for adults, CNIC_child_Name for kids)
+    return p['patientId']?.toString() ?? p['id']?.toString() ?? '';
   }
 
   Future<bool> _tokenExistsToday(String patientId) async {
@@ -243,7 +287,17 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Selects a patient and checks medicine restriction.
+  /// Downloads restrictions from Firestore first so internet-only terminals
+  /// always have the latest data before the block check.
   Future<void> _selectPatient(Map<String, dynamic> patient) async {
+    // ── FIRESTORE FIX: pull fresh restrictions before checking ────────────
+    try {
+      await LocalStorageService.downloadMedicineRestrictions(widget.branchId);
+    } catch (e) {
+      debugPrint('[TokenScreen] downloadMedicineRestrictions failed: $e');
+    }
+
     final hasToken = await _tokenExistsToday(patient['patientId'] as String);
     if (mounted) {
       setState(() {
@@ -252,6 +306,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         _patientsList.clear();
         _errorMessage  = null;
       });
+      _checkMedicineRestriction(patient);
     }
   }
 
@@ -282,6 +337,28 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         return;
       }
 
+      // ── FIRESTORE FIX: refresh restrictions one final time at token issue
+      // to catch any race conditions between search and issue ────────────────
+      try {
+        await LocalStorageService.downloadMedicineRestrictions(widget.branchId);
+      } catch (e) {
+        debugPrint('[TokenScreen] Pre-generate restriction refresh failed: $e');
+      }
+
+      _checkMedicineRestriction(_patientData!);
+      final restriction = _medicineRestriction;
+      if (restriction != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('❌ Patient blocked. Medicine expires in ${restriction['remainingDays']} days.'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ));
+        }
+        setState(() => _isLoading = false);
+        return;
+      }
+
       final now     = DateTime.now();
       final dateKey = DateFormat('ddMMyy').format(now);
       // Global serial — count ALL queue types
@@ -292,7 +369,6 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           '$dateKey-${(localCount + 1).toString().padLeft(3, '0')}';
 
       // ── QUEUE TYPE FIX: resolve from patient status ──────────────────────
-      // patient['status'] is set during registration as 'Zakat', 'Non-Zakat', 'GMWF'
       final rawStatus = _patientData!['status']?.toString();
       final queueType = _resolveQueueType(rawStatus);
 
@@ -330,12 +406,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       };
 
       // STEP 1 — Hive (instant, offline-safe)
-      // Store with queueType explicitly so any downstream lookup finds it
       await Hive.box(LocalStorageService.entriesBox)
           .put('${widget.branchId}-$serial', entryData);
 
       // STEP 2 — LAN broadcast
-      // Include queueType at the root level too so ServerSyncManager picks it up
       try {
         RealtimeManager().sendMessage({
           ...RealtimeEvents.payload(
@@ -343,7 +417,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             branchId: widget.branchId,
             data: entryData,
           ),
-          'queueType': queueType,   // root-level for SSM interception
+          'queueType': queueType,
           'dateKey':   dateKey,
           'serial':    serial,
         });
@@ -397,9 +471,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             .doc(widget.branchId)
             .collection('serials')
             .doc(dateKey);
-        // ── FIX: write to correct queueType sub-collection ─────────────────
         await dayRef
-            .collection(queueType)   // 'zakat' | 'non-zakat' | 'gmwf'
+            .collection(queueType)
             .doc(serial)
             .set(entryData, SetOptions(merge: true));
         await dayRef.set(
@@ -416,15 +489,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
     if (!written) {
       try {
-        // ── FIX: queueType at TOP LEVEL in sync op so SyncService reads it
-        // directly via action['queueType'] without a Hive fallback ──────────
         await LocalStorageService.enqueueSync({
           'type':      'save_entry',
           'branchId':  widget.branchId,
           'dateKey':   dateKey,
-          'queueType': queueType,   // TOP LEVEL — SyncService reads this first
+          'queueType': queueType,
           'serial':    serial,
-          'data':      entryData,   // also inside data for compatibility
+          'data':      entryData,
         });
         debugPrint('[TokenScreen] 📥 Queued for sync: $queueType/$serial');
       } catch (e) {
@@ -484,7 +555,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                 const SizedBox(width: 12),
                 Text('Request Patient Edit',
                     style: TextStyle(
-                        fontWeight: FontWeight.bold, 
+                        fontWeight: FontWeight.bold,
                         color: Colors.green.shade700,
                         fontSize: 16)),
               ]),
@@ -719,7 +790,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
               const SizedBox(width: 12),
               Text('Enter Vitals',
                   style: TextStyle(
-                      fontWeight: FontWeight.bold, 
+                      fontWeight: FontWeight.bold,
                       color: Colors.green.shade700,
                       fontSize: 16)),
             ]),
@@ -870,6 +941,94 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  Future<void> _requestTokenException() async {
+    if (_patientData == null) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final rId = _getRestrictionId(_patientData!);
+      final pId = _patientData!['patientId']?.toString() ?? '';
+
+      final matchedId = (LocalStorageService.isPatientBlockedByMedicine(widget.branchId, rId) != null)
+          ? rId : pId;
+
+      final patientName = _patientData!['name']?.toString() ?? 'Unknown';
+
+      final requestData = <String, dynamic>{
+        'requestType':     'token_exception',
+        'status':          'pending',
+        'patientId':       matchedId,
+        'patientName':     patientName,
+        'cnic':            _patientData!['cnic'],
+        'guardianCnic':    _patientData!['guardianCnic'],
+        'restriction':     _medicineRestriction,
+        'requestedBy':     widget.receptionistId,
+        'requestedByName': widget.receptionistName,
+        'requestedAt':     DateTime.now().toIso8601String(),
+        'targetRole':      'doctor',
+        'branchId':        widget.branchId,
+      };
+
+      String docId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+
+      try {
+        final docRef = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('edit_requests')
+            .add({
+          ...requestData,
+          'requestedAt': FieldValue.serverTimestamp(),
+        });
+        docId = docRef.id;
+      } catch (e) {
+        debugPrint('[TokenScreen] Firestore offline — using local ID: $docId');
+      }
+
+      await LocalStorageService.enqueueSync({
+        'type':      'save_token_exception_request',
+        'branchId':  widget.branchId,
+        'requestId': docId,
+        'data':      requestData,
+      });
+
+      RealtimeManager().sendMessage({
+        ...RealtimeEvents.payload(
+          type:     RealtimeEvents.tokenExceptionRequest,
+          branchId: widget.branchId,
+          data: {
+            'requestId':   docId,
+            'patientId':   matchedId,
+            'patientName': patientName,
+            'restriction': _medicineRestriction,
+            'branchId':    widget.branchId,
+          },
+        ),
+      });
+
+      setState(() {
+        _isExceptionPending = true;
+        _isLoading = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Exception request sent to Doctor!'),
+          backgroundColor: Colors.blue,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('❌ Failed to send request: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Widget _editField(
@@ -1137,12 +1296,54 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             ]),
                           ),
                         ],
+                        if (_medicineRestriction != null) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                                color: Colors.orange[50],
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.orange.shade300)),
+                            child: Column(
+                              children: [
+                                Row(children: [
+                                  Icon(Icons.medication_liquid_outlined,
+                                      color: Colors.orange.shade800, size: 22),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text(
+                                    _medicineRestriction!['isLastDay'] == true
+                                      ? 'Restricted: Medicine expires TODAY'
+                                      : 'Restricted: Medicine expires in ${_medicineRestriction!['remainingDays']} days',
+                                    style: TextStyle(
+                                        color:      Colors.orange.shade900,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize:   13),
+                                  )),
+                                ]),
+                                const SizedBox(height: 10),
+                                ElevatedButton.icon(
+                                  onPressed: (_isLoading || _isExceptionPending) ? null : _requestTokenException,
+                                  icon: Icon(
+                                    _isExceptionPending ? Icons.hourglass_top : Icons.emergency_share_outlined,
+                                    size: 18),
+                                  label: Text(_isExceptionPending ? 'Exception Pending...' : 'Request Exception'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isExceptionPending ? Colors.orange.shade300 : Colors.orange.shade700,
+                                    foregroundColor: Colors.white,
+                                    minimumSize: const Size(double.infinity, 40),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             onPressed:
-                                _hasTokenToday ? null : _showVitalsDialog,
+                                (_hasTokenToday || _medicineRestriction != null) ? null : _showVitalsDialog,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: _hasTokenToday
                                   ? Colors.grey[400]
@@ -1157,7 +1358,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             label: Text(
                               _hasTokenToday
                                   ? 'Token Already Issued'
-                                  : 'Enter Vitals & Issue Token',
+                                  : (_medicineRestriction != null
+                                      ? 'Medicine Restriction Active'
+                                      : 'Enter Vitals & Issue Token'),
                               style: TextStyle(
                                   fontSize: isMobile ? 14 : 15),
                             ),

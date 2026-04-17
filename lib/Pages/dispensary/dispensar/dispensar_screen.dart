@@ -1,6 +1,4 @@
-// lib/pages/dispensar_screen.dart
-// MOBILE: Switches from horizontal two-column layout to vertical stacked layout
-// on narrow screens. AppBar compresses. Connection badges collapse on mobile.
+// lib/Pages/dispensary/dispensar/dispensar_screen.dart
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -38,7 +36,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
   bool _online = true;
   bool _isSyncing = false;
   bool _isLoggingOut = false;
-  // Mobile: show queue or form
   bool _showingForm = false;
 
   ConnectionStatus _connectionStatus = const ConnectionStatus(
@@ -52,6 +49,13 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   Map<String, dynamic>? _selectedQueueEntry;
 
+  // [BUG-13] Remove function returned by addReconnectListener
+  VoidCallback? _removeReconnectListener;
+
+  // [BUG-12] Debounce + guard for reconnect-triggered sync
+  Timer? _syncDebounce;
+  bool _reconnectSyncing = false;
+
   static const Color _teal = Color(0xFF00695C);
 
   @override
@@ -59,19 +63,99 @@ class _DispensarScreenState extends State<DispensarScreen> {
     super.initState();
     SyncService().start(widget.branchId);
     _listenConnectivity();
+
+    // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
+    // We do NOT call ConnectionManager().start() in postFrameCallback anymore
+    // because at that point _dispenserName is still null (async fetch pending).
+    // Instead _fetchDispenserName() starts the connection once the name is resolved.
     _fetchDispenserName();
     _loadBranchName();
 
     _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
+      // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
+      if (status.isConnected) {
+        _syncDebounce?.cancel();
+        _syncDebounce = Timer(const Duration(milliseconds: 300), _syncOnReconnect);
+      }
     });
 
+    // [BUG-13] Register via listener list — safe alongside DoctorScreen
+    _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      ConnectionManager().start(role: 'dispenser', branchId: widget.branchId);
       _startBackgroundSync();
     });
 
     _realtimeSub = RealtimeManager().messageStream.listen(_handleRealtimeMessage);
+  }
+
+  // [FIX-USERNAME] Resolve dispenser name then start/update connection with it.
+  Future<void> _fetchDispenserName() async {
+    String? resolvedName;
+
+    // 1. Try local cache first (fast, no network needed).
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final local = LocalStorageService.getLocalUserByUid(user.uid);
+      resolvedName = (local?['username'] as String?)?.trim();
+      if (resolvedName?.isEmpty == true) resolvedName = null;
+    }
+
+    // 2. Fall back to email prefix while Firestore loads.
+    resolvedName ??= user?.email?.split('@').first;
+
+    if (mounted) setState(() => _dispenserName = resolvedName);
+
+    // 3. Start connection with whatever name we have so far.
+    //    This ensures the identify message goes out quickly.
+    ConnectionManager().start(
+      role:     'dispenser',
+      branchId: widget.branchId,
+      username: resolvedName,
+    );
+    if (resolvedName != null) {
+      RealtimeManager().updateUsername(resolvedName);
+    }
+
+    // 4. Fetch from Firestore for the authoritative display name.
+    if (user != null) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        final firestoreName =
+            (doc.data()?['username'] as String?)?.trim() ??
+            (doc.data()?['name']     as String?)?.trim();
+        if (firestoreName != null && firestoreName.isNotEmpty) {
+          if (mounted) setState(() => _dispenserName = firestoreName);
+          // [FIX-USERNAME] Push updated name into RealtimeManager so future
+          // messages carry the correct attribution.
+          RealtimeManager().updateUsername(firestoreName);
+        }
+      } catch (e) {
+        debugPrint('[Dispenser] Could not fetch dispenser name from Firestore: $e');
+      }
+    }
+  }
+
+  // FIX-SYNC-2: Upload first, then let triggerUpload() decide whether it is
+  // safe to download. Do NOT call downloadTodayTokens() directly here —
+  // that would pull stale Firestore data before pending items are uploaded.
+  Future<void> _syncOnReconnect() async {
+    if (!mounted || _reconnectSyncing) return;
+    _reconnectSyncing = true;
+    try {
+      // triggerUpload() handles upload → conditional download in the right order
+      await SyncService().triggerUpload();
+      if (mounted) setState(() {});
+      debugPrint('[Dispenser] ✅ Synced on reconnect');
+    } catch (e) {
+      debugPrint('[Dispenser] Reconnect sync failed: $e');
+    } finally {
+      _reconnectSyncing = false;
+    }
   }
 
   Future<void> _startBackgroundSync() async {
@@ -113,19 +197,30 @@ class _DispensarScreenState extends State<DispensarScreen> {
       }
       if (serial == _selectedQueueEntry?['serial'] && mounted) setState(() {});
 
-      Flushbar(
-        message: '💊 Prescription ready for #$serial',
-        backgroundColor: Colors.blue.shade700,
-        duration: const Duration(seconds: 5),
-      ).show(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(
+            message: '💊 Prescription ready for #$serial',
+            backgroundColor: Colors.blue.shade700,
+            duration: const Duration(seconds: 5),
+          ).show(context);
+        }
+      });
+
     } else if (type == RealtimeEvents.saveEntry || type == 'token_created') {
-      Hive.box(LocalStorageService.entriesBox).put('${widget.branchId}-$serial', data);
+      // [BUG-14] Use saveEntryLocal for proper sanitisation
+      LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
       if (mounted) setState(() {});
-      Flushbar(
-        message: '🎟️ New token: #$serial',
-        backgroundColor: Colors.green.shade700,
-        duration: const Duration(seconds: 4),
-      ).show(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(
+            message: '🎟️ New token: #$serial',
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 4),
+          ).show(context);
+        }
+      });
+
     } else if (type == 'dispense_completed') {
       final box = Hive.box(LocalStorageService.entriesBox);
       final key = '${widget.branchId}-$serial';
@@ -142,13 +237,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
         });
       }
     }
-  }
-
-  Future<void> _fetchDispenserName() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    final local = LocalStorageService.getLocalUserByUid(user.uid);
-    if (mounted) setState(() => _dispenserName = local?['username'] ?? user.email?.split('@').first);
   }
 
   Future<void> _loadBranchName() async {
@@ -169,11 +257,15 @@ class _DispensarScreenState extends State<DispensarScreen> {
       final isOnline = results.any((r) => r != ConnectivityResult.none);
       if (_online != isOnline && mounted) {
         setState(() => _online = isOnline);
-        Flushbar(
-          message: isOnline ? 'Internet restored — syncing...' : 'Offline (LAN still works)',
-          backgroundColor: isOnline ? Colors.green.shade700 : Colors.orange.shade700,
-          duration: const Duration(seconds: 4),
-        ).show(context);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Flushbar(
+              message: isOnline ? 'Internet restored — syncing...' : 'Offline (LAN still works)',
+              backgroundColor: isOnline ? Colors.green.shade700 : Colors.orange.shade700,
+              duration: const Duration(seconds: 4),
+            ).show(context);
+          }
+        });
         if (isOnline) _forceSync();
       }
     });
@@ -184,9 +276,19 @@ class _DispensarScreenState extends State<DispensarScreen> {
     setState(() => _isSyncing = true);
     try {
       await SyncService().forceFullRefresh(widget.branchId);
-      Flushbar(message: 'Full sync completed', backgroundColor: Colors.green.shade700, duration: const Duration(seconds: 4)).show(context);
+      await LocalStorageService.downloadTodayTokens(widget.branchId);
+      if (mounted) setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(message: 'Full sync completed', backgroundColor: Colors.green.shade700, duration: const Duration(seconds: 4)).show(context);
+        }
+      });
     } catch (e) {
-      Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700, duration: const Duration(seconds: 5)).show(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700, duration: const Duration(seconds: 5)).show(context);
+        }
+      });
     } finally {
       if (mounted) setState(() => _isSyncing = false);
     }
@@ -229,16 +331,15 @@ class _DispensarScreenState extends State<DispensarScreen> {
         title: Row(children: [
           Image.asset('assets/logo/gmwf.png', height: 36),
           const SizedBox(width: 10),
-          Expanded(
+          const Expanded(
             child: Text(
               'Dispensary',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
               overflow: TextOverflow.ellipsis,
             ),
           ),
         ]),
         actions: [
-          // Compact status dot — LAN
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
             width: 10, height: 10,
@@ -247,7 +348,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
               color: _connectionStatus.isConnected ? Colors.greenAccent : Colors.redAccent,
             ),
           ),
-          // Compact status dot — Internet
           Container(
             margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
             width: 10, height: 10,
@@ -263,17 +363,11 @@ class _DispensarScreenState extends State<DispensarScreen> {
             )
           else
             IconButton(icon: const Icon(Icons.sync, color: Colors.white, size: 22), onPressed: _forceSync),
-          // ── Inventory: dispenser gets back button, NO Adjust button ──────
           IconButton(
             icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 22),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => InventoryPage(
-                  branchId: widget.branchId,
-                  isDispenser: true,
-                ),
-              ),
+              MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDispenser: true)),
             ),
           ),
           _isLoggingOut
@@ -283,7 +377,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
       );
     }
 
-    // Desktop AppBar
     return AppBar(
       backgroundColor: _teal,
       elevation: 10,
@@ -330,17 +423,11 @@ class _DispensarScreenState extends State<DispensarScreen> {
               : const Icon(Icons.sync, size: 32, color: Colors.white),
           onPressed: _isSyncing ? null : _forceSync,
         ),
-        // ── Inventory: dispenser gets back button, NO Adjust button ────────
         IconButton(
           icon: const Icon(Icons.inventory_2_outlined, size: 32, color: Colors.white),
           onPressed: () => Navigator.push(
             context,
-            MaterialPageRoute(
-              builder: (_) => InventoryPage(
-                branchId: widget.branchId,
-                isDispenser: true,
-              ),
-            ),
+            MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDispenser: true)),
           ),
         ),
         _isLoggingOut
@@ -372,9 +459,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
                     colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
                   ),
                 ),
-                child: isMobile
-                    ? _buildMobileLayout()
-                    : _buildDesktopLayout(),
+                child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
               ),
             );
           },
@@ -383,7 +468,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     );
   }
 
-  // ── Mobile: single-panel with back navigation ────────────────────────────
   Widget _buildMobileLayout() {
     if (_showingForm && _selectedQueueEntry != null) {
       return Column(children: [
@@ -433,7 +517,6 @@ class _DispensarScreenState extends State<DispensarScreen> {
     );
   }
 
-  // ── Desktop: two-column layout ───────────────────────────────────────────
   Widget _buildDesktopLayout() {
     return LayoutBuilder(builder: (context, constraints) {
       final isTablet = constraints.maxWidth >= 1000;
@@ -493,6 +576,9 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   @override
   void dispose() {
+    _syncDebounce?.cancel();
+    // [BUG-13] Unregister from ConnectionManager's listener list
+    _removeReconnectListener?.call();
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

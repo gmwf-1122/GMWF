@@ -1,11 +1,4 @@
-// lib/pages/patient_form.dart
-// CHANGES IN THIS VERSION:
-//   • When daysOfMedicine > 1 a teal banner is shown at the top of the
-//     prescription content: "Medicines for X days — total quantities below".
-//   • Medicine quantities shown in the dispenser view are the TOTAL for all
-//     days (already multiplied by the doctor at save time). A small per-day
-//     note is added below each item when quantityPerDay is available.
-// All previous fixes (FIX-INV, FIX-QT) are retained unchanged.
+// lib/Pages/dispensary/dispensar/patient_form.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -16,19 +9,16 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
-
 import '../../../services/local_storage_service.dart';
 import '../../../services/sync_service.dart';
 import 'patient_form_helper.dart';
 import '../../../realtime/realtime_manager.dart';
 import '../../../realtime/realtime_events.dart';
-
 class PatientForm extends StatefulWidget {
   final String branchId;
   final Map<String, dynamic> queueEntry;
   final VoidCallback? onDispensed;
   final String? dispenserName;
-
   const PatientForm({
     super.key,
     required this.branchId,
@@ -36,26 +26,21 @@ class PatientForm extends StatefulWidget {
     this.onDispensed,
     this.dispenserName,
   });
-
   @override
   State<PatientForm> createState() => _PatientFormState();
 }
-
 class _PatientFormState extends State<PatientForm> {
   Map<String, dynamic> _data = {};
   String? _gender;
   String? _age;
   String? _branchName;
-  bool _isDispensed           = false;
-  bool _isPrinting            = false;
-  bool _isDispensing          = false;
-  bool _loadingBranch         = true;
+  bool _isDispensed = false;
+  bool _isPrinting = false;
+  bool _isDispensing = false;
+  bool _loadingBranch = true;
   bool _isLoadingPrescription = true;
-
   static const Color _teal = Color(0xFF00695C);
-
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
-
   // ─── Queue-type normaliser ────────────────────────────────────────────────
   static String _normaliseQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
@@ -64,7 +49,6 @@ class _PatientFormState extends State<PatientForm> {
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     return 'zakat';
   }
-
   // ─── Serial resolver ──────────────────────────────────────────────────────
   String get _resolvedSerial {
     for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
@@ -84,7 +68,6 @@ class _PatientFormState extends State<PatientForm> {
     }
     return '';
   }
-
   // ─── Queue-type resolver ──────────────────────────────────────────────────
   String get _resolvedQueueType {
     final serial = _resolvedSerial;
@@ -99,44 +82,35 @@ class _PatientFormState extends State<PatientForm> {
     if (fromData != null && fromData.isNotEmpty) return _normaliseQueueType(fromData);
     return 'zakat';
   }
-
   // ─── Days of medicine ─────────────────────────────────────────────────────
   int get _daysOfMedicine {
-    // From loaded prescription data
     final fromData = _data['daysOfMedicine'];
     if (fromData is int && fromData > 1) return fromData;
-    // From embedded prescription in queue entry
     final embedded = widget.queueEntry['prescription'];
     if (embedded is Map) {
       final d = embedded['daysOfMedicine'];
       if (d is int && d > 1) return d;
     }
-    // From top-level entry
     final topLevel = widget.queueEntry['daysOfMedicine'];
     if (topLevel is int && topLevel > 1) return topLevel;
     return 1;
   }
-
   @override
   void initState() {
     super.initState();
     _loadBranchName();
     _loadPrescription();
-
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
-      final type  = event['event_type'] as String?;
-      final data  = event['data'] as Map<String, dynamic>? ?? {};
+      final type = event['event_type'] as String?;
+      final data = event['data'] as Map<String, dynamic>? ?? {};
       if (type == null) return;
-
       final eventSerial = data['serial']?.toString().trim().toLowerCase();
-      final mySerial    = _resolvedSerial.toLowerCase();
+      final mySerial = _resolvedSerial.toLowerCase();
       final eventBranch = data['branchId']?.toString().trim().toLowerCase();
-      final myBranch    = widget.branchId.toLowerCase().trim();
-
+      final myBranch = widget.branchId.toLowerCase().trim();
       if (eventBranch != null && eventBranch != myBranch) return;
       if (eventSerial != null && eventSerial.isNotEmpty &&
           mySerial.isNotEmpty && eventSerial != mySerial) return;
-
       if (type == RealtimeEvents.savePrescription ||
           type == RealtimeEvents.saveEntry ||
           type == 'dispense_completed') {
@@ -144,13 +118,11 @@ class _PatientFormState extends State<PatientForm> {
       }
     });
   }
-
   @override
   void dispose() {
     _realtimeSub?.cancel();
     super.dispose();
   }
-
   // ─── Branch name ──────────────────────────────────────────────────────────
   Future<void> _loadBranchName() async {
     if (widget.branchId.isEmpty) {
@@ -161,38 +133,33 @@ class _PatientFormState extends State<PatientForm> {
       final doc = await FirebaseFirestore.instance
           .collection('branches').doc(widget.branchId).get();
       if (mounted) setState(() {
-        _branchName    = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
+        _branchName = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
         _loadingBranch = false;
       });
     } catch (_) {
       if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
     }
   }
-
   // ─── Prescription loader ──────────────────────────────────────────────────
   Future<void> _loadPrescription() async {
     if (!mounted) return;
     setState(() => _isLoadingPrescription = true);
-
     String serial = '';
     for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
       final v = widget.queueEntry[f]?.toString().trim() ?? '';
       if (v.isNotEmpty) { serial = v.toLowerCase(); break; }
     }
-
     String cnic = '';
     for (final f in ['patientCnic', 'cnic', 'guardianCnic', 'patientCNIC', 'guardianCNIC']) {
       final v = (widget.queueEntry[f]?.toString() ?? '')
           .trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
       if (v.isNotEmpty && v != '0000000000000') { cnic = v; break; }
     }
-
     Map<String, dynamic> found = {};
-
     found = _searchHive(serial, cnic);
     if (found.isEmpty) {
       final entryKey = '${widget.branchId}-$serial';
-      final entry    = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+      final entry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
       final embedded = (entry is Map) ? entry['prescription'] : null;
       if (embedded is Map && embedded.isNotEmpty) {
         found = Map<String, dynamic>.from(embedded);
@@ -211,29 +178,25 @@ class _PatientFormState extends State<PatientForm> {
       if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
     if (found.isEmpty) found = _searchHive(serial, cnic);
-
-    final vitals  = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
-    final gender  = found['patientGender']?.toString() ??
+    final vitals = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
+    final gender = found['patientGender']?.toString() ??
         widget.queueEntry['patientGender']?.toString() ??
         vitals['gender']?.toString() ?? 'N/A';
-    final age     = found['patientAge']?.toString() ??
+    final age = found['patientAge']?.toString() ??
         widget.queueEntry['patientAge']?.toString() ??
         vitals['age']?.toString() ?? 'N/A';
-
     final dispenseStatus = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase();
     final patientName = found['patientName']?.toString() ??
         widget.queueEntry['patientName']?.toString() ?? 'Unknown Patient';
     if (found.isNotEmpty) found['patientName'] = patientName;
-
     if (mounted) setState(() {
-      _data                  = found;
-      _gender                = gender;
-      _age                   = age;
-      _isDispensed           = dispenseStatus == 'dispensed';
+      _data = found;
+      _gender = gender;
+      _age = age;
+      _isDispensed = dispenseStatus == 'dispensed';
       _isLoadingPrescription = false;
     });
   }
-
   Map<String, dynamic> _searchHive(String serial, String cnic) {
     final box = Hive.box(LocalStorageService.prescriptionsBox);
     if (cnic.isNotEmpty && serial.isNotEmpty) {
@@ -265,7 +228,6 @@ class _PatientFormState extends State<PatientForm> {
     }
     return {};
   }
-
   Future<Map<String, dynamic>> _fetchFromPrescriptionsByCnic(String serial, String cnic) async {
     try {
       final snap = await FirebaseFirestore.instance
@@ -280,7 +242,6 @@ class _PatientFormState extends State<PatientForm> {
     } catch (e) { debugPrint('[PatientForm] Firestore prescriptions/{cnic} error: $e'); }
     return {};
   }
-
   Future<Map<String, dynamic>> _fetchFromPrescriptionsScanAll(String serial) async {
     try {
       final cnicDocs = await FirebaseFirestore.instance
@@ -298,7 +259,6 @@ class _PatientFormState extends State<PatientForm> {
     } catch (e) { debugPrint('[PatientForm] Firestore scan-all error: $e'); }
     return {};
   }
-
   Future<Map<String, dynamic>> _fetchFromSerialsEmbedded(String serial) async {
     try {
       final dateKey = serial.contains('-') ? serial.split('-')[0] : '';
@@ -323,25 +283,22 @@ class _PatientFormState extends State<PatientForm> {
     } catch (e) { debugPrint('[PatientForm] Firestore serials embedded error: $e'); }
     return {};
   }
-
   // ─── Helpers ──────────────────────────────────────────────────────────────
   bool get _hasPrintableContent {
-    final lab = (_data['labResults']    ?? []) as List;
-    final rx  = (_data['prescriptions'] ?? []) as List;
+    final lab = (_data['labResults'] ?? []) as List;
+    final rx = (_data['prescriptions'] ?? []) as List;
     return lab.isNotEmpty || rx.isNotEmpty;
   }
-
   String _getMedAbbrev(String? type) {
     final t = (type ?? '').toLowerCase();
-    if (t.contains('syrup'))     return 'syp.';
+    if (t.contains('syrup')) return 'syp.';
     if (t.contains('injection')) return 'inj.';
-    if (t.contains('tablet'))    return 'tab.';
-    if (t.contains('capsule'))   return 'cap.';
-    if (t.contains('drip'))      return 'drip.';
-    if (t.contains('syringe'))   return 'syr.';
+    if (t.contains('tablet')) return 'tab.';
+    if (t.contains('capsule')) return 'cap.';
+    if (t.contains('drip')) return 'drip.';
+    if (t.contains('syringe')) return 'syr.';
     return '';
   }
-
   String _firstNonEmpty(List<dynamic> candidates) {
     for (final c in candidates) {
       final s = c?.toString().trim() ?? '';
@@ -349,7 +306,6 @@ class _PatientFormState extends State<PatientForm> {
     }
     return '';
   }
-
   // ─── Print ────────────────────────────────────────────────────────────────
   Future<void> _printOnly() async {
     if (!_hasPrintableContent) {
@@ -371,35 +327,27 @@ class _PatientFormState extends State<PatientForm> {
       if (mounted) setState(() => _isPrinting = false);
     }
   }
-
   // ─── Inventory deduction ──────────────────────────────────────────────────
-  // Tablets / capsules / syrups: deduct quantity × days (N days' supply).
-  // Injections / drips / nebulisation: always × 1 — one-time use only.
   static bool _isInjectableType(String? type) {
     final t = (type ?? '').toLowerCase();
     return t.contains('injection') || t.contains('inj') ||
         t.contains('drip') || t.contains('syringe') || t.contains('nebulization');
   }
-
   Future<void> _deductInventoryLocally(
       String branchId, String serial, List<dynamic> medicines, int days) async {
     for (final med in medicines) {
       if (med is! Map) continue;
-      final medMap     = Map<String, dynamic>.from(med);
+      final medMap = Map<String, dynamic>.from(med);
       final medicineId = (medMap['inventoryId'] ??
               medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
-      final perDayRaw  = medMap['quantity'] ?? medMap['qty'] ?? 0;
-      final perDay     = perDayRaw is num
+      final perDayRaw = medMap['quantity'] ?? medMap['qty'] ?? 0;
+      final perDay = perDayRaw is num
           ? perDayRaw.toDouble()
           : double.tryParse(perDayRaw.toString()) ?? 0.0;
       if (medicineId.isEmpty || perDay <= 0) continue;
-
-      // Injections/drips always × 1; oral/syrup × days
       final multiplier = _isInjectableType(medMap['type']?.toString()) ? 1 : days;
-      final qtyNum     = perDay * multiplier;
-
+      final qtyNum = perDay * multiplier;
       debugPrint('[PatientForm] deduct $medicineId: ${perDay}/day × $multiplier = $qtyNum');
-
       try {
         final stockBox = Hive.box('stock_items');
         final existing = stockBox.get(medicineId);
@@ -413,10 +361,9 @@ class _PatientFormState extends State<PatientForm> {
       } catch (e) {
         debugPrint('[PatientForm] Hive stock decrement failed $medicineId: $e');
       }
-
       bool firestoreWritten = false;
       try {
-        final conn   = await Connectivity().checkConnectivity();
+        final conn = await Connectivity().checkConnectivity();
         final online = !conn.contains(ConnectivityResult.none);
         if (online) {
           await FirebaseFirestore.instance
@@ -429,7 +376,6 @@ class _PatientFormState extends State<PatientForm> {
       } catch (e) {
         debugPrint('[PatientForm] Firestore inventory update failed: $e');
       }
-
       if (!firestoreWritten) {
         await LocalStorageService.enqueueSync({
           'type': 'update_inventory', 'branchId': branchId,
@@ -441,11 +387,9 @@ class _PatientFormState extends State<PatientForm> {
       }
     }
   }
-
   // ─── Dispense ─────────────────────────────────────────────────────────────
   Future<void> _dispenseOnly() async {
     if (_isDispensed) return;
-
     final days = _daysOfMedicine;
     final confirm = await showDialog<bool>(
       context: context,
@@ -459,26 +403,26 @@ class _PatientFormState extends State<PatientForm> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: _teal),
-            child: const Text('Dispense', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _teal,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Dispense'),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
-
     setState(() => _isDispensing = true);
     try {
       final serial = _resolvedSerial;
       if (serial.isEmpty) throw Exception(
           'Missing serial — queueEntry keys: ${widget.queueEntry.keys.toList()}');
-
-      final queueType     = _resolvedQueueType;
-      final now           = DateTime.now();
-      final dateKey       = DateFormat('ddMMyy').format(now);
-      final nowIso        = now.toIso8601String();
+      final queueType = _resolvedQueueType;
+      final now = DateTime.now();
+      final dateKey = DateFormat('ddMMyy').format(now);
+      final nowIso = now.toIso8601String();
       final dispenserName = widget.dispenserName ?? 'Unknown Dispenser';
-
       final doctorName = _firstNonEmpty([
         _data['doctorName'], _data['prescribedBy'], _data['updatedBy'],
         widget.queueEntry['doctorName'], 'Unknown',
@@ -487,68 +431,67 @@ class _PatientFormState extends State<PatientForm> {
         widget.queueEntry['createdByName'], widget.queueEntry['tokenBy'],
         widget.queueEntry['createdBy'], 'Unknown',
       ]);
-
+      // FIX-SYNC-4: Include 'status': 'completed' so that when this map is
+      // written to the Firestore serial doc (via enqueueSync below), a
+      // subsequent download will see status == 'completed' rather than the
+      // stale 'waiting' value, preventing the token from reverting.
       final minimalUpdate = {
         'dispenseStatus': 'dispensed',
-        'dispensedAt':    nowIso,
-        'dispensedBy':    dispenserName,
-        'dispenserName':  dispenserName,
-        'serial':         serial,
-        'dateKey':        dateKey,
-        'queueType':      queueType,
-        'branchId':       widget.branchId,
+        'status': 'completed', // ← FIX-SYNC-4
+        'dispensedAt': nowIso,
+        'dispensedBy': dispenserName,
+        'dispenserName': dispenserName,
+        'serial': serial,
+        'dateKey': dateKey,
+        'queueType': queueType,
+        'branchId': widget.branchId,
         'daysOfMedicine': days,
       };
-
-      final entryKey     = '${widget.branchId}-$serial';
+      final entryKey = '${widget.branchId}-$serial';
       final currentEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
       if (currentEntry != null) {
         final updated = Map<String, dynamic>.from(currentEntry)..addAll(minimalUpdate);
         await Hive.box(LocalStorageService.entriesBox).put(entryKey, updated);
       }
-
       final dispensaryRecord = {
         ...Map<String, dynamic>.from(widget.queueEntry),
         ...Map<String, dynamic>.from(_data),
-        'branchId':       widget.branchId,
-        'serial':         serial,
-        'dateKey':        dateKey,
-        'date':           dateKey,
-        'queueType':      queueType,
-        'createdAt':      nowIso,
+        'branchId': widget.branchId,
+        'serial': serial,
+        'dateKey': dateKey,
+        'date': dateKey,
+        'queueType': queueType,
+        'createdAt': nowIso,
         'dispenseStatus': 'dispensed',
-        'dispensedAt':    nowIso,
-        'dispensedBy':    dispenserName,
-        'dispenserName':  dispenserName,
-        'doctorName':     doctorName,
-        'prescribedBy':   doctorName,
-        'tokenBy':        tokenBy,
-        'createdByName':  tokenBy,
+        'status': 'completed', // ← FIX-SYNC-4
+        'dispensedAt': nowIso,
+        'dispensedBy': dispenserName,
+        'dispenserName': dispenserName,
+        'doctorName': doctorName,
+        'prescribedBy': doctorName,
+        'tokenBy': tokenBy,
+        'createdByName': tokenBy,
         'daysOfMedicine': days,
       };
       await Hive.box(LocalStorageService.dispensaryBox)
           .put('${widget.branchId}_${dateKey}_$serial', dispensaryRecord);
-
       final medicines = (_data['prescriptions'] as List?)
           ?.where((m) => m is Map &&
               (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
           .toList() ?? [];
       if (medicines.isNotEmpty) {
-        // Pass days so tab/cap/syrup are deducted × days; injectables always × 1
         await _deductInventoryLocally(widget.branchId, serial, medicines, days);
       }
-
       RealtimeManager().sendMessage(RealtimeEvents.payload(
         type: 'dispense_completed',
         data: {
           'branchId': widget.branchId,
-          'serial':   serial,
-          'dateKey':  dateKey,
+          'serial': serial,
+          'dateKey': dateKey,
           ...minimalUpdate,
           if (medicines.isNotEmpty) 'medicines': medicines,
         },
       ));
-
       try {
         final branchRef = FirebaseFirestore.instance
             .collection('branches').doc(widget.branchId);
@@ -564,15 +507,12 @@ class _PatientFormState extends State<PatientForm> {
           'dateKey': dateKey, 'serial': serial, 'data': dispensaryRecord,
         });
       }
-
       await LocalStorageService.enqueueSync({
         'type': 'update_serial_status', 'branchId': widget.branchId,
         'dateKey': dateKey, 'queueType': queueType, 'serial': serial,
         'data': minimalUpdate,
       });
-
       SyncService().triggerUpload();
-
       if (mounted) setState(() => _isDispensed = true);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(days > 1
@@ -587,7 +527,6 @@ class _PatientFormState extends State<PatientForm> {
       if (mounted) setState(() => _isDispensing = false);
     }
   }
-
   // ─── UI helpers ───────────────────────────────────────────────────────────
   Widget _sectionTitle(String title, IconData icon, {bool isMobile = false}) =>
       Padding(
@@ -598,7 +537,6 @@ class _PatientFormState extends State<PatientForm> {
           Text(title, style: PatientFormHelper.robotoBold(size: isMobile ? 14 : 18, color: _teal)),
         ]),
       );
-
   Widget _linedList(List items, {bool isLab = false, bool isMobile = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
     if (isLab) {
@@ -611,23 +549,18 @@ class _PatientFormState extends State<PatientForm> {
         )).toList(),
       );
     }
-
     final days = _daysOfMedicine;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: items.map((item) {
-        final abbrev      = _getMedAbbrev(item['type']);
-        final rawName     = item['name']?.toString() ?? '';
+        final abbrev = _getMedAbbrev(item['type']);
+        final rawName = item['name']?.toString() ?? '';
         final displayName = '$abbrev $rawName'.trim();
-        final urduLine    = PatientFormHelper.buildUrduDosageLine(item);
-        final mealUrdu    = PatientFormHelper.getMealUrdu(item['meal']?.toString() ?? '');
-        final isInj       = _isInjectableType(item['type']?.toString());
-        // Per-day quantity as prescribed by the doctor
-        final perDayQty   = ((item['quantity'] ?? 1) as num).toInt();
-        // Total given at dispense time (injections/drips always ×1)
-        final totalQty    = isInj ? perDayQty : perDayQty * days;
-
+        final urduLine = PatientFormHelper.buildUrduDosageLine(item);
+        final mealUrdu = PatientFormHelper.getMealUrdu(item['meal']?.toString() ?? '');
+        final isInj = _isInjectableType(item['type']?.toString());
+        final perDayQty = ((item['quantity'] ?? 1) as num).toInt();
+        final totalQty = isInj ? perDayQty : perDayQty * days;
         return Container(
           padding: EdgeInsets.only(
               top: isMobile ? 4 : 6, bottom: isMobile ? 10 : 12),
@@ -646,8 +579,6 @@ class _PatientFormState extends State<PatientForm> {
                         style: PatientFormHelper.robotoBold(
                             size: isMobile ? 13 : 16)),
                     const SizedBox(height: 2),
-                    // For multi-day non-injectable: show per-day timing and
-                    // a teal note saying how many days total are being dispensed.
                     if (days > 1 && !isInj)
                       Container(
                         margin: const EdgeInsets.only(top: 2),
@@ -676,7 +607,6 @@ class _PatientFormState extends State<PatientForm> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  // Urdu dosage line shows per-day instruction unchanged
                   if (urduLine.isNotEmpty)
                     Text(
                       urduLine,
@@ -708,7 +638,6 @@ class _PatientFormState extends State<PatientForm> {
       }).toList(),
     );
   }
-
   // ─── "Medicines for X days" banner ────────────────────────────────────────
   Widget _buildDaysBanner({required bool isMobile}) {
     final days = _daysOfMedicine;
@@ -739,7 +668,6 @@ class _PatientFormState extends State<PatientForm> {
       ]),
     );
   }
-
   // ─── Header / footer ──────────────────────────────────────────────────────
   Widget _buildHeader({required bool isMobile}) => ClipRRect(
     borderRadius: BorderRadius.vertical(top: Radius.circular(isMobile ? 12 : 20)),
@@ -763,7 +691,9 @@ class _PatientFormState extends State<PatientForm> {
                     style: PatientFormHelper.robotoBold(size: 10, color: Colors.white70)),
               ])),
               const SizedBox(width: 8),
-              Image.asset('assets/images/moon.png', width: 48, height: 48),
+              Transform.rotate(
+                  angle: -0.10, // Increased anti-clockwise rotation
+                  child: Image.asset('assets/images/moon.png', width: 48, height: 48)),
             ])
           : Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
               Image.asset('assets/logo/gmwf.png', width: 100, height: 100),
@@ -775,11 +705,12 @@ class _PatientFormState extends State<PatientForm> {
                 Text('Free Dispensary',
                     style: PatientFormHelper.robotoBold(size: 24, color: Colors.white)),
               ])),
-              Image.asset('assets/images/moon.png', width: 90, height: 90),
+              Transform.rotate(
+                  angle: -0.4, // Increased anti-clockwise rotation
+                  child: Image.asset('assets/images/moon.png', width: 90, height: 90)),
             ]),
     ),
   );
-
   Widget _buildFooter({required bool isMobile}) => ClipRRect(
     borderRadius: BorderRadius.vertical(bottom: Radius.circular(isMobile ? 12 : 20)),
     child: Container(
@@ -795,9 +726,8 @@ class _PatientFormState extends State<PatientForm> {
       ])),
     ),
   );
-
   Widget _buildActionBar({required bool isMobile}) {
-    final days    = _daysOfMedicine;
+    final days = _daysOfMedicine;
     final printBtn = ElevatedButton.icon(
       onPressed: _hasPrintableContent && !_isPrinting ? _printOnly : null,
       icon: _isPrinting
@@ -805,14 +735,14 @@ class _PatientFormState extends State<PatientForm> {
               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           : const Icon(Icons.print, color: Colors.white),
       label: Text(_isPrinting ? 'Printing...' : 'Print Slip',
-          style: TextStyle(color: Colors.white,
+          style: TextStyle(
               fontSize: isMobile ? 13 : 16, fontWeight: FontWeight.bold)),
       style: ElevatedButton.styleFrom(
         backgroundColor: _hasPrintableContent ? _teal : Colors.grey.shade400,
+        foregroundColor: Colors.white,
         padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: isMobile ? 14 : 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 8),
     );
-
     final dispenseLabel = _isDispensed
         ? 'Already Dispensed'
         : _isDispensing
@@ -820,7 +750,6 @@ class _PatientFormState extends State<PatientForm> {
             : days > 1
                 ? 'Dispense ($days days\' supply)'
                 : 'Dispense Medicine';
-
     final dispenseBtn = ElevatedButton.icon(
       onPressed: _isDispensed || _isDispensing ? null : _dispenseOnly,
       icon: _isDispensing
@@ -828,14 +757,14 @@ class _PatientFormState extends State<PatientForm> {
               child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
           : const Icon(Icons.check_circle, color: Colors.white),
       label: Text(dispenseLabel,
-          style: TextStyle(color: Colors.white,
+          style: TextStyle(
               fontSize: isMobile ? 13 : 16, fontWeight: FontWeight.bold)),
       style: ElevatedButton.styleFrom(
         backgroundColor: _isDispensed ? Colors.grey.shade600 : _teal,
+        foregroundColor: Colors.white,
         padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 40, vertical: isMobile ? 14 : 20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)), elevation: 8),
     );
-
     return Container(
       width: double.infinity, color: Colors.white,
       padding: EdgeInsets.symmetric(
@@ -851,18 +780,16 @@ class _PatientFormState extends State<PatientForm> {
             ]),
     );
   }
-
   Widget _buildContent({required bool isMobile}) {
-    final prescriptions        = (_data['prescriptions'] ?? []) as List;
-    final labTests             = (_data['labResults']    ?? []) as List;
-    final diagnosis            = _data['diagnosis']?.toString() ?? '';
-    final patientName          = _data['patientName'] ?? 'Unknown';
-    final inventoryMeds        = prescriptions.where((m) => m['inventoryId'] != null && !PatientFormHelper.isInjectable(m)).toList();
+    final prescriptions = (_data['prescriptions'] ?? []) as List;
+    final labTests = (_data['labResults'] ?? []) as List;
+    final diagnosis = _data['diagnosis']?.toString() ?? '';
+    final patientName = _data['patientName'] ?? 'Unknown';
+    final inventoryMeds = prescriptions.where((m) => m['inventoryId'] != null && !PatientFormHelper.isInjectable(m)).toList();
     final inventoryInjectables = prescriptions.where((m) => m['inventoryId'] != null && PatientFormHelper.isInjectable(m)).toList();
-    final customMeds           = prescriptions.where((m) => m['inventoryId'] == null && !PatientFormHelper.isInjectable(m)).toList();
-    final customInjectables    = prescriptions.where((m) => m['inventoryId'] == null && PatientFormHelper.isInjectable(m)).toList();
-    final basePadding          = isMobile ? 16.0 : 40.0;
-
+    final customMeds = prescriptions.where((m) => m['inventoryId'] == null && !PatientFormHelper.isInjectable(m)).toList();
+    final customInjectables = prescriptions.where((m) => m['inventoryId'] == null && PatientFormHelper.isInjectable(m)).toList();
+    final basePadding = isMobile ? 16.0 : 40.0;
     Widget patientInfo = Wrap(spacing: 6, runSpacing: 4, children: [
       RichText(text: TextSpan(style: PatientFormHelper.robotoBold(size: isMobile ? 13 : 18), children: [
         TextSpan(text: 'Patient: ', style: PatientFormHelper.robotoBold(color: _teal, size: isMobile ? 13 : 18)),
@@ -877,9 +804,7 @@ class _PatientFormState extends State<PatientForm> {
         TextSpan(text: _age ?? 'N/A', style: PatientFormHelper.robotoBold(size: isMobile ? 14 : 20)),
       ])),
     ]);
-
     Widget medicineBody = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // Days banner
       _buildDaysBanner(isMobile: isMobile),
       patientInfo,
       if (diagnosis.isNotEmpty) ...[
@@ -914,7 +839,6 @@ class _PatientFormState extends State<PatientForm> {
         _linedList(customInjectables, isMobile: isMobile),
       ],
     ]);
-
     return Container(
       color: Colors.white,
       padding: EdgeInsets.all(basePadding),
@@ -931,12 +855,10 @@ class _PatientFormState extends State<PatientForm> {
             ])),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile    = screenWidth < 700;
-
+    final isMobile = screenWidth < 700;
     if (_isLoadingPrescription) {
       return const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         CircularProgressIndicator(color: _teal),
@@ -944,7 +866,6 @@ class _PatientFormState extends State<PatientForm> {
         Text('Loading prescription...', style: TextStyle(color: _teal)),
       ]));
     }
-
     if (_data.isEmpty) {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
         const Icon(Icons.hourglass_empty, size: 80, color: Colors.grey),
@@ -955,12 +876,13 @@ class _PatientFormState extends State<PatientForm> {
         ElevatedButton.icon(
           onPressed: _loadPrescription, icon: const Icon(Icons.refresh),
           label: const Text('Retry'),
-          style: ElevatedButton.styleFrom(backgroundColor: _teal)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _teal,
+            foregroundColor: Colors.white,
+          )),
       ]));
     }
-
     final bottomBarHeight = isMobile ? 140.0 : 120.0;
-
     return Scaffold(
       backgroundColor: Colors.grey[100],
       body: Stack(children: [
@@ -986,7 +908,6 @@ class _PatientFormState extends State<PatientForm> {
       ]),
     );
   }
-
   Widget _buildLabCol(List labTests) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [

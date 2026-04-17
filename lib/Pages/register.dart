@@ -55,17 +55,18 @@ class _RegisterState extends State<Register>
 
   // ── Roles ────────────────────────────────────────────────────────────────
   static const List<Map<String, dynamic>> _roleItems = [
-    {'label': 'CEO',          'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Admin',        'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Chairman',     'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Manager',      'icon': Icons.manage_accounts_outlined,     'type': 'crown'},
-    {'label': 'Server',       'icon': Icons.shield_rounded,               'type': 'shield'},
-    {'label': 'Doctor',       'icon': Icons.medical_services_outlined,    'type': 'normal'},
-    {'label': 'Receptionist', 'icon': Icons.support_agent_rounded,        'type': 'normal'},
-    {'label': 'Dispenser',    'icon': Icons.medication_outlined,          'type': 'normal'},
-    {'label': 'Supervisor',   'icon': Icons.manage_accounts_outlined,     'type': 'normal'},
-    {'label': 'Office Boy',   'icon': Icons.confirmation_number_outlined, 'type': 'normal'},
-    {'label': 'Kitchen',      'icon': Icons.restaurant_outlined,          'type': 'normal'},
+    {'label': 'CEO',            'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'Admin',          'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'Chairman',       'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'HQ Manager',     'icon': Icons.business_center_rounded,      'type': 'crown'},
+    {'label': 'Branch Manager', 'icon': Icons.manage_accounts_rounded,      'type': 'crown'},
+    {'label': 'Server',         'icon': Icons.shield_rounded,               'type': 'shield'},
+    {'label': 'Doctor',         'icon': Icons.medical_services_outlined,    'type': 'normal'},
+    {'label': 'Receptionist',   'icon': Icons.support_agent_rounded,        'type': 'normal'},
+    {'label': 'Dispenser',      'icon': Icons.medication_outlined,          'type': 'normal'},
+    {'label': 'Supervisor',     'icon': Icons.manage_accounts_outlined,     'type': 'normal'},
+    {'label': 'Office Boy',     'icon': Icons.confirmation_number_outlined, 'type': 'normal'},
+    {'label': 'Kitchen',        'icon': Icons.restaurant_outlined,          'type': 'normal'},
   ];
 
   final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'Other'];

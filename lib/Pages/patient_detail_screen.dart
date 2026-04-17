@@ -621,8 +621,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     final isAdult    = data['isAdult'] == true;
     final dobString  = data['dob'] is Timestamp
         ? DateFormat('dd MMM yyyy').format((data['dob'] as Timestamp).toDate()) : 'N/A';
-    final joined     = data['createdAt'] is Timestamp
-        ? DateFormat('dd MMM yyyy').format((data['createdAt'] as Timestamp).toDate()) : 'N/A';
+    final joined     = _parseDate(data['createdAt']);
 
     return [
       const SizedBox(height: 4),
@@ -710,6 +709,19 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         Expanded(child: Text(value, style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600))),
       ]),
     );
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  /// Parses a date from either a Firestore [Timestamp] or an ISO 8601 [String].
+  String _parseDate(dynamic raw, {String fmt = 'dd MMM yyyy'}) {
+    if (raw == null) return 'N/A';
+    try {
+      if (raw is Timestamp) return DateFormat(fmt).format(raw.toDate());
+      if (raw is String && raw.isNotEmpty)
+        return DateFormat(fmt).format(DateTime.parse(raw));
+    } catch (_) {}
+    return 'N/A';
   }
 
   // ── Edit helpers ──

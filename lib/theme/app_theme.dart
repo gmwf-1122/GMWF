@@ -156,7 +156,7 @@ class RoleThemeData {
     danger:                Color(0xFFB91C1C),
     zakat:                 Color(0xFF2E7D32),
     nonZakat:              Color(0xFF1565C0),
-    gmwf:                  Color(0xFF8B4513),
+    gmwf:                  Color(0xFFFFA500),
     cardFillTokens:        Color(0xFF2C4280),  
     cardFillPrescriptions: Color(0xFF3D5A9A), 
     cardFillDispensary:    Color(0xFF1E2F60),

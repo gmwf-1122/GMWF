@@ -5,10 +5,15 @@
 //      and stores it in _clientInfo.
 //   2. getConnectedClients() includes username in returned map.
 //   3. onClientConnected callback info map includes username.
-//   All other logic unchanged.
+//   4. [DEDUP] Server-side _messageId deduplication with 24-hour TTL.
+//      Duplicate messages receive an immediate ACK but are NOT processed
+//      or broadcast again — eliminates double-processing on reconnect.
+//   5. [DEDUP] _purgeOldMessageIds() runs every 10 minutes to keep memory bounded.
 
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import '../config/constants.dart';
 
@@ -23,6 +28,17 @@ class LanServer {
 
   int _messagesReceived = 0;
   int _messagesSent     = 0;
+
+  RawDatagramSocket? _udpSocket;
+  Timer? _udpTimer;
+
+  // ── [DEDUP] Processed message IDs with timestamps for 24-hour TTL ──────────
+  // LinkedHashMap preserves insertion order so oldest entries can be purged fast.
+  final LinkedHashMap<String, DateTime> _processedMessageIds =
+      LinkedHashMap<String, DateTime>();
+  static const _dedupTtl       = Duration(hours: 24);
+  static const _dedupMaxSize   = 50000; // hard cap to prevent unbounded growth
+  Timer? _dedupPurgeTimer;
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Function(String socketId, Map<String, dynamic> info)? onClientConnected;
@@ -67,6 +83,10 @@ class LanServer {
             ..close();
         }
       });
+
+      _startUdpBroadcast(ipShown);
+      _startDedupPurgeTimer();
+
     } catch (e) {
       print('╔════════════════════════════════════════════════════════════╗');
       print('║ FAILED TO START LAN SERVER on port $port                   ║');
@@ -74,6 +94,54 @@ class LanServer {
       print('╚════════════════════════════════════════════════════════════╝');
       rethrow;
     }
+  }
+
+  // ── UDP Broadcast ──────────────────────────────────────────────────────────
+  void _startUdpBroadcast(String ipShown) {
+    try {
+      RawDatagramSocket.bind(InternetAddress.anyIPv4, 0).then((socket) {
+        socket.broadcastEnabled = true;
+        _udpSocket = socket;
+        
+        final payload = utf8.encode('${AppNetwork.udpMessagePrefix}$ipShown:$port');
+        final broadcastAddr = InternetAddress('255.255.255.255');
+        
+        _udpTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+          try {
+            _udpSocket?.send(payload, broadcastAddr, AppNetwork.udpBroadcastPort);
+          } catch (e) {
+            print('[LanServer] UDP send error: $e');
+          }
+        });
+        print('[LanServer] UDP Broadcaster started.');
+      });
+    } catch (e) {
+      print('[LanServer] Failed to start UDP broadcast: $e');
+    }
+  }
+
+  // ── [DEDUP] Purge processed-ID map every 10 minutes ───────────────────────
+  void _startDedupPurgeTimer() {
+    _dedupPurgeTimer?.cancel();
+    _dedupPurgeTimer = Timer.periodic(const Duration(minutes: 10), (_) {
+      _purgeOldMessageIds();
+    });
+  }
+
+  void _purgeOldMessageIds() {
+    final cutoff = DateTime.now().subtract(_dedupTtl);
+    // Remove entries older than TTL (LinkedHashMap is insertion-ordered).
+    _processedMessageIds.removeWhere((_, ts) => ts.isBefore(cutoff));
+
+    // Hard cap — remove oldest entries first if still over size limit.
+    if (_processedMessageIds.length > _dedupMaxSize) {
+      final overflow = _processedMessageIds.length - _dedupMaxSize;
+      final keysToRemove = _processedMessageIds.keys.take(overflow).toList();
+      for (final k in keysToRemove) {
+        _processedMessageIds.remove(k);
+      }
+    }
+    print('[LanServer] Dedup purge: ${_processedMessageIds.length} IDs retained');
   }
 
   // ── Add client ─────────────────────────────────────────────────────────────
@@ -102,8 +170,7 @@ class LanServer {
   }
 
   // ── Handle message ─────────────────────────────────────────────────────────
-  void _handleMessage(
-      WebSocket socket, String socketId, dynamic message) {
+  void _handleMessage(WebSocket socket, String socketId, dynamic message) {
     if (message is! String) return;
     final trimmed = message.trim();
 
@@ -124,7 +191,7 @@ class LanServer {
         final role     = data['role']     as String?;
         final branchId = data['branchId'] as String?;
         final clientId = data['_clientId'] as String?;
-        // ← Extract username sent by client; fall back to role label.
+        // Extract username sent by client; fall back to role label.
         final username = (data['username'] as String?)?.trim().isNotEmpty == true
             ? data['username'] as String
             : role ?? 'unknown';
@@ -133,7 +200,7 @@ class LanServer {
           final info = {
             'role':        role.toLowerCase().trim(),
             'branchId':    branchId.toLowerCase().trim(),
-            'username':    username,                  // ← stored
+            'username':    username,
             'clientId':    clientId,
             'identified':  true,
             'connectedAt': DateTime.now().toIso8601String(),
@@ -170,13 +237,42 @@ class LanServer {
         return;
       }
 
+      // ── [DEDUP] Server-side deduplication ─────────────────────────────────
+      final messageId = data['_messageId'] as String?;
+      if (messageId != null && messageId.isNotEmpty) {
+        if (_processedMessageIds.containsKey(messageId)) {
+          // Already processed — send immediate ACK so client removes from outbox
+          // but do NOT process or broadcast.
+          print('[LanServer] ⚠️ Duplicate messageId=$messageId from $socketId — ACK & ignore');
+          socket.add(jsonEncode({
+            'event_type': 'message_ack',
+            'messageId':  messageId,
+            'duplicate':  true,
+          }));
+          return;
+        }
+        // Mark as processed with current timestamp.
+        _processedMessageIds[messageId] = DateTime.now();
+      }
+
+      // ── Acknowledge message immediately ───────────────────────────────────
+      if (messageId != null && messageId.isNotEmpty) {
+        socket.add(jsonEncode({
+          'event_type': 'message_ack',
+          'messageId':  messageId,
+          'duplicate':  false,
+        }));
+      }
+
       // ── Enrich and route ──────────────────────────────────────────────────
       final enhanced = Map<String, dynamic>.from(data);
-      enhanced['_serverTimestamp'] = DateTime.now().toIso8601String();
-      enhanced['_senderRole']      = _clientInfo[socket]!['role'];
-      enhanced['_senderBranch']    = _clientInfo[socket]!['branchId'];
-      enhanced['_senderUsername']  = _clientInfo[socket]!['username']; // ← included
-      enhanced['_clientId']      ??= _clientInfo[socket]!['clientId'];
+      enhanced['_serverTimestamp']  = DateTime.now().toIso8601String();
+      enhanced['_senderRole']       = _clientInfo[socket]!['role'];
+      enhanced['_senderBranch']     = _clientInfo[socket]!['branchId'];
+      enhanced['_senderUsername']   = _clientInfo[socket]!['username'];
+      enhanced['_clientId']       ??= _clientInfo[socket]!['clientId'];
+      // Attach socket ID so SSM can correctly credit the right connected user
+      enhanced['_socketId']         = socketId;
 
       onMessageReceived?.call(enhanced);
       _routeMessage(socket, enhanced);
@@ -286,7 +382,7 @@ class LanServer {
         'socketId': socketId,
         'role':     e.value['role'],
         'branchId': e.value['branchId'],
-        'username': e.value['username'],   // ← exposed
+        'username': e.value['username'],
         'clientId': e.value['clientId'],
       };
     }).toList();
@@ -307,9 +403,16 @@ class LanServer {
     }
   }
 
-  // ── Stop ───────────────────────────────────────────────────────────────────
   Future<void> stop() async {
     print('[LanServer] Shutting down (${_clients.length} clients)...');
+    _udpTimer?.cancel();
+    _udpTimer = null;
+    _udpSocket?.close();
+    _udpSocket = null;
+    _dedupPurgeTimer?.cancel();
+    _dedupPurgeTimer = null;
+    _processedMessageIds.clear();
+    
     for (final client in _clients) {
       try { client.close(); } catch (_) {}
     }

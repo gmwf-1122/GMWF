@@ -35,6 +35,8 @@ class RealtimeEvents {
   static const String tokenStatusChanged = 'token_status_changed';
   static const String prescriptionCreated = 'prescription_created';
   static const String dispenseCompleted = 'dispense_completed';
+  static const String tokenExceptionRequest = 'token_exception_request';
+  static const String tokenExceptionApproved = 'token_exception_approved';
 
   // ---- Connection events ----
   static const String clientConnected = 'client_connected';

@@ -16,6 +16,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import 'local_storage_service.dart';
+import '../models/donation_models.dart';
 
 class DonationsLocalStorage {
   // ── Box names (public — SubmissionService references donationsBox) ─────────
@@ -31,22 +32,16 @@ class DonationsLocalStorage {
   // ══════════════════════════════════════════════════════════════════════════
 
   static Future<void> init() async {
-    if (!Hive.isBoxOpen(donationsBox)) {
-      await Hive.openBox(donationsBox);
-    }
-    if (!Hive.isBoxOpen(creditLedgerBox)) {
-      await Hive.openBox(creditLedgerBox);
-    }
+    await LocalStorageService.openBoxSafe(donationsBox);
+    await LocalStorageService.openBoxSafe(creditLedgerBox);
     // FIX 1: required by LocalStorageService.enqueueSync()
-    if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
-      await Hive.openBox(LocalStorageService.syncBox);
-    }
+    await LocalStorageService.openBoxSafe(LocalStorageService.syncBox);
     // FIX 1: required by LocalStorageService.nextReceiptNumber() offline path
-    if (!Hive.isBoxOpen('app_settings')) {
-      await Hive.openBox('app_settings');
-    }
-    debugPrint('[DonationsLocalStorage] Boxes opened. Init sequence FINISHED.');
+    await LocalStorageService.openBoxSafe('app_settings');
+    
+    debugPrint('[DonationsLocalStorage] Boxes opened safely. Init sequence FINISHED.');
   }
+
 
   // ── Public box accessors ───────────────────────────────────────────────────
   static Box getBox()       => Hive.box(donationsBox);
@@ -99,7 +94,7 @@ class DonationsLocalStorage {
   // DONATIONS — write
   // ══════════════════════════════════════════════════════════════════════════
 
-  static Future<String> saveDonation({
+  static Future<DonationRecord> saveDonation({
     required String branchId,
     required Map<String, dynamic> data,
   }) async {
@@ -107,14 +102,15 @@ class DonationsLocalStorage {
     final date    = (data['date'] as String?) ?? _today();
     final key     = _donationKey(branchId, date, localId);
 
-    final record = Map<String, dynamic>.from(data);
-    record['localId']     = localId;
-    record['hiveKey']     = key;
-    record['branchId']    = branchId;
-    record['syncStatus']  = 'pending';
-    record['firestoreId'] = null;
-    record['submitted']   = false;
-    final sanitized = _sanitize(record);
+    final recordMap = Map<String, dynamic>.from(data);
+    recordMap['localId']     = localId;
+    recordMap['hiveKey']     = key;
+    recordMap['branchId']    = branchId;
+    recordMap['syncStatus']  = 'pending';
+    recordMap['status']      = data['status'] ?? DonationStatus.pending;
+    recordMap['firestoreId'] = null;
+    
+    final sanitized = _sanitize(recordMap);
 
     debugPrint('[DonationsLS] Put record into Hive... key: $key');
     await Hive.box(donationsBox).put(key, sanitized);
@@ -129,7 +125,7 @@ class DonationsLocalStorage {
       'data':     sanitized,
     });
 
-    return key;
+    return DonationRecord.fromMap(sanitized, key);
   }
 
   static Future<void> updateDonationField(
@@ -197,10 +193,9 @@ class DonationsLocalStorage {
 
   // ── Reads ──────────────────────────────────────────────────────────────────
 
-  static List<Map<String, dynamic>> getDonationsForDate(
+  static List<DonationRecord> getDonationsForDate(
       String branchId, String date) {
-    // FIX: Match both single and double underscore for transition safety
-    final box    = Hive.box(donationsBox);
+    final box = Hive.box(donationsBox);
     return box.keys
         .where((k) {
           final s = k.toString();
@@ -210,22 +205,22 @@ class DonationsLocalStorage {
         })
         .map((k) {
           try {
-            return Map<String, dynamic>.from(box.get(k) as Map);
+            final raw = box.get(k);
+            if (raw == null) return null;
+            return DonationRecord.fromMap(Map<String, dynamic>.from(raw as Map), k.toString());
           } catch (e) {
             debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
             return null;
           }
         })
-        .whereType<Map<String, dynamic>>()
+        .whereType<DonationRecord>()
         .toList()
-      ..sort((a, b) => ((b['timestamp'] as String?) ?? '')
-          .compareTo((a['timestamp'] as String?) ?? ''));
+      ..sort((a, b) => b.date.compareTo(a.date)); // Fallback sort by date string
   }
 
   /// All donations for branch, newest first. Credit keys excluded.
-  static List<Map<String, dynamic>> getAllDonations(String branchId) {
-    // FIX: Match both single and double underscore for transition safety
-    final box    = Hive.box(donationsBox);
+  static List<DonationRecord> getAllDonations(String branchId) {
+    final box = Hive.box(donationsBox);
     return box.keys
         .where((k) {
           final s = k.toString();
@@ -233,25 +228,25 @@ class DonationsLocalStorage {
         })
         .map((k) {
           try {
-            return Map<String, dynamic>.from(box.get(k) as Map);
+            final raw = box.get(k);
+            if (raw == null) return null;
+            return DonationRecord.fromMap(Map<String, dynamic>.from(raw as Map), k.toString());
           } catch (e) {
             debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
             return null;
           }
         })
-        .whereType<Map<String, dynamic>>()
-        .toList()
-      ..sort((a, b) => ((b['timestamp'] as String?) ?? '')
-          .compareTo((a['timestamp'] as String?) ?? ''));
+        .whereType<DonationRecord>()
+        .toList();
   }
 
   /// Alias used by SubmissionService.getUnsubmittedPool().
-  static List<Map<String, dynamic>> getDonationsList(String branchId) =>
+  static List<DonationRecord> getDonationsList(String branchId) =>
       getAllDonations(branchId);
 
   // ── Streams ────────────────────────────────────────────────────────────────
 
-  static Stream<List<Map<String, dynamic>>> streamDonationsForDate(
+  static Stream<List<DonationRecord>> streamDonationsForDate(
       String branchId, String date) async* {
     yield getDonationsForDate(branchId, date);
     await for (final _ in Hive.box(donationsBox).watch()) {
@@ -259,7 +254,7 @@ class DonationsLocalStorage {
     }
   }
 
-  static Stream<List<Map<String, dynamic>>> streamAllDonations(
+  static Stream<List<DonationRecord>> streamAllDonations(
       String branchId) async* {
     yield getAllDonations(branchId);
     await for (final _ in Hive.box(donationsBox).watch()) {

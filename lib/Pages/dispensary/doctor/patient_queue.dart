@@ -1,18 +1,4 @@
-// lib/pages/patient_queue.dart
-// CHANGES IN THIS VERSION:
-//   NEW: Prescription edit dialog now includes a days-of-medicine selector
-//        (1 / 2 / 3 days). The chosen value is saved to:
-//          • Hive prescriptions box (inside updatedPresc)
-//          • Hive entries box (top-level 'daysOfMedicine')
-//          • Firestore serial doc and prescriptions doc (via _updateFirestore)
-//          • LAN broadcast payload
-//        Revenue pricing: Zakat = PKR 20 × days, Non-zakat = PKR 100 × days,
-//        GMWF = PKR 0. The extra charge beyond day-1 is shown in the dialog.
-//
-// All previous fixes retained:
-//   • _normaliseQueueType single source of truth
-//   • queueType resolved from entryData → prescData → patient map
-//   • Firestore writes to correct sub-collection
+// lib/Pages/dispensary/doctor/patient_queue.dart
 
 import 'dart:async';
 
@@ -59,6 +45,20 @@ class _PatientQueueState extends State<PatientQueue>
 
   late StreamSubscription<Map<String, dynamic>> _realtimeSub;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
+  StreamSubscription<QuerySnapshot>? _exceptionSub;
+  List<DocumentSnapshot> _exceptionRequests = [];
+  List<Map<String, dynamic>> _localExceptionRequests = [];
+
+  List<Map<String, dynamic>> _loadLocalExceptionRequests() {
+    final box = Hive.box('app_settings');
+    return box.keys
+        .where((k) => k.toString().startsWith('pending_exception_'))
+        .map((k) => Map<String, dynamic>.from(box.get(k) as Map))
+        .where((r) =>
+            r['branchId']?.toString() == widget.branchId &&
+            r['status']?.toString() == 'pending')
+        .toList();
+  }
 
   bool _isOnline = true;
 
@@ -108,8 +108,32 @@ class _PatientQueueState extends State<PatientQueue>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _tryAutoSelectSmallestWaiting();
         });
+      } else if (type == RealtimeEvents.tokenExceptionRequest) {
+        // Cache the request locally so doctor sees it even offline
+        final requestId = data?['requestId']?.toString() ??
+            'local_${DateTime.now().millisecondsSinceEpoch}';
+        final localReq = <String, dynamic>{
+          'id':          requestId,
+          'requestType': 'token_exception',
+          'status':      'pending',
+          'patientId':   data?['patientId'] ?? '',
+          'patientName': data?['patientName'] ?? 'Unknown',
+          'restriction': data?['restriction'],
+          'branchId':    widget.branchId,
+        };
+        // Persist to Hive so it survives screen rebuild
+        Hive.box('app_settings').put(
+            'pending_exception_$requestId',
+            LocalStorageService.sanitize(localReq));
+        if (mounted) {
+          setState(() {
+            _localExceptionRequests = _loadLocalExceptionRequests();
+          });
+        }
       }
     });
+
+    _startExceptionListener();
 
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
@@ -137,7 +161,197 @@ class _PatientQueueState extends State<PatientQueue>
     _pulseController.dispose();
     _realtimeSub.cancel();
     _connSub?.cancel();
+    _exceptionSub?.cancel();
     super.dispose();
+  }
+
+  void _startExceptionListener() {
+    _exceptionSub?.cancel();
+    _exceptionSub = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('edit_requests')
+        .where('requestType', isEqualTo: 'token_exception')
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((snap) {
+      if (mounted) {
+        setState(() {
+          _exceptionRequests = snap.docs;
+        });
+      }
+    });
+  }
+
+  Future<void> _approveException(Map<String, dynamic> data) async {
+    final patientId = data['patientId'] as String;
+    final requestId = data['id'] as String;
+
+    final reasonCtrl = TextEditingController();
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Approve Exception'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Why are you allowing this patient (${data['patientName']}) to get a token again today?'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonCtrl,
+              decoration: const InputDecoration(
+                hintText: 'Enter reason (e.g. emergency, correction)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Approve'),
+          ),
+        ],
+      ),
+    );
+
+    if (approved != true) return;
+    final doctorReason = reasonCtrl.text.trim();
+    if (doctorReason.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Please enter a reason for the exception'),
+      ));
+      return;
+    }
+
+    try {
+      // 1. Update Firestore if possible
+      try {
+        await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('edit_requests')
+            .doc(requestId)
+            .update({
+          'status': 'approved',
+          'doctorReason': doctorReason,
+          'approvedBy': RealtimeManager().role ?? 'Doctor',
+          'approvedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        debugPrint('[PatientQueue] Firestore offline update failed: $e');
+      }
+
+      // 2. Enqueue sync op
+      await LocalStorageService.enqueueSync({
+        'type':      'approve_token_exception',
+        'branchId':  widget.branchId,
+        'requestId': requestId,
+        'patientId': patientId,
+        'data': {
+          'doctorReason': doctorReason,
+          'approvedBy':   RealtimeManager().role ?? 'Doctor',
+          'approvedAt':   DateTime.now().toIso8601String(),
+        },
+      });
+
+      // 3. Clear local restriction & local request cache
+      await LocalStorageService.clearMedicineRestriction(widget.branchId, patientId);
+      Hive.box('app_settings').delete('pending_exception_$requestId');
+
+      // 4. Local broadcast to receptionist
+      RealtimeManager().sendMessage({
+        ...RealtimeEvents.payload(
+          type: RealtimeEvents.tokenExceptionApproved,
+          branchId: widget.branchId,
+          data: {
+            'requestId': requestId,
+            'patientId': patientId,
+            'reason':    doctorReason,
+          },
+        ),
+      });
+
+      if (mounted) {
+        setState(() {
+          _localExceptionRequests = _loadLocalExceptionRequests();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('✅ Exception approved. Restriction cleared.'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
+    }
+  }
+
+  Future<void> _rejectException(Map<String, dynamic> data) async {
+    final requestId  = data['id'] as String;
+    final reasonCtrl = TextEditingController();
+    
+    final rejected = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Reject Exception'),
+        content: TextField(
+          controller: reasonCtrl,
+          decoration: const InputDecoration(hintText: 'Reason for rejection'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (rejected != true) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('edit_requests')
+          .doc(requestId)
+          .update({
+        'status': 'rejected',
+        'doctorReason': reasonCtrl.text.trim(),
+        'rejectedBy': RealtimeManager().role ?? 'Doctor',
+        'rejectedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Clear local cache
+      Hive.box('app_settings').delete('pending_exception_$requestId');
+
+      if (mounted) {
+        setState(() {
+          _localExceptionRequests = _loadLocalExceptionRequests();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('❌ Exception request rejected.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
+    }
   }
 
   // ─── Serial number extraction ──────────────────────────────────────────────
@@ -818,9 +1032,12 @@ class _PatientQueueState extends State<PatientQueue>
                 child: const Text('Cancel'),
               ),
               ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(backgroundColor: _teal),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _teal,
+                  foregroundColor: Colors.white,
+                ),
                 icon: const Icon(Icons.save, color: Colors.white),
-                label: const Text('Update', style: TextStyle(color: Colors.white)),
+                label: const Text('Update'),
                 onPressed: () async {
                   Navigator.pop(dialogContext);
                   await _savePrescriptionUpdate(
@@ -1020,6 +1237,21 @@ class _PatientQueueState extends State<PatientQueue>
           default:          list = allPatients;
         }
 
+        final mergedExceptions = [
+          ..._exceptionRequests.map((doc) => {
+                ...doc.data() as Map<String, dynamic>,
+                'id': doc.id
+              }),
+          ..._localExceptionRequests,
+        ];
+
+        // deduplicate by ID
+        final uniqueExceptions = <String, Map<String, dynamic>>{};
+        for (var e in mergedExceptions) {
+          uniqueExceptions[e['id'].toString()] = e;
+        }
+        final finalExceptions = uniqueExceptions.values.toList();
+
         return Column(children: [
           // ── Header ──────────────────────────────────────────────────────
           Container(
@@ -1067,6 +1299,69 @@ class _PatientQueueState extends State<PatientQueue>
           ),
 
           // ── Patient list ─────────────────────────────────────────────────
+
+          if (finalExceptions.isNotEmpty) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Icon(Icons.emergency_share_outlined, color: Colors.orange.shade900, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'EXCEPTION REQUESTS (${finalExceptions.length})',
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade900,
+                          letterSpacing: 1.1),
+                    ),
+                  ]),
+                  const SizedBox(height: 10),
+                  ...finalExceptions.map((d) {
+                    return Card(
+                      elevation: 0,
+                      color: Colors.orange.shade100,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      child: ListTile(
+                        dense: true,
+                        leading: CircleAvatar(
+                          radius: 14,
+                          backgroundColor: Colors.orange.shade800,
+                          child: const Icon(Icons.person, color: Colors.white, size: 16),
+                        ),
+                        title: Text(d['patientName'] ?? 'Unknown',
+                            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange.shade900)),
+                        subtitle: Text('Restricted: ${d['restriction']?['remainingDays'] ?? '?'} days left'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.check_circle, color: Colors.green, size: 24),
+                              onPressed: () => _approveException(d),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.cancel, color: Colors.red, size: 24),
+                              onPressed: () => _rejectException(d),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ],
+
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),

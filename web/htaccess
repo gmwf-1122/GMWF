@@ -1,0 +1,21 @@
+<IfModule mod_mime.c>
+  AddType application/javascript .js
+  AddType application/json .json
+  AddType text/css .css
+  AddType image/png .png
+  AddType image/svg+xml .svg
+  AddType image/x-icon .ico
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /web/
+
+  # Allow direct access to existing files or directories
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # All other requests go to index.html
+  RewriteRule ^ index.html [L]
+</IfModule>

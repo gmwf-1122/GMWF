@@ -112,7 +112,7 @@ class _SupervisorShell extends StatelessWidget {
       _buildHomePage(context, t, isMobile),
       Branches(branchId: branchId, showRegisterButton: false),
       InventoryDocPage(branchId: branchId),
-      RequestPage(branchId: branchId),
+      RequestPage(branchId: branchId, isSupervisor: true),
       AssetsPage(branchId: branchId, isAdmin: false),
     ];
 

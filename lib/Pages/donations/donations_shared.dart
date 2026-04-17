@@ -18,47 +18,45 @@ import '../../theme/role_theme_provider.dart';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class DS {
-  // Navy palette
   static const navy900 = Color(0xFF0B1426);
   static const navy800 = Color(0xFF112244);
   static const navy700 = Color(0xFF163567);
   static const navy600 = Color(0xFF1B4280);
   static const navy100 = Color(0xFFE8EEF7);
 
-  // Emerald
   static const emerald700 = Color(0xFF065F46);
   static const emerald600 = Color(0xFF047857);
   static const emerald500 = Color(0xFF059669);
   static const emerald100 = Color(0xFFD1FAE5);
 
-  // Sapphire
   static const sapphire700 = Color(0xFF1E3A8A);
   static const sapphire500 = Color(0xFF3B82F6);
   static const sapphire100 = Color(0xFFDBEAFE);
 
-  // Plum
   static const plum700 = Color(0xFF6B21A8);
   static const plum500 = Color(0xFFA855F7);
   static const plum100 = Color(0xFFF3E8FF);
 
-  // Gold
   static const gold700 = Color(0xFF92400E);
   static const gold600 = Color(0xFFB45309);
   static const gold500 = Color(0xFFD97706);
   static const gold400 = Color(0xFFFBBF24);
   static const gold100 = Color(0xFFFEF3C7);
 
-  // Crimson
   static const crimson700 = Color(0xFF9B1C1C);
   static const crimson500 = Color(0xFFEF4444);
   static const crimson100 = Color(0xFFFEE2E2);
 
-  // Status
-  static const statusPending  = Color(0xFFD97706);
+  // ── STATUS — FIXED: pending is now calm slate, not amber ─────────────────
+  static const statusPending  = Color(0xFF64748B); // slate-500 — calm, neutral
+  static const statusPendingBg     = Color(0xFFF1F5F9); // slate-100
+  static const statusPendingBorder = Color(0xFFCBD5E1); // slate-300
   static const statusApproved = Color(0xFF059669);
   static const statusRejected = Color(0xFFDC2626);
 
-  // Ink (neutral)
+  // Keep gold for financial accents (amounts, currency)
+  static const amberAccent = Color(0xFFD97706);
+
   static const ink900 = Color(0xFF111827);
   static const ink700 = Color(0xFF374151);
   static const ink500 = Color(0xFF6B7280);
@@ -67,7 +65,6 @@ class DS {
   static const ink100 = Color(0xFFF3F4F6);
   static const ink50  = Color(0xFFF9FAFB);
 
-  // Shadows
   static List<BoxShadow> get shadowSm => [
     const BoxShadow(color: Color(0x0C000000), blurRadius: 6, offset: Offset(0, 2)),
   ];
@@ -80,14 +77,12 @@ class DS {
     const BoxShadow(color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 2)),
   ];
 
-  // Radii
   static const rSm  = 6.0;
   static const rMd  = 10.0;
   static const rLg  = 14.0;
   static const rXl  = 18.0;
   static const r2xl = 24.0;
 
-  // Text styles
   static TextStyle display({Color color = ink900}) => TextStyle(
       fontSize: 24, fontWeight: FontWeight.w800, color: color,
       letterSpacing: -0.8, height: 1.15);
@@ -99,8 +94,8 @@ class DS {
   static TextStyle body({Color color = ink700}) =>
       TextStyle(fontSize: 14, fontWeight: FontWeight.w400, color: color);
   static TextStyle label({Color color = ink500}) => TextStyle(
-      fontSize: 10, fontWeight: FontWeight.w700, color: color,
-      letterSpacing: 0.9);
+      fontSize: 11, fontWeight: FontWeight.w700, color: color,
+      letterSpacing: 0.6);
   static TextStyle caption({Color color = ink500}) =>
       TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: color);
   static TextStyle mono({Color color = ink900, double size = 20}) => TextStyle(
@@ -118,7 +113,7 @@ const String kStatusApproved = 'approved';
 const String kStatusRejected = 'rejected';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PAYMENT METHOD  (no online transfer — bank deposit covers it)
+// PAYMENT METHOD
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum PaymentMethod { cash, cheque, bankDeposit }
@@ -252,14 +247,13 @@ extension DonationCategoryX on DonationCategory {
       case DonationCategory.gmwf:  return 'GMWF General Fund';
     }
   }
-  // compat aliases
   PdfColor get pdfAccent     => pdfPrimary;
   PdfColor get pdfAccentDark => pdfDark;
   PdfColor get pdfAccentMid  => pdfPrimary;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ENTRY TYPE  (Cash / Goods)
+// ENTRY TYPE
 // ─────────────────────────────────────────────────────────────────────────────
 
 enum DonationEntryType { cash, goods }
@@ -359,14 +353,12 @@ extension DonationSubtypeX on DonationSubtype {
   }
 }
 
-/// Returns applicable cash subtypes for given category + optional gmwfSub.
-/// Empty list for goods.
 List<DonationSubtype> subtypesFor({
   required DonationCategory  category,
   required DonationEntryType entryType,
   GmwfSubCategory?           gmwfSub,
 }) {
-  if (entryType.isGoods) return [];
+  if (entryType.isGoods && gmwfSub != GmwfSubCategory.madrisa) return [];
   switch (category) {
     case DonationCategory.jamia:
       return [
@@ -383,13 +375,16 @@ List<DonationSubtype> subtypesFor({
           DonationSubtype.sadqaAtyaat,
         ];
       }
+      if (gmwfSub == GmwfSubCategory.madrisa) {
+        return [
+          DonationSubtype.construction,
+          DonationSubtype.maintenance,
+          DonationSubtype.sadqaAtyaat,
+        ];
+      }
       return [DonationSubtype.sadqaAtyaat];
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CONSTANTS
-// ─────────────────────────────────────────────────────────────────────────────
 
 const List<String> kUnits = [
   'kg', 'gram', 'liter', 'piece', 'packet', 'maund', 'quintal',
@@ -871,7 +866,6 @@ String _fmtDate(String? raw) {
   catch (_) { return raw ?? DateFormat('dd MMM yyyy').format(DateTime.now()); }
 }
 
-// public helpers
 String fmtNum(double v) => _fmtNum(v);
 String fmtAmt(double v) =>
     v == v.truncateToDouble() ? v.toInt().toString() : v.toStringAsFixed(2);
@@ -917,7 +911,7 @@ class DSField extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (label.isNotEmpty) ...[
         Text(label.toUpperCase(), style: DS.label(color: t.textTertiary)
-            .copyWith(fontSize: 9.5, letterSpacing: 1.0)),
+            .copyWith(fontSize: 10, letterSpacing: 1.0)),
         const SizedBox(height: 6),
       ],
       TextFormField(
@@ -1042,6 +1036,7 @@ class DSPaymentMethodSelector extends StatelessWidget {
   }
 }
 
+// ── FIXED: PENDING is now calm slate, not amber ───────────────────────────
 class DSStatusBadge extends StatelessWidget {
   final String status;
   const DSStatusBadge({super.key, required this.status});
@@ -1050,16 +1045,37 @@ class DSStatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final isPending  = status == kStatusPending;
     final isApproved = status == kStatusApproved;
-    final color = isPending ? DS.statusPending
-        : isApproved ? DS.statusApproved : DS.statusRejected;
-    final bg = isPending ? DS.gold100
-        : isApproved ? DS.emerald100 : const Color(0xFFFEE2E2);
-    final lbl = isPending ? 'PENDING' : isApproved ? 'APPROVED' : 'REJECTED';
+
+    final Color fg;
+    final Color bg;
+    final Color border;
+    final String lbl;
+
+    if (isPending) {
+      fg     = DS.statusPending;
+      bg     = DS.statusPendingBg;
+      border = DS.statusPendingBorder;
+      lbl    = 'PENDING';
+    } else if (isApproved) {
+      fg     = DS.statusApproved;
+      bg     = DS.emerald100;
+      border = DS.statusApproved.withOpacity(0.30);
+      lbl    = 'APPROVED';
+    } else {
+      fg     = DS.statusRejected;
+      bg     = DS.crimson100;
+      border = DS.statusRejected.withOpacity(0.30);
+      lbl    = 'REJECTED';
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: color.withOpacity(0.3))),
-      child: Text(lbl, style: DS.label(color: color).copyWith(fontSize: 9)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(DS.rSm),
+        border: Border.all(color: border),
+      ),
+      child: Text(lbl, style: DS.label(color: fg).copyWith(fontSize: 9, letterSpacing: 0.8)),
     );
   }
 }

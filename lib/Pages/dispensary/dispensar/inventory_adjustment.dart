@@ -1,3 +1,5 @@
+// lib/Pages/dispensary/dispensar/inventory_adjustment.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -54,7 +56,8 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   ];
 
   final Map<String, List<String>> _doseOptions = {
-    'Capsule':   ['5 mg','10 mg','20 mg','50 mg','100 mg','250 mg','500 mg'],
+    'Tablet':    ['2 mg','5 mg','20 mg','40 mg','50 mg','100 mg','250 mg','300 mg','400 mg','500 mg','650 mg','1 g'],
+    'Capsule':   ['2 mg','5 mg','10 mg','20 mg','25 mg','40 mg','50 mg','100 mg','250 mg','500 mg'],
     'Syrup':     ['5 ml','10 ml','15 ml','20 ml','30 ml','60 ml','90 ml','120 ml','250 ml'],
     'Injection': ['1cc','2cc','3cc','5cc','10cc'],
     'Drip':      ['100 ml','250 ml','450 ml','500 ml','1000 ml'],
@@ -275,7 +278,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  _confirmRow('Medicine', name),
+                  _confirmRow('Formula', name),
                   _confirmRow('Type', type),
                   if (dose.isNotEmpty) _confirmRow('Dose', dose),
                   _confirmRow('Quantity', qty.toString()),
@@ -580,7 +583,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
         _sectionLabel('Edit Fields'),
         const SizedBox(height: 12),
 
-        _field(nameCtrl, 'Medicine Name *', Icons.medication_rounded),
+        _field(nameCtrl, 'Formula *', Icons.medication_rounded),
         const SizedBox(height: 13),
 
         // Type dropdown
@@ -605,7 +608,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
             value: _selectedDose,
             dropdownColor: _white,
             style: const TextStyle(color: _textDark, fontSize: 14),
-            decoration: _inputDec('Dose *', Icons.science_rounded),
+            decoration: _inputDec(selectedType == 'Tablet' ? 'Dose' : 'Dose *', Icons.science_rounded),
             hint: const Text('Select dose', style: TextStyle(color: _textLight)),
             items: doseList.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
             onChanged: _isLoading ? null : (v) => setState(() => _selectedDose = v),

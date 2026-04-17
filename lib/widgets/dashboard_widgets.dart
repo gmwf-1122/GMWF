@@ -1,15 +1,104 @@
 // lib/widgets/dashboard_widgets.dart
-// Premium shared dashboard components
-// Bento grid layout · Original donut chart · Branch cards with donations & tokens
-// Chairman insights · Animated counts · Progress bars
+// ════════════════════════════════════════════════════════════════════════════════
+// GMWF · Premium Dashboard Components — Production Redesign v3
+// Design system: 8pt grid · Blue=primary · Green=money · Purple=donations
+// All Material Icons (rounded) · Consistent stroke · No random colors
+// ════════════════════════════════════════════════════════════════════════════════
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:shimmer/shimmer.dart';
+import 'package:rxdart/rxdart.dart';
 import '../theme/app_theme.dart';
+import '../theme/role_theme_provider.dart';
 
-// ── Number formatters ─────────────────────────────────────────────────────────
+// ── Design System Tokens ──────────────────────────────────────────────────────
+class DS {
+  // Spacing — strict 8pt grid
+  static const double s1 = 8.0;
+  static const double s2 = 16.0;
+  static const double s3 = 24.0;
+  static const double s4 = 32.0;
+
+  // Semantic colors — Role Based Decisions
+  static const Color zakat        = Color(0xFF16A34A); // Green — Zakat (Revenue/Money)
+  static const Color nonZakat     = Color(0xFF2563EB); // Blue — Non-Zakat (Standard Operations)
+  static const Color gmwf         = Color(0xFFEAB308); // Yellow — GMWF (Free/Internal)
+  static const Color danger       = Color(0xFFDC2626); // Red — Alerts / Critical
+
+  // UI Utilities
+  static const Color blue        = Color(0xFF2563EB); 
+  static const Color blueMuted   = Color(0xFFEFF6FF); 
+  static const Color green       = Color(0xFF16A34A); 
+  static const Color greenMuted  = Color(0xFFDCFCE7); 
+  static const Color purple      = Color(0xFF7C3AED); 
+  static const Color purpleMuted = Color(0xFFF5F3FF); 
+  static const Color orange      = Color(0xFFEA580C); 
+  static const Color orangeMuted = Color(0xFFFFF7ED); 
+  static const Color neutral     = Color(0xFF6B7280); 
+  static const Color neutralBg   = Color(0xFFF9FAFB); 
+  static const Color border      = Color(0xFFE5E7EB); 
+
+  // Typography sizes
+  static const double h1 = 40.0;
+  static const double h2 = 18.0;
+  static const double body = 13.0;
+  static const double caption = 11.0;
+
+  // Corner radii
+  static const double r1 = 8.0;
+  static const double r2 = 16.0;
+  static const double r3 = 20.0;
+  static const double r4 = 24.0;
+}
+
+// ── Dashboard Filter System ──────────────────────────────────────────────────
+
+enum TimeRange { today, week, month, custom }
+
+class DashboardFilter {
+  final TimeRange timeRange;
+  final String branchId; // 'all' or specific ID
+  final String? patientType; // 'zakat', 'non-zakat', 'gmwf', null for all
+  final DateTimeRange? customRange;
+
+  const DashboardFilter({
+    this.timeRange = TimeRange.today,
+    this.branchId = 'all',
+    this.patientType,
+    this.customRange,
+  });
+
+  DashboardFilter copyWith({
+    TimeRange? timeRange,
+    String? branchId,
+    String? patientType,
+    DateTimeRange? customRange,
+  }) {
+    return DashboardFilter(
+      timeRange: timeRange ?? this.timeRange,
+      branchId: branchId ?? this.branchId,
+      patientType: patientType ?? this.patientType,
+      customRange: customRange ?? this.customRange,
+    );
+  }
+}
+
+class DashboardController extends ValueNotifier<DashboardFilter> {
+  DashboardController([DashboardFilter? value])
+      : super(value ?? const DashboardFilter());
+
+  void setTimeRange(TimeRange range) => value = value.copyWith(timeRange: range);
+  void setBranch(String id) => value = value.copyWith(branchId: id);
+  void setPatientType(String? type) => value = value.copyWith(patientType: type);
+  void setCustomRange(DateTimeRange range) =>
+      value = value.copyWith(timeRange: TimeRange.custom, customRange: range);
+}
+
+// Global instance for convenience, though preferred to pass via context or provider
+final dashboardController = DashboardController();
 String fmtPKR(int n) {
   if (n >= 10000000) return 'PKR ${(n / 10000000).toStringAsFixed(1)}Cr';
   if (n >= 100000)   return 'PKR ${(n / 100000).toStringAsFixed(1)}L';
@@ -33,153 +122,283 @@ String fmtPKRDouble(double n) {
 
 // ── Firestore data model ──────────────────────────────────────────────────────
 class BranchStats {
-  final int zakat, nonZakat, gmwf, dasterkhwaan, donations, dispensed, prescribed;
+  final int zakat, nonZakat, gmwf, dasterkhwaan, dasterkhwaanServed,
+      donations, dispensed, prescribed, dispensaryRevenue;
+
   const BranchStats({
     this.zakat = 0, this.nonZakat = 0, this.gmwf = 0,
-    this.dasterkhwaan = 0, this.donations = 0,
-    this.dispensed = 0, this.prescribed = 0,
+    this.dasterkhwaan = 0, this.dasterkhwaanServed = 0,
+    this.donations = 0, this.dispensed = 0, this.prescribed = 0,
+    this.dispensaryRevenue = 0,
   });
-  int get tokens              => zakat + nonZakat + gmwf;
-  int get dispensaryRevenue   => zakat * 20 + nonZakat * 100;
+
+  int get tokens          => zakat + nonZakat + gmwf;
+  // Improved performance score: revenue-weighted + patient footprint + food service
+  int get performanceScore => (totalRevenue ~/ 100) + tokens + dasterkhwaan;
+  int get dasterkhwaanPending => (dasterkhwaan - dasterkhwaanServed).clamp(0, 9999);
+  // int get dispensaryRevenue  => zakat * 20 + nonZakat * 100; // DEPRECATED: use field
   int get dasterkhwaanRevenue => dasterkhwaan * 10;
-  int get totalRevenue        => dispensaryRevenue + dasterkhwaanRevenue + donations;
+  // Serial revenue is specifically from tokens (Dispensary + Dasterkhwaan)
+  int get serialRevenue => dispensaryRevenue + dasterkhwaanRevenue;
+  int get totalRevenue => serialRevenue + donations;
 }
 
-Future<BranchStats> fetchBranchStats(String branchId) async {
+DateTimeRange _resolveFilter(DashboardFilter? filter) {
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  if (filter == null) return DateTimeRange(start: today, end: today);
+  switch (filter.timeRange) {
+    case TimeRange.today: return DateTimeRange(start: today, end: today);
+    case TimeRange.week:  return DateTimeRange(start: today.subtract(const Duration(days: 6)), end: today);
+    case TimeRange.month: return DateTimeRange(start: today.subtract(const Duration(days: 30)), end: today);
+    case TimeRange.custom: return filter.customRange ?? DateTimeRange(start: today, end: today);
+  }
+}
+
+Future<BranchStats> fetchBranchStats(String branchId, {DashboardFilter? filter}) async {
   try {
-    final df  = DateFormat('ddMMyy');
-    final now = DateTime.now();
-    final ds  = df.format(DateTime(now.year, now.month, now.day));
-    final base = FirebaseFirestore.instance
-        .collection('branches').doc(branchId).collection('serials').doc(ds);
+    final range = _resolveFilter(filter);
+    DateTime start = range.start;
+    DateTime end = range.end;
 
-    final counts = await Future.wait([
-      base.collection('zakat').count().get(),
-      base.collection('non-zakat').count().get(),
-      base.collection('gmwf').count().get(),
-      base.collection('dasterkhwan').count().get(),
-    ]);
-    final z   = counts[0].count ?? 0;
-    final nz  = counts[1].count ?? 0;
-    final gm  = counts[2].count ?? 0;
-    final das = counts[3].count ?? 0;
-
-    final dispSnap = await FirebaseFirestore.instance
-        .collection('branches/$branchId/dispensary/$ds/$ds').count().get();
-    final dispensed = dispSnap.count ?? 0;
-
-    final snaps = await Future.wait([
-      base.collection('zakat').get(),
-      base.collection('non-zakat').get(),
-      base.collection('gmwf').get(),
-    ]);
-    final presRoot = FirebaseFirestore.instance
-        .collection('branches').doc(branchId).collection('prescriptions');
-    final Map<String, String> sid = {};
-    for (final s in snaps) {
-      for (final doc in s.docs) {
-        final data   = doc.data();
-        final serial = data['serial']?.toString();
-        if (serial == null) continue;
-        final cnic  = data['cnic']?.toString()?.trim() ?? '';
-        final gcnic = data['guardianCnic']?.toString()?.trim() ?? '';
-        final id    = cnic.isNotEmpty ? cnic : gcnic.isNotEmpty ? gcnic : '';
-        if (id.isNotEmpty) sid[serial] = id;
-      }
-    }
-    int prescribed = 0;
-    if (sid.isNotEmpty) {
-      final ps = await Future.wait(sid.entries.map((e) =>
-          presRoot.doc(e.value).collection('prescriptions').doc(e.key).get()));
-      prescribed = ps.where((s) => s.exists).length;
+    // Safety limit to 31 days max to prevent massive unindexed reads
+    if (end.difference(start).inDays > 31) {
+      start = end.subtract(const Duration(days: 31));
     }
 
-    int donations = 0;
-    try {
-      final donSnap = await FirebaseFirestore.instance
-          .collection('branches').doc(branchId).collection('donations')
-          .where('date', isEqualTo: ds).get();
-      for (final doc in donSnap.docs) {
-        donations += ((doc.data()['amount'] as num?)?.toInt() ?? 0);
+    final List<DateTime> days = [];
+    for (int i = 0; i <= end.difference(start).inDays; i++) {
+      days.add(start.add(Duration(days: i)));
+    }
+
+    int z = 0, nz = 0, gm = 0, das = 0, served = 0, dispensed = 0, dispRev = 0;
+    double donTotal = 0;
+
+    final dashStart = DateFormat('yyyy-MM-dd').format(start);
+    final dashEnd   = DateFormat('yyyy-MM-dd').format(end);
+
+    // 1. Fetch donations for the date range
+    final donSnap = await FirebaseFirestore.instance
+        .collection('branches').doc(branchId).collection('donations')
+        .where('date', isGreaterThanOrEqualTo: dashStart)
+        .where('date', isLessThanOrEqualTo: dashEnd)
+        .get();
+
+    for (final doc in donSnap.docs) {
+      final amt = (doc.data())['amount'];
+      donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+    }
+
+    // 2. Fetch daily serials
+    final df = DateFormat('ddMMyy');
+    for (final day in days) {
+      final dsLegacy = df.format(day);
+      final dsDash   = DateFormat('yyyy-MM-dd').format(day);
+      final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(dsLegacy);
+
+      // We explicitly capture the Future results to parse them safely based on index
+      final results = await Future.wait([
+        base.collection('zakat').get(),
+        base.collection('non-zakat').get(),
+        base.collection('gmwf').get(),
+        base.collection('dasterkhwan').get(), // Use original path where tokens reside
+        FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$dsLegacy/$dsLegacy').get(),
+        FirebaseFirestore.instance.collection('branches').doc(branchId).collection('dasterkhwaan').doc(dsDash).get(),
+      ]);
+
+      z  += (results[0] as QuerySnapshot).size;
+      nz += (results[1] as QuerySnapshot).size;
+      gm += (results[2] as QuerySnapshot).size;
+
+      // Calculate actual revenue by summing up daysOfMedicine (Multiple tokens)
+      for (final doc in (results[0] as QuerySnapshot).docs) {
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        dispRev += 20 * d.toInt();
       }
-    } catch (_) {}
+      for (final doc in (results[1] as QuerySnapshot).docs) {
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        dispRev += 100 * d.toInt();
+      }
+
+      das += (results[3] as QuerySnapshot).size;
+      dispensed += (results[4] as QuerySnapshot).size;
+
+      final dayDoc = results[5] as DocumentSnapshot;
+      if (dayDoc.exists) {
+        final dayData = dayDoc.data() as Map<String, dynamic>?;
+        served += (dayData?['servedTokens'] as num?)?.toInt() ?? 0;
+      }
+    }
 
     return BranchStats(
       zakat: z, nonZakat: nz, gmwf: gm,
-      dasterkhwaan: das, donations: donations,
-      dispensed: dispensed, prescribed: prescribed,
+      dispensed: dispensed, prescribed: 0,
+      dasterkhwaan: das, dasterkhwaanServed: served, 
+      donations: donTotal.toInt(),
+      dispensaryRevenue: dispRev,
     );
-  } catch (_) {
+  } catch (e) {
+    debugPrint('[fetchBranchStats] Error: $e');
     return const BranchStats();
   }
 }
 
-Future<BranchStats> fetchAllBranchesStats(List<String> ids) async {
-  final results = await Future.wait(ids.map(fetchBranchStats));
-  int z = 0, nz = 0, gm = 0, das = 0, don = 0, disp = 0, presc = 0;
-  for (final r in results) {
-    z += r.zakat; nz += r.nonZakat; gm += r.gmwf;
-    das += r.dasterkhwaan; don += r.donations;
-    disp += r.dispensed; presc += r.prescribed;
+Stream<BranchStats> streamBranchStats(String branchId, {DashboardFilter? filter}) {
+  final range = _resolveFilter(filter);
+  DateTime start = range.start;
+  DateTime end = range.end;
+
+  // Safety limit for streams to prevent excessive listeners
+  if (end.difference(start).inDays > 14) {
+    start = end.subtract(const Duration(days: 14));
   }
-  return BranchStats(
-    zakat: z, nonZakat: nz, gmwf: gm, dasterkhwaan: das,
-    donations: don, dispensed: disp, prescribed: presc,
-  );
+
+  final List<DateTime> days = [];
+  for (int i = 0; i <= end.difference(start).inDays; i++) {
+    days.add(start.add(Duration(days: i)));
+  }
+
+  final df = DateFormat('ddMMyy');
+  final dashDF = DateFormat('yyyy-MM-dd');
+  final streams = <Stream<dynamic>>[];
+
+  // 1. Donation stream
+  final dashStart = dashDF.format(start);
+  final dashEnd   = dashDF.format(end);
+  streams.add(FirebaseFirestore.instance
+      .collection('branches').doc(branchId).collection('donations')
+      .where('date', isGreaterThanOrEqualTo: dashStart)
+      .where('date', isLessThanOrEqualTo: dashEnd)
+      .snapshots());
+
+  // 2. Daily collection streams
+  for (final day in days) {
+    final dsLegacy = df.format(day);
+    final dsDash   = dashDF.format(day);
+    final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(dsLegacy);
+
+    streams.add(base.collection('zakat').snapshots());
+    streams.add(base.collection('non-zakat').snapshots());
+    streams.add(base.collection('gmwf').snapshots());
+    streams.add(base.collection('dasterkhwan').snapshots());
+    streams.add(FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$dsLegacy/$dsLegacy').snapshots());
+    streams.add(FirebaseFirestore.instance.collection('branches').doc(branchId).collection('dasterkhwaan').doc(dsDash).snapshots());
+  }
+
+  return Rx.combineLatestList(streams).map((results) {
+    int z = 0, nz = 0, gm = 0, das = 0, served = 0, dispensed = 0, dispRev = 0;
+    double donTotal = 0;
+
+    // First result is donations
+    final donSnap = results[0] as QuerySnapshot;
+    for (final doc in donSnap.docs) {
+      final amt = (doc.data() as Map<String, dynamic>?)?['amount'];
+      donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+    }
+
+    // Following results are chunks of 6 streams per day
+    int idx = 1;
+    while (idx < results.length) {
+      final zSnap    = results[idx++] as QuerySnapshot;
+      final nzSnap   = results[idx++] as QuerySnapshot;
+      final gmSnap   = results[idx++] as QuerySnapshot;
+      final daskSnap = results[idx++] as QuerySnapshot;
+      final dispSnap = results[idx++] as QuerySnapshot;
+      final dayDoc   = results[idx++] as DocumentSnapshot;
+
+      z  += zSnap.size;
+      nz += nzSnap.size;
+      gm += gmSnap.size;
+      das += daskSnap.size;
+      dispensed += dispSnap.size;
+
+      if (dayDoc.exists) {
+        final dayData = dayDoc.data() as Map<String, dynamic>?;
+        served += (dayData?['servedTokens'] as num?)?.toInt() ?? 0;
+      }
+
+      // Sum up revenue
+      for (final doc in zSnap.docs) {
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        dispRev += 20 * d.toInt();
+      }
+      for (final doc in nzSnap.docs) {
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        dispRev += 100 * d.toInt();
+      }
+    }
+
+    return BranchStats(
+      zakat: z, nonZakat: nz, gmwf: gm,
+      dispensed: dispensed, prescribed: 0,
+      dasterkhwaan: das, dasterkhwaanServed: served,
+      donations: donTotal.toInt(),
+      dispensaryRevenue: dispRev,
+    );
+  }).handleError((e) {
+    debugPrint('[streamBranchStats] Error: $e');
+    return const BranchStats();
+  });
 }
 
-// ── Loading card ──────────────────────────────────────────────────────────────
+Stream<BranchStats> streamAllBranchesStats(List<String> ids, {DashboardFilter? filter}) {
+  if (ids.isEmpty) return Stream.value(const BranchStats());
+  
+  final streams = ids.map((id) => streamBranchStats(id, filter: filter)).toList();
+  return Rx.combineLatestList(streams).map((results) {
+    int z = 0, nz = 0, gm = 0, das = 0, dasServed = 0, don = 0, disp = 0, presc = 0, dispRev = 0;
+    for (final r in results) {
+      final s = r as BranchStats;
+      z += s.zakat; nz += s.nonZakat; gm += s.gmwf;
+      das += s.dasterkhwaan; dasServed += s.dasterkhwaanServed;
+      don += s.donations; disp += s.dispensed; presc += s.prescribed;
+      dispRev += s.dispensaryRevenue;
+    }
+    return BranchStats(
+      zakat: z, nonZakat: nz, gmwf: gm,
+      dasterkhwaan: das, dasterkhwaanServed: dasServed,
+      donations: don, dispensed: disp, prescribed: presc,
+      dispensaryRevenue: dispRev,
+    );
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// PRIMITIVES — Animations, Shimmer loader, etc.
+// ════════════════════════════════════════════════════════════════════════════════
+
 class DashLoadingCard extends StatelessWidget {
   final RoleThemeData t;
   final double height;
-  const DashLoadingCard({super.key, required this.t, required this.height});
+  const DashLoadingCard({super.key, required this.t, this.height = 160});
 
   @override
-  Widget build(BuildContext context) => Container(
-    height: height,
-    decoration: BoxDecoration(
-      color: t.bgCard,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: t.bgRule),
+  Widget build(BuildContext context) => Shimmer.fromColors(
+    baseColor: DS.border,
+    highlightColor: Colors.white,
+    child: Container(
+      height: height, width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(DS.r3),
+      ),
     ),
-    child: Center(child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent)),
   );
 }
 
-// ── Section heading ───────────────────────────────────────────────────────────
-class DashHeading extends StatelessWidget {
-  final String text;
-  final RoleThemeData t;
-  const DashHeading(this.text, {super.key, required this.t});
-
-  @override
-  Widget build(BuildContext context) => Row(children: [
-    Container(width: 4, height: 20,
-        decoration: BoxDecoration(color: t.accent, borderRadius: BorderRadius.circular(2))),
-    const SizedBox(width: 10),
-    Text(text, style: TextStyle(
-        color: t.textPrimary, fontSize: 18,
-        fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-  ]);
-}
-
-// ── Animated count-up ─────────────────────────────────────────────────────────
 class _AnimatedCount extends StatefulWidget {
   final int value;
   final TextStyle style;
-  final String prefix;
-  final String suffix;
+  final String prefix, suffix;
   const _AnimatedCount({required this.value, required this.style,
       this.prefix = '', this.suffix = ''});
-  @override
-  State<_AnimatedCount> createState() => _AnimatedCountState();
+  @override State<_AnimatedCount> createState() => _AnimatedCountState();
 }
 
 class _AnimatedCountState extends State<_AnimatedCount>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _anim;
-
   @override
   void initState() {
     super.initState();
@@ -187,30 +406,22 @@ class _AnimatedCountState extends State<_AnimatedCount>
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _ctrl.forward();
   }
-
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
-
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
     builder: (_, __) {
       final v = (widget.value * _anim.value).toInt();
       String s;
-      if (widget.value >= 10000000)
-        s = '${(v / 10000000).toStringAsFixed(1)}Cr';
-      else if (widget.value >= 100000)
-        s = '${(v / 100000).toStringAsFixed(1)}L';
-      else if (widget.value >= 1000)
-        s = '${(v / 1000).toStringAsFixed(1)}K';
-      else
-        s = NumberFormat('#,##0', 'en_US').format(v);
+      if (widget.value >= 10000000) s = '${(v / 10000000).toStringAsFixed(1)}Cr';
+      else if (widget.value >= 100000) s = '${(v / 100000).toStringAsFixed(1)}L';
+      else if (widget.value >= 1000) s = '${(v / 1000).toStringAsFixed(1)}K';
+      else s = NumberFormat('#,##0', 'en_US').format(v);
       return Text('${widget.prefix}$s${widget.suffix}', style: widget.style);
     },
   );
 }
 
-// ── Animated progress bar ─────────────────────────────────────────────────────
 class _AnimatedProgressBar extends StatefulWidget {
   final double value;
   final Color color;
@@ -218,10 +429,9 @@ class _AnimatedProgressBar extends StatefulWidget {
   final double height;
   const _AnimatedProgressBar({
     required this.value, required this.color,
-    this.backgroundColor, this.height = 8,
+    this.backgroundColor, this.height = 6,
   });
-  @override
-  State<_AnimatedProgressBar> createState() => _AnimatedProgressBarState();
+  @override State<_AnimatedProgressBar> createState() => _AnimatedProgressBarState();
 }
 
 class _AnimatedProgressBarState extends State<_AnimatedProgressBar>
@@ -235,8 +445,7 @@ class _AnimatedProgressBarState extends State<_AnimatedProgressBar>
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _ctrl.forward();
   }
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
@@ -245,66 +454,47 @@ class _AnimatedProgressBarState extends State<_AnimatedProgressBar>
       child: LinearProgressIndicator(
         value: (widget.value * _anim.value).clamp(0.0, 1.0),
         minHeight: widget.height,
-        backgroundColor: widget.backgroundColor ?? widget.color.withOpacity(0.15),
+        backgroundColor: widget.backgroundColor ?? widget.color.withOpacity(0.12),
         valueColor: AlwaysStoppedAnimation(widget.color),
       ),
     ),
   );
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
-// ORIGINAL DONUT CHART (reverted — percentage labels on arcs)
-// ════════════════════════════════════════════════════════════════════════════════
-
+// ── Donut chart (kept intact — it's good) ────────────────────────────────────
 class _DonutPainter extends CustomPainter {
   final List<double> values;
   final List<Color> colors;
   final double progress;
-
   _DonutPainter({required this.values, required this.colors, required this.progress});
 
   @override
   void paint(Canvas canvas, Size size) {
     final total = values.fold(0.0, (a, b) => a + b);
     if (total == 0) return;
-
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width, size.height) / 2 - 6;
-    const strokeW = 44.0;
+    const strokeW = 40.0;
     const gap = 0.022;
-
     double startAngle = -pi / 2;
     final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeW
-      ..strokeCap = StrokeCap.butt;
+      ..style = PaintingStyle.stroke ..strokeWidth = strokeW ..strokeCap = StrokeCap.butt;
 
     for (int i = 0; i < values.length; i++) {
       if (values[i] == 0) continue;
       final sweep = (values[i] / total) * 2 * pi * progress - gap;
-      if (sweep <= 0) {
-        startAngle += (values[i] / total) * 2 * pi * progress;
-        continue;
-      }
-
+      if (sweep <= 0) { startAngle += (values[i] / total) * 2 * pi * progress; continue; }
       paint.color = colors[i];
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius),
-        startAngle + gap / 2, sweep, false, paint,
-      );
-
-      // Percentage label on arc
+      canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+          startAngle + gap / 2, sweep, false, paint);
       final pct = (values[i] / total * 100).round();
       if (pct >= 5 && progress > 0.65) {
         final midAngle = startAngle + gap / 2 + sweep / 2;
         final lx = center.dx + radius * cos(midAngle);
         final ly = center.dy + radius * sin(midAngle);
         final tp = TextPainter(
-          text: TextSpan(
-            text: '$pct%',
-            style: const TextStyle(color: Colors.white, fontSize: 12,
-                fontWeight: FontWeight.w800),
-          ),
+          text: TextSpan(text: '$pct%',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
           textDirection: ui.TextDirection.ltr,
         )..layout();
         tp.paint(canvas, Offset(lx - tp.width / 2, ly - tp.height / 2));
@@ -324,8 +514,7 @@ class _AnimatedDonut extends StatefulWidget {
   final double size;
   const _AnimatedDonut({required this.values, required this.colors,
       required this.center, this.size = 190});
-  @override
-  State<_AnimatedDonut> createState() => _AnimatedDonutState();
+  @override State<_AnimatedDonut> createState() => _AnimatedDonutState();
 }
 
 class _AnimatedDonutState extends State<_AnimatedDonut>
@@ -339,27 +528,533 @@ class _AnimatedDonutState extends State<_AnimatedDonut>
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
     _ctrl.forward();
   }
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
     builder: (_, __) => SizedBox(
       width: widget.size, height: widget.size,
       child: Stack(alignment: Alignment.center, children: [
-        CustomPaint(
-          size: Size(widget.size, widget.size),
-          painter: _DonutPainter(
-              values: widget.values, colors: widget.colors, progress: _anim.value),
-        ),
+        CustomPaint(size: Size(widget.size, widget.size),
+            painter: _DonutPainter(values: widget.values, colors: widget.colors, progress: _anim.value)),
         widget.center,
       ]),
     ),
   );
 }
 
+// ── Animated distribution bar ─────────────────────────────────────────────────
+class _AnimatedDistBar extends StatefulWidget {
+  final int zakat, nonZakat, gmwf;
+  final Color colorZ, colorNZ, colorG;
+  const _AnimatedDistBar({required this.zakat, required this.nonZakat, required this.gmwf,
+      required this.colorZ, required this.colorNZ, required this.colorG});
+  @override State<_AnimatedDistBar> createState() => _AnimatedDistBarState();
+}
+
+class _AnimatedDistBarState extends State<_AnimatedDistBar>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(duration: const Duration(milliseconds: 1000), vsync: this);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
+    _ctrl.forward();
+  }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final total = widget.zakat + widget.nonZakat + widget.gmwf;
+    if (total == 0) return const SizedBox.shrink();
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) => ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: Row(children: [
+          if (widget.zakat > 0)    Expanded(flex: widget.zakat,    child: Container(height: 6, color: widget.colorZ)),
+          if (widget.nonZakat > 0) Expanded(flex: widget.nonZakat, child: Container(height: 6, color: widget.colorNZ)),
+          if (widget.gmwf > 0)     Expanded(flex: widget.gmwf,     child: Container(height: 6, color: widget.colorG)),
+        ]),
+      ),
+    );
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
-// HERO BANNER — Purple gradient
+// DESIGN-SYSTEM COMPONENTS
+// ════════════════════════════════════════════════════════════════════════════════
+
+/// Consistent H2 section heading with accent bar + optional action
+class DashSection extends StatelessWidget {
+  final String title;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+  final RoleThemeData t;
+
+  const DashSection(this.title, {super.key, required this.t,
+      this.actionLabel, this.onAction});
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Container(width: 4, height: 22,
+          decoration: BoxDecoration(
+              color: t.accent, borderRadius: BorderRadius.circular(2))),
+      const SizedBox(width: DS.s1),
+      Text(title, style: TextStyle(
+          color: t.textPrimary, fontSize: DS.h2,
+          fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+      const Spacer(),
+      if (actionLabel != null && onAction != null)
+        TextButton(
+          onPressed: onAction,
+          style: TextButton.styleFrom(
+            foregroundColor: t.accent,
+            padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 4),
+          ),
+          child: Text(actionLabel!, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        ),
+    ],
+  );
+}
+
+/// Backward-compatible alias kept for any screens still using `DashHeading`
+class DashHeading extends StatelessWidget {
+  final String text;
+  final RoleThemeData t;
+  const DashHeading(this.text, {super.key, required this.t});
+
+  @override
+  Widget build(BuildContext context) => DashSection(text, t: t);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// A. REVENUE HERO CARD — Most prominent element
+// Blue → Indigo gradient, H1 total revenue, 3 source pills
+// ════════════════════════════════════════════════════════════════════════════════
+
+class RevenueHeroCard extends StatefulWidget {
+  final BranchStats s;
+  final String? label;     // e.g. "All Branches – Today"
+  const RevenueHeroCard({super.key, required this.s, this.label});
+
+  @override State<RevenueHeroCard> createState() => _RevenueHeroCardState();
+}
+
+class _RevenueHeroCardState extends State<RevenueHeroCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(duration: const Duration(milliseconds: 700), vsync: this);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _ctrl.forward();
+  }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.s;
+    return FadeTransition(
+      opacity: _anim,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(DS.s3),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1E40AF), Color(0xFF2563EB), Color(0xFF3B82F6)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(DS.r4),
+          boxShadow: [BoxShadow(
+            color: DS.blue.withOpacity(0.30),
+            blurRadius: 32, offset: const Offset(0, 12),
+          )],
+        ),
+        child: Stack(children: [
+          // Decorative circles
+          Positioned(right: -24, top: -24, child: Container(width: 140, height: 140,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.06)))),
+          Positioned(right: 60, bottom: -10, child: Container(width: 70, height: 70,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withOpacity(0.04)))),
+
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Label row
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.18),
+                    borderRadius: BorderRadius.circular(DS.r1)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.trending_up_rounded, color: Colors.white, size: 12),
+                  const SizedBox(width: 5),
+                  Text(widget.label ?? 'Today\'s Revenue',
+                      style: const TextStyle(color: Colors.white, fontSize: 11,
+                          fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                ]),
+              ),
+              const Spacer(),
+              Text(DateFormat('d MMM yyyy').format(DateTime.now()),
+                  style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12)),
+            ]),
+
+            const SizedBox(height: DS.s2),
+
+            // H1 Revenue
+            _AnimatedCount(
+              value: s.totalRevenue,
+              prefix: 'PKR ',
+              style: const TextStyle(
+                  color: Colors.white, fontSize: DS.h1,
+                  fontWeight: FontWeight.w900, letterSpacing: -1.5, height: 1.0),
+            ),
+            const SizedBox(height: 4),
+            Text('Total Revenue (Dispensary + Dasterkhwaan + Donations)',
+                style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: DS.caption)),
+
+            const SizedBox(height: DS.s2),
+
+            // 3 source pills
+            LayoutBuilder(builder: (_, c) {
+              final isWide = c.maxWidth > 480;
+              final pills = [
+                _revPill(Icons.local_pharmacy_rounded, 'Dispensary',
+                    s.dispensaryRevenue, const Color(0xFF93C5FD)),
+                _revPill(Icons.restaurant_rounded, 'Dasterkhwaan',
+                    s.dasterkhwaanRevenue, const Color(0xFF6EE7B7)),
+                _revPill(Icons.volunteer_activism_rounded, 'Donations',
+                    s.donations, const Color(0xFFC4B5FD)),
+              ];
+              if (isWide) {
+                return Row(children: [
+                  for (int i = 0; i < pills.length; i++) ...[
+                    if (i > 0) Container(width: 1, height: 40,
+                        color: Colors.white.withOpacity(0.2),
+                        margin: const EdgeInsets.symmetric(horizontal: DS.s2)),
+                    Expanded(child: pills[i]),
+                  ],
+                ]);
+              }
+              return Column(
+                  children: pills.map((p) => Padding(
+                      padding: const EdgeInsets.only(bottom: DS.s1), child: p)).toList());
+            }),
+          ]),
+        ]),
+      ),
+    );
+  }
+
+  Widget _revPill(IconData icon, String label, int amount, Color color) =>
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(DS.r1)),
+            child: Icon(icon, color: color, size: 14)),
+        const SizedBox(width: DS.s1),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(color: Colors.white.withOpacity(0.70),
+              fontSize: DS.caption, fontWeight: FontWeight.w500)),
+          _AnimatedCount(value: amount, prefix: 'PKR ',
+              style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w800)),
+        ]),
+      ]);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// B. OPERATIONS OVERVIEW ROW
+// [Total Patients] [Meals Issued] [Meals Served] [Completion %]
+// ════════════════════════════════════════════════════════════════════════════════
+
+class OperationsOverviewRow extends StatelessWidget {
+  final BranchStats s;
+  const OperationsOverviewRow({super.key, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final completionPct = s.tokens > 0
+        ? (s.dispensed / s.tokens * 100).clamp(0, 100).toDouble()
+        : 0.0;
+
+    final tiles = [
+      _OpsTile(
+        icon: Icons.people_rounded,
+        iconColor: DS.blue, iconBg: DS.blueMuted,
+        value: fmtNum(s.tokens), label: 'Total Patients',
+        isEmpty: s.tokens == 0,
+      ),
+      _OpsTile(
+        icon: Icons.restaurant_rounded,
+        iconColor: DS.orange, iconBg: DS.orangeMuted,
+        value: fmtNum(s.dasterkhwaan), label: 'Tokens Issued',
+        isEmpty: s.dasterkhwaan == 0,
+      ),
+      _OpsTile(
+        icon: Icons.done_all_rounded,
+        iconColor: DS.green, iconBg: DS.greenMuted,
+        value: fmtNum(s.dasterkhwaanServed), label: 'Tokens Served',
+        isEmpty: s.dasterkhwaanServed == 0,
+      ),
+      _OpsTile(
+        icon: Icons.track_changes_rounded,
+        iconColor: DS.purple, iconBg: DS.purpleMuted,
+        value: '${completionPct.toStringAsFixed(0)}%',
+        label: 'Completion',
+        progressValue: completionPct / 100,
+        progressColor: DS.purple,
+      ),
+    ];
+
+    return LayoutBuilder(builder: (_, c) {
+      final cols = c.maxWidth < 480 ? 2 : 4;
+      return GridView.count(
+        crossAxisCount: cols,
+        crossAxisSpacing: DS.s2, mainAxisSpacing: DS.s2,
+        childAspectRatio: cols == 2 ? 1.55 : 1.60,
+        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+        children: tiles,
+      );
+    });
+  }
+}
+
+class _OpsTile extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor, iconBg;
+  final String value, label;
+  final bool isEmpty;
+  final double? progressValue;
+  final Color? progressColor;
+
+  const _OpsTile({
+    required this.icon, required this.iconColor, required this.iconBg,
+    required this.value, required this.label,
+    this.isEmpty = false, this.progressValue, this.progressColor,
+  });
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(DS.s2),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(DS.r2),
+      border: Border.all(color: DS.border),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+          blurRadius: 10, offset: const Offset(0, 3))],
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Container(padding: const EdgeInsets.all(DS.s1),
+            decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(DS.r1)),
+            child: Icon(icon, color: iconColor, size: 16)),
+        const Spacer(),
+        if (isEmpty)
+          Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: const Color(0xFFFEF3C7),
+                  borderRadius: BorderRadius.circular(DS.r1)),
+              child: const Text('—', style: TextStyle(color: Color(0xFFD97706), fontSize: 10, fontWeight: FontWeight.w700))),
+      ]),
+      const Spacer(),
+      Text(value, style: TextStyle(
+          fontSize: value.length > 5 ? 18 : 24,
+          fontWeight: FontWeight.w900,
+          color: isEmpty ? DS.neutral : iconColor, height: 1.1)),
+      const SizedBox(height: 2),
+      Text(label, style: const TextStyle(fontSize: DS.caption, color: DS.neutral,
+          fontWeight: FontWeight.w500)),
+      if (progressValue != null) ...[
+        const SizedBox(height: 8),
+        _AnimatedProgressBar(value: progressValue!, color: progressColor ?? DS.purple, height: 4),
+      ],
+    ]),
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// C. FINANCIAL SOURCES ROW — Zakat / Non-Zakat / GMWF
+// ════════════════════════════════════════════════════════════════════════════════
+
+class FinancialSourcesRow extends StatelessWidget {
+  final BranchStats s;
+  final RoleThemeData t;
+  const FinancialSourcesRow({super.key, required this.s, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = s.tokens;
+    return Container(
+      padding: const EdgeInsets.all(DS.s2),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.border),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+            blurRadius: 10, offset: const Offset(0, 3))],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Header
+        Row(children: [
+          Container(padding: const EdgeInsets.all(DS.s1),
+              decoration: BoxDecoration(color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1)),
+              child: const Icon(Icons.account_balance_rounded, color: DS.blue, size: 16)),
+          const SizedBox(width: DS.s1),
+          const Text('Patient Financial Sources',
+              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          Text('$total total', style: const TextStyle(color: DS.neutral, fontSize: 12)),
+        ]),
+
+        const SizedBox(height: DS.s2),
+
+        // Distribution bar (if there's data)
+        if (total > 0) ...[
+          _AnimatedDistBar(zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
+              colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf),
+          const SizedBox(height: DS.s2),
+        ],
+
+        // 3 source tiles
+        LayoutBuilder(builder: (_, c) {
+          final isWide = c.maxWidth > 480;
+          final items = [
+            _SrcTile(color: t.zakat, label: 'Zakat',
+                count: s.zakat, revenue: s.zakat * 20,
+                rateLabel: '@ PKR 20', total: total),
+            _SrcTile(color: t.nonZakat, label: 'Non-Zakat',
+                count: s.nonZakat, revenue: s.nonZakat * 100,
+                rateLabel: '@ PKR 100', total: total),
+            _SrcTile(color: t.gmwf, label: 'GMWF',
+                count: s.gmwf, revenue: 0,
+                rateLabel: 'Free', total: total),
+          ];
+          if (isWide) {
+            return Row(children: <Widget>[
+              Expanded(child: items[0]),
+              const SizedBox(width: DS.s2),
+              Expanded(child: items[1]),
+              const SizedBox(width: DS.s2),
+              Expanded(child: items[2]),
+            ]);
+          }
+          return Column(children: [
+            Row(children: [Expanded(child: items[0]), const SizedBox(width: DS.s2), Expanded(child: items[1])]),
+            const SizedBox(height: DS.s2),
+            items[2],
+          ]);
+        }),
+
+        // Empty state
+        if (total == 0) _EmptyOpsState(
+          icon: Icons.people_outline_rounded,
+          message: 'No patients registered today',
+          hint: 'Check back once registration begins at your branch',
+        ),
+      ]),
+    );
+  }
+}
+
+class _SrcTile extends StatelessWidget {
+  final Color color;
+  final String label, rateLabel;
+  final int count, revenue, total;
+  const _SrcTile({required this.color, required this.label, required this.count,
+      required this.revenue, required this.rateLabel, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total > 0 ? (count / total * 100).round() : 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: DS.s1 + 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(DS.r1 + 4),
+        border: Border.all(color: color.withOpacity(0.20)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(width: 8, height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(DS.r1)),
+            child: Text('$pct%', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+          ),
+        ]),
+        const SizedBox(height: 6),
+        _AnimatedCount(value: count,
+            style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.w900, height: 1.1)),
+        Text('patients', style: TextStyle(color: color.withOpacity(0.65), fontSize: DS.caption)),
+        const SizedBox(height: 4),
+        Text(revenue > 0 ? fmtPKR(revenue) : rateLabel,
+            style: TextStyle(color: const Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(rateLabel, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+      ]),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// D. EMPTY OPERATIONS STATE — Helpful, not dead
+// ════════════════════════════════════════════════════════════════════════════════
+
+class _EmptyOpsState extends StatelessWidget {
+  final IconData icon;
+  final String message;
+  final String? hint;
+  final VoidCallback? onPrimary;
+  final String primaryLabel;
+
+  const _EmptyOpsState({
+    required this.icon,
+    required this.message,
+    this.hint,
+    this.onPrimary,
+    this.primaryLabel = 'Refresh',
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: DS.s3),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Container(padding: const EdgeInsets.all(DS.s2),
+          decoration: BoxDecoration(color: DS.neutralBg, shape: BoxShape.circle),
+          child: Icon(icon, size: 32, color: DS.neutral)),
+      const SizedBox(height: DS.s2),
+      Text(message, style: const TextStyle(color: Color(0xFF111827),
+          fontSize: 14, fontWeight: FontWeight.w600)),
+      if (hint != null) ...[
+        const SizedBox(height: 6),
+        Text(hint!, textAlign: TextAlign.center,
+            style: const TextStyle(color: DS.neutral, fontSize: 12)),
+      ],
+      if (onPrimary != null) ...[
+        const SizedBox(height: DS.s2),
+        FilledButton.icon(
+          onPressed: onPrimary,
+          icon: const Icon(Icons.refresh_rounded, size: 16),
+          label: Text(primaryLabel),
+          style: FilledButton.styleFrom(
+            backgroundColor: DS.blue,
+            padding: const EdgeInsets.symmetric(horizontal: DS.s3, vertical: DS.s1),
+          ),
+        ),
+      ],
+    ]),
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// E. COMPACT HERO BANNER — 35% smaller than original
 // ════════════════════════════════════════════════════════════════════════════════
 
 class HeroBanner extends StatefulWidget {
@@ -369,14 +1064,10 @@ class HeroBanner extends StatefulWidget {
   final BranchStats stats;
 
   const HeroBanner({
-    super.key,
-    required this.t,
-    required this.username,
-    required this.roleLabel,
-    required this.stats,
+    super.key, required this.t, required this.username,
+    required this.roleLabel, required this.stats,
   });
-  @override
-  State<HeroBanner> createState() => _HeroBannerState();
+  @override State<HeroBanner> createState() => _HeroBannerState();
 }
 
 class _HeroBannerState extends State<HeroBanner>
@@ -386,12 +1077,11 @@ class _HeroBannerState extends State<HeroBanner>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
+    _ctrl = AnimationController(duration: const Duration(milliseconds: 600), vsync: this);
     _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
     _ctrl.forward();
   }
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) {
@@ -404,91 +1094,382 @@ class _HeroBannerState extends State<HeroBanner>
       opacity: _anim,
       child: Container(
         width: double.infinity,
-        padding: const EdgeInsets.all(28),
+        // Reduced padding: was 28, now 16/20 → ~35% height reduction
+        padding: const EdgeInsets.fromLTRB(DS.s2 + 4, DS.s2, DS.s2 + 4, DS.s2),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            colors: [Color(0xFF6B48FF), Color(0xFF8B6FFF)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+          gradient: LinearGradient(
+            colors: [widget.t.accent, widget.t.accentLight],
+            begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
+          borderRadius: BorderRadius.circular(DS.r3),
           boxShadow: [BoxShadow(
-            color: const Color(0xFF6B48FF).withOpacity(0.35),
-            blurRadius: 32, offset: const Offset(0, 12),
+            color: widget.t.accent.withOpacity(0.30),
+            blurRadius: 24, offset: const Offset(0, 8),
           )],
         ),
-        child: Stack(children: [
-          Positioned(right: -20, top: -20,
-            child: Container(width: 130, height: 130,
-              decoration: BoxDecoration(shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.07)))),
-          Positioned(right: 50, top: 25,
-            child: Container(width: 65, height: 65,
-              decoration: BoxDecoration(shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.05)))),
-
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Welcome, ${widget.username}',
-                    style: const TextStyle(color: Colors.white, fontSize: 24,
-                        fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-                const SizedBox(height: 6),
-                Text('Patient Processing Overview – Today',
-                    style: TextStyle(color: Colors.white.withOpacity(0.75),
-                        fontSize: 13)),
-              ])),
-            ]),
-            const SizedBox(height: 28),
-            Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _AnimatedCount(value: s.tokens,
-                    style: const TextStyle(color: Colors.white, fontSize: 42,
-                        fontWeight: FontWeight.w900, height: 1.0)),
-                const SizedBox(height: 4),
-                Text('Total Patients',
-                    style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
-              ])),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                Text('${completionPct.toStringAsFixed(0)}%',
-                    style: const TextStyle(color: Colors.white, fontSize: 42,
-                        fontWeight: FontWeight.w900, height: 1.0)),
-                const SizedBox(height: 4),
-                Text('Completion Rate',
-                    style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
-              ])),
-            ]),
-            const SizedBox(height: 18),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: completionPct / 100,
-                minHeight: 8,
-                backgroundColor: Colors.white.withOpacity(0.20),
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
-              ),
+        child: Row(children: [
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Role badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 3),
+              decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.20),
+                  borderRadius: BorderRadius.circular(DS.r1)),
+              child: Text(widget.roleLabel,
+                  style: const TextStyle(color: Colors.white, fontSize: 10,
+                      fontWeight: FontWeight.w700, letterSpacing: 1.5)),
             ),
-            const SizedBox(height: 12),
-            Row(children: [
-              Icon(Icons.check_circle_rounded, color: Colors.white.withOpacity(0.80), size: 14),
-              const SizedBox(width: 5),
-              Text('${s.dispensed} processed',
-                  style: TextStyle(color: Colors.white.withOpacity(0.80), fontSize: 12)),
-              const Spacer(),
-              Text(DateFormat('d MMM yyyy').format(DateTime.now()),
-                  style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12)),
-            ]),
+            const SizedBox(height: 6),
+            // Username
+            Text(widget.username,
+                style: const TextStyle(color: Colors.white, fontSize: 20,
+                    fontWeight: FontWeight.w800, height: 1.1),
+                overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 4),
+            Text(DateFormat('EEE, d MMM').format(DateTime.now()),
+                style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 12)),
+          ])),
+          const SizedBox(width: DS.s2),
+          // Two compact stat chips
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            _statChip(Icons.people_rounded, fmtNum(s.tokens), 'Patients'),
+            const SizedBox(width: DS.s1),
+            _statChip(Icons.track_changes_rounded,
+                '${completionPct.toStringAsFixed(0)}%', 'Done'),
           ]),
         ]),
       ),
     );
   }
+
+  Widget _statChip(IconData icon, String value, String label) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: DS.s1),
+    decoration: BoxDecoration(
+      color: Colors.white.withOpacity(0.18),
+      borderRadius: BorderRadius.circular(DS.r1 + 4),
+    ),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, color: Colors.white, size: 14),
+      const SizedBox(height: 3),
+      Text(value, style: const TextStyle(color: Colors.white,
+          fontSize: 15, fontWeight: FontWeight.w900, height: 1.0)),
+      Text(label, style: TextStyle(color: Colors.white.withOpacity(0.70), fontSize: 10)),
+    ]),
+  );
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// CHAIRMAN INSIGHTS CARD — directly below hero
-// Overall Performance (purple gradient) + Top Performer (orange-red gradient)
-// Shows: Total Revenue, Total Patients, Total Donations, Food Tokens
+// F. BRANCH PERFORMANCE TABLE — collapsible rows, replaces card list
+// ════════════════════════════════════════════════════════════════════════════════
+
+class BranchPerformanceTable extends StatefulWidget {
+  final RoleThemeData t;
+  final List<Map<String, dynamic>> branches; // [{'id', 'name', 'location?'}]
+  const BranchPerformanceTable({
+    super.key, required this.t, required this.branches,
+  });
+  @override State<BranchPerformanceTable> createState() => _BranchPerformanceTableState();
+}
+
+class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
+  final Map<String, BranchStats> _latestStats = {}; // Local cache for sorting
+  final Set<String> _expanded = {};
+  String _sortBy = 'tokens'; // 'tokens', 'revenue', 'donations'
+  bool _ascending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    dashboardController.addListener(_onFilterChanged);
+  }
+
+  @override
+  void dispose() {
+    dashboardController.removeListener(_onFilterChanged);
+    super.dispose();
+  }
+
+  void _onFilterChanged() {
+    if (mounted) setState(() {});
+  }
+
+  List<Map<String, dynamic>> get _sortedBranches {
+    final list = List<Map<String, dynamic>>.from(widget.branches);
+    list.sort((a, b) {
+      final idA = a['id'] as String;
+      final idB = b['id'] as String;
+      final sa = _latestStats[idA] ?? const BranchStats();
+      final sb = _latestStats[idB] ?? const BranchStats();
+
+      int compare = 0;
+      switch (_sortBy) {
+        case 'tokens': compare = sa.tokens.compareTo(sb.tokens); break;
+        case 'revenue': compare = sa.totalRevenue.compareTo(sb.totalRevenue); break;
+        case 'donations': compare = sa.donations.compareTo(sb.donations); break;
+      }
+      return _ascending ? compare : -compare;
+    });
+    return list;
+  }
+
+  void _toggleSort(String key) {
+    setState(() {
+      if (_sortBy == key) _ascending = !_ascending;
+      else { _sortBy = key; _ascending = false; }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.t;
+    final sorted = _sortedBranches;
+    final topId = sorted.isNotEmpty ? sorted.first['id'] : null;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.border),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+            blurRadius: 14, offset: const Offset(0, 4))],
+      ),
+      child: Column(children: [
+        // Table header
+        Container(
+          padding: const EdgeInsets.fromLTRB(DS.s2, DS.s1 + 4, DS.s2, DS.s1 + 4),
+          decoration: BoxDecoration(
+              color: DS.neutralBg,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(DS.r2)),
+              border: const Border(bottom: BorderSide(color: DS.border))),
+          child: Row(children: [
+            const Expanded(flex: 3, child: Text('Branch', style: TextStyle(
+                color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
+            _headerCell('Patients', 'tokens', flex: 2),
+            _headerCell('Donations', 'donations', flex: 2),
+            _headerCell('Food', 'food', flex: 2, sortable: false),
+            _headerCell('Revenue', 'revenue', flex: 2),
+            const SizedBox(width: 24), // expand chevron space
+          ]),
+        ),
+
+        // Rows with individual StreamBuilders for real-time independence
+        ...sorted.asMap().entries.map((entry) {
+          final i = entry.key;
+          final b = entry.value;
+          final id = b['id'] as String;
+          final name = b['name'] as String;
+          final isExpanded = _expanded.contains(id);
+          final isLast = i == sorted.length - 1;
+
+          return StreamBuilder<BranchStats>(
+            stream: streamBranchStats(id, filter: dashboardController.value),
+            builder: (context, snapshot) {
+              final s = snapshot.data ?? const BranchStats();
+              // Update local cache silently for sorting in next rebuild
+              if (snapshot.hasData) {
+                _latestStats[id] = s;
+              }
+              
+              final isTop = id == topId && s.tokens > 0;
+
+              return _BranchTableRow(
+                t: t, name: name, stats: s,
+                isExpanded: isExpanded,
+                isLast: isLast,
+                isTop: isTop,
+                onTap: () => setState(() {
+                  if (isExpanded) _expanded.remove(id);
+                  else _expanded.add(id);
+                }),
+              );
+            }
+          );
+        }),
+
+        // Empty state
+        if (sorted.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(DS.s4),
+            child: _EmptyOpsState(
+              icon: Icons.store_outlined,
+              message: 'No branches matched',
+              hint: 'Try adjusting your filters',
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Widget _headerCell(String label, String key, {int flex = 1, bool sortable = true}) {
+    final active = _sortBy == key;
+    return Expanded(
+      flex: flex,
+      child: InkWell(
+        onTap: sortable ? () => _toggleSort(key) : null,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(label, style: TextStyle(
+                color: active ? DS.blue : DS.neutral,
+                fontSize: 11, fontWeight: FontWeight.w700)),
+            if (sortable && active) ...[
+              const SizedBox(width: 2),
+              Icon(_ascending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                  size: 10, color: DS.blue),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BranchTableRow extends StatelessWidget {
+  final RoleThemeData t;
+  final String name;
+  final BranchStats? stats;
+  final bool isExpanded, isLast, isTop;
+  final VoidCallback onTap;
+  const _BranchTableRow({
+    required this.t, required this.name, required this.stats,
+    required this.isExpanded, required this.isLast, required this.isTop, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final s = stats ?? const BranchStats();
+
+    return Column(children: [
+      InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(DS.s2, DS.s2 - 4, DS.s2, DS.s2 - 4),
+          decoration: BoxDecoration(
+            color: isTop ? DS.green.withOpacity(0.05) : (isExpanded ? DS.blueMuted.withOpacity(0.5) : Colors.transparent),
+            border: isLast && !isExpanded ? null
+                : const Border(bottom: BorderSide(color: DS.border, width: 0.5)),
+          ),
+          child: Row(children: [
+            // Branch name
+            Expanded(flex: 3, child: Row(children: [
+              if (isTop) const Icon(Icons.stars_rounded, color: DS.green, size: 14),
+              if (isTop) const SizedBox(width: 4),
+              Container(width: 6, height: 6,
+                  decoration: BoxDecoration(
+                      color: s.tokens > 0 ? DS.green : DS.border,
+                      shape: BoxShape.circle)),
+              const SizedBox(width: DS.s1),
+              Expanded(child: Text(name,
+                  style: TextStyle(color: t.textPrimary, fontSize: 13,
+                      fontWeight: isExpanded || isTop ? FontWeight.w700 : FontWeight.w600),
+                  overflow: TextOverflow.ellipsis)),
+            ])),
+            // Patients
+            Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.tokens,
+                style: const TextStyle(color: DS.blue, fontSize: 13,
+                    fontWeight: FontWeight.w800, letterSpacing: -0.3),
+            ))),
+            // Donations
+            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.donations),
+                style: const TextStyle(color: DS.purple, fontSize: 12,
+                    fontWeight: FontWeight.w700)))),
+            // Food Tokens
+            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dasterkhwaan),
+                style: const TextStyle(color: DS.orange, fontSize: 12,
+                    fontWeight: FontWeight.w700)))),
+            // Revenue
+            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.totalRevenue),
+                style: const TextStyle(color: DS.green, fontSize: 12,
+                    fontWeight: FontWeight.w700)))),
+            // Chevron
+            AnimatedRotation(
+              turns: isExpanded ? 0.25 : 0,
+              duration: const Duration(milliseconds: 250),
+              child: const Icon(Icons.chevron_right_rounded, color: DS.neutral, size: 20),
+            ),
+          ]),
+        ),
+      ),
+
+      // Expanded detail panel
+      AnimatedCrossFade(
+        firstChild: const SizedBox.shrink(),
+        secondChild: _BranchDetailPanel(t: t, s: s),
+        crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+        duration: const Duration(milliseconds: 280),
+      ),
+
+      if (isExpanded && !isLast)
+        const Divider(height: 1, color: DS.border),
+    ]);
+  }
+}
+
+class _BranchDetailPanel extends StatelessWidget {
+  final RoleThemeData t;
+  final BranchStats s;
+  const _BranchDetailPanel({required this.t, required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
+      color: DS.blueMuted.withOpacity(0.25),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Patient type breakdown
+        Row(children: [
+          _detailChip(t.zakat, 'Zakat', s.zakat, 'PKR ${fmtNum(s.zakat * 20)}'),
+          const SizedBox(width: DS.s1),
+          _detailChip(t.nonZakat, 'Non-Zakat', s.nonZakat, 'PKR ${fmtNum(s.nonZakat * 100)}'),
+          const SizedBox(width: DS.s1),
+          _detailChip(t.gmwf, 'GMWF', s.gmwf, 'Free'),
+        ]),
+
+        const SizedBox(height: DS.s2),
+
+        // Food service progress
+        Row(children: [
+          const Icon(Icons.restaurant_rounded, size: 13, color: DS.orange),
+          const SizedBox(width: 6),
+          const Text('Food Service:', style: TextStyle(color: DS.neutral, fontSize: 12)),
+          const SizedBox(width: 6),
+          Text('${s.dasterkhwaanServed} / ${s.dasterkhwaan} served',
+              style: const TextStyle(color: DS.orange, fontSize: 12, fontWeight: FontWeight.w700)),
+        ]),
+        const SizedBox(height: 6),
+        _AnimatedProgressBar(
+            value: s.dasterkhwaan > 0 ? s.dasterkhwaanServed / s.dasterkhwaan : 0,
+            color: DS.orange, height: 5),
+
+        // Distribution bar
+        if (s.tokens > 0) ...[
+          const SizedBox(height: DS.s2),
+          _AnimatedDistBar(zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
+              colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf),
+        ],
+      ]),
+    );
+  }
+
+  Widget _detailChip(Color color, String label, int count, String revenue) =>
+      Expanded(child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(DS.r1),
+          border: Border.all(color: color.withOpacity(0.20)),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w700)),
+          _AnimatedCount(value: count,
+              style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w900)),
+          Text(revenue, style: TextStyle(color: color.withOpacity(0.75), fontSize: 10)),
+        ]),
+      ));
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// G. CHAIRMAN INSIGHTS CARD (kept — used in legacy screens if needed)
 // ════════════════════════════════════════════════════════════════════════════════
 
 class ChairmanInsightsCard extends StatelessWidget {
@@ -501,174 +1482,18 @@ class ChairmanInsightsCard extends StatelessWidget {
   final int targetRevenue;
 
   const ChairmanInsightsCard({
-    super.key,
-    required this.t,
-    required this.s,
-    required this.topBranchName,
-    this.topBranchLocation = '',
-    required this.topBranchRevenue,
-    required this.topBranchPatients,
+    super.key, required this.t, required this.s,
+    required this.topBranchName, this.topBranchLocation = '',
+    required this.topBranchRevenue, required this.topBranchPatients,
     this.targetRevenue = 21000000,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (_, constraints) {
-      final isWide = constraints.maxWidth > 600;
-      if (isWide) {
-        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Expanded(flex: 3,
-              child: _OverallPerformanceCard(s: s)),
-          const SizedBox(width: 14),
-          Expanded(flex: 2,
-              child: _TopPerformerCard(
-                  name: topBranchName, location: topBranchLocation,
-                  revenue: topBranchRevenue, patients: topBranchPatients)),
-        ]);
-      }
-      return Column(children: [
-        _OverallPerformanceCard(s: s),
-        const SizedBox(height: 14),
-        _TopPerformerCard(name: topBranchName, location: topBranchLocation,
-            revenue: topBranchRevenue, patients: topBranchPatients),
-      ]);
-    });
-  }
-}
-
-class _OverallPerformanceCard extends StatelessWidget {
-  final BranchStats s;
-  const _OverallPerformanceCard({required this.s});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF7C3AED), Color(0xFFA855F7)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: const Color(0xFF7C3AED).withOpacity(0.30),
-            blurRadius: 20, offset: const Offset(0, 8))],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header
-        Row(children: [
-          const Icon(Icons.workspace_premium_rounded, color: Colors.white70, size: 18),
-          const SizedBox(width: 8),
-          const Text('Overall Performance',
-              style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: Colors.white.withOpacity(0.18),
-                borderRadius: BorderRadius.circular(20)),
-            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.trending_up_rounded, color: Colors.white, size: 12),
-              SizedBox(width: 4),
-              Text('+12% growth', style: TextStyle(color: Colors.white,
-                  fontSize: 11, fontWeight: FontWeight.w600)),
-            ]),
-          ),
-        ]),
-        const SizedBox(height: 20),
-
-        // Row 1: Total Revenue + Total Patients
-        Row(children: [
-          Expanded(child: _statBlock(
-            label: 'Total Revenue',
-            child: _AnimatedCount(value: s.totalRevenue,
-                style: const TextStyle(color: Color(0xFFFBBF24), fontSize: 20,
-                    fontWeight: FontWeight.w900, height: 1.1)),
-          )),
-          Expanded(child: _statBlock(
-            label: 'Total Patients',
-            child: _AnimatedCount(value: s.tokens,
-                style: const TextStyle(color: Colors.white, fontSize: 20,
-                    fontWeight: FontWeight.w900, height: 1.1)),
-          )),
-        ]),
-        const SizedBox(height: 14),
-
-        // Row 2: Total Donations + Food Tokens
-        Row(children: [
-          Expanded(child: _statBlock(
-            label: 'Donations',
-            child: _AnimatedCount(value: s.donations,
-                style: const TextStyle(color: Color(0xFF86EFAC), fontSize: 20,
-                    fontWeight: FontWeight.w900, height: 1.1)),
-          )),
-          Expanded(child: _statBlock(
-            label: 'Food Tokens',
-            child: _AnimatedCount(value: s.dasterkhwaan,
-                style: const TextStyle(color: Color(0xFF93C5FD), fontSize: 20,
-                    fontWeight: FontWeight.w900, height: 1.1)),
-          )),
-        ]),
-      ]),
-    );
-  }
-
-  Widget _statBlock({required String label, required Widget child}) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 11)),
-        const SizedBox(height: 4),
-        child,
-      ]);
-}
-
-class _TopPerformerCard extends StatelessWidget {
-  final String name, location;
-  final int revenue, patients;
-  const _TopPerformerCard({required this.name, required this.location,
-      required this.revenue, required this.patients});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(22),
-    decoration: BoxDecoration(
-      gradient: const LinearGradient(
-        colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
-        begin: Alignment.topLeft, end: Alignment.bottomRight,
-      ),
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withOpacity(0.30),
-          blurRadius: 20, offset: const Offset(0, 8))],
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        const Icon(Icons.bolt_rounded, color: Colors.white70, size: 16),
-        const SizedBox(width: 6),
-        Text('Top Performer', style: TextStyle(
-            color: Colors.white.withOpacity(0.85), fontSize: 12, fontWeight: FontWeight.w600)),
-      ]),
-      const SizedBox(height: 14),
-      Text(name.isEmpty ? '—' : name,
-          style: const TextStyle(color: Colors.white, fontSize: 22,
-              fontWeight: FontWeight.w900, height: 1.1)),
-      if (location.isNotEmpty) ...[
-        const SizedBox(height: 4),
-        Text(location, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
-      ],
-      const SizedBox(height: 16),
-      _row('Revenue', fmtPKR(revenue)),
-      const SizedBox(height: 10),
-      _row('Patients', '$patients'),
-    ]),
-  );
-
-  Widget _row(String label, String value) => Row(children: [
-    Text(label, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
-    const Spacer(),
-    Text(value, style: const TextStyle(
-        color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800)),
-  ]);
+  Widget build(BuildContext context) => RevenueHeroCard(s: s);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// BENTO GRID — Patient distribution donut + 4 metric tiles
+// H. BENTO STATS GRID (backward compat — wraps new components)
 // ════════════════════════════════════════════════════════════════════════════════
 
 class BentoStatsGrid extends StatelessWidget {
@@ -679,228 +1504,22 @@ class BentoStatsGrid extends StatelessWidget {
   final int targetRevenue;
 
   const BentoStatsGrid({
-    super.key,
-    required this.t,
-    required this.s,
-    required this.branchCount,
-    required this.topBranchName,
+    super.key, required this.t, required this.s,
+    required this.branchCount, required this.topBranchName,
     this.targetRevenue = 21000000,
   });
 
   @override
   Widget build(BuildContext context) {
-    final completionPct = s.tokens > 0
-        ? (s.dispensed / s.tokens * 100).clamp(0, 100).toDouble()
-        : 0.0;
-
-    return LayoutBuilder(builder: (_, c) {
-      final isWide = c.maxWidth > 620;
-
-      if (isWide) {
-        // Wide: donut on left (spans 2 rows) + 4 tiles on right in 2x2
-        return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          // Donut card — tall
-          SizedBox(
-            width: c.maxWidth * 0.42,
-            child: _DonutCard(t: t, s: s),
-          ),
-          const SizedBox(width: 14),
-          // 2x2 metric grid
-          Expanded(child: Column(children: [
-            Row(children: [
-              Expanded(child: _BentoTile(
-                icon: Icons.track_changes_rounded,
-                iconBg: const Color(0xFFF0EDFF),
-                iconColor: const Color(0xFF7C3AED),
-                value: '${completionPct.toStringAsFixed(0)}%',
-                label: 'Avg. Achievement',
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: _BentoTile(
-                icon: Icons.location_city_rounded,
-                iconBg: const Color(0xFFECFDF5),
-                iconColor: const Color(0xFF059669),
-                value: topBranchName.isNotEmpty
-                    ? topBranchName.split(' ').first
-                    : '—',
-                label: 'Top Branch',
-              )),
-            ]),
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(child: _BentoTile(
-                icon: Icons.store_rounded,
-                iconBg: const Color(0xFFEFF6FF),
-                iconColor: const Color(0xFF3B82F6),
-                value: '$branchCount/$branchCount',
-                label: 'Active Branches',
-              )),
-              const SizedBox(width: 12),
-              Expanded(child: _BentoTile(
-                icon: Icons.account_balance_wallet_rounded,
-                iconBg: const Color(0xFFFFF7ED),
-                iconColor: const Color(0xFFD97706),
-                value: fmtPKR(targetRevenue),
-                label: 'Total Target',
-              )),
-            ]),
-          ])),
-        ]);
-      }
-
-      // Narrow: stacked
-      return Column(children: [
-        _DonutCard(t: t, s: s),
-        const SizedBox(height: 14),
-        GridView.count(
-          crossAxisCount: 2, shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 12, mainAxisSpacing: 12,
-          childAspectRatio: 1.4,
-          children: [
-            _BentoTile(
-              icon: Icons.track_changes_rounded,
-              iconBg: const Color(0xFFF0EDFF),
-              iconColor: const Color(0xFF7C3AED),
-              value: '${completionPct.toStringAsFixed(0)}%',
-              label: 'Avg. Achievement',
-            ),
-            _BentoTile(
-              icon: Icons.location_city_rounded,
-              iconBg: const Color(0xFFECFDF5),
-              iconColor: const Color(0xFF059669),
-              value: topBranchName.isNotEmpty
-                  ? topBranchName.split(' ').first : '—',
-              label: 'Top Branch',
-            ),
-            _BentoTile(
-              icon: Icons.store_rounded,
-              iconBg: const Color(0xFFEFF6FF),
-              iconColor: const Color(0xFF3B82F6),
-              value: '$branchCount/$branchCount',
-              label: 'Active Branches',
-            ),
-            _BentoTile(
-              icon: Icons.account_balance_wallet_rounded,
-              iconBg: const Color(0xFFFFF7ED),
-              iconColor: const Color(0xFFD97706),
-              value: fmtPKR(targetRevenue),
-              label: 'Total Target',
-            ),
-          ],
-        ),
-      ]);
-    });
+    return Column(children: [
+      OperationsOverviewRow(s: s),
+      const SizedBox(height: DS.s2),
+      FinancialSourcesRow(s: s, t: t),
+    ]);
   }
 }
 
-// ── Donut card (bento left panel) ─────────────────────────────────────────────
-class _DonutCard extends StatelessWidget {
-  final RoleThemeData t;
-  final BranchStats s;
-  const _DonutCard({required this.t, required this.s});
-
-  @override
-  Widget build(BuildContext context) {
-    final total = s.tokens;
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-            blurRadius: 14, offset: const Offset(0, 4))],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Patient Distribution',
-            style: TextStyle(color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 20),
-
-        if (total == 0)
-          Center(child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Text('No patients today', style: TextStyle(color: t.textTertiary)),
-          ))
-        else
-          Center(
-            child: _AnimatedDonut(
-              size: 185,
-              values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
-              colors: [t.zakat, t.nonZakat, t.gmwf],
-              center: Column(mainAxisSize: MainAxisSize.min, children: [
-                _AnimatedCount(value: total,
-                    style: TextStyle(color: t.textPrimary, fontSize: 24,
-                        fontWeight: FontWeight.w900)),
-                Text('patients', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-              ]),
-            ),
-          ),
-
-        const SizedBox(height: 18),
-        // Legend
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _dot(t.zakat, 'Zakat'),
-          const SizedBox(width: 18),
-          _dot(t.nonZakat, 'Non-Zakat'),
-          const SizedBox(width: 18),
-          _dot(t.gmwf, 'GMWF'),
-        ]),
-      ]),
-    );
-  }
-
-  Widget _dot(Color c, String label) => Row(mainAxisSize: MainAxisSize.min, children: [
-    Container(width: 9, height: 9,
-        decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
-    const SizedBox(width: 5),
-    Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500,
-        color: const Color(0xFF4B5563))),
-  ]);
-}
-
-// ── Single bento tile ─────────────────────────────────────────────────────────
-class _BentoTile extends StatelessWidget {
-  final IconData icon;
-  final Color iconBg, iconColor;
-  final String value, label;
-
-  const _BentoTile({
-    required this.icon, required this.iconBg, required this.iconColor,
-    required this.value, required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: const Color(0xFFE5E7EB)),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-          blurRadius: 10, offset: const Offset(0, 3))],
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: iconColor, size: 18)),
-      const Spacer(),
-      Text(value,
-          style: TextStyle(
-              fontSize: value.length > 7 ? 15 : 22,
-              fontWeight: FontWeight.w800, color: const Color(0xFF111827), height: 1.1),
-          maxLines: 1, overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 3),
-      Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF),
-          fontWeight: FontWeight.w500)),
-    ]),
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// KPI TILES ROW
-// ════════════════════════════════════════════════════════════════════════════════
-
+// ── KPI Tiles Row (backward compat) ──────────────────────────────────────────
 class KpiTilesRow extends StatelessWidget {
   final RoleThemeData t;
   final BranchStats s;
@@ -908,135 +1527,125 @@ class KpiTilesRow extends StatelessWidget {
   const KpiTilesRow({super.key, required this.t, required this.s, required this.branchCount});
 
   @override
-  Widget build(BuildContext context) {
-    final completionPct = s.tokens > 0 ? (s.dispensed / s.tokens * 100) : 0.0;
-    return LayoutBuilder(builder: (_, c) {
-      final cols = c.maxWidth < 500 ? 2 : 4;
-      return GridView.count(
-        crossAxisCount: cols,
-        crossAxisSpacing: 12, mainAxisSpacing: 12,
-        childAspectRatio: cols == 2 ? 1.55 : 1.75,
-        shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-        children: [
-          _KpiCard(t: t, icon: Icons.people_rounded, color: t.zakat,
-              label: 'Total Patients',
-              child: _AnimatedCount(value: s.tokens,
-                  style: TextStyle(color: t.zakat, fontSize: 28,
-                      fontWeight: FontWeight.w900, height: 1.1))),
-          _KpiCard(t: t, icon: Icons.check_circle_rounded, color: t.nonZakat,
-              label: 'Completed',
-              child: _AnimatedCount(value: s.dispensed,
-                  style: TextStyle(color: t.nonZakat, fontSize: 28,
-                      fontWeight: FontWeight.w900, height: 1.1))),
-          _KpiCard(t: t, icon: Icons.trending_up_rounded, color: t.gmwf,
-              label: 'Avg. Completion',
-              child: Text('${completionPct.toStringAsFixed(1)}%',
-                  style: TextStyle(color: t.gmwf, fontSize: 28,
-                      fontWeight: FontWeight.w900, height: 1.1))),
-          _KpiCard(t: t, icon: Icons.store_rounded, color: t.accentLight,
-              label: 'Active Branches',
-              child: _AnimatedCount(value: branchCount,
-                  style: TextStyle(color: t.accentLight, fontSize: 28,
-                      fontWeight: FontWeight.w900, height: 1.1))),
-        ],
-      );
-    });
-  }
+  Widget build(BuildContext context) => OperationsOverviewRow(s: s);
 }
 
-class _KpiCard extends StatelessWidget {
-  final RoleThemeData t;
-  final IconData icon;
-  final Color color;
-  final String label;
-  final Widget child;
-  const _KpiCard({required this.t, required this.icon, required this.color,
-      required this.label, required this.child});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: t.bgCard,
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: color.withOpacity(0.20)),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-          blurRadius: 12, offset: const Offset(0, 3))],
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Container(padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(color: color.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(10)),
-          child: Icon(icon, color: color, size: 18)),
-      const Spacer(),
-      child,
-      const SizedBox(height: 4),
-      Text(label, style: TextStyle(color: t.textTertiary, fontSize: 11)),
-    ]),
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════════════════
-// TOP BRANCH BANNER
-// ════════════════════════════════════════════════════════════════════════════════
-
+// ── Top Branch Banner ─────────────────────────────────────────────────────────
 class TopBranchBanner extends StatelessWidget {
   final RoleThemeData t;
   final String branchName;
   final int revenue;
   final int patients;
+  final int donations;
+  final int foodTokens;
   const TopBranchBanner({super.key, required this.t, required this.branchName,
-      required this.revenue, required this.patients});
+      required this.revenue, required this.patients, required this.donations, required this.foodTokens});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+    padding: const EdgeInsets.symmetric(horizontal: DS.s3, vertical: DS.s2),
     decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [t.accentLight, t.accent],
+      gradient: const LinearGradient(
+        colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
         begin: Alignment.centerLeft, end: Alignment.centerRight,
       ),
-      borderRadius: BorderRadius.circular(18),
-      boxShadow: [BoxShadow(color: t.accent.withOpacity(0.30),
+      borderRadius: BorderRadius.circular(DS.r2),
+      boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withOpacity(0.30),
           blurRadius: 20, offset: const Offset(0, 8))],
     ),
     child: Row(children: [
-      Container(padding: const EdgeInsets.all(14),
+      Container(padding: const EdgeInsets.all(DS.s1 + 4),
           decoration: BoxDecoration(color: Colors.white.withOpacity(0.18),
-              borderRadius: BorderRadius.circular(14)),
-          child: const Icon(Icons.emoji_events_rounded, color: Colors.white, size: 28)),
-      const SizedBox(width: 18),
+              borderRadius: BorderRadius.circular(DS.r1 + 4)),
+          child: const Icon(Icons.emoji_events_rounded, color: Colors.white, size: 24)),
+      const SizedBox(width: DS.s2),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 3),
           decoration: BoxDecoration(color: Colors.white.withOpacity(0.20),
-              borderRadius: BorderRadius.circular(6)),
+              borderRadius: BorderRadius.circular(DS.r1)),
           child: const Text('TOP PERFORMING BRANCH – TODAY',
               style: TextStyle(color: Colors.white, fontSize: 9,
                   fontWeight: FontWeight.w800, letterSpacing: 1.2)),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: DS.s1),
         Text(branchName, style: const TextStyle(
-            color: Colors.white, fontSize: 24, fontWeight: FontWeight.w800, height: 1.1)),
-        const SizedBox(height: 6),
+            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, height: 1.1)),
+        const SizedBox(height: 4),
         Row(children: [
-          const Icon(Icons.attach_money_rounded, color: Colors.white70, size: 15),
           const SizedBox(width: 4),
           Text(fmtPKR(revenue), style: const TextStyle(
-              color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-          const SizedBox(width: 16),
-          const Icon(Icons.people_rounded, color: Colors.white70, size: 15),
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(width: DS.s2),
+          const Icon(Icons.volunteer_activism_rounded, color: Colors.white70, size: 14),
+          const SizedBox(width: 4),
+          Text(fmtNum(donations), style: const TextStyle(
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(width: DS.s2),
+          const Icon(Icons.restaurant_rounded, color: Colors.white70, size: 14),
+          const SizedBox(width: 4),
+          Text(fmtNum(foodTokens), style: const TextStyle(
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(width: DS.s2),
+          const Icon(Icons.people_rounded, color: Colors.white70, size: 14),
           const SizedBox(width: 4),
           Text('$patients patients', style: const TextStyle(
-              color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
       ])),
     ]),
   );
 }
 
+class ExecutiveTopBranchFetcher extends StatelessWidget {
+  final RoleThemeData t;
+  final List<Map<String, dynamic>> branches;
+  const ExecutiveTopBranchFetcher({super.key, required this.t, required this.branches});
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<DashboardFilter>(
+    valueListenable: dashboardController,
+    builder: (context, filter, child) {
+      return FutureBuilder<Map<String, dynamic>>(
+        future: _findTop(filter),
+        builder: (_, snap) {
+          if (!snap.hasData) return DashLoadingCard(t: t, height: 88);
+          final d = snap.data!;
+          if ((d['tokens'] as int) == 0 && (d['revenue'] as int) == 0) return const SizedBox.shrink();
+          return TopBranchBanner(
+            t: t, branchName: d['name'] as String,
+            revenue: d['revenue'] as int, patients: d['tokens'] as int,
+            donations: d['donations'] as int, foodTokens: d['food'] as int,
+          );
+        },
+      );
+    },
+  );
+
+  Future<Map<String, dynamic>> _findTop(DashboardFilter filter) async {
+    Map<String, dynamic> best = {
+      'name': '', 'tokens': 0, 'revenue': 0,
+      'donations': 0, 'food': 0, 'score': -1.0
+    };
+    for (final b in branches) {
+      final s = await fetchBranchStats(b['id'] as String, filter: filter);
+      if (s.performanceScore.toDouble() > (best['score'] as double)) {
+        best = {
+          'name': b['name'],
+          'tokens': s.tokens,
+          'revenue': s.totalRevenue,
+          'donations': s.donations,
+          'food': s.dasterkhwaan,
+          'score': s.performanceScore.toDouble(),
+        };
+      }
+    }
+    return best;
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════════
-// GRAND TOTALS CARD
+// I. GRAND TOTALS CARD — Simplified, references RevenueHeroCard data
 // ════════════════════════════════════════════════════════════════════════════════
 
 class GrandTotalsCard extends StatelessWidget {
@@ -1045,86 +1654,12 @@ class GrandTotalsCard extends StatelessWidget {
   const GrandTotalsCard({super.key, required this.t, required this.s});
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(22),
-    decoration: BoxDecoration(
-      color: t.bgCard, borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: t.bgRule),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
-          blurRadius: 16, offset: const Offset(0, 4))],
-    ),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Container(padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(10)),
-            child: Icon(Icons.analytics_outlined, color: t.accent, size: 18)),
-        const SizedBox(width: 10),
-        Text("Today's Overview", style: TextStyle(
-            color: t.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
-        const Spacer(),
-        Text(DateFormat('dd MMM yyyy').format(DateTime.now()),
-            style: TextStyle(color: t.textTertiary, fontSize: 12)),
-      ]),
-      const SizedBox(height: 18),
-      _AnimatedCount(value: s.totalRevenue, prefix: 'PKR ',
-          style: TextStyle(color: t.accent, fontSize: 32,
-              fontWeight: FontWeight.w900, letterSpacing: -1)),
-      const SizedBox(height: 2),
-      Text('Total Revenue (Dispensary + Dasterkhwaan + Donations)',
-          style: TextStyle(color: t.textTertiary, fontSize: 11)),
-      const SizedBox(height: 18),
-      Divider(height: 1, color: t.bgRule),
-      const SizedBox(height: 14),
-      Row(children: [
-        _revPill(Icons.local_pharmacy_outlined, 'Dispensary',
-            fmtPKR(s.dispensaryRevenue), t.accentLight),
-        _vDiv(),
-        _revPill(Icons.restaurant_outlined, 'Dasterkhwaan',
-            fmtPKR(s.dasterkhwaanRevenue), t.zakat),
-        _vDiv(),
-        _revPill(Icons.volunteer_activism_rounded, 'Donations',
-            fmtPKR(s.donations), const Color(0xFF6A1B9A)),
-      ]),
-      const SizedBox(height: 18),
-      Divider(height: 1, color: t.bgRule),
-      const SizedBox(height: 14),
-      Row(children: [
-        _kpiPill('Zakat', s.zakat, t.zakat),
-        _vDiv(),
-        _kpiPill('Non-Zakat', s.nonZakat, t.nonZakat),
-        _vDiv(),
-        _kpiPill('GMWF', s.gmwf, t.gmwf),
-        _vDiv(),
-        _kpiPill('Food Tokens', s.dasterkhwaan, t.accentLight),
-      ]),
-    ]),
-  );
-
-  Widget _revPill(IconData icon, String label, String val, Color color) =>
-      Expanded(child: Column(children: [
-        Icon(icon, color: color, size: 15),
-        const SizedBox(height: 5),
-        Text(val, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 2),
-        Text(label, textAlign: TextAlign.center,
-            style: TextStyle(color: t.textTertiary, fontSize: 10)),
-      ]));
-
-  Widget _kpiPill(String label, int count, Color color) =>
-      Expanded(child: Column(children: [
-        _AnimatedCount(value: count,
-            style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.w800)),
-        const SizedBox(height: 3),
-        Text(label, textAlign: TextAlign.center,
-            style: TextStyle(color: t.textTertiary, fontSize: 10)),
-      ]));
-
-  Widget _vDiv() => Container(width: 1, height: 36, color: t.bgRule,
-      margin: const EdgeInsets.symmetric(horizontal: 4));
+  Widget build(BuildContext context) => RevenueHeroCard(s: s,
+      label: 'All Branches – Today');
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// PATIENT DISTRIBUTION CARD (kept for admin/manager screens that use it directly)
+// J. PATIENT DISTRIBUTION CARD — Donut chart with detail legend
 // ════════════════════════════════════════════════════════════════════════════════
 
 class PatientDistributionCard extends StatelessWidget {
@@ -1140,185 +1675,240 @@ class PatientDistributionCard extends StatelessWidget {
     final gPct = total > 0 ? (s.gmwf / total * 100).round() : 0;
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule),
+        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.border),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+            blurRadius: 14, offset: const Offset(0, 4))],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header (same for both layouts)
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: t.accentMuted,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.pie_chart_rounded, color: t.accent, size: 18),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Patient Type Distribution – Today",
-                    style: TextStyle(
-                      color: t.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    "Total across all branches",
-                    style: TextStyle(color: t.textTertiary, fontSize: 11),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(padding: const EdgeInsets.all(DS.s1),
+              decoration: BoxDecoration(color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1)),
+              child: const Icon(Icons.pie_chart_rounded, color: DS.blue, size: 16)),
+          const SizedBox(width: DS.s1),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Patient Type Distribution',
+                style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+            Text('Today · Total across all branches',
+                style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+          ]),
+        ]),
+        const SizedBox(height: DS.s2 + 4),
 
-          if (total == 0)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40),
-                child: Text(
-                  "No patients today",
-                  style: TextStyle(color: t.textTertiary, fontSize: 14),
-                ),
-              ),
-            )
-          else
-            LayoutBuilder(
-              builder: (context, constraints) {
-                // Breakpoint: ~620–640px is a good mobile/desktop switch for this card
-                final isDesktop = constraints.maxWidth >= 620;
+        if (total == 0)
+          _EmptyOpsState(
+            icon: Icons.people_outline_rounded,
+            message: 'No patients today',
+            hint: 'Patient data will appear once registration begins',
+          )
+        else
+          LayoutBuilder(builder: (context, constraints) {
+            final isDesktop = constraints.maxWidth >= 580;
+            final donut = _AnimatedDonut(
+              size: isDesktop ? 210 : 190,
+              values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
+              colors: [t.zakat, t.nonZakat, t.gmwf],
+              center: Column(mainAxisSize: MainAxisSize.min, children: [
+                _AnimatedCount(value: total,
+                    style: TextStyle(color: t.textPrimary,
+                        fontSize: isDesktop ? 34 : 28, fontWeight: FontWeight.w900)),
+                Text('patients', style: const TextStyle(color: DS.neutral, fontSize: 12)),
+              ]),
+            );
 
-                final donut = _AnimatedDonut(
-                  size: isDesktop ? 220 : 200,
-                  values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
-                  colors: [t.zakat, t.nonZakat, t.gmwf],
-                  center: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _AnimatedCount(
-                        value: total,
-                        style: TextStyle(
-                          color: t.textPrimary,
-                          fontSize: isDesktop ? 36 : 32,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        "patients",
-                        style: TextStyle(color: t.textTertiary, fontSize: 13),
-                      ),
-                    ],
-                  ),
-                );
+            final legend = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              _legendItem(t.zakat, 'Zakat', s.zakat, zPct, 'PKR ${fmtNum(s.zakat * 20)}', '@ PKR 20'),
+              const SizedBox(height: DS.s1 + 4),
+              _legendItem(t.nonZakat, 'Non-Zakat', s.nonZakat, nPct, 'PKR ${fmtNum(s.nonZakat * 100)}', '@ PKR 100'),
+              const SizedBox(height: DS.s1 + 4),
+              _legendItem(t.gmwf, 'GMWF', s.gmwf, gPct, 'Free', 'No charge'),
+            ]);
 
-                final legend = Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _legendItem(t.zakat, "Zakaat", s.zakat, zPct, "PKR ${s.zakat * 20}", "@ PKR 20"),
-                    const SizedBox(height: 12),
-                    _legendItem(t.nonZakat, "Non-Zakat", s.nonZakat, nPct, "PKR ${s.nonZakat * 100}", "@ PKR 100"),
-                    const SizedBox(height: 12),
-                    _legendItem(t.gmwf, "GMWF", s.gmwf, gPct, "Free", "No charge"),
-                  ],
-                );
-
-                if (isDesktop) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      // Donut on left
-                      donut,
-                      const SizedBox(width: 40),
-                      // Legend on right
-                      Expanded(child: legend),
-                    ],
-                  );
-                } else {
-                  return Column(
-                    children: [
-                      // Donut centered on mobile
-                      Center(child: donut),
-                      const SizedBox(height: 32),
-                      // Legend below
-                      legend,
-                    ],
-                  );
-                }
-              },
-            ),
-        ],
-      ),
+            if (isDesktop) {
+              return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+                donut, const SizedBox(width: DS.s4), Expanded(child: legend),
+              ]);
+            }
+            return Column(children: [Center(child: donut), const SizedBox(height: DS.s3), legend]);
+          }),
+      ]),
     );
   }
 
-  Widget _legendItem(Color color, String label, int count, int pct, String rev, String rate) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.20)),
-      ),
-      child: Row(
-        children: [
+  Widget _legendItem(Color color, String label, int count, int pct, String rev, String rate) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.07),
+          borderRadius: BorderRadius.circular(DS.r1 + 4),
+          border: Border.all(color: color.withOpacity(0.20)),
+        ),
+        child: Row(children: [
+          Container(width: 10, height: 10,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: DS.s1 + 4),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+            Text('$count patients  ·  $rev',
+                style: const TextStyle(color: DS.neutral, fontSize: 11)),
+          ])),
           Container(
-            width: 12,
-            height: 12,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            padding: const EdgeInsets.symmetric(horizontal: DS.s1 + 2, vertical: 4),
+            decoration: BoxDecoration(color: color.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(DS.r1)),
+            child: Text('$pct%', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ]),
+      );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// K. EXECUTIVE GLOBAL OVERVIEW GRID
+// ════════════════════════════════════════════════════════════════════════════════
+
+class GlobalOverviewGrid extends StatelessWidget {
+  final RoleThemeData t;
+  final BranchStats s;
+  final int branchCount;
+
+  const GlobalOverviewGrid({
+    super.key,
+    required this.t,
+    required this.s,
+    required this.branchCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _row([
+          _tile(
+            label: 'Total Revenue',
+            value: s.totalRevenue,
+            prefix: 'PKR ',
+            icon: Icons.payments_rounded,
+            color: t.accent,
+            itemCount: s.donations > 0 ? 'Inc. Donations' : null,
+          ),
+          _tile(
+            label: 'Total Patients',
+            value: s.tokens,
+            icon: Icons.people_alt_rounded,
+            color: DS.blue,
+            itemCount: '$branchCount Branches',
+          ),
+        ]),
+        const SizedBox(height: DS.s2),
+        _row([
+          _tile(
+            label: 'Food Tokens',
+            value: s.dasterkhwaan,
+            icon: Icons.restaurant_rounded,
+            color: DS.orange,
+            itemCount: '${s.dasterkhwaanServed} served',
+          ),
+          _tile(
+            label: 'Donations',
+            value: s.donations,
+            prefix: 'PKR ',
+            icon: Icons.volunteer_activism_rounded,
+            color: DS.purple,
+            itemCount: 'Today',
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _row(List<Widget> children) => Row(
+        children: [
+          children[0],
+          const SizedBox(width: DS.s2),
+          children[1],
+        ],
+      );
+
+  Widget _tile({
+    required String label,
+    required int value,
+    String? prefix,
+    required IconData icon,
+    required Color color,
+    String? itemCount,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(DS.s2 + 2),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(DS.r2),
+          border: Border.all(color: DS.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                Container(
+                  padding: const EdgeInsets.all(DS.s1),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(DS.r1),
                   ),
+                  child: Icon(icon, color: color, size: 16),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  "$count patients  •  $rev",
-                  style: TextStyle(color: t.textSecondary, fontSize: 12),
-                ),
+                const Spacer(),
+                if (itemCount != null)
+                  Text(
+                    itemCount,
+                    style: TextStyle(
+                      color: DS.neutral,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
               ],
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              "$pct%",
+            const SizedBox(height: DS.s2),
+            _AnimatedCount(
+              value: value,
+              prefix: prefix ?? '',
               style: TextStyle(
-                color: color,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
+                color: t.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.5,
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                color: DS.neutral,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
+
 // ════════════════════════════════════════════════════════════════════════════════
-// SERVICE REVENUE CARD
+// L. SERVICE REVENUE CARD
 // ════════════════════════════════════════════════════════════════════════════════
 
 class ServiceRevenueCard extends StatelessWidget {
@@ -1328,33 +1918,34 @@ class ServiceRevenueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const dasColor = Color(0xFF0891B2);
-    const donColor = Color(0xFF6A1B9A);
+    const dasColor = DS.orange;
+    const donColor = DS.purple;
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: t.bgCard, borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule),
+        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.border),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
             blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text('Services & Donations',
-            style: TextStyle(color: t.textPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 16),
-        _svcRow(Icons.restaurant_outlined, dasColor, 'Dasterkhwaan Food Tokens',
-            '${s.dasterkhwaan} tokens · × PKR 10', s.dasterkhwaanRevenue),
-        const SizedBox(height: 10),
-        Divider(height: 1, color: t.bgRule),
-        const SizedBox(height: 10),
+        const Text('Services & Donations',
+            style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+        const SizedBox(height: DS.s2),
+        _svcRow(Icons.restaurant_rounded, dasColor, 'Dasterkhwaan – Meals',
+            '${s.dasterkhwaan} issued · ${s.dasterkhwaanServed} served · × PKR 10',
+            s.dasterkhwaanRevenue),
+        const SizedBox(height: DS.s1),
+        Divider(height: 1, color: DS.border),
+        const SizedBox(height: DS.s1),
         _svcRow(Icons.volunteer_activism_rounded, donColor, 'Donations Collected',
             'Cash & transfers · today', s.donations),
-        const SizedBox(height: 14),
-        Divider(height: 1, color: t.bgRule),
-        const SizedBox(height: 10),
+        const SizedBox(height: DS.s2),
+        Divider(height: 1, color: DS.border),
+        const SizedBox(height: DS.s1 + 4),
         Row(children: [
-          Text('Services Total', style: TextStyle(
-              color: t.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
+          const Text('Services Total', style: TextStyle(
+              color: DS.neutral, fontSize: 13, fontWeight: FontWeight.w600)),
           const Spacer(),
           _AnimatedCount(value: s.dasterkhwaanRevenue + s.donations, prefix: 'PKR ',
               style: TextStyle(color: t.accent, fontSize: 16, fontWeight: FontWeight.w800)),
@@ -1365,23 +1956,23 @@ class ServiceRevenueCard extends StatelessWidget {
 
   Widget _svcRow(IconData icon, Color color, String title, String sub, int amount) =>
       Row(children: [
-        Container(padding: const EdgeInsets.all(10),
+        Container(padding: const EdgeInsets.all(DS.s1 + 2),
             decoration: BoxDecoration(color: color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(DS.r1)),
             child: Icon(icon, color: color, size: 18)),
-        const SizedBox(width: 12),
+        const SizedBox(width: DS.s1 + 4),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(title, style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 2),
-          Text(sub, style: TextStyle(color: t.textTertiary, fontSize: 11)),
+          Text(sub, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
         ])),
         _AnimatedCount(value: amount, prefix: 'PKR ',
-            style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w800)),
+            style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
       ]);
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// BRANCH SUMMARY CARD — with donations + food tokens rows
+// L. BRANCH SUMMARY CARD (kept — backward compat, used standalone)
 // ════════════════════════════════════════════════════════════════════════════════
 
 class BranchSummaryCard extends StatelessWidget {
@@ -1392,12 +1983,8 @@ class BranchSummaryCard extends StatelessWidget {
   final int? revenueTarget;
 
   const BranchSummaryCard({
-    super.key,
-    required this.t,
-    required this.branchId,
-    required this.branchName,
-    this.location,
-    this.revenueTarget = 3000000,
+    super.key, required this.t, required this.branchId,
+    required this.branchName, this.location, this.revenueTarget = 3000000,
   });
 
   @override
@@ -1408,221 +1995,128 @@ class BranchSummaryCard extends StatelessWidget {
       final s = snap.data ?? const BranchStats();
       final target = revenueTarget ?? 3000000;
       final achPct = target > 0
-          ? (s.totalRevenue / target * 100).clamp(0, 100).toDouble()
-          : 0.0;
+          ? (s.totalRevenue / target * 100).clamp(0, 100).toDouble() : 0.0;
 
+      if (loading) return DashLoadingCard(t: t, height: 90);
       return AnimatedOpacity(
-        opacity: loading ? 0.0 : 1.0,
-        duration: const Duration(milliseconds: 500),
+        opacity: 1.0, duration: const Duration(milliseconds: 400),
         child: Container(
           decoration: BoxDecoration(
-            color: t.bgCard, borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: t.bgRule),
+            color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
+            border: Border.all(color: DS.border),
             boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-                blurRadius: 16, offset: const Offset(0, 5))],
+                blurRadius: 14, offset: const Offset(0, 4))],
           ),
-          child: loading
-              ? SizedBox(height: 90, child: Center(
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent)))
-              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-                  // ── Header ───────────────────────────────────────────
-                  Container(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 16, 14),
-                    decoration: BoxDecoration(
-                      color: t.accentMuted.withOpacity(0.35),
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                      border: Border(bottom: BorderSide(color: t.bgRule)),
-                    ),
-                    child: Row(children: [
-                      Expanded(child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(branchName, style: TextStyle(
-                            color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.w800)),
-                        if (location != null && location!.isNotEmpty)
-                          Row(children: [
-                            Icon(Icons.location_on_outlined, size: 11, color: t.textTertiary),
-                            const SizedBox(width: 3),
-                            Text(location!, style: TextStyle(
-                                color: t.textTertiary, fontSize: 11)),
-                          ]),
-                      ])),
-                      // Token badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: t.accent,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [BoxShadow(color: t.accent.withOpacity(0.35),
-                              blurRadius: 8, offset: const Offset(0, 3))],
-                        ),
-                        child: _AnimatedCount(value: s.tokens,
-                            style: const TextStyle(color: Colors.white,
-                                fontSize: 14, fontWeight: FontWeight.w800)),
-                      ),
-                    ]),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(DS.s2, DS.s2 - 2, DS.s2 - 2, DS.s2 - 2),
+              decoration: BoxDecoration(
+                color: DS.neutralBg,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(DS.r2)),
+                border: const Border(bottom: BorderSide(color: DS.border, width: 0.5)),
+              ),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(branchName, style: const TextStyle(
+                      color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w900)),
+                  if (location != null && location!.isNotEmpty)
+                    Text(location!, style: const TextStyle(color: DS.neutral, fontSize: 10)),
+                ])),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: DS.blue.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(DS.r1),
                   ),
-
-                  // ── Body ─────────────────────────────────────────────
-                  Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-                      // Patient type row
-                      Row(children: [
-                        _typeCol(Icons.mosque_rounded,                   t.zakat,    'Zakat',    s.zakat),
-                        const SizedBox(width: 16),
-                        _typeCol(Icons.account_balance_wallet_outlined,  t.nonZakat, 'Non-Z',    s.nonZakat),
-                        const SizedBox(width: 16),
-                        _typeCol(Icons.favorite_rounded,                 t.gmwf,     'GMWF',     s.gmwf),
-                        const Spacer(),
-                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                          _AnimatedCount(value: s.dispensaryRevenue, prefix: 'PKR ',
-                              style: TextStyle(color: t.accent, fontSize: 13,
-                                  fontWeight: FontWeight.w800)),
-                          Text('dispensary', style: TextStyle(color: t.textTertiary, fontSize: 10)),
-                        ]),
-                      ]),
-
-                      // Distribution bar
-                      if (s.tokens > 0) ...[
-                        const SizedBox(height: 12),
-                        _AnimatedDistBar(
-                          zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
-                          colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf,
-                        ),
-                      ],
-
-                      const SizedBox(height: 16),
-                      Divider(height: 1, color: t.bgRule),
-                      const SizedBox(height: 14),
-
-                      // Revenue progress bar
-                      Row(children: [
-                        Icon(Icons.account_balance_wallet_outlined,
-                            size: 13, color: t.textTertiary),
-                        const SizedBox(width: 6),
-                        Text('Revenue', style: TextStyle(
-                            color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
-                        const Spacer(),
-                        _AnimatedCount(value: s.totalRevenue,
-                            style: TextStyle(color: t.accent, fontSize: 13,
-                                fontWeight: FontWeight.w800)),
-                      ]),
-                      const SizedBox(height: 6),
-                      _AnimatedProgressBar(value: achPct / 100, color: t.accent),
-                      const SizedBox(height: 4),
-                      Row(children: [
-                        Text('Target: ${fmtPKR(target)}',
-                            style: TextStyle(color: t.textTertiary, fontSize: 10)),
-                        const Spacer(),
-                        Text('${achPct.toStringAsFixed(0)}%',
-                            style: TextStyle(color: t.accent, fontSize: 10,
-                                fontWeight: FontWeight.w700)),
-                      ]),
-
-                      const SizedBox(height: 14),
-                      Divider(height: 1, color: t.bgRule),
-                      const SizedBox(height: 12),
-
-                      // Donations + Food tokens + Total row
-                      Row(children: [
-                        _svcChip(Icons.restaurant_outlined, const Color(0xFF0891B2),
-                            'Food Tokens',
-                            s.dasterkhwaan > 0
-                                ? '${s.dasterkhwaan} · ${fmtPKR(s.dasterkhwaanRevenue)}'
-                                : '—'),
-                        const SizedBox(width: 12),
-                        _svcChip(Icons.volunteer_activism_rounded,
-                            const Color(0xFF6A1B9A),
-                            'Donations',
-                            s.donations > 0 ? fmtPKR(s.donations) : '—'),
-                        const Spacer(),
-                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                          Text('Total', style: TextStyle(
-                              color: t.textTertiary, fontSize: 10, fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 2),
-                          _AnimatedCount(value: s.totalRevenue, prefix: 'PKR ',
-                              style: TextStyle(color: t.accent, fontSize: 15,
-                                  fontWeight: FontWeight.w900)),
-                        ]),
-                      ]),
-                    ]),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.people_alt_rounded, size: 12, color: DS.blue),
+                      const SizedBox(width: 4),
+                      _AnimatedCount(value: s.tokens,
+                        style: const TextStyle(color: DS.blue, fontSize: 13, fontWeight: FontWeight.w800)),
+                    ],
                   ),
+                ),
+              ]),
+            ),
+
+            // Body
+            Padding(
+              padding: const EdgeInsets.all(DS.s2),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                // Revenue progress
+                Row(children: [
+                  Icon(Icons.payments_rounded, size: 12, color: t.accent),
+                  const SizedBox(width: 6),
+                  const Text('Revenue', style: TextStyle(color: DS.neutral, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  _AnimatedCount(value: s.totalRevenue, prefix: 'PKR ',
+                      style: TextStyle(color: t.accent, fontSize: 13, fontWeight: FontWeight.w900)),
                 ]),
+                const SizedBox(height: 8),
+                _AnimatedProgressBar(value: achPct / 100, color: t.accent),
+                const SizedBox(height: 6),
+                
+                // Patient Distribution Spark
+                if (s.tokens > 0) ...[
+                  const SizedBox(height: 4),
+                  _AnimatedDistBar(zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
+                      colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf),
+                  const SizedBox(height: 12),
+                ],
+
+                // Condensed Footer stats
+                Row(children: [
+                   _svcIcon(Icons.restaurant_rounded, DS.orange, '${s.dasterkhwaan}'),
+                   const SizedBox(width: 12),
+                   _svcIcon(Icons.volunteer_activism_rounded, DS.purple, fmtPKR(s.donations)),
+                ]),
+              ]),
+            ),
+          ]),
         ),
       );
     },
   );
 
+  Widget _svcIcon(IconData icon, Color color, String value) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, color: color.withOpacity(0.7), size: 13),
+      const SizedBox(width: 4),
+      Text(value, style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.w700)),
+    ],
+  );
+
+
   Widget _typeCol(IconData icon, Color color, String label, int count) =>
       Column(children: [
-        Icon(icon, color: color, size: 22),
+        Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(label, style: TextStyle(color: t.textTertiary, fontSize: 10)),
+        Text(label, style: const TextStyle(color: DS.neutral, fontSize: 10)),
         const SizedBox(height: 2),
         _AnimatedCount(value: count,
-            style: TextStyle(color: t.textPrimary, fontSize: 18, fontWeight: FontWeight.w800)),
+            style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w800)),
       ]);
 
   Widget _svcChip(IconData icon, Color color, String label, String value) =>
       Row(mainAxisSize: MainAxisSize.min, children: [
-        Container(padding: const EdgeInsets.all(7),
+        Container(padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(color: color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(8)),
-            child: Icon(icon, color: color, size: 14)),
-        const SizedBox(width: 8),
+                borderRadius: BorderRadius.circular(DS.r1)),
+            child: Icon(icon, color: color, size: 13)),
+        const SizedBox(width: DS.s1),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: TextStyle(color: t.textSecondary, fontSize: 11,
-              fontWeight: FontWeight.w600)),
+          Text(label, style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w600)),
           Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
         ]),
       ]);
 }
 
-// ── Animated distribution bar ─────────────────────────────────────────────────
-class _AnimatedDistBar extends StatefulWidget {
-  final int zakat, nonZakat, gmwf;
-  final Color colorZ, colorNZ, colorG;
-  const _AnimatedDistBar({required this.zakat, required this.nonZakat, required this.gmwf,
-      required this.colorZ, required this.colorNZ, required this.colorG});
-  @override
-  State<_AnimatedDistBar> createState() => _AnimatedDistBarState();
-}
-
-class _AnimatedDistBarState extends State<_AnimatedDistBar>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _anim;
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(duration: const Duration(milliseconds: 1000), vsync: this);
-    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic);
-    _ctrl.forward();
-  }
-  @override
-  void dispose() { _ctrl.dispose(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    final total = widget.zakat + widget.nonZakat + widget.gmwf;
-    if (total == 0) return const SizedBox.shrink();
-    return AnimatedBuilder(
-      animation: _anim,
-      builder: (_, __) => ClipRRect(
-        borderRadius: BorderRadius.circular(4),
-        child: Row(children: [
-          if (widget.zakat    > 0) Expanded(flex: widget.zakat,    child: Container(height: 7, color: widget.colorZ)),
-          if (widget.nonZakat > 0) Expanded(flex: widget.nonZakat, child: Container(height: 7, color: widget.colorNZ)),
-          if (widget.gmwf     > 0) Expanded(flex: widget.gmwf,     child: Container(height: 7, color: widget.colorG)),
-        ]),
-      ),
-    );
-  }
-}
-
 // ════════════════════════════════════════════════════════════════════════════════
-// DONATIONS SUMMARY CARD
+// M. DONATIONS SUMMARY CARD
 // ════════════════════════════════════════════════════════════════════════════════
 
 class DonationsSummaryCard extends StatelessWidget {
@@ -1634,44 +2128,50 @@ class DonationsSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const donColor = Color(0xFF6A1B9A);
+    final activeBranches = branches.where((b) => (b['donations'] as int) > 0).toList();
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: t.bgCard, borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: donColor.withOpacity(0.2)),
+        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.purple.withOpacity(0.25)),
         boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
             blurRadius: 12, offset: const Offset(0, 3))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(padding: const EdgeInsets.all(9),
-              decoration: BoxDecoration(color: donColor.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.volunteer_activism_rounded, color: donColor, size: 18)),
-          const SizedBox(width: 10),
-          Text('Total Donations', style: TextStyle(
-              color: t.textPrimary, fontSize: 15, fontWeight: FontWeight.w700)),
+          Container(padding: const EdgeInsets.all(DS.s1),
+              decoration: BoxDecoration(color: DS.purpleMuted,
+                  borderRadius: BorderRadius.circular(DS.r1)),
+              child: const Icon(Icons.volunteer_activism_rounded, color: DS.purple, size: 18)),
+          const SizedBox(width: DS.s1),
+          const Text('Donations Collected',
+              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
           const Spacer(),
           _AnimatedCount(value: totalDonations, prefix: 'PKR ',
-              style: const TextStyle(color: donColor, fontSize: 18, fontWeight: FontWeight.w900)),
+              style: const TextStyle(color: DS.purple, fontSize: 18, fontWeight: FontWeight.w900)),
         ]),
-        if (branches.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Divider(height: 1, color: t.bgRule),
-          const SizedBox(height: 10),
-          ...branches.where((b) => (b['donations'] as int) > 0).map((b) => Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+
+        if (activeBranches.isEmpty) ...[
+          const SizedBox(height: DS.s2),
+          _EmptyOpsState(
+            icon: Icons.volunteer_activism_outlined,
+            message: 'No donations recorded today',
+            hint: 'Donations will appear here once collected at any branch',
+          ),
+        ] else ...[
+          const SizedBox(height: DS.s2),
+          const Divider(height: 1, color: DS.border),
+          const SizedBox(height: DS.s1 + 4),
+          ...activeBranches.map((b) => Padding(
+            padding: const EdgeInsets.only(bottom: DS.s1),
             child: Row(children: [
               Container(width: 6, height: 6,
-                  decoration: BoxDecoration(color: donColor.withOpacity(0.5),
-                      shape: BoxShape.circle)),
-              const SizedBox(width: 8),
+                  decoration: const BoxDecoration(color: DS.purple, shape: BoxShape.circle)),
+              const SizedBox(width: DS.s1),
               Expanded(child: Text(b['name'] as String,
-                  style: TextStyle(color: t.textSecondary, fontSize: 13))),
+                  style: const TextStyle(color: Color(0xFF374151), fontSize: 13))),
               Text(fmtPKR(b['donations'] as int),
-                  style: const TextStyle(color: donColor, fontSize: 13,
-                      fontWeight: FontWeight.w700)),
+                  style: const TextStyle(color: DS.purple, fontSize: 13, fontWeight: FontWeight.w700)),
             ]),
           )),
         ],
@@ -1681,7 +2181,7 @@ class DonationsSummaryCard extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// BRANCH PERFORMANCE HEADER
+// N. BRANCH PERFORMANCE HEADER (backward compat)
 // ════════════════════════════════════════════════════════════════════════════════
 
 class BranchPerformanceHeader extends StatelessWidget {
@@ -1691,10 +2191,301 @@ class BranchPerformanceHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(children: [
-    Text('Branch Performance', style: TextStyle(
-        color: t.textPrimary, fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+    const Text('Branch Performance', style: TextStyle(
+        color: Color(0xFF111827), fontSize: DS.h2, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
     const Spacer(),
-    Text('$branchCount branches', style: TextStyle(
-        color: t.textTertiary, fontSize: 13, fontWeight: FontWeight.w500)),
+    Text('$branchCount branches', style: const TextStyle(color: DS.neutral, fontSize: 13)),
   ]);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// L. GLOBAL FILTER BAR — Decision driven filtering
+// ════════════════════════════════════════════════════════════════════════════════
+
+class GlobalFilterBar extends StatelessWidget {
+  final DashboardController controller;
+  final List<Map<String, dynamic>> branches;
+
+  const GlobalFilterBar({
+    super.key,
+    required this.controller,
+    this.branches = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<DashboardFilter>(
+      valueListenable: controller,
+      builder: (context, filter, child) {
+        return Container(
+          padding: const EdgeInsets.symmetric(vertical: DS.s1, horizontal: DS.s2),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(bottom: BorderSide(color: DS.border)),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              _buildTimeChips(filter),
+              const SizedBox(width: DS.s3),
+              _buildBranchSelector(context, filter),
+              const SizedBox(width: DS.s3),
+              _buildTypeChips(filter),
+            ]),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTimeChips(DashboardFilter filter) {
+    return Row(children: [
+      _chip('Today', TimeRange.today, filter.timeRange, (v) => controller.setTimeRange(v)),
+      _chip('Week', TimeRange.week, filter.timeRange, (v) => controller.setTimeRange(v)),
+      _chip('Month', TimeRange.month, filter.timeRange, (v) => controller.setTimeRange(v)),
+      _chip('Custom', TimeRange.custom, filter.timeRange, (v) => _pickDateRange(v)),
+    ]);
+  }
+
+  Widget _buildBranchSelector(BuildContext context, DashboardFilter filter) {
+    final activeBranch = branches.firstWhere((b) => b['id'] == filter.branchId, orElse: () => <String, dynamic>{'name': 'All Branches'});
+    return PopupMenuButton<String>(
+      onSelected: controller.setBranch,
+      itemBuilder: (context) => [
+        const PopupMenuItem(value: 'all', child: Text('All Branches')),
+        ...branches.map((b) => PopupMenuItem(value: b['id'], child: Text(b['name']))),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: 8),
+        decoration: BoxDecoration(
+          color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1),
+          border: Border.all(color: DS.blue.withOpacity(0.2)),
+        ),
+        child: Row(children: [
+          const Icon(Icons.location_on_rounded, size: 14, color: DS.blue),
+          const SizedBox(width: 8),
+          Text(activeBranch['name'] ?? 'Unknown', style: const TextStyle(color: DS.blue, fontSize: 12, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 4),
+          const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: DS.blue),
+        ]),
+      ),
+    );
+  }
+
+  Widget _buildTypeChips(DashboardFilter filter) {
+    return Row(children: [
+      _typeChip('All', null, filter.patientType, DS.neutral),
+      _typeChip('Zakat', 'zakat', filter.patientType, DS.zakat),
+      _typeChip('Non-Zakat', 'non-zakat', filter.patientType, DS.nonZakat),
+      _typeChip('GMWF', 'gmwf', filter.patientType, DS.gmwf),
+    ]);
+  }
+
+  Widget _chip<T>(String label, T value, T activeValue, ValueChanged<T> onSelected) {
+    final active = value == activeValue;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label, style: TextStyle(fontSize: 11, fontWeight: active ? FontWeight.w800 : FontWeight.w600)),
+        selected: active,
+        onSelected: (s) => onSelected(value),
+        selectedColor: DS.blue,
+        labelStyle: TextStyle(color: active ? Colors.white : DS.neutral),
+        backgroundColor: DS.neutralBg,
+        showCheckmark: false,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+    );
+  }
+
+  Widget _typeChip(String label, String? value, String? activeValue, Color color) {
+    final active = value == activeValue;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        onTap: () => controller.setPatientType(value),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: active ? color : Colors.transparent,
+            borderRadius: BorderRadius.circular(DS.r1),
+            border: Border.all(color: active ? color : DS.border),
+          ),
+          child: Text(label, style: TextStyle(
+            color: active ? Colors.white : DS.neutral,
+            fontSize: 11, fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+          )),
+        ),
+      ),
+    );
+  }
+
+  void _pickDateRange(TimeRange v) {
+    // Standard picker placeholder
+    controller.setTimeRange(v);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// M. ACTIONABLE KPI CARD — Premium data display
+// ════════════════════════════════════════════════════════════════════════════════
+
+class ActionableKPICard extends StatelessWidget {
+  final String label;
+  final String value;
+  final String? prefix;
+  final IconData icon;
+  final Color color;
+  final String? insight;
+  final bool isPrimary;
+  final String? trend;
+
+  const ActionableKPICard({
+    super.key,
+    required this.label,
+    required this.value,
+    this.prefix,
+    required this.icon,
+    required this.color,
+    this.insight,
+    this.isPrimary = false,
+    this.trend,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.all(isPrimary ? DS.s3 : DS.s2),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: DS.border),
+        boxShadow: [
+          BoxShadow(color: color.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 8)),
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(DS.r1)),
+            child: Icon(icon, color: color, size: isPrimary ? 24 : 18),
+          ),
+          const Spacer(),
+          if (trend != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: DS.greenMuted, borderRadius: BorderRadius.circular(DS.r1)),
+              child: Text(trend!, style: const TextStyle(color: DS.green, fontSize: 10, fontWeight: FontWeight.w700)),
+            ),
+        ]),
+        SizedBox(height: isPrimary ? DS.s2 : DS.s1),
+        Text(label, style: const TextStyle(color: DS.neutral, fontSize: 12, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          if (prefix != null) Text(prefix!, style: TextStyle(color: color.withOpacity(0.6), fontSize: isPrimary ? 20 : 14, fontWeight: FontWeight.w700)),
+          const SizedBox(width: 4),
+          Text(value, style: TextStyle(color: const Color(0xFF111827), fontSize: isPrimary ? 32 : 24, fontWeight: FontWeight.w900, height: 1.1)),
+        ]),
+        if (insight != null) ...[
+          const SizedBox(height: DS.s1),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(color: DS.neutralBg, borderRadius: BorderRadius.circular(DS.r1)),
+            child: Text(insight!, style: const TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// N. DASHBOARD SECTION HEADER
+// ════════════════════════════════════════════════════════════════════════════════
+
+class DashSectionHeader extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final List<Widget>? actions;
+
+  const DashSectionHeader({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.actions,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: DS.s2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF111827),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: const TextStyle(color: DS.neutral, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (actions != null) ...actions!,
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// Backward-compat shims for widgets still referenced in older screens
+// ════════════════════════════════════════════════════════════════════════════════
+
+// _KpiCard shim
+class _KpiCard extends StatelessWidget {
+  final RoleThemeData t;
+  final IconData icon;
+  final Color color;
+  final String label;
+  final Widget child;
+  const _KpiCard({required this.t, required this.icon, required this.color,
+      required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(DS.s2),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(DS.r2),
+      border: Border.all(color: color.withOpacity(0.20)),
+      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
+          blurRadius: 12, offset: const Offset(0, 3))],
+    ),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(padding: const EdgeInsets.all(DS.s1),
+          decoration: BoxDecoration(color: color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(DS.r1)),
+          child: Icon(icon, color: color, size: 18)),
+      const Spacer(), child,
+      const SizedBox(height: 4),
+      Text(label, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+    ]),
+  );
 }

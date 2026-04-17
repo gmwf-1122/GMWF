@@ -1,11 +1,4 @@
-// lib/pages/doctor_screen.dart
-// CHANGES in this version:
-//   • History panel inside DoctorScreen now uses compactMode: true for a
-//     denser, icon-reduced card layout so more data fits on screen.
-//   • History tab (mobile) and history panel header (desktop) now show an
-//     "Open Full History" button that pushes PatientHistoryPage — a
-//     full-screen scrollable list with repeat support.
-//   • All other logic unchanged.
+// lib/Pages/dispensary/doctor/doctor_screen.dart
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -69,13 +62,20 @@ class _DoctorScreenState extends State<DoctorScreen>
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
   StreamSubscription<ConnectionStatus>? _connectionSub;
 
+  // [BUG-13] Remove function returned by addReconnectListener
+  VoidCallback? _removeReconnectListener;
+
+  // [BUG-12] Debounce + guard for reconnect-triggered sync
+  Timer? _syncDebounce;
+  bool _reconnectSyncing = false;
+
   static const Color _teal = Color(0xFF00695C);
 
   int _rightPanelKey = 0;
 
   late TabController _tabController;
 
-  // ─── Queue-type resolver ────────────────────────────────────────────────────
+  // ── Queue-type resolver ────────────────────────────────────────────────────
   static String resolveQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
@@ -90,19 +90,90 @@ class _DoctorScreenState extends State<DoctorScreen>
     _tabController = TabController(length: 3, vsync: this);
 
     SyncService().start(widget.branchId);
-    _fetchDoctorName();
     _loadBranchName();
     _listenConnectivity();
 
+    // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
+    // _fetchDoctorName() starts the connection once the name is resolved so
+    // the identify message carries the real name, not just 'doctor'.
+    _fetchDoctorName();
+
     _connectionSub = ConnectionManager().statusStream.listen((s) {
       if (mounted) setState(() => _connectionStatus = s);
+      // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
+      if (s.isConnected) {
+        _syncDebounce?.cancel();
+        _syncDebounce = Timer(const Duration(milliseconds: 300), _syncOnReconnect);
+      }
     });
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ConnectionManager().start(role: 'doctor', branchId: widget.branchId);
-    });
+    // [BUG-13] Register via listener list — safe alongside DispensarScreen
+    _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
 
     _realtimeSub = RealtimeManager().messageStream.listen(_handleRealtimeUpdate);
+  }
+
+  // [FIX-USERNAME] Resolve doctor name then start/update connection with it.
+  Future<void> _fetchDoctorName() async {
+    String? resolvedName;
+
+    // 1. Try local cache first (instant, no network needed).
+    final localUser = LocalStorageService.getLocalUserByUid(widget.doctorId);
+    resolvedName = (localUser?['username'] as String?)?.trim();
+    if (resolvedName?.isEmpty == true) resolvedName = null;
+
+    // 2. Fall back to the name passed as a widget param.
+    resolvedName ??= widget.doctorName.trim().isNotEmpty ? widget.doctorName.trim() : null;
+
+    if (mounted) setState(() => _username = resolvedName);
+
+    // 3. Start connection immediately with whatever name is available.
+    ConnectionManager().start(
+      role:     'doctor',
+      branchId: widget.branchId,
+      username: resolvedName,
+    );
+    if (resolvedName != null) {
+      RealtimeManager().updateUsername(resolvedName);
+    }
+
+    // 4. Fetch authoritative name from Firestore.
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.doctorId)
+          .get();
+      if (!snap.exists) return;
+      final firestoreName =
+          (snap.data()?['username'] as String?)?.trim() ??
+          (snap.data()?['name']     as String?)?.trim() ?? '';
+      if (firestoreName.isNotEmpty) {
+        if (mounted) setState(() => _username = firestoreName);
+        // [FIX-USERNAME] Push updated name into RealtimeManager so future
+        // messages carry the correct attribution.
+        RealtimeManager().updateUsername(firestoreName);
+      }
+    } catch (e) {
+      debugPrint('[DoctorScreen] Could not fetch doctor name: $e');
+    }
+  }
+
+  // FIX-SYNC-2: Upload first, then let triggerUpload() decide whether it is
+  // safe to download. Do NOT call downloadTodayTokens() directly here —
+  // that would pull stale Firestore data before pending items are uploaded.
+  Future<void> _syncOnReconnect() async {
+    if (!mounted || _reconnectSyncing) return;
+    _reconnectSyncing = true;
+    try {
+      // triggerUpload() handles upload → conditional download in the right order
+      await SyncService().triggerUpload();
+      if (mounted) setState(() {});
+      debugPrint('[DoctorScreen] ✅ Synced on reconnect');
+    } catch (e) {
+      debugPrint('[DoctorScreen] Reconnect sync failed: $e');
+    } finally {
+      _reconnectSyncing = false;
+    }
   }
 
   void _handleRealtimeUpdate(Map<String, dynamic> event) {
@@ -123,20 +194,24 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
   }
 
+  // [BUG-14] Use LocalStorageService.saveEntryLocal instead of raw Hive write
   void _handleNewToken(Map<String, dynamic> data) {
     final serial = data['serial']?.toString();
     if (serial != null && serial.isNotEmpty) {
-      Hive.box(LocalStorageService.entriesBox)
-          .put('${widget.branchId}-$serial', data);
+      LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
     }
     if (mounted) {
       setState(() {});
-      Flushbar(
-        message: '🎟️ New token: ${data['patientName'] ?? '#${data['serial']}'}',
-        backgroundColor: Colors.green.shade700,
-        duration: const Duration(seconds: 4),
-        icon: const Icon(Icons.person_add, color: Colors.white),
-      ).show(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(
+            message: '🎟️ New token: ${data['patientName'] ?? '#${data['serial']}'}',
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 4),
+            icon: const Icon(Icons.person_add, color: Colors.white),
+          ).show(context);
+        }
+      });
     }
   }
 
@@ -160,33 +235,16 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (serial != null && serial == _selectedPatientData?['serial']) {
       if (mounted) {
         setState(() => _selectedPatientData?['dispenseStatus'] = 'dispensed');
-        Flushbar(
-          message: '💊 Patient #$serial has been dispensed',
-          backgroundColor: Colors.purple.shade700,
-          duration: const Duration(seconds: 3),
-        ).show(context);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Flushbar(
+              message: '💊 Patient #$serial has been dispensed',
+              backgroundColor: Colors.purple.shade700,
+              duration: const Duration(seconds: 3),
+            ).show(context);
+          }
+        });
       }
-    }
-  }
-
-  Future<void> _fetchDoctorName() async {
-    final localUser = LocalStorageService.getLocalUserByUid(widget.doctorId);
-    final localName = (localUser?['username'] as String?)?.trim() ?? '';
-    if (localName.isNotEmpty && mounted) { setState(() => _username = localName); return; }
-
-    final passedName = widget.doctorName.trim();
-    if (passedName.isNotEmpty && mounted) setState(() => _username = passedName);
-
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users').doc(widget.doctorId).get();
-      if (!snap.exists) return;
-      final firestoreName =
-          (snap.data()?['username'] as String?)?.trim() ??
-          (snap.data()?['name'] as String?)?.trim() ?? '';
-      if (firestoreName.isNotEmpty && mounted) setState(() => _username = firestoreName);
-    } catch (e) {
-      debugPrint('[DoctorScreen] Could not fetch doctor name from Firestore: $e');
     }
   }
 
@@ -212,11 +270,15 @@ class _DoctorScreenState extends State<DoctorScreen>
       final online = results.any((r) => r != ConnectivityResult.none);
       if (_online != online && mounted) {
         setState(() => _online = online);
-        Flushbar(
-          message: online ? 'Internet restored' : 'Offline (LAN still works)',
-          backgroundColor: online ? Colors.green.shade700 : Colors.orange.shade700,
-          duration: const Duration(seconds: 3),
-        ).show(context);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Flushbar(
+              message: online ? 'Internet restored' : 'Offline (LAN still works)',
+              backgroundColor: online ? Colors.green.shade700 : Colors.orange.shade700,
+              duration: const Duration(seconds: 3),
+            ).show(context);
+          }
+        });
       }
     });
   }
@@ -226,11 +288,21 @@ class _DoctorScreenState extends State<DoctorScreen>
     setState(() => _isSyncing = true);
     try {
       await SyncService().forceFullRefresh(widget.branchId);
-      Flushbar(message: 'Sync completed', backgroundColor: Colors.green.shade700,
-          duration: const Duration(seconds: 3)).show(context);
+      await LocalStorageService.downloadTodayTokens(widget.branchId);
+      if (mounted) setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(message: 'Sync completed', backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 3)).show(context);
+        }
+      });
     } catch (e) {
-      Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700,
-          duration: const Duration(seconds: 3)).show(context);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700,
+              duration: const Duration(seconds: 3)).show(context);
+        }
+      });
     } finally {
       if (mounted) setState(() => _isSyncing = false);
     }
@@ -301,7 +373,6 @@ class _DoctorScreenState extends State<DoctorScreen>
     ).show(context);
   }
 
-  /// Opens the full-screen history page for the currently selected patient
   void _openFullHistory() {
     if (_selectedPatientData == null) return;
     Navigator.push(
@@ -312,7 +383,6 @@ class _DoctorScreenState extends State<DoctorScreen>
           patientData: _selectedPatientData!,
           onRepeatLast: (raw) {
             _applyRepeatData(raw);
-            // Navigate back to prescription tab on mobile
             final screenWidth = MediaQuery.of(context).size.width;
             if (screenWidth < 900) _tabController.animateTo(1);
           },
@@ -389,7 +459,6 @@ class _DoctorScreenState extends State<DoctorScreen>
       );
     }
 
-    // Desktop AppBar
     return AppBar(
       backgroundColor: _teal,
       elevation: 10,
@@ -473,10 +542,6 @@ class _DoctorScreenState extends State<DoctorScreen>
           ?.toString(),
     );
 
-    debugPrint(
-        '[DoctorScreen] patient queueType="${_selectedPatientData!['queueType']}" '
-        'status="${_selectedPatientData!['status']}" → resolved="$resolvedQueueType"');
-
     return DoctorRightPanel(
       key: ValueKey(_rightPanelKey),
       branchId: widget.branchId,
@@ -516,8 +581,6 @@ class _DoctorScreenState extends State<DoctorScreen>
     );
   }
 
-  /// Inline history panel — shows last visit compactly + visit count badge
-  /// with an "All Visits" button that pushes PatientHistoryPage.
   Widget _buildHistoryPanel() {
     if (_selectedPatientData == null) {
       return const Center(
@@ -528,7 +591,6 @@ class _DoctorScreenState extends State<DoctorScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header row with "All Visits →" button
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 4),
           child: Row(children: [
@@ -557,7 +619,6 @@ class _DoctorScreenState extends State<DoctorScreen>
           ]),
         ),
         const Divider(height: 1),
-        // Compact latest visit — scrollable
         Expanded(
           child: PatientHistory(
             branchId: widget.branchId,
@@ -594,7 +655,6 @@ class _DoctorScreenState extends State<DoctorScreen>
     return TabBarView(
       controller: _tabController,
       children: [
-        // Queue tab
         Padding(
           padding: const EdgeInsets.all(8),
           child: Card(
@@ -609,7 +669,6 @@ class _DoctorScreenState extends State<DoctorScreen>
             ),
           ),
         ),
-        // Prescription tab
         Padding(
           padding: const EdgeInsets.all(8),
           child: Column(children: [
@@ -633,7 +692,6 @@ class _DoctorScreenState extends State<DoctorScreen>
             ),
           ]),
         ),
-        // History tab — compact panel + full-history button
         Padding(
           padding: const EdgeInsets.all(8),
           child: Card(
@@ -725,6 +783,9 @@ class _DoctorScreenState extends State<DoctorScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _syncDebounce?.cancel();
+    // [BUG-13] Unregister from ConnectionManager's listener list
+    _removeReconnectListener?.call();
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

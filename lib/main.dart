@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 
 import 'firebase_options.dart';
 
@@ -25,6 +26,7 @@ import 'services/local_storage_service.dart';
 import 'services/donations_local_storage.dart';
 import 'services/submission_service.dart';
 import 'realtime/server_sync_manager.dart';
+import 'widgets/gmwf_loading_view.dart';
 
 // Global navigator key — used to show Flushbar/SnackBar from anywhere (safely)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -131,6 +133,22 @@ void _showCrashScreen(Object error, StackTrace stack) {
                           horizontal: 24, vertical: 12),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    onPressed: () async {
+                      try {
+                        await LocalStorageService.clearAllData();
+                        debugPrint("Manual factory reset successful.");
+                        WidgetsBinding.instance.reassembleApplication();
+                      } catch (e) {
+                        debugPrint("Factory reset failed: $e");
+                      }
+                    },
+                    icon: const Icon(Icons.delete_forever, color: Colors.red),
+                    label: const Text('Factory Reset (Clear All Data)',
+                        style: TextStyle(color: Colors.red)),
+                  ),
+
                 ],
               ),
             ),
@@ -156,12 +174,17 @@ void _installGlobalErrorHandlers() {
 }
 
 Future<void> main() async {
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+
   _installGlobalErrorHandlers();
 
-  WidgetsFlutterBinding.ensureInitialized();
-
-  // Show loading screen immediately
-  runApp(const _StartupLoadingScreen());
+  // Show loading screen immediately with a basic MaterialApp wrapper to avoid
+  // Directionality/MediaQuery errors before the main app starts.
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: GmwfLoadingView(),
+  ));
 
   try {
     debugPrint("[main] Starting initialization...");
@@ -201,10 +224,12 @@ Future<void> main() async {
     await _logError("App initialization failed: $e", st.toString());
     await _markLastCrash();
     debugPrint("[main] CRITICAL STARTUP ERROR: $e\n$st");
+    FlutterNativeSplash.remove();
     _showCrashScreen(e, st);
     return;
   }
 
+  FlutterNativeSplash.remove();
   runApp(const MyApp());
 
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -222,76 +247,6 @@ Future<void> main() async {
         _logError("Window setup failed: $e", st.toString());
       }
     });
-  }
-}
-
-// ── Startup loading screen ────────────────────────────────────────────────────
-
-class _StartupLoadingScreen extends StatelessWidget {
-  const _StartupLoadingScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        backgroundColor: const Color(0xFFF1F8E9),
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Logo — constrained and aspect-ratio safe
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final size = (MediaQuery.of(context).size.width * 0.35)
-                          .clamp(80.0, 160.0);
-                      return Image.asset(
-                        'assets/logo/gmwf.png',
-                        width: size,
-                        height: size,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => Icon(
-                          Icons.local_pharmacy,
-                          size: size,
-                          color: const Color(0xFF00695C),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 40),
-                  const SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: CircularProgressIndicator(
-                      color: Color(0xFF1B5E20),
-                      strokeWidth: 3,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    "GMWF is starting...",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1B5E20)),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    "Initializing services...",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -318,6 +273,11 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.green,
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            foregroundColor: Colors.white,
+          ),
+        ),
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
             TargetPlatform.android: CupertinoPageTransitionsBuilder(),
@@ -334,7 +294,7 @@ class MyApp extends StatelessWidget {
               stream: FirebaseAuth.instance.authStateChanges(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const _StartupLoadingScreen();
+                  return const GmwfLoadingView();
                 }
                 if (snapshot.hasData && snapshot.data != null) {
                   Future.microtask(() => _enterFullScreen());

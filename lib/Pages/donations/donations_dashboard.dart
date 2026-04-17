@@ -33,7 +33,10 @@ class MiniKpiRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: DonationsLocalStorage.streamDonationsForDate(branchId, today),
+      stream: DonationsLocalStorage.streamDonationsForDate(branchId, today)
+          .map((list) => list
+              .map((r) => {'hiveKey': r.hiveKey, ...r.toMap()})
+              .toList()),
       builder: (_, snap) {
         final docs  = snap.data ?? [];
         final count = docs.length;
@@ -128,12 +131,18 @@ class _DashboardTabState extends State<DashboardTab> {
   GmwfSubCategory?   _filterGmwfSub;
   late Stream<List<Map<String, dynamic>>> _stream;
 
+  Stream<List<Map<String, dynamic>>> _buildStream(String branchId) =>
+      DonationsLocalStorage.streamAllDonations(branchId)
+          .map((list) => list
+              .map((r) => {'hiveKey': r.hiveKey, ...r.toMap()})
+              .toList());
+
   @override
   void initState() {
     super.initState();
     _from   = widget.today;
     _to     = widget.today;
-    _stream = DonationsLocalStorage.streamAllDonations(widget.branchId);
+    _stream = _buildStream(widget.branchId);
   }
 
   @override
@@ -141,7 +150,7 @@ class _DashboardTabState extends State<DashboardTab> {
     super.didUpdateWidget(old);
     if (old.branchId != widget.branchId) {
       setState(() {
-        _stream        = DonationsLocalStorage.streamAllDonations(widget.branchId);
+        _stream        = _buildStream(widget.branchId);
         _from          = widget.today;
         _to            = widget.today;
         _filterGmwfSub = null;
@@ -181,14 +190,12 @@ class _DashboardTabState extends State<DashboardTab> {
 
         final all = snap.data ?? [];
 
-        // Role filter
         final roleFilt = widget.role.isOfficeBoy
             ? all.where((d) =>
                 (d['recordedBy'] as String? ?? '').toLowerCase() ==
                 widget.username.toLowerCase()).toList()
             : all;
 
-        // Date filter
         final dateFilt = roleFilt.where((d) {
           final date = (d['date'] as String?) ?? '';
           if (_from.isNotEmpty && date.compareTo(_from) < 0) return false;
@@ -196,13 +203,11 @@ class _DashboardTabState extends State<DashboardTab> {
           return true;
         }).toList();
 
-        // Category filter
         final catFilt = _filterCat == null
             ? dateFilt
             : dateFilt.where((d) =>
                 (d['categoryId'] as String?) == _filterCat!.name).toList();
 
-        // GMWF sub-category filter
         final donations = _filterGmwfSub == null
             ? catFilt
             : catFilt.where((d) =>
@@ -304,7 +309,6 @@ class _WideLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // LEFT: KPI + form
       SizedBox(
         width: 420,
         child: Column(children: [
@@ -319,7 +323,6 @@ class _WideLayout extends StatelessWidget {
         ]),
       ),
       Container(width: 1, color: t.bgRule),
-      // RIGHT: sticky filters + list
       Expanded(child: _RightList(
         donations: donations, branchId: branchId,
         activeCat: activeCat, filterCat: filterCat,
@@ -494,7 +497,6 @@ class _RightList extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // NARROW HEADER DELEGATE
-// base 196 + 38 when gmwf subs shown
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _NarrowHeaderDelegate extends SliverPersistentHeaderDelegate {
@@ -508,7 +510,7 @@ class _NarrowHeaderDelegate extends SliverPersistentHeaderDelegate {
   final ValueChanged<DonationCategory?> onFilter;
   final ValueChanged<GmwfSubCategory?>  onGmwfFilter;
 
-  double get _h => showGmwfSubs ? 234.0 : 196.0;
+  double get _h => showGmwfSubs ? 222.0 : 184.0;
 
   const _NarrowHeaderDelegate({
     required this.bgColor,    required this.branchId,
@@ -574,7 +576,6 @@ class _NarrowHeaderDelegate extends SliverPersistentHeaderDelegate {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WIDE RIGHT HEADER DELEGATE
-// base 108 + 38 when gmwf subs shown
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _WideRightHeaderDelegate extends SliverPersistentHeaderDelegate {
@@ -588,7 +589,7 @@ class _WideRightHeaderDelegate extends SliverPersistentHeaderDelegate {
   final ValueChanged<DonationCategory?> onFilter;
   final ValueChanged<GmwfSubCategory?>  onGmwfFilter;
 
-  double get _h => showGmwfSubs ? 150.0 : 108.0;
+  double get _h => showGmwfSubs ? 148.0 : 106.0;
 
   const _WideRightHeaderDelegate({
     required this.bgColor,   required this.hPad,  required this.rPad,
@@ -709,7 +710,7 @@ class _DonationSliver extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DATE BAR
+// DATE BAR  — two plain tap targets, no pills-within-pills
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DateBar extends StatelessWidget {
@@ -728,7 +729,7 @@ class _DateBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
           color: t.bgCard,
           borderRadius: BorderRadius.circular(DS.rMd),
@@ -736,14 +737,35 @@ class _DateBar extends StatelessWidget {
           boxShadow: DS.shadowSm),
       child: Row(children: [
         Icon(Icons.date_range_rounded, size: 14, color: DonDS.teal),
-        const SizedBox(width: 8),
-        _pill(t, 'From', from, onFrom),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 5),
-          child: Icon(Icons.arrow_forward_rounded,
-              size: 11, color: t.textTertiary),
+        const SizedBox(width: 10),
+        // From target
+        GestureDetector(
+          onTap: onFrom,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('From ', style: DS.caption(color: t.textTertiary)
+                .copyWith(fontSize: 11)),
+            Text(_p(from), style: DS.label(color: t.textPrimary)
+                .copyWith(fontSize: 12)),
+            const SizedBox(width: 2),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 13, color: DonDS.teal),
+          ]),
         ),
-        _pill(t, 'To', to, onTo),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Icon(Icons.arrow_forward_rounded, size: 11, color: t.textTertiary),
+        ),
+        // To target
+        GestureDetector(
+          onTap: onTo,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('To ', style: DS.caption(color: t.textTertiary)
+                .copyWith(fontSize: 11)),
+            Text(_p(to), style: DS.label(color: t.textPrimary)
+                .copyWith(fontSize: 12)),
+            const SizedBox(width: 2),
+            Icon(Icons.keyboard_arrow_down_rounded, size: 13, color: DonDS.teal),
+          ]),
+        ),
         const Spacer(),
         if (!_isToday)
           GestureDetector(
@@ -758,8 +780,7 @@ class _DateBar extends StatelessWidget {
                 Icon(Icons.today_rounded, size: 10, color: DonDS.teal),
                 SizedBox(width: 3),
                 Text('Today',
-                    style: TextStyle(
-                        fontSize: 9, fontWeight: FontWeight.w700,
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
                         color: DonDS.teal)),
               ]),
             ),
@@ -767,29 +788,6 @@ class _DateBar extends StatelessWidget {
       ]),
     );
   }
-
-  Widget _pill(RoleThemeData t, String lbl, String date, VoidCallback tap) =>
-      GestureDetector(
-        onTap: tap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-          decoration: BoxDecoration(
-              color: t.bgCardAlt,
-              borderRadius: BorderRadius.circular(DS.rSm),
-              border: Border.all(color: t.bgRule)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('$lbl: ',
-                style: DS.label(color: t.textTertiary)
-                    .copyWith(fontSize: 9)),
-            Text(_p(date),
-                style: DS.label(color: t.textPrimary)
-                    .copyWith(fontSize: 11)),
-            const SizedBox(width: 3),
-            const Icon(Icons.keyboard_arrow_down_rounded,
-                size: 11, color: DonDS.teal),
-          ]),
-        ),
-      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -839,7 +837,6 @@ class _GmwfSubChips extends StatelessWidget {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(children: [
-        // Small "GMWF:" label prefix
         Container(
           margin: const EdgeInsets.only(right: 8),
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -848,8 +845,7 @@ class _GmwfSubChips extends StatelessWidget {
             borderRadius: BorderRadius.circular(DS.rSm),
           ),
           child: const Text('GMWF',
-              style: TextStyle(
-                  fontSize: 9, fontWeight: FontWeight.w800,
+              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800,
                   color: DS.emerald600, letterSpacing: 0.8)),
         ),
         ...GmwfSubCategory.values.map((sub) {
@@ -861,8 +857,7 @@ class _GmwfSubChips extends StatelessWidget {
               onTap: () => onChanged(sel ? null : sub),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 11, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
                 decoration: BoxDecoration(
                   color: sel ? sub.color : t.bgCard,
                   borderRadius: BorderRadius.circular(DS.rSm),
@@ -879,8 +874,7 @@ class _GmwfSubChips extends StatelessWidget {
                       color: sel ? Colors.white : sub.color),
                   const SizedBox(width: 5),
                   Text(sub.label,
-                      style: TextStyle(
-                          fontSize: 10,
+                      style: TextStyle(fontSize: 10,
                           fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                           color: sel ? Colors.white : sub.color)),
                 ]),
@@ -927,8 +921,7 @@ class _Chip extends StatelessWidget {
           Text(label,
               style: DS.label(color: sel ? Colors.white : color)
                   .copyWith(fontSize: 12,
-                      fontWeight: sel
-                          ? FontWeight.w700 : FontWeight.w500)),
+                      fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
         ]),
       ),
     );
@@ -990,7 +983,7 @@ class _SectionHeader extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SUMMARY CARD
+// SUMMARY CARD  — 4 flat cells, NO progress bar
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _SummaryCard extends StatelessWidget {
@@ -1006,7 +999,8 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     double total = 0, approved = 0, pending = 0;
-    int cashCnt = 0, goodsCnt = 0;
+    int goodsCnt = 0, cashCnt = 0;
+
     for (final d in donations) {
       final amt     = _toAmt(d['amount']);
       final isGoods = (d['entryType'] as String? ?? '') == 'goods';
@@ -1017,99 +1011,91 @@ class _SummaryCard extends StatelessWidget {
         else if (status == kStatusPending) pending  += amt;
       } else { goodsCnt++; }
     }
-    final pct   = total > 0 ? (approved / total).clamp(0.0, 1.0) : 0.0;
+
     final color = filterGmwfSub?.color ?? category.color;
 
     return Container(
       margin:  const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
           color:        t.bgCard,
           borderRadius: BorderRadius.circular(DS.rLg),
           border:       Border.all(color: color.withOpacity(0.18)),
           boxShadow:    DS.shadowSm),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // Header row
         Row(children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
                 color: color.withOpacity(0.10),
                 borderRadius: BorderRadius.circular(DS.rSm)),
             child: Icon(Icons.analytics_rounded, color: color, size: 14)),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(child: Column(
               crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Summary', style: DS.subheading(color: t.textPrimary)),
-            Text('${donations.length} donation'
-                '${donations.length != 1 ? "s" : ""}',
+            Text('${donations.length} donation${donations.length != 1 ? "s" : ""}',
                 style: DS.caption(color: t.textTertiary)),
           ])),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text('PKR ${fmtNum(total)}',
                 style: DS.mono(color: color, size: 17)),
-            Text('Cash total',
-                style: DS.caption(color: t.textTertiary)),
+            Text('Cash total', style: DS.caption(color: t.textTertiary)),
           ]),
         ]),
-        if (cashCnt > 0) ...[
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Approval rate',
-                  style: DS.label(color: t.textTertiary)),
-              Text('${(pct * 100).round()}%',
-                  style: DS.label(color: DS.statusApproved)
-                      .copyWith(fontSize: 11)),
-            ],
-          ),
-          const SizedBox(height: 5),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: pct, minHeight: 6,
-              backgroundColor: DS.statusPending.withOpacity(0.15),
-              valueColor: const AlwaysStoppedAnimation(DS.statusApproved),
-            ),
-          ),
-          const SizedBox(height: 10),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              _StatPill('Approved', 'PKR ${fmtNum(approved)}',
-                  DS.statusApproved),
-              const SizedBox(width: 8),
-              _StatPill('Pending',  'PKR ${fmtNum(pending)}',
-                  DS.statusPending),
-              if (goodsCnt > 0) ...[
-                const SizedBox(width: 8),
-                _StatPill('Goods', '$goodsCnt items', DS.plum500),
-              ],
-            ]),
-          ),
+        const SizedBox(height: 12),
+        // ── 4 flat stat cells — replaces progress bar ─────────────────────
+        Row(children: [
+          _StatCell('Total', 'PKR ${fmtNum(total)}', color),
+          const SizedBox(width: 8),
+          _StatCell('Approved', 'PKR ${fmtNum(approved)}', DS.statusApproved),
+          const SizedBox(width: 8),
+          _StatCell('Pending', 'PKR ${fmtNum(pending)}', DS.statusPending),
+          const SizedBox(width: 8),
+          _StatCell('Records', '${donations.length}', DS.ink500),
+        ]),
+        if (goodsCnt > 0) ...[
+          const SizedBox(height: 8),
+          Row(children: [
+            Icon(Icons.inventory_2_rounded, size: 12, color: DS.plum500),
+            const SizedBox(width: 5),
+            Text('$goodsCnt goods donation${goodsCnt != 1 ? "s" : ""} in range',
+                style: DS.caption(color: DS.plum700).copyWith(fontSize: 11)),
+          ]),
         ],
       ]),
     );
   }
 }
 
-class _StatPill extends StatelessWidget {
-  final String label, value; final Color color;
-  const _StatPill(this.label, this.value, this.color);
+class _StatCell extends StatelessWidget {
+  final String label, value;
+  final Color  color;
+  const _StatCell(this.label, this.value, this.color);
+
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    decoration: BoxDecoration(
-        color:        color.withOpacity(0.07),
-        borderRadius: BorderRadius.circular(DS.rSm),
-        border:       Border.all(color: color.withOpacity(0.20))),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: DS.label(color: color).copyWith(fontSize: 9)),
-      const SizedBox(height: 3),
-      Text(value, style: DS.mono(color: color, size: 12),
-          overflow: TextOverflow.ellipsis),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+        decoration: BoxDecoration(
+            color:        color.withOpacity(0.07),
+            borderRadius: BorderRadius.circular(DS.rSm),
+            border:       Border.all(color: color.withOpacity(0.18))),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: DS.label(color: color)
+                  .copyWith(fontSize: 9, letterSpacing: 0.5)),
+          const SizedBox(height: 3),
+          Text(value,
+              style: DS.mono(color: color, size: 10.5),
+              overflow: TextOverflow.ellipsis),
+        ]),
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1186,8 +1172,7 @@ class _EmptyState extends StatelessWidget {
               size: 30, color: cat.color.withOpacity(0.4)),
         ),
         const SizedBox(height: 16),
-        Text('No Transactions',
-            style: DS.subheading(color: t.textTertiary)),
+        Text('No Transactions', style: DS.subheading(color: t.textTertiary)),
         const SizedBox(height: 4),
         Text('No records for the selected date range',
             style: DS.caption(color: t.textTertiary)),
@@ -1224,7 +1209,7 @@ class _ErrorView extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DONATION TILE
+// DONATION TILE  — 3-zone layout: donor+amount / badges / secondary actions
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _DonationTile extends StatefulWidget {
@@ -1283,7 +1268,7 @@ class _DonationTileState extends State<_DonationTile> {
 
     String? collectorLabel;
     if (colRole.isNotEmpty && colRole != 'Staff' && recorder.isNotEmpty) {
-      collectorLabel = '$colRole: $recorder';
+      collectorLabel = '$colRole · $recorder';
     } else if (recorder.isNotEmpty) {
       collectorLabel = recorder;
     }
@@ -1292,262 +1277,214 @@ class _DonationTileState extends State<_DonationTile> {
       decoration: BoxDecoration(
           color:        t.bgCard,
           borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: t.bgRule),
+          border:       Border.all(color: accent.withOpacity(0.20)),
           boxShadow:    DS.shadowSm),
       clipBehavior: Clip.antiAlias,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      child: IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
 
-        // Top stripe
-        Container(
-          height: 3,
-          decoration: BoxDecoration(
-              gradient: LinearGradient(
-                  colors: [accent, accent.withOpacity(0.4)])),
-        ),
+          // ── Left accent bar ──────────────────────────────────────────────
+          Container(width: 4, color: accent),
 
-        IntrinsicHeight(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Container(width: 3, color: accent.withOpacity(0.4)),
-            Expanded(child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                // Receipt badge
-                Container(
-                  constraints: const BoxConstraints(minWidth: 46),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 8),
-                  decoration: BoxDecoration(
-                      color: accent.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(DS.rMd),
-                      border: Border.all(color: accent.withOpacity(0.18))),
-                  child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                    Text('RCT', style: DS.label(color: accent)
-                        .copyWith(fontSize: 7)),
-                    const SizedBox(height: 2),
-                    Text(receiptNo.isNotEmpty
-                            ? receiptNo.split('-').last : '-',
-                        style: DS.mono(color: accent, size: 13)
-                            .copyWith(height: 1.2)),
+          // ── Content ──────────────────────────────────────────────────────
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+
+                // ── ZONE 1: Donor name + amount ───────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 11, 12, 0),
+                  child: Row(children: [
+                    Expanded(
+                      child: Text(donor,
+                          style: DS.subheading(color: t.textPrimary)
+                              .copyWith(fontSize: 14.5),
+                          overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(amtDisplay,
+                        style: DS.mono(color: accent, size: 15)),
                   ]),
                 ),
-                const SizedBox(width: 10),
 
-                // Info column
-                Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text(donor,
-                      style: DS.subheading(color: t.textPrimary)
-                          .copyWith(fontSize: 14.5)),
-                  const SizedBox(height: 2),
-                  if (receiptNo.isNotEmpty)
-                    Text(receiptNo,
-                        style: DS.caption(color: t.textTertiary)
-                            .copyWith(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 9.5)),
-                  if (collectorLabel != null) ...[
-                    const SizedBox(height: 3),
-                    Row(children: [
-                      Icon(Icons.badge_outlined, size: 10,
-                          color: t.textTertiary),
-                      const SizedBox(width: 4),
-                      if (colRole.isNotEmpty && colRole != 'Staff') ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: _roleColor(colRole).withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                                color: _roleColor(colRole).withOpacity(0.3)),
-                          ),
-                          child: Text(colRole,
-                              style: DS.label(color: _roleColor(colRole))
-                                  .copyWith(fontSize: 8)),
-                        ),
-                        const SizedBox(width: 4),
-                      ],
-                      Flexible(child: Text(collectorLabel,
-                          style: DS.caption(color: t.textTertiary)
-                              .copyWith(fontSize: 10),
-                          overflow: TextOverflow.ellipsis)),
-                    ]),
-                  ],
-                  const SizedBox(height: 5),
-                  Wrap(spacing: 5, runSpacing: 4, children: [
+                // ── ZONE 2: Badges + status ───────────────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+                  child: Wrap(spacing: 5, runSpacing: 4, children: [
+                    // Receipt no as tiny mono badge
+                    if (receiptNo.isNotEmpty)
+                      _MonoBadge(text: receiptNo, color: accent),
                     _CatBadge(cat: cat),
                     if (gmwfSub != null) _GmwfSubBadge(sub: gmwfSub),
                     if (isGoods) _GoodsBadge(),
                     if (subtype != null) DSSubtypeBadge(subtype: subtype),
-                    if ((d['paymentMethod'] as String? ?? 'Cash') != 'Cash')
-                      _MetaPill(icon: Icons.credit_card_rounded,
-                          label: d['paymentMethod'] as String,
-                          color: DonDS.teal),
-                    if (phone.isNotEmpty)
-                      _MetaPill(icon: Icons.phone_outlined,
-                          label: phone, color: t.textTertiary),
-                    if (goodsItem.isNotEmpty)
-                      _MetaPill(icon: Icons.inventory_2_outlined,
-                          label: goodsItem, color: accent),
-                  ]),
-                ])),
-
-                // Amount + status
-                const SizedBox(width: 8),
-                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text(amtDisplay,
-                      style: DS.mono(color: accent, size: 15)),
-                  if (!isGoods) ...[
-                    const SizedBox(height: 5),
-                    DSStatusBadge(status: status),
-                  ],
-                ]),
-              ]),
-            )),
-          ]),
-        ),
-
-        // Notes
-        if (notes.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 12, 0),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                  color: t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(DS.rSm),
-                  border: Border.all(color: t.bgRule)),
-              child: Text(notes,
-                  style: DS.caption(color: t.textSecondary)
-                      .copyWith(fontStyle: FontStyle.italic)),
-            ),
-          ),
-
-        // Action buttons
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-          child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(children: [
-                DSActionButton(icon: Icons.print_rounded, label: 'Print',
-                    color: accent,
-                    onTap: () => printReceiptPdf(d, receiptNo)),
-                const SizedBox(width: 6),
-                DSActionButton(icon: Icons.download_rounded, label: 'PDF',
-                    color: DonDS.teal,
-                    onTap: () =>
-                        downloadReceiptPdf(d, receiptNo, context)),
-                const SizedBox(width: 6),
-                DSActionButton(
-                    assetImage: 'assets/icons/WA.png',
-                    label: 'WhatsApp',
-                    color: const Color(0xFF25D366),
-                    disabled: phone.isEmpty,
-                    onTap: () => shareReceiptWhatsApp(
-                        d, receiptNo, phone, widget.branchName)),
-                const SizedBox(width: 6),
-                DSActionButton(icon: Icons.sms_rounded, label: 'SMS',
-                    color: accent, disabled: phone.isEmpty,
-                    onTap: () => sendSmsThankYou(
-                          phone, donor, cat, amt,
-                          unit.isEmpty ? 'PKR' : unit,
-                          receiptNo, widget.branchName,
-                          subtype: subtype, gmwfSub: gmwfSub,
-                          paymentMethod:
-                              d['paymentMethod'] as String? ?? 'Cash',
-                          isGoods: isGoods,
-                        )),
-              ]),
-            ),
-            const SizedBox(height: 8),
-            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-              GestureDetector(
-                onTap: () => setState(() => _exp = !_exp),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                      color: t.bgCardAlt,
-                      borderRadius: BorderRadius.circular(DS.rSm),
-                      border: Border.all(color: t.bgRule)),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text(_exp ? 'Less' : 'Details',
-                        style: DS.label(color: t.textTertiary)
-                            .copyWith(fontSize: 11)),
-                    const SizedBox(width: 3),
-                    Icon(_exp
-                            ? Icons.expand_less_rounded
-                            : Icons.expand_more_rounded,
-                        size: 14, color: t.textTertiary),
+                    if (!isGoods) DSStatusBadge(status: status),
                   ]),
                 ),
-              ),
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: () => _confirmDelete(context),
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                      color: DS.statusRejected.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(DS.rSm),
-                      border: Border.all(
-                          color: DS.statusRejected.withOpacity(0.25))),
-                  child: Icon(Icons.delete_outline_rounded,
-                      size: 16, color: DS.statusRejected),
-                ),
-              ),
-            ]),
-          ]),
-        ),
 
-        // Expanded details
-        if (_exp)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 12, 14, 14),
-            decoration: BoxDecoration(
-                color:  t.bgCardAlt,
-                border: Border(top: BorderSide(color: t.bgRule))),
-            child: Wrap(spacing: 22, runSpacing: 10, children: [
-              _Cell('Receipt No', receiptNo.isNotEmpty ? receiptNo : '-'),
-              _Cell('Category', cat.label),
-              if (gmwfSub != null) _Cell('Programme', gmwfSub.label),
-              if (subtype  != null) _Cell('Sub-Type', subtype.label),
-              _Cell('Entry', isGoods ? 'Goods / Ajnas' : 'Cash'),
-              _Cell('Recorded By', recorder.isNotEmpty ? recorder : '-'),
-              if (colRole.isNotEmpty) _Cell('Collector Role', colRole),
-              _Cell('Date', d['date'] as String? ?? '-'),
-              if (d['paymentMethod'] != null && !isGoods)
-                _Cell('Payment', d['paymentMethod'] as String),
-              if (!isGoods)
-                _Cell('Status',
-                    status[0].toUpperCase() + status.substring(1)),
-              if (isGoods && prob != null)
-                _Cell('Est. Value', 'PKR ${fmtNum(prob)}'),
-              _Cell('Sync',
-                  (d['syncStatus'] as String? ?? 'pending') == 'pending'
-                      ? '⏳ Queued' : '✅ Synced'),
-            ]),
+                // ── ZONE 3: Recorder + contact (muted) ───────────────────
+                if (collectorLabel != null || phone.isNotEmpty || goodsItem.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 5, 12, 0),
+                    child: Row(children: [
+                      if (collectorLabel != null) ...[
+                        Icon(Icons.badge_outlined, size: 10, color: t.textTertiary),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(collectorLabel,
+                              style: DS.caption(color: t.textTertiary)
+                                  .copyWith(fontSize: 10),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ] else
+                        const Spacer(),
+                      if (phone.isNotEmpty) ...[
+                        Icon(Icons.phone_outlined, size: 10, color: t.textTertiary),
+                        const SizedBox(width: 3),
+                        Text(phone,
+                            style: DS.caption(color: t.textTertiary)
+                                .copyWith(fontSize: 10)),
+                      ],
+                      if ((d['paymentMethod'] as String? ?? 'Cash') != 'Cash') ...[
+                        const SizedBox(width: 8),
+                        Icon(Icons.credit_card_rounded, size: 10, color: DonDS.teal),
+                        const SizedBox(width: 3),
+                        Text(d['paymentMethod'] as String,
+                            style: DS.caption(color: DonDS.teal)
+                                .copyWith(fontSize: 10)),
+                      ],
+                    ]),
+                  ),
+
+                // ── Notes ─────────────────────────────────────────────────
+                if (notes.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 7, 12, 0),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                          color: t.bgCardAlt,
+                          borderRadius: BorderRadius.circular(DS.rSm),
+                          border: Border.all(color: t.bgRule)),
+                      child: Text(notes,
+                          style: DS.caption(color: t.textSecondary)
+                              .copyWith(fontStyle: FontStyle.italic,
+                                  fontSize: 11)),
+                    ),
+                  ),
+
+                // ── Action row (secondary — compact) ──────────────────────
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  child: Row(children: [
+                    // Print
+                    _TinyAction(
+                        icon: Icons.print_rounded, label: 'Print',
+                        color: accent,
+                        onTap: () => printReceiptPdf(d, receiptNo)),
+                    const SizedBox(width: 5),
+                    // PDF
+                    _TinyAction(
+                        icon: Icons.download_rounded, label: 'PDF',
+                        color: DonDS.teal,
+                        onTap: () => downloadReceiptPdf(d, receiptNo, context)),
+                    const SizedBox(width: 5),
+                    // WhatsApp
+                    _TinyAction(
+                        assetImage: 'assets/icons/WA.png', label: 'WA',
+                        color: const Color(0xFF25D366),
+                        disabled: phone.isEmpty,
+                        onTap: () => shareReceiptWhatsApp(
+                            d, receiptNo, phone, widget.branchName)),
+                    const SizedBox(width: 5),
+                    // SMS
+                    _TinyAction(
+                        icon: Icons.sms_rounded, label: 'SMS',
+                        color: accent, disabled: phone.isEmpty,
+                        onTap: () => sendSmsThankYou(
+                            phone, donor, cat, amt,
+                            unit.isEmpty ? 'PKR' : unit,
+                            receiptNo, widget.branchName,
+                            subtype: subtype, gmwfSub: gmwfSub,
+                            paymentMethod: d['paymentMethod'] as String? ?? 'Cash',
+                            isGoods: isGoods)),
+                    const Spacer(),
+                    // Details toggle
+                    GestureDetector(
+                      onTap: () => setState(() => _exp = !_exp),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                            color: t.bgCardAlt,
+                            borderRadius: BorderRadius.circular(DS.rSm),
+                            border: Border.all(color: t.bgRule)),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Text(_exp ? 'Less' : 'Details',
+                              style: DS.label(color: t.textTertiary)
+                                  .copyWith(fontSize: 10)),
+                          const SizedBox(width: 2),
+                          Icon(_exp
+                                  ? Icons.expand_less_rounded
+                                  : Icons.expand_more_rounded,
+                              size: 13, color: t.textTertiary),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    // Delete — small, right-edge, destructive
+                    GestureDetector(
+                      onTap: () => _confirmDelete(context),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                            color: DS.statusRejected.withOpacity(0.07),
+                            borderRadius: BorderRadius.circular(DS.rSm),
+                            border: Border.all(
+                                color: DS.statusRejected.withOpacity(0.22))),
+                        child: Icon(Icons.delete_outline_rounded,
+                            size: 15, color: DS.statusRejected),
+                      ),
+                    ),
+                  ]),
+                ),
+
+                // ── Expanded details ───────────────────────────────────────
+                if (_exp)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+                    decoration: BoxDecoration(
+                        color:  t.bgCardAlt,
+                        border: Border(top: BorderSide(color: t.bgRule))),
+                    child: Wrap(spacing: 22, runSpacing: 10, children: [
+                      _Cell('Receipt No', receiptNo.isNotEmpty ? receiptNo : '-'),
+                      _Cell('Category', cat.label),
+                      if (gmwfSub != null) _Cell('Programme', gmwfSub.label),
+                      if (subtype  != null) _Cell('Sub-Type', subtype.label),
+                      _Cell('Entry', isGoods ? 'Goods / Ajnas' : 'Cash'),
+                      _Cell('Recorded By', recorder.isNotEmpty ? recorder : '-'),
+                      if (colRole.isNotEmpty) _Cell('Collector Role', colRole),
+                      _Cell('Date', d['date'] as String? ?? '-'),
+                      if (d['paymentMethod'] != null && !isGoods)
+                        _Cell('Payment', d['paymentMethod'] as String),
+                      if (!isGoods)
+                        _Cell('Status',
+                            status[0].toUpperCase() + status.substring(1)),
+                      if (isGoods && prob != null)
+                        _Cell('Est. Value', 'PKR ${fmtNum(prob)}'),
+                      _Cell('Sync',
+                          (d['syncStatus'] as String? ?? 'pending') == 'pending'
+                              ? 'Queued' : 'Synced'),
+                    ]),
+                  ),
+              ],
+            ),
           ),
-      ]),
+        ]),
+      ),
     );
-  }
-
-  Color _roleColor(String r) {
-    switch (r.toLowerCase().trim()) {
-      case 'chairman':   return DS.gold500;
-      case 'manager':    return DS.emerald500;
-      case 'office boy': return DS.sapphire500;
-      default:           return DS.ink500;
-    }
   }
 
   void _confirmDelete(BuildContext context) {
@@ -1563,46 +1500,43 @@ class _DonationTileState extends State<_DonationTile> {
               color:        t.bgCard,
               borderRadius: BorderRadius.circular(DS.rXl),
               border:       Border.all(color: t.bgRule)),
-          child: Column(
-            mainAxisSize:       MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Remove Transaction',
-                  style: DS.heading(color: t.textPrimary)),
-              const SizedBox(height: 10),
-              Text('This will permanently delete this donation record.',
-                  style: DS.body(color: t.textSecondary)),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(child: OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                      foregroundColor: t.textSecondary,
-                      side: BorderSide(color: t.bgRule),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(DS.rMd)),
-                      padding: const EdgeInsets.symmetric(vertical: 12)),
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
-                )),
-                const SizedBox(width: 10),
-                Expanded(child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: DS.statusRejected,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(DS.rMd)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      elevation: 0),
-                  onPressed: () async {
-                    Navigator.pop(ctx);
-                    await _doDelete();
-                  },
-                  child: const Text('Delete',
-                      style: TextStyle(fontWeight: FontWeight.w700)),
-                )),
-              ]),
-            ],
-          ),
+          child: Column(mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Remove Transaction',
+                style: DS.heading(color: t.textPrimary)),
+            const SizedBox(height: 10),
+            Text('This will permanently delete this donation record.',
+                style: DS.body(color: t.textSecondary)),
+            const SizedBox(height: 20),
+            Row(children: [
+              Expanded(child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: t.textSecondary,
+                    side: BorderSide(color: t.bgRule),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.rMd)),
+                    padding: const EdgeInsets.symmetric(vertical: 12)),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              )),
+              const SizedBox(width: 10),
+              Expanded(child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: DS.statusRejected,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.rMd)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    elevation: 0),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  await _doDelete();
+                },
+                child: const Text('Delete',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+              )),
+            ]),
+          ]),
         ),
       ),
     );
@@ -1612,8 +1546,7 @@ class _DonationTileState extends State<_DonationTile> {
     try {
       final hiveKey = widget.data['hiveKey'] as String?;
       if (hiveKey == null || hiveKey.isEmpty) return;
-      await DonationsLocalStorage.deleteDonation(
-          hiveKey, widget.branchId);
+      await DonationsLocalStorage.deleteDonation(hiveKey, widget.branchId);
     } catch (e) { debugPrint('[Tile] Delete error: $e'); }
   }
 }
@@ -1621,6 +1554,68 @@ class _DonationTileState extends State<_DonationTile> {
 // ─────────────────────────────────────────────────────────────────────────────
 // MICRO WIDGETS
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Tiny mono badge for receipt number
+class _MonoBadge extends StatelessWidget {
+  final String text;
+  final Color  color;
+  const _MonoBadge({required this.text, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+        color:        color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(DS.rSm),
+        border:       Border.all(color: color.withOpacity(0.22))),
+    child: Text(text,
+        style: TextStyle(
+            fontSize: 9, fontWeight: FontWeight.w700,
+            color: color,
+            fontFeatures: const [FontFeature.tabularFigures()])),
+  );
+}
+
+/// Compact action button — icon + short label, no tall button
+class _TinyAction extends StatelessWidget {
+  final IconData?    icon;
+  final String?      assetImage;
+  final String       label;
+  final Color        color;
+  final bool         disabled;
+  final VoidCallback onTap;
+  const _TinyAction({
+    this.icon, this.assetImage,
+    required this.label, required this.color,
+    this.disabled = false, required this.onTap,
+  }) : assert(icon != null || assetImage != null);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    final c = disabled ? t.textTertiary : color;
+    final Widget iconW = assetImage != null
+        ? ColorFiltered(colorFilter: ColorFilter.mode(c, BlendMode.srcIn),
+            child: Image.asset(assetImage!, width: 12, height: 12))
+        : Icon(icon!, size: 12, color: c);
+    return GestureDetector(
+      onTap: disabled ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: disabled ? t.bgCardAlt : color.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(DS.rSm),
+          border: Border.all(color: disabled ? t.bgRule : color.withOpacity(0.20)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          iconW, const SizedBox(width: 4),
+          Text(label, style: DS.label(color: c)
+              .copyWith(fontSize: 10, letterSpacing: 0.2)),
+        ]),
+      ),
+    );
+  }
+}
 
 class _CatBadge extends StatelessWidget {
   final DonationCategory cat;
@@ -1680,21 +1675,6 @@ class _GoodsBadge extends StatelessWidget {
   );
 }
 
-class _MetaPill extends StatelessWidget {
-  final IconData icon; final String label; final Color? color;
-  const _MetaPill({required this.icon, required this.label, this.color});
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    final c = color ?? t.textTertiary;
-    return Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, size: 11, color: c),
-      const SizedBox(width: 4),
-      Text(label, style: DS.caption(color: c)),
-    ]);
-  }
-}
-
 class _Cell extends StatelessWidget {
   final String label, value;
   const _Cell(this.label, this.value);
@@ -1704,9 +1684,8 @@ class _Cell extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(label, style: DS.label(color: t.textTertiary)),
       const SizedBox(height: 3),
-      Text(value,
-          style: DS.subheading(color: t.textPrimary)
-              .copyWith(fontSize: 12.5)),
+      Text(value, style: DS.subheading(color: t.textPrimary)
+          .copyWith(fontSize: 12.5)),
     ]);
   }
 }

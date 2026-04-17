@@ -1,6 +1,4 @@
-// lib/pages/patient_info.dart
-// MOBILE: Fully responsive — stacks vertically on small screens,
-// vitals wrap instead of overflow, font sizes scale with screen width.
+// lib/Pages/dispensary/doctor/patient_info.dart
 
 import 'package:flutter/material.dart';
 

@@ -6,11 +6,11 @@ import 'package:intl/intl.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dashboard_widgets.dart';
+import '../widgets/scroll_reveal.dart';
 import 'branches.dart';
 import 'register.dart';
 import 'download_screen.dart';
 import 'users.dart';
-import 'fix_patients.dart';
 import 'donations/donations_screen.dart';
 
 const _cDonation = Color(0xFF6A1B9A);
@@ -80,7 +80,13 @@ class _AdminScreenState extends State<AdminScreen>
 
   Widget _buildBody(RoleThemeData t, bool isWide) {
     if (_pageIndex == -2) {
-      return _AdminDashboard(t: t, branchId: widget.branchId, username: widget.username);
+      return _AdminDashboard(
+        t: t,
+        branchId: widget.branchId,
+        username: widget.username,
+        onGo: _go,
+        onGoDonations: _goDonations,
+      );
     }
     if (_pageIndex == -1) {
       return Material(
@@ -98,7 +104,6 @@ class _AdminScreenState extends State<AdminScreen>
       case 2:  page = const UsersScreen(isPatientMode: true); break;
       case 3:  page = const UsersScreen(); break;
       case 4:  page = const DownloadScreen(); break;
-      case 5:  page = FixPatientsScreen(branchId: widget.branchId); break;
       default: page = const SizedBox.shrink();
     }
     return RoleThemeScope(
@@ -140,7 +145,6 @@ class _AdminScreenState extends State<AdminScreen>
       case 2:  return 'Patients';
       case 3:  return 'Users';
       case 4:  return 'Download';
-      case 5:  return 'Fix Patients';
       default: return 'Admin Panel';
     }
   }
@@ -208,7 +212,6 @@ class _AdminScreenState extends State<AdminScreen>
           _sheetTile(ctx, t, Icons.account_balance_outlined, 'Branches', 0),
           _sheetTile(ctx, t, Icons.person_add_outlined, 'Register User', 1),
           _sheetTile(ctx, t, Icons.download_outlined, 'Download', 4),
-          _sheetTile(ctx, t, Icons.build_outlined, 'Fix Patients', 5, danger: true),
           const SizedBox(height: 8),
           Divider(color: t.bgRule),
           _sheetTile(ctx, t, Icons.logout_outlined, 'Sign Out', -999, danger: true),
@@ -268,7 +271,6 @@ class _AdminScreenState extends State<AdminScreen>
         _navTile(t, Icons.favorite_border_rounded,  'Patients',     _pageIndex == 2, () => _go(2)),
         _navTile(t, Icons.people_outline_rounded,   'Users',        _pageIndex == 3, () => _go(3)),
         _navTile(t, Icons.download_outlined,        'Download',     _pageIndex == 4, () => _go(4)),
-        _navTile(t, Icons.build_outlined,           'Fix Patients', _pageIndex == 5, () => _go(5), accentColor: t.danger),
       ])),
       Divider(height: 1, color: t.bgRule, indent: 24, endIndent: 24),
       const SizedBox(height: 4),
@@ -283,19 +285,19 @@ class _AdminScreenState extends State<AdminScreen>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 1),
       child: Material(
-        color: active ? (accentColor ?? t.accent).withOpacity(0.09) : Colors.transparent,
+        color: active ? (accentColor ?? t.accent).withOpacity(0.12) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10), onTap: onTap,
           child: Padding(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(children: [
-              Icon(icon, size: 19, color: active ? c : t.textTertiary),
+              Icon(icon, size: 20, color: c),
               const SizedBox(width: 12),
               Expanded(child: Text(label, style: TextStyle(
-                  color: active ? c : t.textSecondary, fontSize: 14.5,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w500))),
-              if (active) Container(width: 6, height: 6,
-                  decoration: BoxDecoration(color: c, shape: BoxShape.circle)),
+                  color: c, fontSize: 14.5,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w500))),
+              if (active) Container(width: 6, height: 18,
+                  decoration: BoxDecoration(color: c, borderRadius: BorderRadius.circular(2))),
             ]),
           ),
         ),
@@ -308,208 +310,221 @@ class _AdminScreenState extends State<AdminScreen>
 class _AdminDashboard extends StatelessWidget {
   final RoleThemeData t;
   final String branchId, username;
-  const _AdminDashboard({required this.t, required this.branchId, required this.username});
+  final void Function(int) onGo;
+  final VoidCallback onGoDonations;
+
+  const _AdminDashboard({
+    required this.t,
+    required this.branchId,
+    required this.username,
+    required this.onGo,
+    required this.onGoDonations,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       color: t.bg,
-      child: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
-        child: SafeArea(child: Padding(
-          padding: EdgeInsets.all(isMobile ? 16 : 24),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _hero(context, isMobile),
-            const SizedBox(height: 24),
-            _kpiSection(),
-            const SizedBox(height: 24),
-            DashHeading("Today's Summary", t: t),
-            const SizedBox(height: 14),
-            _grandSummary(),
-            const SizedBox(height: 24),
-          ]),
-        )),
+      child: ValueListenableBuilder<DashboardFilter>(
+        valueListenable: dashboardController,
+        builder: (context, filter, child) {
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('branches').snapshots(),
+            builder: (context, branchSnap) {
+              final branches = branchSnap.hasData
+                  ? branchSnap.data!.docs.map((d) {
+                      final data = d.data() as Map<String, dynamic>;
+                      return <String, dynamic>{'id': d.id, 'name': data['name'] as String? ?? d.id};
+                    }).toList()
+                  : <Map<String, dynamic>>[];
+
+              return Column(
+                children: [
+                  GlobalFilterBar(controller: dashboardController, branches: branches),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Padding(
+                        padding: const EdgeInsets.all(DS.s3),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _hero(context, branches),
+                            const SizedBox(height: DS.s3),
+
+                            ExecutiveTopBranchFetcher(t: t, branches: branches),
+                            const SizedBox(height: DS.s4),
+
+                            DashSectionHeader(title: 'Quick Actions', subtitle: 'Common management tasks'),
+                            _buildQuickActions(context),
+                            const SizedBox(height: DS.s4),
+
+                            DashSectionHeader(title: 'Operational Overview', subtitle: 'Live metrics across all nodes'),
+                            _buildKPIOverview(branches, filter),
+                            const SizedBox(height: DS.s4),
+
+                            DashSectionHeader(
+                              title: 'Branch Performance Table',
+                              subtitle: 'Comparative analysis of branch output',
+                            ),
+                            const SizedBox(height: DS.s2),
+                            BranchPerformanceTable(t: t, branches: branches),
+                            const SizedBox(height: DS.s4),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
       ),
     );
   }
 
-  Widget _hero(BuildContext context, bool isMobile) => Container(
-    padding: EdgeInsets.all(isMobile ? 20 : 28),
-    decoration: BoxDecoration(
-      gradient: LinearGradient(colors: [t.accent, t.accentLight],
-          begin: Alignment.topLeft, end: Alignment.bottomRight),
-      borderRadius: BorderRadius.circular(isMobile ? 18 : 22),
-      boxShadow: [BoxShadow(color: t.accent.withOpacity(0.28), blurRadius: 32, offset: const Offset(0, 10))],
-    ),
-    child: isMobile
-        ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 10),
-                  const SizedBox(width: 5),
-                  Text(DateFormat('EEE, d MMM yyyy').format(DateTime.now()),
-                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w500)),
-                ]),
-              ),
-              const Spacer(),
-              Container(padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.16),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.25))),
-                  child: Image.asset("assets/logo/gmwf.png", height: 28, width: 28)),
-            ]),
-            const SizedBox(height: 14),
-            Text("Welcome back,", style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 13)),
-            const SizedBox(height: 3),
-            Text(username, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-            const SizedBox(height: 6),
-            Text("Full access · All branches", style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 12)),
-          ])
-        : Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.18), borderRadius: BorderRadius.circular(20)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.calendar_today_rounded, color: Colors.white70, size: 12),
-                  const SizedBox(width: 6),
-                  Text(DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
-                      style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500)),
-                ]),
-              ),
-              const SizedBox(height: 16),
-              Text("Welcome back,", style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 14)),
-              const SizedBox(height: 4),
-              Text(username, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
-              const SizedBox(height: 8),
-              Text("Full access · All branches · All data", style: TextStyle(color: Colors.white.withOpacity(0.65), fontSize: 13)),
-            ])),
-            const SizedBox(width: 20),
-            Container(padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.16),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withOpacity(0.25))),
-                child: Image.asset("assets/logo/gmwf.png", height: 52, width: 52)),
-          ]),
-  );
-
-  Widget _kpiSection() => StreamBuilder<QuerySnapshot>(
-    stream: FirebaseFirestore.instance.collection('branches').snapshots(),
-    builder: (_, snap) {
-      if (!snap.hasData) return DashLoadingCard(t: t, height: 140);
-      final docs = snap.data!.docs;
-      final ids  = docs.map((d) => d.id).toList();
-      final branches = docs.map((d) {
-        final data = d.data() as Map<String, dynamic>;
-        return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-      }).toList();
-      return FutureBuilder<BranchStats>(
-        future: fetchAllBranchesStats(ids),
-        builder: (_, snap) {
-          if (!snap.hasData) return DashLoadingCard(t: t, height: 140);
-          final s = snap.data!;
-          return Column(children: [
-            KpiTilesRow(t: t, s: s, branchCount: branches.length),
-            const SizedBox(height: 12),
-            _TopBranchFetcher(t: t, branches: branches),
-          ]);
-        },
-      );
-    },
-  );
-
-  Widget _grandSummary() => StreamBuilder<QuerySnapshot>(
-    stream: FirebaseFirestore.instance.collection('branches').snapshots(),
-    builder: (_, snap) {
-      if (!snap.hasData) return DashLoadingCard(t: t, height: 300);
-      final docs = snap.data!.docs;
-      final ids  = docs.map((d) => d.id).toList();
-      final branches = docs.map((d) {
-        final data = d.data() as Map<String, dynamic>;
-        return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-      }).toList()..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-
-      return FutureBuilder<BranchStats>(
-        future: fetchAllBranchesStats(ids),
-        builder: (_, snap) {
-          if (!snap.hasData) return DashLoadingCard(t: t, height: 300);
-          final totals = snap.data!;
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            GrandTotalsCard(t: t, s: totals),
-            const SizedBox(height: 12),
-            PatientDistributionCard(t: t, s: totals),
-            const SizedBox(height: 12),
-            ServiceRevenueCard(t: t, s: totals),
-            const SizedBox(height: 28),
-            DashHeading('Branch Performance', t: t), const SizedBox(height: 14),
-            _BranchDonationsFetcher(t: t, branches: branches),
-            const SizedBox(height: 16),
-            ...branches.map((b) => Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: BranchSummaryCard(t: t, branchId: b['id']!, branchName: b['name']!),
-            )),
-          ]);
-        },
-      );
-    },
-  );
-}
-
-class _TopBranchFetcher extends StatelessWidget {
-  final RoleThemeData t;
-  final List<Map<String, dynamic>> branches;
-  const _TopBranchFetcher({required this.t, required this.branches});
-
-  @override
-  Widget build(BuildContext context) => FutureBuilder<Map<String, dynamic>>(
-    future: _findTop(),
-    builder: (_, snap) {
-      if (!snap.hasData) return DashLoadingCard(t: t, height: 88);
-      final d = snap.data!;
-      if ((d['tokens'] as int) == 0) return const SizedBox.shrink();
-      return TopBranchBanner(t: t, branchName: d['name'] as String,
-          revenue: d['revenue'] as int, patients: d['tokens'] as int);
-    },
-  );
-
-  Future<Map<String, dynamic>> _findTop() async {
-    Map<String, dynamic> best = {'name': '', 'tokens': 0, 'revenue': 0};
-    for (final b in branches) {
-      final s = await fetchBranchStats(b['id'] as String);
-      if (s.tokens > (best['tokens'] as int)) {
-        best = {'name': b['name'], 'tokens': s.tokens, 'revenue': s.totalRevenue};
-      }
-    }
-    return best;
+  Widget _hero(BuildContext context, List<Map<String, dynamic>> branches) {
+    return Container(
+      padding: const EdgeInsets.all(DS.s3),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [t.accent, t.accentLight], begin: Alignment.topLeft, end: Alignment.bottomRight),
+        borderRadius: BorderRadius.circular(DS.r3),
+        boxShadow: [BoxShadow(color: t.accent.withOpacity(0.25), blurRadius: 24, offset: const Offset(0, 8))],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text("Welcome back,", style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 14)),
+                const SizedBox(height: 4),
+                Text(username, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Icon(Icons.bolt_rounded, color: Colors.amber, size: 16),
+                    const SizedBox(width: 6),
+                    Text("Admin Access Control Active", style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.all(DS.s2),
+            decoration: BoxDecoration(color: Colors.white.withOpacity(0.15), borderRadius: BorderRadius.circular(DS.r2)),
+            child: Image.asset("assets/logo/gmwf.png", height: 50, width: 50),
+          ),
+        ],
+      ),
+    );
   }
-}
 
-class _BranchDonationsFetcher extends StatelessWidget {
-  final RoleThemeData t;
-  final List<Map<String, dynamic>> branches;
-  const _BranchDonationsFetcher({required this.t, required this.branches});
+  Widget _buildQuickActions(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          _actionTile(context, Icons.account_balance_outlined, 'Branches', DS.blue, () => onGo(0)),
+          _actionTile(context, Icons.volunteer_activism_rounded, 'Donations', DS.purple, onGoDonations),
+          _actionTile(context, Icons.person_add_rounded, 'Add User', DS.green, () => onGo(1)),
+          _actionTile(context, Icons.file_download_rounded, 'Reports', DS.orange, () => onGo(4)),
+        ],
+      ),
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) => FutureBuilder<List<Map<String, dynamic>>>(
-    future: _fetchDonations(),
-    builder: (_, snap) {
-      if (!snap.hasData) return DashLoadingCard(t: t, height: 80);
-      final data  = snap.data!;
-      final total = data.fold<int>(0, (s, b) => s + (b['donations'] as int));
-      return DonationsSummaryCard(t: t, branches: data, totalDonations: total);
-    },
-  );
+  Widget _actionTile(BuildContext context, IconData icon, String label, Color color, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(right: DS.s2),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(DS.r2),
+        child: Container(
+          width: 120,
+          padding: const EdgeInsets.all(DS.s2),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(DS.r2),
+            border: Border.all(color: DS.border),
+          ),
+          child: Column(
+            children: [
+              Container(padding: const EdgeInsets.all(DS.s1), decoration: BoxDecoration(color: color.withOpacity(0.12), shape: BoxShape.circle), child: Icon(icon, color: color, size: 20)),
+              const SizedBox(height: DS.s1),
+              Text(label, textAlign: TextAlign.center, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-  Future<List<Map<String, dynamic>>> _fetchDonations() async {
-    final results = <Map<String, dynamic>>[];
-    for (final b in branches) {
-      final stats = await fetchBranchStats(b['id'] as String);
-      results.add({'id': b['id'], 'name': b['name'], 'donations': stats.donations});
-    }
-    return results;
+  Widget _buildKPIOverview(List<Map<String, dynamic>> branches, DashboardFilter filter) {
+    return StreamBuilder<BranchStats>(
+      stream: streamAllBranchesStats(branches.map((b) => b['id'] as String).toList(), filter: filter),
+      builder: (context, snap) {
+        final s = snap.data ?? const BranchStats();
+        return Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: ActionableKPICard(
+                    label: 'Total Revenue',
+                    value: fmtNum(s.totalRevenue),
+                    prefix: 'PKR ',
+                    icon: Icons.payments_rounded,
+                    color: DS.green,
+                    isPrimary: true,
+                    insight: 'Aggregated from all branches',
+                  ),
+                ),
+                const SizedBox(width: DS.s2),
+                Expanded(
+                  child: ActionableKPICard(
+                    label: 'Total Patients',
+                    value: fmtNum(s.tokens),
+                    icon: Icons.people_alt_rounded,
+                    color: DS.blue,
+                    isPrimary: true,
+                    insight: '${branches.length} active branches',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: DS.s2),
+            Row(
+              children: [
+                Expanded(
+                  child: ActionableKPICard(
+                    label: 'Tokens Served',
+                    value: fmtNum(s.dasterkhwaanServed),
+                    icon: Icons.restaurant_rounded,
+                    color: DS.orange,
+                    insight: '${s.dasterkhwaan} tokens issued',
+                  ),
+                ),
+                const SizedBox(width: DS.s2),
+                Expanded(
+                  child: ActionableKPICard(
+                    label: 'Donations',
+                    value: fmtNum(s.donations),
+                    prefix: 'PKR ',
+                    icon: Icons.volunteer_activism_rounded,
+                    color: DS.purple,
+                    insight: 'Today\'s contributions',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: DS.s2),
+            PatientDistributionCard(t: t, s: s),
+          ],
+        );
+      },
+    );
   }
 }

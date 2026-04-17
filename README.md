@@ -1,266 +1,222 @@
-# 🏥 GMWF — Clinic Management System
+<p align="center">
+  <img src="assets/logo/gmwf.png" alt="GMWF Logo" width="120" />
+</p>
 
-A production-grade **Flutter clinic management app** with offline-first architecture, real-time LAN synchronization, and Firebase Firestore cloud backup. Built for multi-device clinic environments where receptionists, doctors, and dispensers need fast, reliable data — even without internet.
+# 🕌 Gulzar Madina Welfare Foundation (GMWF)
+### Integrated Welfare Operations Platform
 
----
+[![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)](https://flutter.dev)
+[![Firebase](https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase)](https://firebase.google.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20iOS-blue?style=for-the-badge)](https://flutter.dev/multi-platform)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
 
-## ✨ Features
-
-- **Offline-First** — Every write hits local Hive storage first. The app works fully offline and syncs automatically when connectivity returns.
-- **Real-Time LAN Sync** — All devices on the same network stay in sync instantly via WebSocket. No internet required for inter-device communication.
-- **Dedicated LAN Server** — A dedicated always-on device runs the LAN server for maximum stability. No dependency on any staff member's device.
-- **Multi-Role Support** — Separate flows for receptionist, doctor, dispenser, admin, CEO, and chairman.
-- **Firebase Firestore Backup** — All data is asynchronously pushed to Firestore as the cloud source of truth.
-- **Smart Reconnect** — Devices that go offline receive a targeted catch-up bundle when they reconnect — not a full re-sync.
-- **Cross-Platform** — Supports Android, iOS, Windows, macOS, Linux, and ChromeOS.
+A production-grade **Flutter application** purpose-built for the Gulzar Madina Welfare Foundation. GMWF digitally manages the foundation's entire operational ecosystem—from **medical dispensaries** and **community kitchens (Dasterkhwaan)** to **donation tracking** and **financial auditing**—all under a single unified platform with offline-first reliability and real-time multi-device synchronization.
 
 ---
 
-## 🏗️ Architecture
+## 🏛️ Foundation Operations
 
-The system uses a three-tier hybrid architecture:
+GMWF is not a single-purpose app. It is a **comprehensive welfare management system** covering every operational vertical of the foundation:
 
+### 🏥 Dispensary & Medical Services
+The core medical module manages the full patient lifecycle across multiple branches:
+- **Patient Registration** — CNIC-based records with complete demographics
+- **Token Queue System** — Digital queue management for receptionists
+- **Doctor Consultation** — Patient history, prescriptions, and clinical notes
+- **Dispensary Fulfillment** — Prescription-linked medicine dispensing with real-time inventory tracking
+- **Medicine Inventory** — Stock management with approval workflows for inventory adjustments and edit requests
+
+### 🍲 Dasterkhwaan (Community Kitchen)
+A dedicated module for the foundation's free food service:
+- **Food Token Issuance** — Daily meal token generation and tracking by office boys
+- **Kitchen Management** — Full cooking session logging, with ingredient deduction from stock
+- **Pantry Inventory** — 60+ default stock items (vegetables, grains, spices, dairy, meat) with add/adjust/carry-forward
+- **Carry-Over Logic** — Leftover food from previous days is automatically carried to the next day's stock
+- **Daily History** — Per-date audit trail of tokens issued, meals cooked, and food served
+
+### 💰 Donations & Financial Accountability
+A multi-layered donation recording and auditing system with a full credit chain:
+- **Multi-Category Recording** — Donations split into **Jamia/Masjid** and **GMWF** funds, with GMWF further broken into Dasterkhwaan, Dispensary, Madrisa, and General sub-categories
+- **Cash & Goods Support** — Record monetary donations (Cash, Cheque, Bank Deposit) or in-kind goods contributions (with estimated valuation)
+- **Donation Subtypes** — Construction, Maintenance, Iftar, Zakat, Sadqa Wajiba, Sadqa/Atyaat, General
+- **Credit Ledger & Chain of Custody** — Office Boy → Manager → Chairman approval flow with full audit trail
+- **PDF Receipt Generation** — Professionally branded A5 donation receipts with QR codes
+- **WhatsApp Integration** — One-tap thank-you message and receipt sharing via WhatsApp
+- **Excel Export** — Chairman-level ledger export for external auditing
+
+### 📊 Executive Dashboards
+Role-specific dashboards for organizational leadership:
+- **Chairman Portal** — Global overview of all branches with KPI cards (revenue, patients, food tokens served, donations), branch performance tables, and donation auditing
+- **CEO Dashboard** — Aggregate operational metrics and branch comparison
+- **HQ Manager View** — Multi-branch oversight with cross-branch credit ledger monitoring
+- **Branch Manager View** — Localized branch performance with patient cards and operational metrics
+
+---
+
+## ⚡ Technical Architecture
+
+### Offline-First Hybrid Sync
+
+The system uses a three-tier hybrid architecture engineered for zero-downtime clinic operations:
+
+```text
+  [ Local Hive Storage ] ◄─────► [ LAN WebSocket Sync ] ◄─────► [ Firebase Firestore ]
+    (Primary Persistence)           (Local Real-time Hub)           (Cloud Global State)
 ```
-Local Hive Storage  ←→  LAN WebSocket Sync  ←→  Firebase Firestore
-(always available)      (dedicated server)        (cloud truth)
-```
 
-A **dedicated always-on server device** runs the LAN hub. All staff devices — receptionist, doctor, and dispenser — connect to it as clients. Every write goes to local Hive first — Firestore uploads are always async and queued.
+- **Every write hits Hive first** — the app is fully usable without internet
+- **LAN WebSocket sync** keeps all clinic devices in lockstep over the local network
+- **Firestore uploads are async and queued** — cloud is the source of truth but never blocks the UI
+
+### 📡 LAN Network Topology
+
+A dedicated always-on device runs the **LAN Hub**, decoupling server logic from any staff workstation:
 
 ```
                     ┌─────────────────────┐
                     │   Dedicated Server  │
                     │  (always-on device) │
-                    │  lan_server.dart    │
-                    │  server_sync_mgr    │
+                    │  WebSocket :53281   │
                     └──────────┬──────────┘
-                               │ WebSocket (port 53281)
+                               │
           ┌────────────────────┼────────────────────┐
           │                    │                    │
-          ▼                    ▼                    ▼
-   Receptionist            Doctor              Dispenser
-   (client only)          (client)             (client)
-   realtime_manager    realtime_manager     realtime_manager
-   firestore_service   firestore_service    firestore_service
+     Receptionist           Doctor             Dispenser
+      (client)             (client)            (client)
 ```
+
+**Discovery methods** (first to succeed wins):
+| Method | Speed |
+|:--|:--|
+| mDNS (`_gmwftoken._tcp`) | ~1–2s |
+| UDP Broadcast | ~2–3s |
+| Subnet Scan (batches of 25) | Fallback |
+
+### 🔄 Smart Reconnection
+When a device reconnects, the server sends only **missed data** to that specific socket — no full re-sync, no broadcast storm.
 
 ---
 
-## 📁 Project Structure
+## 👥 Organizational Roles
+
+| Role | Responsibility | Data Scope |
+|:--|:--|:--|
+| **Chairman** | Executive oversight, donation auditing, Excel exports | Global Firestore — all branches |
+| **CEO** | Operational metrics, branch performance comparison | Global Firestore — all branches |
+| **HQ Manager** | Multi-branch management, credit ledger oversight | Cross-branch Firestore views |
+| **Branch Manager** | Localized operations, credit approval, staff management | Single branch — LAN + Firestore |
+| **Supervisor** | Inventory approval, edit request management | Branch-level oversight |
+| **Doctor** | Patient consultation, prescriptions, clinical notes | Active tokens + patient history |
+| **Receptionist** | Patient registration, token issuance, queue management | Token queue + patient records |
+| **Dispenser** | Medicine fulfillment, stock tracking | Prescription queue + inventory |
+| **Office Boy** | Food token issuance, donation collection, credit handoffs | Dasterkhwaan + Donations |
+| **Kitchen Staff** | Cooking sessions, food logging, pantry management | Dasterkhwaan kitchen operations |
+| **Server** | Dedicated LAN hub orchestration | WebSocket server + bridge sync |
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|:--|:--|
+| **Framework** | Flutter (Dart) |
+| **Local Storage** | Hive (NoSQL, high-performance) |
+| **Cloud Backend** | Firebase (Auth, Firestore, Storage) |
+| **Real-time Sync** | WebSockets (raw TCP), mDNS, UDP |
+| **State Management** | Provider, RxDart |
+| **PDF Generation** | `pdf` + `printing` packages |
+| **Design System** | Custom DS with role-based theming |
+| **Charts** | FL Chart |
+| **Typography** | Google Fonts + Noori Nastaliq (Urdu) |
+
+---
+
+## 📁 Key Module Structure
 
 ```
 lib/
+├── Pages/
+│   ├── dispensary/
+│   │   ├── receptionist/     # Patient registration + token queue
+│   │   ├── doctor/           # Consultation + prescriptions
+│   │   └── dispensar/        # Medicine dispensing + inventory
+│   ├── dasterkhwaan/
+│   │   ├── kitchen.dart      # Cooking sessions + pantry management
+│   │   ├── office_boy.dart   # Token issuance + donation recording
+│   │   └── stock.dart        # Food stock management
+│   ├── donations/
+│   │   ├── donations_screen.dart    # Main donations UI
+│   │   ├── donations_form.dart      # Multi-category donation form
+│   │   ├── donations_dashboard.dart # Analytics + charts
+│   │   ├── credit_ledger.dart       # Chain-of-custody ledger
+│   │   └── donations_shared.dart    # Design system + PDF + messaging
+│   ├── chairman_screen.dart         # Executive portal
+│   ├── ceo_screen.dart              # CEO dashboard
+│   ├── manager_screen.dart          # HQ Manager view
+│   ├── branch_manager_screen.dart   # Branch-level management
+│   └── admin_screen.dart            # System administration
 ├── services/
 │   ├── firestore_service.dart       # Primary write gateway (Hive + LAN + Firestore)
 │   ├── sync_service.dart            # Client-side Firestore uploader
-│   ├── auth_service.dart            # Firebase Auth + role-based LAN setup
-│   └── offline_auth_service.dart    # Offline credential cache
-│
-├── lan/
-│   ├── lan_host_manager.dart        # Dedicated server lifecycle orchestrator
-│   ├── lan_server.dart              # Raw WebSocket server (port 53281)
-│   ├── lan_discovery.dart           # mDNS / UDP / subnet scan discovery
-│   ├── server_sync_manager.dart     # Server-side data hub & Firestore bridge
-│   ├── realtime_manager.dart        # Client WebSocket connection manager
-│   ├── realtime_router.dart         # Incoming LAN message handler
-│   └── connection_manager.dart      # Connection state machine for UI
-│
-└── utils/
-    └── network_utils.dart           # Cross-platform LAN IP detection
+│   ├── local_storage_service.dart   # Hive box management
+│   └── auth_service.dart            # Firebase Auth + role-based routing
+├── realtime/                        # LAN server, discovery, WebSocket management
+├── models/                          # Patient, Token, Prescription, Inventory, Donation
+├── theme/                           # Role-based theming + design tokens
+└── widgets/                         # Shared UI components + dashboards
 ```
-
----
-
-## 🔄 Data Flow
-
-### Creating a Token (any client device)
-```
-Staff taps 'Create Token'  (receptionist, doctor, or dispenser)
-        │
-        ▼
-firestore_service.dart
-   ├── 1. Save to Hive entriesBox         (immediate, offline-safe)
-   ├── 2. Enqueue in syncBox              (queued for Firestore upload)
-   ├── 3. Broadcast via RealtimeManager   (LAN WebSocket → dedicated server)
-   └── 4. Trigger SyncService upload
-        │
-        ▼
-lan_server.dart  (dedicated server device)
-   ├── Routes message to all other branch clients
-   └── ServerSyncManager intercepts
-        ├── Saves to server's Hive         (immediate)
-        └── Enqueues in server_sync_queue  (for Firestore)
-        │
-   ┌────┴─────────────────────────────────┐
-   ▼                                      ▼
-Other client devices               Firestore upload
-realtime_router.dart               server_sync_manager.dart
-   └── Saves to Hive                  └── Uploads when online
-                                               │
-                                               ▼
-                                     Firebase Firestore
-```
-
-### Device Reconnect / Catch-up
-```
-Any client device reconnects to LAN
-        │
-        ▼
-connection_manager.dart → RealtimeManager.reconnect()
-        │
-        ▼
-Dedicated server receives identify message
-server_sync_manager.dart
-   └── sendToSocket(socketId, missedData)   ← targeted, NOT broadcast
-        │
-        ▼
-realtime_router.dart on reconnected device
-   └── Deduplicates by _messageId, saves to Hive
-```
-
-### Login / Role Setup
-```
-User enters credentials
-        │
-        ▼
-offline_auth_service.dart
-   └── Checks local cache → returns user offline if valid
-        │  (falls through to Firebase if not cached)
-        ▼
-auth_service.dart → FirebaseAuth.signIn()
-        │
-        ├── role == server (dedicated device)
-        │       └── lan_host_manager.dart.start()
-        │               ├── network_utils → detect IP
-        │               ├── lan_server → start WebSocket server
-        │               └── server_sync_manager → start
-        │
-        └── role == receptionist / doctor / dispenser
-                └── realtime_manager.connect(savedIP)
-                        └── connection_manager watches state
-```
-
----
-
-## 🗄️ Local Storage (Hive Boxes)
-
-| Box | Written by | Read by | Purpose |
-|-----|-----------|---------|---------|
-| `entriesBox` | FirestoreService, RealtimeRouter, SSM | FirestoreService, SyncService | Tokens / queue entries |
-| `patientsBox` | FirestoreService, RealtimeRouter | FirestoreService | Patient records |
-| `prescriptionsBox` | FirestoreService, RealtimeRouter | ServerSyncManager | Prescriptions |
-| `syncBox` | FirestoreService | SyncService | Client upload queue |
-| `server_sync_queue` | ServerSyncManager | ServerSyncManager | Server upload queue |
-| `app_settings` | AuthService, ConnectionManager | ConnectionManager, SyncService | Saved IP, feature flags |
-| `local_edit_requests` | ServerSyncManager | ServerSyncManager | Approved edit requests |
-
----
-
-## 🔐 Firebase Firestore Paths
-
-```
-/branches/{branchId}/patients/{patientId}
-/branches/{branchId}/serials/{ddMMyy}/{queueType}/{serial}
-/branches/{branchId}/prescriptions/{cnic}/prescriptions/{serial}
-/branches/{branchId}/dispensary_records/{date-serial}
-```
-
----
-
-## 🌐 LAN Discovery
-
-Client devices find the dedicated server using three parallel methods — first to succeed wins:
-
-| Method | Typical Speed |
-|--------|--------------|
-| mDNS (`_gmwftoken._tcp`) | ~1–2 seconds |
-| UDP Broadcast | ~2–3 seconds |
-| Subnet Scan (batches of 25) | Fallback |
-
----
-
-## 👥 User Roles
-
-| Role | Device Type | LAN Behaviour |
-|------|------------|--------------|
-| `server` | Dedicated always-on device | Runs LAN hub — ServerSyncManager + LanServer |
-| `receptionist` | Staff tablet/PC | Client only — connects to dedicated server |
-| `doctor` | Staff tablet/PC | Client — connects to dedicated server |
-| `dispenser` | Staff tablet/PC | Client — connects to dedicated server |
-| `admin / ceo / chairman` | Any | No LAN setup — Firestore only |
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-
-- Flutter SDK `>=3.0.0`
-- Dart SDK `>=3.0.0`
-- Firebase project with Firestore and Authentication enabled
-- A dedicated always-on device to run the LAN server
-- All clinic devices must be on the **same local network**
+- Flutter SDK `>=3.10.1`
+- Firebase project with Firestore, Auth, and Storage enabled
+- Dedicated always-on device for LAN Server
+- All clinic devices on the **same local network**
 
 ### Installation
-
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/gmwf.git
-cd gmwf
+git clone https://github.com/gmwf-dev/gmwf.git
 
 # Install dependencies
 flutter pub get
 
-# Configure Firebase
-# Add your google-services.json (Android) and GoogleService-Info.plist (iOS)
-# to the respective platform folders
+# Run code generation (Hive adapters)
+flutter pub run build_runner build --delete-conflicting-outputs
 
-# Run the app
-flutter run
+# Launch the application
+flutter run -d <device_id>
 ```
 
-### Setup Order
-
-1. Start the **dedicated server device** first — it begins advertising on the LAN immediately.
-2. All **staff devices** (receptionist, doctor, dispenser) log in — they auto-discover the server.
-3. The server IP is saved locally after first connection for faster reconnects.
+### Deployment Order
+1. **Start the LAN Server device first** — it begins advertising on the network immediately
+2. **Clinical staff devices** (Receptionist, Doctor, Dispenser) log in and auto-discover the server
+3. **Executive users** (Chairman, CEO, Managers) connect directly via Firestore — no LAN needed
 
 ---
 
 ## 🔧 Key Design Decisions
 
-**Dedicated always-on server** — The server runs on its own device, independent of any staff member. This eliminates the instability that came from tying the LAN hub to the receptionist's device (e.g. device sleep, logout, crash).
-
-**All staff are equal clients** — Receptionist, doctor, and dispenser all connect to the dedicated server the same way. No device has special LAN authority except the server.
-
-**Double-queue system** — Clients use `syncBox` (via `SyncService`), the server uses `server_sync_queue` (via `ServerSyncManager`). Both upload to the same Firestore paths independently.
-
-**No runtime Firestore reads** — After the initial download, all reads come from Hive. Firestore is write-destination and initial-sync-source only. This keeps the app fast and fully offline-capable.
-
-**Targeted catch-up** — When a device reconnects, `ServerSyncManager` sends missed data only to that device's socket. Not a broadcast.
-
-**Echo prevention** — `RealtimeManager` ignores incoming messages that carry its own `_clientId` to avoid processing its own broadcasts.
-
----
-
-## 📦 Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `hive` / `hive_flutter` | Local offline storage |
-| `firebase_core` / `cloud_firestore` | Cloud sync and backup |
-| `firebase_auth` | Authentication |
-| `web_socket_channel` | LAN WebSocket communication |
-| `bonsoir` | mDNS server discovery |
-| `flutter_secure_storage` | Encrypted offline credential cache |
-| `connectivity_plus` | Network state detection |
+- **Dedicated always-on server** — The LAN hub runs on its own device, independent of any staff member, eliminating instability from device sleep/logout/crash
+- **Double-queue uploads** — Clients use `syncBox`, the server uses `server_sync_queue`; both upload to the same Firestore paths independently
+- **No runtime Firestore reads** — After initial download, all reads come from Hive; Firestore is write-destination and initial-sync-source only
+- **Targeted catch-up** — Reconnecting devices receive only missed data on their specific socket
+- **Echo prevention** — `RealtimeManager` ignores messages carrying its own `_clientId`
+- **Role-based theming** — Every role gets a distinct visual identity (colors, gradients, card styles) via the `RoleThemeScope` provider
 
 ---
 
 ## 📄 License
 
- © 2026 Gulzar Madina Welfare Foundation. All rights reserved.
+© 2026 **Gulzar Madina Welfare Foundation (GMWF)**. All rights reserved.
+
+This software is the exclusive property of GMWF. Unauthorized copying, distribution, or modification is strictly prohibited. See the [LICENSE](LICENSE) file for details.
 
 ---
 
-*Built for reliable clinic operations — works offline, syncs when online.*
+<p align="center">
+  <i>Built for the Gulzar Madina Welfare Foundation — Empowering welfare through technology.</i>
+</p>

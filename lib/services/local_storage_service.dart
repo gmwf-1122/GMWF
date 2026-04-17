@@ -1,10 +1,39 @@
 // lib/services/local_storage_service.dart
 //
 // CHANGES IN THIS VERSION:
-//   FIX: searchPatientsByCnicOrGuardian() now also matches by patient name
-//        (minimum 3 chars). This catches cases where the CNIC/phone search
-//        fails because the patient's own CNIC was not stored (child patients
-//        registered only with a guardian CNIC).
+//   FIX 1: searchPatientsByCnicOrGuardian() now also matches by patient name
+//           (minimum 3 chars). This catches cases where the CNIC/phone search
+//           fails because the patient's own CNIC was not stored (child patients
+//           registered only with a guardian CNIC).
+//   FIX 2: saveLocalPatient() now calls flush() after put() so the write is
+//           durably committed before ValueListenableBuilder rebuilds the UI.
+//   FIX 3: saveAllLocalPatients() also calls flush() after putAll() for the
+//           same reason — bulk downloads now immediately reflect in the UI.
+//   FIX 4: downloadTodayTokens() now CLEARS today's Hive entries for the
+//           branch before re-downloading from Firestore. This is the critical
+//           fix for reversed tokens that were deleted from Firestore still
+//           showing in the UI — the old version only added/updated entries and
+//           never removed ones that no longer exist in Firestore.
+//
+// ─── BUG FIX (sync revert) ────────────────────────────────────────────────
+//   FIX-SYNC-3: downloadTodayTokens() Step 4 merge logic now protects ALL
+//               terminal local states, not just status == 'completed'.
+//
+// ─── NEW ──────────────────────────────────────────────────────────────────
+//   saveLocalInventoryItem(): Saves a single inventory item (keyed by
+//     medicineId) to the stock box.
+//
+// ─── MEDICINE RESTRICTION FIRESTORE FIX ──────────────────────────────────
+//   saveMedicineRestriction() now enqueues a 'save_medicine_restriction'
+//   sync op so the restriction is written to Firestore and available to
+//   internet-only terminals (not just LAN-connected ones).
+//
+//   downloadMedicineRestrictions() — new method that pulls active
+//   restrictions from Firestore into local Hive. Called on startup,
+//   after every upload cycle, and by the receptionist before the block
+//   check so internet-only devices always have current data.
+//
+//   fullDownloadOnce() now includes downloadMedicineRestrictions().
 
 import 'dart:convert';
 import 'dart:io';
@@ -24,47 +53,74 @@ class LocalStorageService {
   static const String stockBox         = 'local_stock_items';
   static const String branchesBox      = 'local_branches';
   static const String dispensaryBox    = 'local_dispensary';
+  static const String medicineRestrictionsBox = 'local_medicine_restrictions';
   static const String donationsBox     = 'local_donations';
   static const String creditsBox       = 'local_credit_ledger';
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
-  static Future<void> init() async {
-    debugPrint('[LocalStorageService.init] Opening all Hive boxes...');
-    await Future.wait([
-      Hive.openBox(usersBox),
-      Hive.openBox(patientsBox),
-      Hive.openBox(entriesBox),
-      Hive.openBox(syncBox),
-      Hive.openBox(prescriptionsBox),
-      Hive.openBox(stockBox),
-      Hive.openBox(branchesBox),
-      Hive.openBox(dispensaryBox),
-      Hive.openBox(donationsBox),
-      Hive.openBox(creditsBox),
-      Hive.openBox('app_settings'),
-      Hive.openBox('app_flags'),
-    ]);
-    debugPrint('[LocalStorageService.init] All Hive boxes opened.');
+  /// Safely opens a Hive box, deleting it from disk and recreating it if
+  /// an "unknown typeId" error occurs (legacy/corrupted data).
+  static Future<Box<T>> openBoxSafe<T>(String name) async {
+    try {
+      return await Hive.openBox<T>(name);
+    } catch (e) {
+      debugPrint('[LocalStorageService] openBoxSafe error for "$name": $e');
+      final err = e.toString();
+      // If we see "unknown typeId" or "register an adapter", the box contains 
+      // data we can no longer read. We must reset it to allow app startup.
+      if (err.contains('typeId') || err.contains('adapter') || err.contains('Adapter')) {
+        debugPrint('[LocalStorageService] Resetting corrupted box "$name"...');
+        await Hive.deleteBoxFromDisk(name);
+        return await Hive.openBox<T>(name);
+      }
+      rethrow;
+    }
   }
 
-  static Future<void> clearAllData() async {
-    await Future.wait([
-      Hive.box(usersBox).clear(),
-      Hive.box(patientsBox).clear(),
-      Hive.box(entriesBox).clear(),
-      Hive.box(syncBox).clear(),
-      Hive.box(prescriptionsBox).clear(),
-      Hive.box(stockBox).clear(),
-      Hive.box(branchesBox).clear(),
-      Hive.box(dispensaryBox).clear(),
-      Hive.box(donationsBox).clear(),
-      Hive.box(creditsBox).clear(),
-      Hive.box('app_settings').clear(),
-      Hive.box('app_flags').clear(),
-    ]);
-    debugPrint('[LocalStorageService] All local data cleared.');
+  static Future<void> init() async {
+    debugPrint('[LocalStorageService.init] Opening all Hive boxes...');
+    final boxNames = [
+      usersBox,
+      patientsBox,
+      entriesBox,
+      syncBox,
+      prescriptionsBox,
+      stockBox,
+      branchesBox,
+      dispensaryBox,
+      donationsBox,
+      creditsBox,
+      medicineRestrictionsBox,
+      'app_settings',
+      'app_flags',
+    ];
+
+    for (final name in boxNames) {
+      await openBoxSafe(name);
+    }
+    debugPrint('[LocalStorageService.init] All Hive boxes opened safely.');
   }
+
+
+  static Future<void> clearAllData() async {
+    final boxNames = [
+      usersBox, patientsBox, entriesBox, syncBox, prescriptionsBox,
+      stockBox, branchesBox, dispensaryBox, donationsBox, creditsBox,
+      medicineRestrictionsBox, 'app_settings', 'app_flags',
+      'local_submissions', 'server_sync_queue', 'local_edit_requests',
+      'server_sync_failed'
+    ];
+
+    for (final name in boxNames) {
+      if (Hive.isBoxOpen(name)) {
+        await Hive.box(name).close();
+      }
+      await Hive.deleteBoxFromDisk(name);
+    }
+    debugPrint('[LocalStorage] All local data wiped from disk.');
+  }
+
 
   // ════════════════════════════════════════════════════════════════════════════
   // UTILITIES
@@ -546,6 +602,7 @@ class LocalStorageService {
     await downloadTodayTokens(branchId);
     await downloadDonations(branchId);
     await downloadCredits(branchId);
+    await downloadMedicineRestrictions(branchId); // ← ADDED: Firestore restriction sync
     debugPrint('[LS] fullDownloadOnce completed for branch: $branchId');
   }
 
@@ -684,7 +741,9 @@ class LocalStorageService {
     var sanitized      = sanitize(patient);
     final key          = getPatientKey(sanitized);
     sanitized['patientId'] = key;
-    await Hive.box(patientsBox).put(key, sanitized);
+    final box = Hive.box(patientsBox);
+    await box.put(key, sanitized);
+    await box.flush();
   }
 
   static Future<void> saveAllLocalPatients(
@@ -702,6 +761,7 @@ class LocalStorageService {
       }
     }
     await box.putAll(updates);
+    await box.flush();
   }
 
   static Map<String, dynamic>? getLocalPatientByCnic(String cnic) {
@@ -732,15 +792,16 @@ class LocalStorageService {
     return patients;
   }
 
-  // FIX: now also searches by patient name (min 3 chars) so child patients
-  // registered only with a guardian CNIC can still be found by name.
   static List<Map<String, dynamic>> searchPatientsByCnicOrGuardian(
       String input, {String? branchId}) {
     final normalized      = input.replaceAll('-', '').trim().toLowerCase();
     final normalizedPhone = normalized.replaceAll(RegExp(r'\D'), '');
     final normalizedName  = normalized.replaceAll(RegExp(r'[^a-z0-9]'), '');
 
-    return getAllLocalPatients(branchId: branchId).where((p) {
+    final all = getAllLocalPatients(branchId: branchId);
+    final results = <Map<String, dynamic>>[];
+
+    for (final p in all) {
       final cnic     = (p['cnic'] as String?)
               ?.replaceAll('-', '').trim().toLowerCase() ??
           '';
@@ -751,22 +812,25 @@ class LocalStorageService {
           (p['phone'] as String?)?.replaceAll(RegExp(r'\D'), '') ?? '';
       final name     = _normalizeName((p['name'] as String?) ?? '');
 
-      // CNIC / guardian CNIC match
-      if (cnic.isNotEmpty     && cnic.contains(normalized))     return true;
-      if (guardian.isNotEmpty && guardian.contains(normalized)) return true;
-
-      // Phone match (require at least 4 digits to avoid noise)
-      if (normalizedPhone.length >= 4 &&
+      bool match = false;
+      if (cnic.isNotEmpty     && cnic.contains(normalized))     match = true;
+      else if (guardian.isNotEmpty && guardian.contains(normalized)) match = true;
+      else if (normalizedPhone.length >= 4 &&
           phone.isNotEmpty &&
-          phone.contains(normalizedPhone)) return true;
-
-      // Name match (require at least 3 chars to avoid noise)
-      if (normalizedName.length >= 3 &&
+          phone.contains(normalizedPhone)) match = true;
+      else if (normalizedName.length >= 3 &&
           name.isNotEmpty &&
-          name.contains(normalizedName)) return true;
+          name.contains(normalizedName)) match = true;
 
-      return false;
-    }).toList();
+      if (match) {
+        // Ensure patientId is present — critical for medicine restrictions
+        if (p['patientId'] == null) {
+          p['patientId'] = getPatientKey(p);
+        }
+        results.add(p);
+      }
+    }
+    return results;
   }
 
   static Future<void> deleteLocalPatient(String patientId) async {
@@ -822,9 +886,30 @@ class LocalStorageService {
     await box.put(key, updated);
   }
 
-  static Future<void> deleteLocalEntry(
-      String branchId, String serial) async {
-    await Hive.box(entriesBox).delete('$branchId-$serial');
+  static Future<bool> deleteLocalEntry(String branchId, String tokenSerial) async {
+    try {
+      final box = Hive.box(entriesBox);
+      if (!box.isOpen) return false;
+      final keys = box.keys.toList();
+      bool deleted = false;
+      for (final key in keys) {
+        final entry = box.get(key);
+        if (entry == null) continue;
+        final serial = entry['serial'] as String?;
+        final entryBranch = entry['branchId'] as String?;
+        if (serial == tokenSerial && entryBranch == branchId) {
+          await box.delete(key);
+          debugPrint('[LocalStorage] ✅ Deleted $tokenSerial (key: $key)');
+          deleted = true;
+          break;
+        }
+      }
+      await box.flush();
+      return deleted;
+    } catch (e) {
+      debugPrint('[LocalStorage] ❌ deleteLocalEntry error: $e');
+      return false;
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -939,6 +1024,33 @@ class LocalStorageService {
     await Hive.box(stockBox).put('stock:$id', sanitize(stockItem));
   }
 
+  static void saveLocalInventoryItem(Map<String, dynamic> item) {
+    final rawId = (item['id'] ?? item['medicineId'])?.toString()?.trim();
+    if (rawId == null || rawId.isEmpty) return;
+    final normalised = Map<String, dynamic>.from(item);
+    normalised['id']         = rawId;
+    normalised['medicineId'] = rawId;
+    Hive.box(stockBox).put('stock:$rawId', sanitize(normalised));
+  }
+
+  static Map<String, dynamic>? getLocalInventoryItem(String id) {
+    final val = Hive.box(stockBox).get('stock:$id');
+    if (val == null) return null;
+    return Map<String, dynamic>.from(val as Map);
+  }
+
+  static Future<void> updateLocalStockQuantity(String id, double delta) async {
+    final box = Hive.box(stockBox);
+    final key = 'stock:$id';
+    final raw = box.get(key);
+    if (raw == null) return;
+    final item = Map<String, dynamic>.from(raw as Map);
+    final currentQty = (item['quantity'] ?? 0) as num;
+    item['quantity'] = currentQty + delta;
+    item['updatedAt'] = DateTime.now().toIso8601String();
+    await box.put(key, sanitize(item));
+  }
+
   static Future<void> deleteLocalStockItem(String id) async =>
       Hive.box(stockBox).delete('stock:$id');
 
@@ -1021,7 +1133,6 @@ class LocalStorageService {
       }).toList();
       await saveAllLocalPatients(patients);
 
-      // Mark all downloaded patients as synced so backfill doesn't re-upload
       final flagsBox = Hive.box('app_flags');
       for (final doc in snapshot.docs) {
         await flagsBox.put('patient_synced_${doc.id}', true);
@@ -1033,25 +1144,85 @@ class LocalStorageService {
 
   static Future<void> downloadTodayTokens(String branchId) async {
     final today = getTodayDateKey();
+    final box   = Hive.box(entriesBox);
+
     try {
       final serialsRef = FirebaseFirestore.instance
           .collection('branches')
           .doc(branchId)
           .collection('serials')
           .doc(today);
+
       final dateDoc = await serialsRef.get();
-      if (!dateDoc.exists) return;
+      if (!dateDoc.exists) {
+        final todayKeys = box.keys
+            .where((k) {
+              final key = k.toString();
+              if (!key.startsWith('$branchId-')) return false;
+              final parts = key.substring('$branchId-'.length).split('-');
+              return parts.isNotEmpty && parts[0] == today;
+            })
+            .toList();
+        for (final k in todayKeys) await box.delete(k);
+        await box.flush();
+        return;
+      }
+
+      final Map<String, Map<String, dynamic>> freshEntries = {};
       for (final type in ['zakat', 'non-zakat', 'gmwf']) {
         final snap = await serialsRef.collection(type).get();
         for (final doc in snap.docs) {
-          final d = doc.data();
+          final d = Map<String, dynamic>.from(doc.data());
           d['serial']    = doc.id;
           d['dateKey']   = today;
           d['branchId']  = branchId;
           d['queueType'] = type;
-          await saveEntryLocal(branchId, doc.id, d);
+          freshEntries['$branchId-${doc.id}'] = d;
         }
       }
+
+      final todayHiveKeys = box.keys
+          .where((k) {
+            final key = k.toString();
+            if (!key.startsWith('$branchId-')) return false;
+            final suffix = key.substring('$branchId-'.length);
+            final parts  = suffix.split('-');
+            return parts.length >= 2 && parts[0] == today;
+          })
+          .toList();
+
+      for (final k in todayHiveKeys) {
+        if (!freshEntries.containsKey(k.toString())) await box.delete(k);
+      }
+
+      const terminalStatuses = ['completed', 'dispensed'];
+      for (final entry in freshEntries.entries) {
+        final hiveKey  = entry.key;
+        final fresh    = entry.value;
+        final existing = box.get(hiveKey);
+        Map<String, dynamic> merged = sanitize(fresh);
+        if (existing is Map) {
+          final ex = Map<String, dynamic>.from(existing);
+          final localStatus  = ex['status']?.toString() ?? '';
+          final mergedStatus = merged['status']?.toString() ?? '';
+          if (terminalStatuses.contains(localStatus) &&
+              !terminalStatuses.contains(mergedStatus)) merged['status'] = localStatus;
+          if (ex['dispenseStatus']?.toString() == 'dispensed') {
+            merged['dispenseStatus'] = 'dispensed';
+            if (ex['dispensedAt'] != null) merged['dispensedAt'] = ex['dispensedAt'];
+            if (ex['dispensedBy'] != null) merged['dispensedBy'] = ex['dispensedBy'];
+          }
+          if (ex['prescription'] != null && merged['prescription'] == null) {
+            merged['prescription']   = ex['prescription'];
+            merged['prescriptionId'] = ex['prescriptionId'];
+          }
+          for (final field in ['dispenserName', 'completedAt']) {
+            if (ex[field] != null && merged[field] == null) merged[field] = ex[field];
+          }
+        }
+        await box.put(hiveKey, merged);
+      }
+      await box.flush();
     } catch (e) {
       debugPrint('[LocalStorage] downloadTodayTokens error: $e');
     }
@@ -1104,5 +1275,185 @@ class LocalStorageService {
     } catch (e) {
       debugPrint('[LocalStorage] refreshPrescriptions error: $e');
     }
+  }
+
+  // ── Medicine Restrictions (Multi-day tokens) ───────────────────────────────
+
+  static String _cleanId(String id) => id.trim().replaceAll(RegExp(r'[-\s]'), '');
+
+  /// Saves a medicine restriction locally AND enqueues it for Firestore sync.
+  /// This ensures the restriction reaches internet-only terminals (not just
+  /// LAN-connected ones). The Firestore collection is:
+  ///   branches/{branchId}/medicine_restrictions/{cleanPatientId}
+  static Future<void> saveMedicineRestriction({
+    required String branchId,
+    required String patientId,
+    required int daysCovered,
+  }) async {
+    final cleanId = _cleanId(patientId);
+    if (cleanId.isEmpty) return;
+
+    final box  = Hive.box(medicineRestrictionsBox);
+    final key  = '${branchId}_$cleanId';
+    final now  = DateTime.now();
+
+    // Day 1 = today (already issued). Block starts TOMORROW.
+    // lastBlockedDay = issuedDate + (daysCovered - 1)
+    // e.g. 3-day rx on Mon: lastBlockedDay = Wed. Thu is free.
+    final issuedDate     = DateTime(now.year, now.month, now.day);
+    final lastBlockedDay = issuedDate.add(Duration(days: daysCovered - 1));
+
+    final record = <String, dynamic>{
+      'patientId':      cleanId,
+      'branchId':       branchId,
+      'issuedAt':       now.toIso8601String(),
+      'issuedDateOnly': issuedDate.toIso8601String(),
+      'daysCovered':    daysCovered,
+      'lastBlockedDay': lastBlockedDay.toIso8601String(),
+    };
+
+    await box.put(key, record);
+    await box.flush();
+
+    // ── FIRESTORE FIX: enqueue so internet-only terminals get the restriction
+    await enqueueSync({
+      'type':      'save_medicine_restriction',
+      'branchId':  branchId,
+      'patientId': cleanId,
+      'data':      record,
+    });
+
+    debugPrint('[LSS] Restriction saved + enqueued for Firestore sync: $cleanId '
+        'blocked until $lastBlockedDay ($daysCovered-day rx)');
+  }
+
+  /// Downloads active medicine restrictions from Firestore into local Hive.
+  /// Called on startup, after every upload cycle, and by the receptionist
+  /// right before the block check so internet-only devices are always current.
+  static Future<void> downloadMedicineRestrictions(String branchId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(branchId)
+          .collection('medicine_restrictions')
+          .get();
+
+      final box   = Hive.box(medicineRestrictionsBox);
+      final today = DateTime(
+          DateTime.now().year, DateTime.now().month, DateTime.now().day);
+      
+      // ── FIRESTORE FIX: Keep track of IDs downloaded to clear stale ones ──
+      final downloadedIds = <String>{};
+      int loaded = 0;
+
+      for (final doc in snap.docs) {
+        final d              = Map<String, dynamic>.from(doc.data());
+        final lastBlockedStr = d['lastBlockedDay'] as String?;
+
+        // Skip already-expired restrictions — no point storing them
+        if (lastBlockedStr != null) {
+          final lb             = DateTime.parse(lastBlockedStr);
+          final lastBlockedDay = DateTime(lb.year, lb.month, lb.day);
+          if (today.isAfter(lastBlockedDay)) continue;
+        }
+
+        final patientId = doc.id;
+        final hiveKey   = '${branchId}_$patientId';
+        await box.put(hiveKey, d);
+        downloadedIds.add(patientId);
+        loaded++;
+      }
+
+      // Clear local entries for this branch that weren't in the Firestore set
+      // This handles cases where an exception was approved and Firestore was cleared
+      final prefix = '${branchId}_';
+      final localKeysToClear = box.keys
+          .where((k) => k.toString().startsWith(prefix))
+          .map((k) => k.toString().replaceFirst(prefix, ''))
+          .where((id) => !downloadedIds.contains(id))
+          .toList();
+
+      for (final id in localKeysToClear) {
+        final key = '$prefix$id';
+        await box.delete(key);
+        debugPrint('[LSS] Cleared stale restriction (synced delete) for $id');
+      }
+
+      await box.flush();
+      debugPrint('[LSS] Downloaded $loaded active medicine restrictions for $branchId. '
+          'Cleared ${localKeysToClear.length} stale ones.');
+    } catch (e) {
+      debugPrint('[LSS] downloadMedicineRestrictions error: $e');
+    }
+  }
+
+  static Map<String, dynamic>? getMedicineRestriction(String branchId, String patientId) {
+    if (!Hive.isBoxOpen(medicineRestrictionsBox)) return null;
+    final cleanId = _cleanId(patientId);
+    final box = Hive.box(medicineRestrictionsBox);
+    final key = '${branchId}_$cleanId';
+    final data = box.get(key);
+    if (data == null) return null;
+    return Map<String, dynamic>.from(data);
+  }
+
+  static Future<void> clearMedicineRestriction(String branchId, String patientId) async {
+    final cleanId = _cleanId(patientId);
+    final box = Hive.box(medicineRestrictionsBox);
+    final key = '${branchId}_$cleanId';
+    await box.delete(key);
+    await box.flush();
+    debugPrint('[LocalStorage] 🗑️ Medicine restriction cleared for $cleanId');
+  }
+
+  static Map<String, dynamic>? isPatientBlockedByMedicine(
+      String branchId, String patientId) {
+    final restriction = getMedicineRestriction(branchId, patientId);
+    if (restriction == null) return null;
+
+    final today = DateTime(
+      DateTime.now().year, DateTime.now().month, DateTime.now().day);
+
+    // ── NEW field path ──────────────────────────────────────────────
+    final lastBlockedStr =
+        restriction['lastBlockedDay'] as String?;
+
+    if (lastBlockedStr != null) {
+      final lastBlocked = DateTime.parse(lastBlockedStr);
+      final lastBlockedDay =
+          DateTime(lastBlocked.year, lastBlocked.month, lastBlocked.day);
+
+      if (today.isAfter(lastBlockedDay)) {
+        // Restriction expired — auto-clean
+        clearMedicineRestriction(branchId, patientId);
+        return null;
+      }
+      final todayOnly = DateTime(today.year, today.month, today.day);
+      final diff = lastBlockedDay.difference(todayOnly).inDays;
+
+      return {
+        ...restriction,
+        'remainingDays': diff,
+        'isLastDay': diff == 0,
+      };
+    }
+
+    // ── LEGACY fallback: old entries stored 'expiresAt' ────────────
+    final expiresStr = restriction['expiresAt'] as String?;
+    if (expiresStr == null) {
+      clearMedicineRestriction(branchId, patientId);
+      return null;
+    }
+    final expiresAt    = DateTime.parse(expiresStr);
+    final expireDay    =
+        DateTime(expiresAt.year, expiresAt.month, expiresAt.day)
+        .subtract(const Duration(days: 1));
+
+    if (today.isAfter(expireDay)) {
+      clearMedicineRestriction(branchId, patientId);
+      return null;
+    }
+    final remaining = expireDay.difference(today).inDays + 1;
+    return {...restriction, 'remainingDays': remaining};
   }
 }

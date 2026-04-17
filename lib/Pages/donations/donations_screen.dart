@@ -1,9 +1,4 @@
 // lib/pages/donations/donations_screen.dart
-//
-// FIX: Manager can now see all branches just like Chairman
-// Design: warm slate header (dark teal gradient) + teal accent
-// No tab duplication — Credits is a bottom sheet, not a second tab
-// Tab controller is fully isolated via DefaultTabController
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,6 +23,7 @@ class DonDS {
   static const teal         = Color(0xFF0D9488);
   static const tealLight    = Color(0xFF2DD4BF);
   static const tealMuted    = Color(0x1A0D9488);
+  // Keep amber only for currency/financial amounts — NOT for status
   static const amber        = Color(0xFFF59E0B);
   static const amberMuted   = Color(0x1AF59E0B);
   static const onDark       = Color(0xFFFFFFFF);
@@ -54,9 +50,8 @@ extension UserRoleX on UserRole {
   bool get isManager         => this == UserRole.manager;
   bool get isChairman        => this == UserRole.chairman;
   bool get canApprove        => this == UserRole.manager || this == UserRole.chairman;
-  
-  // FIX: Manager can now see all branches
   bool get canSeeAllBranches => this == UserRole.manager || this == UserRole.chairman;
+  bool get hasCreditsTab     => this != UserRole.staff;
 
   Color get roleColor {
     switch (this) {
@@ -69,20 +64,20 @@ extension UserRoleX on UserRole {
 
   static UserRole fromString(String raw) {
     final n = raw.toLowerCase().replaceAll(RegExp(r'[\s_\-\.]+'), '');
-    if (n == 'chairman')                                       return UserRole.chairman;
-    if (n == 'manager')                                        return UserRole.manager;
-    if (n == 'officeboy' || n == 'ob')                         return UserRole.officeBoy;
-    if (n == 'staff')                                          return UserRole.staff;
-    if (n.contains('chairman'))                                return UserRole.chairman;
-    if (n.contains('manager'))                                 return UserRole.manager;
-    if (n.contains('officeboy') || n.contains('office'))       return UserRole.officeBoy;
+    if (n == 'chairman')                                             return UserRole.chairman;
+    if (n == 'manager' || n == 'branchmanager' || n == 'hqmanager') return UserRole.manager;
+    if (n == 'officeboy' || n == 'ob')                              return UserRole.officeBoy;
+    if (n == 'staff')                                               return UserRole.staff;
+    if (n.contains('chairman'))                                     return UserRole.chairman;
+    if (n.contains('manager'))                                      return UserRole.manager;
+    if (n.contains('officeboy') || n.contains('office'))            return UserRole.officeBoy;
     debugPrint('[UserRole] Unknown: "$raw" → staff');
     return UserRole.staff;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DONATIONS SCREEN
+// DONATIONS SCREEN  — persistent tab bar, Credits is a tab (not a pill)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class DonationsScreen extends StatefulWidget {
@@ -134,16 +129,28 @@ class DonationsScreen extends StatefulWidget {
   State<DonationsScreen> createState() => _DonationsScreenState();
 }
 
-class _DonationsScreenState extends State<DonationsScreen> {
+class _DonationsScreenState extends State<DonationsScreen>
+    with SingleTickerProviderStateMixin {
   DonationCategory _selectedCategory = DonationCategory.jamia;
   late String _viewingBranchId;
   late String _viewingBranchName;
+  late TabController _tabController;
+
+  bool get _hasCreditsTab => widget.role.hasCreditsTab;
+  int  get _tabCount      => _hasCreditsTab ? 2 : 1;
 
   @override
   void initState() {
     super.initState();
     _viewingBranchId   = widget.branchId;
     _viewingBranchName = widget.branchName;
+    _tabController     = TabController(length: _tabCount, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   String get _today => DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -176,22 +183,6 @@ class _DonationsScreenState extends State<DonationsScreen> {
   void _switchBranch(String id, String name) =>
       setState(() { _viewingBranchId = id; _viewingBranchName = name; });
 
-  void _openCredits(BuildContext ctx) {
-    showModalBottomSheet(
-      context:            ctx,
-      isScrollControlled: true,
-      backgroundColor:    Colors.transparent,
-      useSafeArea:        true,
-      builder: (_) => _CreditsSheet(
-        branchId:   _viewingBranchId,
-        username:   widget.username,
-        branchName: _viewingBranchName,
-        userId:     widget.userId,
-        role:       widget.role,
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
@@ -211,6 +202,8 @@ class _DonationsScreenState extends State<DonationsScreen> {
     return Scaffold(
       backgroundColor: t.bg,
       body: Column(children: [
+
+        // ── Lean header ──────────────────────────────────────────────────
         _Header(
           branchName:      _viewingBranchName,
           username:        widget.username,
@@ -219,29 +212,72 @@ class _DonationsScreenState extends State<DonationsScreen> {
           branchOptions:   _branchOptions,
           currentBranchId: _viewingBranchId,
           onBranchSwitch:  _switchBranch,
-          onCreditsTap:    () => _openCredits(context),
         ),
-        Expanded(
-          child: DashboardTab(
-            branchId:          _viewingBranchId,
-            username:          widget.username,
-            branchName:        _viewingBranchName,
-            userId:            widget.userId,
-            col:               _col,
-            today:             _today,
-            role:              widget.role,
-            nextReceiptNumber: _nextReceiptNumber,
-            selectedCategory:  _selectedCategory,
-            onCatChanged:      (c) => setState(() => _selectedCategory = c),
+
+        // ── Persistent tab bar ───────────────────────────────────────────
+        if (_hasCreditsTab)
+          _TabBar(
+            controller:    _tabController,
+            branchId:      _viewingBranchId,
+            role:          widget.role,
+            userId:        widget.userId,
           ),
+
+        // ── Tab content ──────────────────────────────────────────────────
+        Expanded(
+          child: _hasCreditsTab
+              ? TabBarView(
+                  controller: _tabController,
+                  physics:    const NeverScrollableScrollPhysics(),
+                  children: [
+                    _donationsTab(),
+                    _creditsTab(),
+                  ],
+                )
+              : _donationsTab(),
         ),
       ]),
     );
   }
+
+  Widget _donationsTab() => DashboardTab(
+    branchId:          _viewingBranchId,
+    username:          widget.username,
+    branchName:        _viewingBranchName,
+    userId:            widget.userId,
+    col:               _col,
+    today:             _today,
+    role:              widget.role,
+    nextReceiptNumber: _nextReceiptNumber,
+    selectedCategory:  _selectedCategory,
+    onCatChanged:      (c) => setState(() => _selectedCategory = c),
+  );
+
+  Widget _creditsTab() {
+    if (widget.role.isChairman) {
+      return ChairmanCreditApprovalSection(
+          branchId: _viewingBranchId,
+          branchName: _viewingBranchName,
+          username: widget.username);
+    }
+    if (widget.role.isManager) {
+      return ManagerCreditsDashboard(
+          branchId: _viewingBranchId,
+          username: widget.username,
+          branchName: _viewingBranchName,
+          userId: widget.userId);
+    }
+    if (widget.role.isOfficeBoy) {
+      return OfficeBoyCreditsView(
+          branchId: _viewingBranchId,
+          userId: widget.userId);
+    }
+    return const SizedBox.shrink();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HEADER
+// HEADER  — compact, 52px, identity left-aligned and minimal
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
@@ -250,13 +286,15 @@ class _Header extends StatelessWidget {
   final bool     canSwitchBranch;
   final List<({String id, String name})> branchOptions;
   final void Function(String, String) onBranchSwitch;
-  final VoidCallback onCreditsTap;
 
   const _Header({
-    required this.branchName,     required this.username,
-    required this.currentBranchId, required this.role,
-    required this.canSwitchBranch, required this.branchOptions,
-    required this.onBranchSwitch,  required this.onCreditsTap,
+    required this.branchName,
+    required this.username,
+    required this.currentBranchId,
+    required this.role,
+    required this.canSwitchBranch,
+    required this.branchOptions,
+    required this.onBranchSwitch,
   });
 
   @override
@@ -274,73 +312,69 @@ class _Header extends StatelessWidget {
         border: Border(bottom: BorderSide(color: DonDS.headerBorder)),
       ),
       child: SizedBox(
-        height: 62,
+        height: 52,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Row(children: [
 
-            // Avatar + name + badge
-            _Avatar(username: username, role: role, roleColor: rc),
-            const SizedBox(width: 10),
-            _UserInfo(username: username, role: role, roleColor: rc),
+            // ── Minimal identity: avatar + username only ─────────────────
+            _Avatar(username: username, roleColor: rc),
+            const SizedBox(width: 8),
+            Text(
+              username.isNotEmpty ? username : '—',
+              style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: DonDS.onDark),
+            ),
+            const SizedBox(width: 6),
+            _RolePill(role: role),
 
-            // Centre branch picker
-            Expanded(
-              child: GestureDetector(
-                onTap: canSwitchBranch ? () => _showBranchSheet(context) : null,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text('GMWF DONATIONS',
-                        style: TextStyle(
-                            fontSize: 7, fontWeight: FontWeight.w700,
-                            color: DonDS.tealLight.withOpacity(0.65),
-                            letterSpacing: 2)),
-                    const SizedBox(height: 3),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                              branchName.isNotEmpty ? branchName : 'All Branches',
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  fontSize: 14.5, fontWeight: FontWeight.w700,
-                                  color: DonDS.onDark)),
-                        ),
-                        if (canSwitchBranch) ...[
-                          const SizedBox(width: 3),
-                          const Icon(Icons.expand_more_rounded,
-                              size: 16, color: DonDS.onDarkSub),
-                        ],
-                      ],
-                    ),
-                  ],
+            const Spacer(),
+
+            // ── Branch picker centred on remaining space ─────────────────
+            GestureDetector(
+              onTap: canSwitchBranch ? () => _showBranchSheet(context) : null,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.domain_rounded,
+                    size: 13, color: DonDS.tealLight.withOpacity(0.75)),
+                const SizedBox(width: 5),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 160),
+                  child: Text(
+                    branchName.isNotEmpty ? branchName : 'All Branches',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        color: DonDS.onDark),
+                  ),
                 ),
-              ),
+                if (canSwitchBranch) ...[
+                  const SizedBox(width: 2),
+                  const Icon(Icons.expand_more_rounded,
+                      size: 15, color: DonDS.onDarkSub),
+                ],
+              ]),
             ),
 
-            // Credits pill button
-            GestureDetector(
-              onTap: onCreditsTap,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 11, vertical: 8),
-                decoration: BoxDecoration(
-                  color:        DonDS.amber.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(10),
-                  border:       Border.all(
-                      color: DonDS.amber.withOpacity(0.38)),
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                  Icon(Icons.account_balance_wallet_rounded,
-                      size: 14, color: DonDS.amber),
-                  SizedBox(width: 5),
-                  Text('Credits',
-                      style: TextStyle(
-                          fontSize: 11.5, fontWeight: FontWeight.w700,
-                          color: DonDS.amber)),
-                ]),
+            const Spacer(),
+
+            // ── App label (right-aligned) ────────────────────────────────
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color:        DonDS.teal.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(6),
+                border:       Border.all(color: DonDS.teal.withOpacity(0.30)),
+              ),
+              child: const Text(
+                'GMWF',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: DonDS.tealLight,
+                    letterSpacing: 1.2),
               ),
             ),
           ]),
@@ -368,63 +402,139 @@ class _Header extends StatelessWidget {
 
 class _Avatar extends StatelessWidget {
   final String username;
-  final UserRole role;
-  final Color roleColor;
-  const _Avatar({required this.username, required this.role,
-      required this.roleColor});
+  final Color  roleColor;
+  const _Avatar({required this.username, required this.roleColor});
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 36, height: 36,
+    width: 30, height: 30,
     decoration: BoxDecoration(
-      gradient: LinearGradient(colors: [
-        roleColor.withOpacity(0.35), roleColor.withOpacity(0.12)],
-        begin: Alignment.topLeft, end: Alignment.bottomRight),
+      color:  roleColor.withOpacity(0.22),
       shape:  BoxShape.circle,
-      border: Border.all(color: roleColor.withOpacity(0.65), width: 1.5),
+      border: Border.all(color: roleColor.withOpacity(0.55), width: 1.5),
     ),
     child: Center(
       child: Text(
         username.isNotEmpty ? username[0].toUpperCase() : '?',
-        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
+        style: TextStyle(
+            fontSize: 13, fontWeight: FontWeight.w800,
             color: roleColor),
       ),
     ),
   );
 }
 
-class _UserInfo extends StatelessWidget {
-  final String   username;
+class _RolePill extends StatelessWidget {
   final UserRole role;
-  final Color    roleColor;
-  const _UserInfo({required this.username, required this.role,
-      required this.roleColor});
+  const _RolePill({required this.role});
 
   @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      if (username.isNotEmpty)
-        Text(username,
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700,
-                color: DonDS.onDark)),
-      const SizedBox(height: 3),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color:        roleColor.withOpacity(0.20),
-          borderRadius: BorderRadius.circular(99),
-          border:       Border.all(color: roleColor.withOpacity(0.45)),
-        ),
-        child: Text(role.displayLabel.toUpperCase(),
-            style: TextStyle(
-                fontSize: 7.5, fontWeight: FontWeight.w800,
-                color: roleColor, letterSpacing: 1)),
-      ),
-    ],
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    decoration: BoxDecoration(
+      color:        role.roleColor.withOpacity(0.15),
+      borderRadius: BorderRadius.circular(99),
+      border:       Border.all(color: role.roleColor.withOpacity(0.35)),
+    ),
+    child: Text(
+      role.displayLabel.toUpperCase(),
+      style: TextStyle(
+          fontSize: 7.5, fontWeight: FontWeight.w800,
+          color: role.roleColor, letterSpacing: 0.8),
+    ),
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PERSISTENT TAB BAR  — Credits tab shows live pending badge count
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _TabBar extends StatelessWidget {
+  final TabController controller;
+  final String        branchId, userId;
+  final UserRole      role;
+
+  const _TabBar({
+    required this.controller,
+    required this.branchId,
+    required this.userId,
+    required this.role,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Container(
+      color:  t.bg,
+      height: 44,
+      child: TabBar(
+        controller:           controller,
+        labelColor:           DonDS.teal,
+        unselectedLabelColor: t.textTertiary,
+        indicatorColor:       DonDS.teal,
+        indicatorWeight:      2,
+        indicatorSize:        TabBarIndicatorSize.tab,
+        labelStyle:    const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+        unselectedLabelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
+        dividerColor: t.bgRule,
+        tabs: [
+          const Tab(text: 'Donations'),
+          Tab(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Text('Credits'),
+              const SizedBox(width: 6),
+              _PendingBadge(branchId: branchId, role: role, userId: userId),
+            ]),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Live badge showing pending credit count — red pill, always visible.
+class _PendingBadge extends StatelessWidget {
+  final String   branchId, userId;
+  final UserRole role;
+  const _PendingBadge({
+    required this.branchId, required this.userId, required this.role,
+  });
+
+  String get _toRole =>
+      role.isChairman ? 'Chairman' : role.isManager ? 'Manager' : '';
+
+  @override
+  Widget build(BuildContext context) {
+    if (_toRole.isEmpty && !role.isOfficeBoy) return const SizedBox.shrink();
+    final stream = role.isOfficeBoy
+        ? LocalStorageService.streamCredits(branchId: branchId, fromUserId: userId)
+        : LocalStorageService.streamCredits(branchId: branchId, toRole: _toRole);
+
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (ctx, snap) {
+        final count = (snap.data ?? [])
+            .where((d) => (d['status'] as String? ?? '') == kStatusPending)
+            .length;
+        if (count == 0) return const SizedBox.shrink();
+        return Container(
+          constraints: const BoxConstraints(minWidth: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+          decoration: BoxDecoration(
+            color:        DS.statusRejected,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(
+            '$count',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontSize: 10, fontWeight: FontWeight.w800,
+                color: Colors.white),
+          ),
+        );
+      },
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -478,27 +588,22 @@ class _BranchPickerSheet extends StatelessWidget {
           return InkWell(
             onTap: () => onSelect(opt.id, opt.name),
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                   color: isSel ? DonDS.tealMuted : null,
-                  border: Border(bottom: BorderSide(
-                      color: t.bgRule, width: 0.5))),
+                  border: Border(bottom: BorderSide(color: t.bgRule, width: 0.5))),
               child: Row(children: [
                 Container(
                   width: 38, height: 38,
                   decoration: BoxDecoration(
-                    color: isSel
-                        ? DonDS.teal.withOpacity(0.15) : t.bgCardAlt,
-                    shape:  BoxShape.circle,
+                    color: isSel ? DonDS.teal.withOpacity(0.15) : t.bgCardAlt,
+                    shape: BoxShape.circle,
                     border: Border.all(
-                        color: isSel
-                            ? DonDS.teal.withOpacity(0.4) : t.bgRule),
+                        color: isSel ? DonDS.teal.withOpacity(0.4) : t.bgRule),
                   ),
                   child: Center(
                     child: Text(
-                      opt.name.isNotEmpty
-                          ? opt.name[0].toUpperCase() : 'B',
+                      opt.name.isNotEmpty ? opt.name[0].toUpperCase() : 'B',
                       style: TextStyle(
                           fontSize: 15, fontWeight: FontWeight.w800,
                           color: isSel ? DonDS.teal : t.textSecondary),
@@ -507,201 +612,19 @@ class _BranchPickerSheet extends StatelessWidget {
                 ),
                 const SizedBox(width: 14),
                 Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text(opt.name,
-                      style: DS.subheading(color: t.textPrimary)),
-                  Text(opt.id,
-                      style: DS.caption(color: t.textTertiary)
-                          .copyWith(fontSize: 10)),
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(opt.name, style: DS.subheading(color: t.textPrimary)),
+                  Text(opt.id, style: DS.caption(color: t.textTertiary)
+                      .copyWith(fontSize: 10)),
                 ])),
-                if (isSel)
-                  const Icon(Icons.check_circle_rounded,
-                      color: DonDS.teal, size: 20),
+                if (isSel) const Icon(Icons.check_circle_rounded,
+                    color: DonDS.teal, size: 20),
               ]),
             ),
           );
         }),
         SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
       ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CREDITS SHEET
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _CreditsSheet extends StatelessWidget {
-  final String   branchId, username, branchName, userId;
-  final UserRole role;
-
-  const _CreditsSheet({
-    required this.branchId,   required this.username,
-    required this.branchName, required this.userId,
-    required this.role,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t      = RoleThemeScope.dataOf(context);
-    final height = MediaQuery.of(context).size.height * 0.88;
-
-    return Container(
-      height: height,
-      decoration: BoxDecoration(
-        color:        t.bgCard,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      child: Column(children: [
-        const SizedBox(height: 12),
-        Container(
-            width: 36, height: 4,
-            decoration: BoxDecoration(
-                color: t.bgRule, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 14),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(9),
-              decoration: BoxDecoration(
-                  color: DonDS.amberMuted,
-                  borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.account_balance_wallet_rounded,
-                  size: 20, color: DonDS.amber),
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-              Text('Credits', style: DS.heading(color: t.textPrimary)),
-              Text(branchName.isNotEmpty ? branchName : 'All Branches',
-                  style: DS.caption(color: t.textTertiary)),
-            ])),
-            IconButton(
-              icon: Icon(Icons.close_rounded,
-                  color: t.textTertiary, size: 20),
-              onPressed: () => Navigator.pop(context),
-            ),
-          ]),
-        ),
-        Divider(height: 1, color: t.bgRule),
-        Expanded(child: _creditsBody(t)),
-      ]),
-    );
-  }
-
-  Widget _creditsBody(RoleThemeData t) {
-    if (role.isChairman) {
-      return ChairmanCreditApprovalSection(
-          branchId: branchId, branchName: branchName, username: username);
-    }
-    if (role.isManager) {
-      return ManagerCreditsDashboard(
-          branchId: branchId, username: username,
-          branchName: branchName, userId: userId);
-    }
-    if (role.isOfficeBoy) {
-      return OfficeBoyCreditsView(branchId: branchId, userId: userId);
-    }
-    return _ReadOnlyCreditsView(branchId: branchId, username: username);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// READ-ONLY CREDITS (staff)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ReadOnlyCreditsView extends StatelessWidget {
-  final String branchId, username;
-  const _ReadOnlyCreditsView(
-      {required this.branchId, required this.username});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: DonationsLocalStorage.streamCreditEntries(branchId: branchId),
-      builder: (context, snap) {
-        if (snap.hasError) {
-          return Center(child: Text('Error loading credits',
-              style: DS.body(color: t.textSecondary)));
-        }
-        final all  = snap.data ?? [];
-        final mine = all.where((d) =>
-            (d['fromUsername'] as String? ?? '').toLowerCase() ==
-            username.toLowerCase()).toList();
-
-        if (mine.isEmpty) {
-          return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Container(
-              padding: const EdgeInsets.all(22),
-              decoration: BoxDecoration(
-                  color: DonDS.amberMuted, shape: BoxShape.circle),
-              child: const Icon(Icons.account_balance_wallet_outlined,
-                  size: 36, color: DonDS.amber),
-            ),
-            const SizedBox(height: 16),
-            Text('No credits yet',
-                style: DS.subheading(color: t.textTertiary)),
-            const SizedBox(height: 4),
-            Text('Credits will appear here once recorded',
-                style: DS.caption(color: t.textTertiary)),
-          ]));
-        }
-
-        return ListView.separated(
-          padding:          const EdgeInsets.all(16),
-          itemCount:        mine.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder:      (context, i) {
-            final d       = mine[i];
-            final amt     = (d['amount'] as num?)?.toDouble() ?? 0.0;
-            final stat    = d['status']     as String? ?? kStatusPending;
-            final catId   = d['categoryId'] as String? ?? '';
-            final catE    = DonationCategory.values
-                    .firstWhereOrNull((c) => c.name == catId) ??
-                DonationCategory.jamia;
-            final dateRaw = d['date'] as String? ?? '';
-            String dl = dateRaw;
-            try {
-              dl = DateFormat('dd MMM yyyy').format(DateTime.parse(dateRaw));
-            } catch (_) {}
-            return Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                  color: t.bgCard, borderRadius: BorderRadius.circular(DS.rMd),
-                  border: Border.all(color: t.bgRule), boxShadow: DS.shadowSm),
-              child: Row(children: [
-                Container(
-                  width: 40, height: 40,
-                  decoration: BoxDecoration(
-                      color: catE.lightColor, shape: BoxShape.circle),
-                  child: Icon(catE.icon, color: catE.color, size: 18),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  Text(catE.label,
-                      style: DS.subheading(color: t.textPrimary)
-                          .copyWith(fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text(dl, style: DS.caption(color: t.textTertiary)
-                      .copyWith(fontSize: 10)),
-                ])),
-                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  Text('PKR ${fmtNum(amt)}',
-                      style: DS.mono(color: catE.color, size: 13)),
-                  const SizedBox(height: 4),
-                  DSStatusBadge(status: stat),
-                ]),
-              ]),
-            );
-          },
-        );
-      },
     );
   }
 }

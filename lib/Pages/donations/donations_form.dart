@@ -15,7 +15,7 @@ import 'donations_screen.dart';
 import 'credit_ledger.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// ADD DONATION FORM
+// ADD DONATION FORM — flat sections, no card-in-card nesting
 // ═════════════════════════════════════════════════════════════════════════════
 
 class AddDonationForm extends StatefulWidget {
@@ -54,8 +54,6 @@ class _AddDonationFormState extends State<AddDonationForm> {
   final _qtyCtrl   = TextEditingController();
   final _probCtrl  = TextEditingController();
 
-  // FocusScope node isolates all focus traversal inside the form —
-  // Tab / next can never escape into the sidebar.
   final _scopeNode  = FocusScopeNode();
   final _nameFocus  = FocusNode();
   final _phoneFocus = FocusNode();
@@ -240,9 +238,9 @@ class _AddDonationFormState extends State<AddDonationForm> {
       _clearForm();
       final creditNote = (!_isGoods && widget.role.isOfficeBoy && amount > 0)
           ? ' · Credit sent' : '';
-      _snack('✅ Receipt $receiptNo saved$creditNote', DonDS.teal);
+      _snack('Receipt $receiptNo saved$creditNote', DonDS.teal);
     } catch (e, st) {
-      debugPrint('[Form] ❌ $e\n$st');
+      debugPrint('[Form] $e\n$st');
       if (!mounted) return;
       setState(() => _saving = false);
       final msg = e.toString();
@@ -254,19 +252,17 @@ class _AddDonationFormState extends State<AddDonationForm> {
   void _snack(String msg, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg,
-          style: const TextStyle(fontWeight: FontWeight.w600)),
+      content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w600)),
       backgroundColor: color,
       behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(16),
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(DS.rMd)),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 80),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rMd)),
       duration: const Duration(seconds: 4),
     ));
   }
 
   // ───────────────────────────────────────────────────────────────────────────
-  // BUILD
+  // BUILD — flat layout, no card-in-card
   // ───────────────────────────────────────────────────────────────────────────
 
   @override
@@ -274,7 +270,6 @@ class _AddDonationFormState extends State<AddDonationForm> {
     final t   = RoleThemeScope.dataOf(context);
     final cat = widget.category;
 
-    // For GMWF cash, use the sub-category colour as accent
     final Color accent = (!_isGoods && cat == DonationCategory.gmwf)
         ? _gmwfSub.color : cat.color;
 
@@ -282,167 +277,95 @@ class _AddDonationFormState extends State<AddDonationForm> {
       node: _scopeNode,
       child: Form(
         key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color:        t.bgCard,
+            borderRadius: BorderRadius.circular(DS.rLg),
+            border:       Border.all(color: t.bgRule),
+            boxShadow:    DS.shadowSm,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
 
-            // ── CARD 1: Category ──────────────────────────────────────────
-            _FCard(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _FL('CATEGORY'),
-                const SizedBox(height: 8),
-                Row(
-                  children: DonationCategory.values.map((c) {
-                    final sel  = c == cat;
-                    final last = c == DonationCategory.values.last;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => widget.onCatChanged(c),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          margin: EdgeInsets.only(right: last ? 0 : 10),
-                          padding: const EdgeInsets.symmetric(vertical: 13),
-                          decoration: BoxDecoration(
-                            color: sel ? c.color : t.bgCardAlt,
-                            borderRadius: BorderRadius.circular(DS.rLg),
-                            border: Border.all(
-                                color: sel ? c.color : t.bgRule),
-                            boxShadow: sel
-                                ? [BoxShadow(
-                                    color: c.color.withOpacity(0.25),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 3))]
-                                : null,
-                          ),
-                          child: Column(children: [
-                            Icon(c.icon, size: 22,
-                                color: sel ? Colors.white : t.textTertiary),
-                            const SizedBox(height: 5),
-                            Text(c.shortLabel,
-                                style: DS.label(
-                                        color: sel
-                                            ? Colors.white
-                                            : t.textTertiary)
-                                    .copyWith(
-                                        fontSize: 11, letterSpacing: 0.4)),
-                          ]),
+              // ── CATEGORY ─────────────────────────────────────────────────
+              _SectionLabel('Category'),
+              const SizedBox(height: 8),
+              Row(
+                children: DonationCategory.values.map((c) {
+                  final sel  = c == cat;
+                  final last = c == DonationCategory.values.last;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => widget.onCatChanged(c),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        margin: EdgeInsets.only(right: last ? 0 : 10),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        decoration: BoxDecoration(
+                          color: sel ? c.color : t.bgCardAlt,
+                          borderRadius: BorderRadius.circular(DS.rLg),
+                          border: Border.all(color: sel ? c.color : t.bgRule),
+                          boxShadow: sel
+                              ? [BoxShadow(color: c.color.withOpacity(0.25),
+                                  blurRadius: 10, offset: const Offset(0, 3))]
+                              : null,
                         ),
+                        child: Column(children: [
+                          Icon(c.icon, size: 22,
+                              color: sel ? Colors.white : t.textTertiary),
+                          const SizedBox(height: 5),
+                          Text(c.shortLabel,
+                              style: DS.label(
+                                      color: sel ? Colors.white : t.textTertiary)
+                                  .copyWith(fontSize: 11, letterSpacing: 0.4)),
+                        ]),
                       ),
-                    );
-                  }).toList(),
-                ),
+                    ),
+                  );
+                }).toList(),
+              ),
 
-                // GMWF sub-programme
-                if (cat == DonationCategory.gmwf) ...[
-                  const SizedBox(height: 14),
-                  _FL('PROGRAMME'),
-                  const SizedBox(height: 8),
-                  GridView.count(
-                    crossAxisCount: 2, shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisSpacing: 8, mainAxisSpacing: 8,
-                    childAspectRatio: 3.2,
-                    children: GmwfSubCategory.values.map((sub) {
-                      final sel = sub == _gmwfSub;
-                      return GestureDetector(
-                        onTap: () => _onGmwfSubChanged(sub),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          decoration: BoxDecoration(
-                            color: sel ? sub.color : t.bgCardAlt,
-                            borderRadius: BorderRadius.circular(DS.rMd),
-                            border: Border.all(
-                                color: sel ? sub.color : t.bgRule),
-                            boxShadow: sel
-                                ? [BoxShadow(
-                                    color: sub.color.withOpacity(0.22),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2))]
-                                : null,
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10),
-                            child: Row(children: [
-                              Icon(sub.icon, size: 14,
-                                  color: sel ? Colors.white : sub.color),
-                              const SizedBox(width: 7),
-                              Expanded(
-                                child: Text(sub.label,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: DS.label(
-                                            color: sel
-                                                ? Colors.white
-                                                : t.textPrimary)
-                                        .copyWith(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w600,
-                                            letterSpacing: 0.1)),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-
-                // Donation type toggle
-                const SizedBox(height: 14),
-                _FL('TYPE'),
+              // GMWF sub-programme
+              if (cat == DonationCategory.gmwf) ...[
+                const SizedBox(height: 16),
+                _SectionLabel('Programme'),
                 const SizedBox(height: 8),
-                Row(
-                  children: DonationEntryType.values.map((et) {
-                    final sel  = et == _entryType;
-                    final last = et == DonationEntryType.values.last;
-                    return Expanded(
-                      child: GestureDetector(
-                        onTap: () => _onEntryTypeChanged(et),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          margin: EdgeInsets.only(right: last ? 0 : 10),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 11),
-                          decoration: BoxDecoration(
-                            color: sel
-                                ? accent.withOpacity(0.07)
-                                : t.bgCardAlt,
-                            borderRadius: BorderRadius.circular(DS.rLg),
-                            border: Border.all(
-                                color: sel ? accent : t.bgRule,
-                                width: sel ? 1.5 : 1),
-                          ),
+                GridView.count(
+                  crossAxisCount: 2, shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 8, mainAxisSpacing: 8,
+                  childAspectRatio: 3.2,
+                  children: GmwfSubCategory.values.map((sub) {
+                    final sel = sub == _gmwfSub;
+                    return GestureDetector(
+                      onTap: () => _onGmwfSubChanged(sub),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        decoration: BoxDecoration(
+                          color: sel ? sub.color : t.bgCardAlt,
+                          borderRadius: BorderRadius.circular(DS.rMd),
+                          border: Border.all(color: sel ? sub.color : t.bgRule),
+                          boxShadow: sel
+                              ? [BoxShadow(color: sub.color.withOpacity(0.22),
+                                  blurRadius: 6, offset: const Offset(0, 2))]
+                              : null,
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           child: Row(children: [
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 150),
-                              width: 16, height: 16,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.white,
-                                border: Border.all(
-                                    color: sel
-                                        ? accent
-                                        : t.textTertiary.withOpacity(0.4),
-                                    width: sel ? 5 : 1.5),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Icon(et.icon, size: 14,
-                                color: sel ? accent : t.textTertiary),
-                            const SizedBox(width: 6),
+                            Icon(sub.icon, size: 14,
+                                color: sel ? Colors.white : sub.color),
+                            const SizedBox(width: 7),
                             Expanded(
-                              child: Text(et.label,
+                              child: Text(sub.label,
                                   overflow: TextOverflow.ellipsis,
-                                  style: DS.body(
-                                          color: sel
-                                              ? accent
-                                              : t.textSecondary)
-                                      .copyWith(
-                                          fontSize: 12.5,
-                                          fontWeight: sel
-                                              ? FontWeight.w700
-                                              : FontWeight.w500)),
+                                  style: DS.label(
+                                          color: sel ? Colors.white : t.textPrimary)
+                                      .copyWith(fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 0.1)),
                             ),
                           ]),
                         ),
@@ -451,237 +374,279 @@ class _AddDonationFormState extends State<AddDonationForm> {
                   }).toList(),
                 ),
               ],
-            )),
-            const SizedBox(height: 10),
 
-            // ── CARD 2: Donor info ────────────────────────────────────────
-            _FCard(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _FL('DONOR'),
+              // ── ENTRY TYPE ───────────────────────────────────────────────
+              const SizedBox(height: 16),
+              _SectionLabel('Type'),
+              const SizedBox(height: 8),
+              Row(
+                children: DonationEntryType.values.map((et) {
+                  final sel  = et == _entryType;
+                  final last = et == DonationEntryType.values.last;
+                  return Expanded(
+                    child: GestureDetector(
+                      onTap: () => _onEntryTypeChanged(et),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        margin: EdgeInsets.only(right: last ? 0 : 10),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: sel ? accent.withOpacity(0.07) : t.bgCardAlt,
+                          borderRadius: BorderRadius.circular(DS.rLg),
+                          border: Border.all(
+                              color: sel ? accent : t.bgRule,
+                              width: sel ? 1.5 : 1),
+                        ),
+                        child: Row(children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: 16, height: 16,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.white,
+                              border: Border.all(
+                                  color: sel ? accent : t.textTertiary.withOpacity(0.4),
+                                  width: sel ? 5 : 1.5),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(et.icon, size: 14,
+                              color: sel ? accent : t.textTertiary),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(et.label,
+                                overflow: TextOverflow.ellipsis,
+                                style: DS.body(
+                                        color: sel ? accent : t.textSecondary)
+                                    .copyWith(fontSize: 12.5,
+                                        fontWeight: sel
+                                            ? FontWeight.w700 : FontWeight.w500)),
+                          ),
+                        ]),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+
+              // ── DIVIDER ───────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Container(height: 1, color: t.bgRule),
+              ),
+
+              // ── DONOR ─────────────────────────────────────────────────────
+              _SectionLabel('Donor'),
+              const SizedBox(height: 8),
+              _FF(
+                controller: _nameCtrl, focusNode: _nameFocus,
+                hint: 'Full name',
+                icon: Icons.person_outline_rounded, accent: accent,
+                keyboardType: TextInputType.name,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => _scopeNode.nextFocus(),
+                validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null,
+              ),
+              const SizedBox(height: 10),
+              _FF(
+                controller: _phoneCtrl, focusNode: _phoneFocus,
+                hint: 'Phone (optional) — 03XX-XXXXXXX',
+                icon: Icons.phone_outlined, accent: accent,
+                keyboardType: TextInputType.phone,
+                textCapitalization: TextCapitalization.none,
+                textInputAction: TextInputAction.next,
+                onSubmitted: (_) => _scopeNode.nextFocus(),
+                formatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(11),
+                ],
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) return null;
+                  if (v.trim().length != 11) return 'Must be 11 digits';
+                  return null;
+                },
+              ),
+
+              // ── GOODS DETAILS (conditional) ───────────────────────────────
+              if (_isGoods) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Container(height: 1, color: t.bgRule),
+                ),
+                _SectionLabel('Goods Details'),
                 const SizedBox(height: 8),
                 _FF(
-                  controller: _nameCtrl, focusNode: _nameFocus,
-                  hint: 'Full name',
-                  icon: Icons.person_outline_rounded, accent: accent,
-                  keyboardType: TextInputType.name,
-                  textCapitalization: TextCapitalization.words,
+                  controller: _itemCtrl, focusNode: _itemFocus,
+                  hint: 'Item — e.g. Rice, Wheat, Cooking Oil',
+                  icon: Icons.inventory_2_outlined, accent: accent,
+                  textCapitalization: TextCapitalization.sentences,
                   textInputAction: TextInputAction.next,
                   onSubmitted: (_) => _scopeNode.nextFocus(),
-                  validator: (v) =>
-                      v?.trim().isEmpty ?? true ? 'Required' : null,
                 ),
                 const SizedBox(height: 10),
+                Row(children: [
+                  Expanded(
+                    child: _FF(
+                      controller: _qtyCtrl, focusNode: _qtyFocus,
+                      hint: 'Quantity',
+                      icon: Icons.scale_outlined, accent: accent,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      textCapitalization: TextCapitalization.none,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => _scopeNode.nextFocus(),
+                      validator: (v) =>
+                          v?.trim().isEmpty ?? true ? 'Required' : null,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  _UnitPicker(
+                      value: _unit, color: accent,
+                      onChanged: (v) => setState(() => _unit = v ?? _unit)),
+                ]),
+                const SizedBox(height: 10),
                 _FF(
-                  controller: _phoneCtrl, focusNode: _phoneFocus,
-                  hint: 'Phone (optional) — 03XX-XXXXXXX',
-                  icon: Icons.phone_outlined, accent: accent,
-                  keyboardType: TextInputType.phone,
+                  controller: _probCtrl, focusNode: _probFocus,
+                  hint: 'Estimated value PKR (optional)',
+                  icon: Icons.payments_outlined, accent: accent,
+                  keyboardType: TextInputType.number,
                   textCapitalization: TextCapitalization.none,
                   textInputAction: TextInputAction.next,
                   onSubmitted: (_) => _scopeNode.nextFocus(),
-                  formatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(11),
-                  ],
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return null;
-                    if (v.trim().length != 11) return 'Must be 11 digits';
-                    return null;
-                  },
+                  formatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
               ],
-            )),
-            const SizedBox(height: 10),
 
-            // ── CARD 3: Goods details (conditional) ───────────────────────
-            if (_isGoods) ...[
-              _FCard(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _FL('GOODS DETAILS'),
+              // ── CASH DETAILS ──────────────────────────────────────────────
+              if (!_isGoods) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Container(height: 1, color: t.bgRule),
+                ),
+                // Sub-type dropdown
+                if (_currentSubtypes.isNotEmpty) ...[
+                  _SectionLabel('Sub-Type'),
                   const SizedBox(height: 8),
-                  _FF(
-                    controller: _itemCtrl, focusNode: _itemFocus,
-                    hint: 'Item — e.g. Rice, Wheat, Cooking Oil',
-                    icon: Icons.inventory_2_outlined, accent: accent,
-                    textCapitalization: TextCapitalization.sentences,
-                    textInputAction: TextInputAction.next,
-                    onSubmitted: (_) => _scopeNode.nextFocus(),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    Expanded(
-                      child: _FF(
-                        controller: _qtyCtrl, focusNode: _qtyFocus,
-                        hint: 'Quantity',
-                        icon: Icons.scale_outlined, accent: accent,
-                        keyboardType: const TextInputType
-                            .numberWithOptions(decimal: true),
-                        textCapitalization: TextCapitalization.none,
-                        textInputAction: TextInputAction.next,
-                        onSubmitted: (_) => _scopeNode.nextFocus(),
-                        validator: (v) =>
-                            v?.trim().isEmpty ?? true ? 'Required' : null,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    _UnitPicker(
-                        value: _unit, color: accent,
-                        onChanged: (v) =>
-                            setState(() => _unit = v ?? _unit)),
-                  ]),
-                  const SizedBox(height: 10),
-                  _FF(
-                    controller: _probCtrl, focusNode: _probFocus,
-                    hint: 'Estimated value PKR (optional)',
-                    icon: Icons.payments_outlined, accent: accent,
-                    keyboardType: TextInputType.number,
-                    textCapitalization: TextCapitalization.none,
-                    textInputAction: TextInputAction.next,
-                    onSubmitted: (_) => _scopeNode.nextFocus(),
-                    formatters: [FilteringTextInputFormatter.digitsOnly],
-                  ),
-                ],
-              )),
-              const SizedBox(height: 10),
-            ],
-
-            // ── CARD 4: Sub-type + Amount + Payment (cash only) ───────────
-            if (!_isGoods) ...[
-              _FCard(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Sub-type — REPLACED WITH DROPDOWN
-                  if (_currentSubtypes.isNotEmpty) ...[
-                    _FL('SUB-TYPE'),
-                    const SizedBox(height: 8),
-                    _SubtypeDropdown(
-                      subtypes:  _currentSubtypes,
-                      selected:  _selectedSubtype,
-                      accent:    accent,
-                      onChanged: (st) =>
-                          setState(() => _selectedSubtype = st!),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-
-                  // Amount
-                  _FL('AMOUNT (PKR)'),
-                  const SizedBox(height: 8),
-                  _FF(
-                    controller: _amtCtrl, focusNode: _amtFocus,
-                    hint: 'Enter amount',
-                    icon: Icons.payments_rounded, accent: accent,
-                    keyboardType: TextInputType.number,
-                    textCapitalization: TextCapitalization.none,
-                    // done closes keyboard, never escapes scope
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => FocusScope.of(context).unfocus(),
-                    formatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (v) =>
-                        v?.trim().isEmpty ?? true ? 'Required' : null,
+                  _SubtypeDropdown(
+                    subtypes:  _currentSubtypes,
+                    selected:  _selectedSubtype,
+                    accent:    accent,
+                    onChanged: (st) =>
+                        setState(() => _selectedSubtype = st!),
                   ),
                   const SizedBox(height: 14),
-
-                  // Payment method — three equal columns in one row
-                  _FL('PAYMENT METHOD'),
-                  const SizedBox(height: 8),
-                  _PaymentRow(
-                    selected:    _paymentMethod,
-                    onChanged:   (pm) =>
-                        setState(() => _paymentMethod = pm),
-                    accentColor: accent,
-                  ),
                 ],
-              )),
-              const SizedBox(height: 10),
-            ],
-
-            // ── CARD 5: Notes ─────────────────────────────────────────────
-            _FCard(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _FL('NOTES (OPTIONAL)'),
+                // Amount
+                _SectionLabel('Amount (PKR)'),
                 const SizedBox(height: 8),
                 _FF(
-                  controller: _notesCtrl, focusNode: _notesFocus,
-                  hint: 'Any remarks or additional info',
-                  icon: Icons.notes_rounded, accent: accent,
-                  textCapitalization: TextCapitalization.sentences,
+                  controller: _amtCtrl, focusNode: _amtFocus,
+                  hint: 'Enter amount',
+                  icon: Icons.payments_rounded, accent: accent,
+                  keyboardType: TextInputType.number,
+                  textCapitalization: TextCapitalization.none,
                   textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _submit(),
+                  onSubmitted: (_) => FocusScope.of(context).unfocus(),
+                  formatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: (v) =>
+                      v?.trim().isEmpty ?? true ? 'Required' : null,
+                ),
+                const SizedBox(height: 14),
+                // Payment method
+                _SectionLabel('Payment Method'),
+                const SizedBox(height: 8),
+                _PaymentRow(
+                  selected:    _paymentMethod,
+                  onChanged:   (pm) => setState(() => _paymentMethod = pm),
+                  accentColor: accent,
                 ),
               ],
-            )),
-            const SizedBox(height: 16),
 
-            // ── SUBMIT ────────────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accent,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(DS.rLg)),
-                  elevation: 0,
-                  shadowColor: accent.withOpacity(0.4),
-                ),
-                onPressed: _saving ? null : _submit,
-                child: _saving
-                    ? const SizedBox(
-                        width: 22, height: 22,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2.5))
-                    : Row(mainAxisSize: MainAxisSize.min, children: [
-                        const Icon(Icons.add_circle_rounded, size: 18),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.role.isOfficeBoy && !_isGoods
-                              ? 'Save & Send to Manager'
-                              : _isGoods
-                                  ? 'Save Goods Donation'
-                                  : 'Save Donation',
-                          style: const TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.w700),
-                        ),
-                      ]),
+              // ── NOTES ─────────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Container(height: 1, color: t.bgRule),
               ),
-            ),
-            const SizedBox(height: 10),
+              _SectionLabel('Notes (Optional)'),
+              const SizedBox(height: 8),
+              _FF(
+                controller: _notesCtrl, focusNode: _notesFocus,
+                hint: 'Any remarks or additional info',
+                icon: Icons.notes_rounded, accent: accent,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _submit(),
+              ),
 
-            // ── Status row ────────────────────────────────────────────────
-            Row(children: [
-              Icon(
-                  _isOnline
-                      ? Icons.wifi_rounded
-                      : Icons.cloud_off_rounded,
-                  size: 11,
-                  color: _isOnline ? DonDS.teal : DS.gold600),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
+              // ── SUBMIT ────────────────────────────────────────────────────
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(DS.rLg)),
+                    elevation: 0,
+                    shadowColor: accent.withOpacity(0.4),
+                  ),
+                  onPressed: _saving ? null : _submit,
+                  child: _saving
+                      ? const SizedBox(
+                          width: 22, height: 22,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2.5))
+                      : Row(mainAxisSize: MainAxisSize.min, children: [
+                          const Icon(Icons.add_circle_rounded, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.role.isOfficeBoy && !_isGoods
+                                ? 'Save & Send to Manager'
+                                : _isGoods
+                                    ? 'Save Goods Donation'
+                                    : 'Save Donation',
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w700),
+                          ),
+                        ]),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ── Status row ────────────────────────────────────────────────
+              Row(children: [
+                Icon(
                     _isOnline
-                        ? 'Online — syncs automatically'
-                        : 'Offline — saved locally',
-                    style: TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w600,
-                        color: _isOnline ? DonDS.teal : DS.gold600)),
-              ),
-              if (widget.role.isOfficeBoy && !_isGoods) ...[
-                Icon(Icons.arrow_upward_rounded,
-                    size: 10, color: DS.sapphire500),
-                const SizedBox(width: 3),
-                Text('Auto-credit',
-                    style: const TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w600,
-                        color: DS.sapphire700)),
-              ],
-            ]),
-            const SizedBox(height: 4),
-          ],
+                        ? Icons.wifi_rounded
+                        : Icons.cloud_off_rounded,
+                    size: 11,
+                    color: _isOnline ? DonDS.teal : DS.amberAccent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                      _isOnline
+                          ? 'Online — syncs automatically'
+                          : 'Offline — saved locally',
+                      style: TextStyle(
+                          fontSize: 10, fontWeight: FontWeight.w600,
+                          color: _isOnline ? DonDS.teal : DS.amberAccent)),
+                ),
+                if (widget.role.isOfficeBoy && !_isGoods) ...[
+                  Icon(Icons.arrow_upward_rounded,
+                      size: 10, color: DS.sapphire500),
+                  const SizedBox(width: 3),
+                  const Text('Auto-credit',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                          color: DS.sapphire700)),
+                ],
+              ]),
+              const SizedBox(height: 4),
+            ],
+          ),
         ),
       ),
     );
@@ -689,46 +654,27 @@ class _AddDonationFormState extends State<AddDonationForm> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PRIVATE HELPERS
+// SECTION LABEL  — replaces _FL
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Form field label
-class _FL extends StatelessWidget {
+class _SectionLabel extends StatelessWidget {
   final String text;
-  const _FL(this.text);
+  const _SectionLabel(this.text);
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    return Text(text,
-        style: DS.label(color: t.textTertiary)
-            .copyWith(fontSize: 9.5, letterSpacing: 1.1));
-  }
-}
-
-/// Card container
-class _FCard extends StatelessWidget {
-  final Widget child;
-  const _FCard({required this.child});
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color:        t.bgCard,
-        borderRadius: BorderRadius.circular(DS.rLg),
-        border:       Border.all(color: t.bgRule),
-        boxShadow: const [BoxShadow(
-            color: Color(0x07000000),
-            blurRadius: 8, offset: Offset(0, 2))],
-      ),
-      child: child,
+    return Text(
+      text.toUpperCase(),
+      style: DS.label(color: t.textTertiary)
+          .copyWith(fontSize: 10, letterSpacing: 1.1),
     );
   }
 }
 
-/// Form field
+// ─────────────────────────────────────────────────────────────────────────────
+// FORM FIELD
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _FF extends StatelessWidget {
   final TextEditingController      controller;
   final FocusNode?                 focusNode;
@@ -802,18 +748,15 @@ class _FF extends StatelessWidget {
   }
 }
 
-/// Sub-type dropdown — REPLACED CHIPS
 class _SubtypeDropdown extends StatelessWidget {
   final List<DonationSubtype>          subtypes;
   final DonationSubtype                selected;
   final Color                          accent;
   final ValueChanged<DonationSubtype?> onChanged;
-  
+
   const _SubtypeDropdown({
-    required this.subtypes,
-    required this.selected,
-    required this.accent,
-    required this.onChanged,
+    required this.subtypes, required this.selected,
+    required this.accent,   required this.onChanged,
   });
 
   @override
@@ -830,15 +773,17 @@ class _SubtypeDropdown extends StatelessWidget {
         child: DropdownButton<DonationSubtype>(
           value:         selected,
           isExpanded:    true,
-          style:         DS.body(color: t.textPrimary).copyWith(fontWeight: FontWeight.w600),
+          style:         DS.body(color: t.textPrimary)
+              .copyWith(fontWeight: FontWeight.w600),
           dropdownColor: t.bgCard,
-          icon:          Icon(Icons.keyboard_arrow_down_rounded, color: accent),
+          icon: Icon(Icons.keyboard_arrow_down_rounded, color: accent),
           items: subtypes.map((st) => DropdownMenuItem(
             value: st,
             child: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(st.icon, size: 14, color: st.color),
               const SizedBox(width: 10),
-              Text(st.label, style: TextStyle(color: st.color, fontWeight: FontWeight.w600)),
+              Text(st.label, style: TextStyle(
+                  color: st.color, fontWeight: FontWeight.w600)),
             ]),
           )).toList(),
           onChanged: onChanged,
@@ -848,7 +793,6 @@ class _SubtypeDropdown extends StatelessWidget {
   }
 }
 
-/// Payment method — three equal columns
 class _PaymentRow extends StatelessWidget {
   final PaymentMethod               selected;
   final ValueChanged<PaymentMethod> onChanged;
@@ -871,12 +815,9 @@ class _PaymentRow extends StatelessWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               margin: EdgeInsets.only(right: last ? 0 : 8),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 6, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
               decoration: BoxDecoration(
-                color: sel
-                    ? accentColor.withOpacity(0.10)
-                    : t.bgCardAlt,
+                color: sel ? accentColor.withOpacity(0.10) : t.bgCardAlt,
                 borderRadius: BorderRadius.circular(DS.rMd),
                 border: Border.all(
                     color: sel ? accentColor : t.bgRule,
@@ -891,8 +832,7 @@ class _PaymentRow extends StatelessWidget {
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: DS.label(
                             color: sel ? accentColor : t.textTertiary)
-                        .copyWith(
-                            letterSpacing: 0.2, fontSize: 10,
+                        .copyWith(letterSpacing: 0.2, fontSize: 10,
                             fontWeight: sel
                                 ? FontWeight.w700 : FontWeight.w500)),
               ]),
@@ -904,7 +844,6 @@ class _PaymentRow extends StatelessWidget {
   }
 }
 
-/// Unit dropdown
 class _UnitPicker extends StatelessWidget {
   final String value;
   final ValueChanged<String?> onChanged;

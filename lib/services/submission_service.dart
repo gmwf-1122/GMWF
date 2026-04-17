@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
+import '../models/donation_models.dart';
 import 'donations_local_storage.dart';
 import 'local_storage_service.dart';
 
@@ -18,7 +19,7 @@ class SubmitPoolSummary {
   final int    ownCount;
   final int    forwardedCount;
   final double cashTotal;
-  final List<Map<String, dynamic>> donations;
+  final List<DonationRecord> donations;
 
   const SubmitPoolSummary({
     required this.total,
@@ -44,11 +45,10 @@ class SubmissionService {
   static const String _boxName = 'local_submissions';
 
   static Future<void> init() async {
-    if (!Hive.isBoxOpen(_boxName)) {
-      await Hive.openBox(_boxName);
-    }
+    await LocalStorageService.openBoxSafe(_boxName);
     debugPrint('[SubmissionService] ready');
   }
+
 
   static Box get _box => Hive.box(_boxName);
 
@@ -56,19 +56,18 @@ class SubmissionService {
   // READ — pool helpers
   // ══════════════════════════════════════════════════════════════════════════
 
-  static List<Map<String, dynamic>> getUnsubmittedPool({
+  static List<DonationRecord> getUnsubmittedPool({
     required String branchId,
     required String userId,
-    required String role,   // 'Office Boy' | 'Manager'
+    required String role,
   }) {
-    // FIX: DonationsLocalStorage.getDonationsList() — not LocalStorageService
     final all = DonationsLocalStorage.getDonationsList(branchId);
     return all.where((d) {
-      if (d['submitted'] == true) return false;
+      if (d.submitted == true) return false;
       if (role == 'Manager') {
-        return d['collectorId'] == userId || d['forwardedBy'] == userId;
+        return d.collectorId == userId || d.forwardedBy == userId;
       }
-      return d['collectorId'] == userId;
+      return d.collectorId == userId;
     }).toList();
   }
 
@@ -78,11 +77,10 @@ class SubmissionService {
     required String role,
   }) {
     final pool     = getUnsubmittedPool(branchId: branchId, userId: userId, role: role);
-    final ownCount = pool.where((d) => d['forwardedBy'] != userId).length;
-    final fwdCount = pool.where((d) => d['forwardedBy'] == userId).length;
-    final cash     = pool
-        .where((d) => d['amount'] != null)
-        .fold<double>(0.0, (s, d) => s + ((d['amount'] as num?)?.toDouble() ?? 0.0));
+    final ownCount = pool.where((d) => d.forwardedBy != userId).length;
+    final fwdCount = pool.where((d) => d.forwardedBy == userId).length;
+    final cash     = pool.fold<double>(0.0, (s, d) => s + d.amount);
+
     return SubmitPoolSummary(
       total:          pool.length,
       ownCount:       ownCount,
@@ -156,22 +154,19 @@ class SubmissionService {
     required String toUserId,
     required String toUsername,
     required String toRole,
-    required List<Map<String, dynamic>> pool,
+    required List<DonationRecord> pool,
   }) async {
     if (pool.isEmpty) return null;
 
     final id      = 'sub_${DateTime.now().millisecondsSinceEpoch}';
     final donKeys = pool
-        .map((d) => (d['hiveKey'] as String?) ?? (d['id'] as String?) ?? '')
+        .map((d) => d.hiveKey)
         .where((k) => k.isNotEmpty)
         .toList();
 
-    final cashTotal = pool
-        .where((d) => d['amount'] != null)
-        .fold<double>(0.0, (s, d) => s + ((d['amount'] as num?)?.toDouble() ?? 0.0));
-
-    final fwdDons = pool.where((d) => d['forwardedBy'] == fromUserId).toList();
-    final ownDons = pool.where((d) => d['forwardedBy'] != fromUserId).toList();
+    final cashTotal  = pool.fold<double>(0.0, (s, d) => s + d.amount);
+    final fwdDons    = pool.where((d) => d.forwardedBy == fromUserId).toList();
+    final ownDons    = pool.where((d) => d.forwardedBy != fromUserId).toList();
 
     final submission = <String, dynamic>{
       'id':                id,
@@ -201,8 +196,6 @@ class SubmissionService {
 
     await _box.put(id, submission);
 
-    // Mark donations as submitted.
-    // FIX: Use DonationsLocalStorage.donationsBox — not LocalStorageService.donationsBox
     final donBox = Hive.box(DonationsLocalStorage.donationsBox);
     for (final key in donKeys) {
       final raw = donBox.get(key);
@@ -252,7 +245,6 @@ class SubmissionService {
     if (actorRole == 'Manager') {
       final keys = List<String>.from(
           (sub['donationHiveKeys'] as List? ?? []).map((e) => e.toString()));
-      // FIX: DonationsLocalStorage.donationsBox — not LocalStorageService.donationsBox
       final donBox = Hive.box(DonationsLocalStorage.donationsBox);
       for (final key in keys) {
         final donRaw = donBox.get(key);
@@ -304,7 +296,6 @@ class SubmissionService {
 
     final keys = List<String>.from(
         (sub['donationHiveKeys'] as List? ?? []).map((e) => e.toString()));
-    // FIX: DonationsLocalStorage.donationsBox
     final donBox = Hive.box(DonationsLocalStorage.donationsBox);
     for (final key in keys) {
       final donRaw = donBox.get(key);

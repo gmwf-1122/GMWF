@@ -1,14 +1,4 @@
-// lib/pages/patient_list.dart
-// MOBILE UPDATE:
-//   • Removed fixed width: 440 — now fills available space
-//   • Summary cards scale down on narrow screens (responsive font + padding)
-//   • ListTile compresses on mobile (smaller avatar, tighter padding)
-//   • Header adapts font size on narrow screens
-//   • Container border-radius reduced on mobile for better fit
-//
-// FIX: Auto-select no longer jumps away from a valid pending selection
-// FIX: Queue filter now includes 'dispensed' status entries (older sync paths)
-// FIX: All pending patients are now selectable (not just the smallest)
+// lib/Pages/dispensary/dispensar/patient_list.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';

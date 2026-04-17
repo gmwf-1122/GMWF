@@ -1,12 +1,4 @@
-// lib/pages/patient_register.dart
-//
-// CHANGES IN THIS VERSION:
-//   FIX: _savePatient() now uses local-first pattern matching FirestoreService:
-//     1. Save to Hive first (always, instant, offline-safe)
-//     2. Call FirestoreService.savePatient() which handles direct write + queue
-//   Previously if FirestoreService threw, the patient was lost.
-//   Now Hive is written BEFORE calling FirestoreService so the patient is
-//   guaranteed to exist locally even if registration throws mid-way.
+// lib/Pages/dispensary/receptionist/patient_register.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

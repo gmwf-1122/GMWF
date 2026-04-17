@@ -21,11 +21,13 @@ import 'dispensary/dispensar/inventory.dart';
 import 'dispensary/dispensar/dispensar_screen.dart';
 import 'login_page.dart';
 import 'manager_screen.dart';
+import 'branch_manager_screen.dart';
 import 'server_dashboard_with_sync.dart';
 
 import 'dasterkhwaan/office_boy.dart';
 import 'dasterkhwaan/kitchen.dart';
 import 'donations/donations_screen.dart';
+import '../widgets/gmwf_loading_view.dart';
 
 import '../main.dart';
 
@@ -275,6 +277,7 @@ class HomeRouter extends StatelessWidget {
         return AdminScreen(branchId: branchId);
 
       case 'manager':
+      case 'hq manager':
         return ManagerScreen(branchId: branchId, username: userName);
 
       case 'server':
@@ -317,17 +320,20 @@ class HomeRouter extends StatelessWidget {
       case 'supervisor':
         return SupervisorScreen(branchId: branchId, supervisorId: uid);
 
+      case 'branch manager':
+        return BranchManagerScreen(branchId: branchId, userId: uid);
+
       case 'office boy':
       case 'dasterkhwaan office boy':
       case 'food token generator':
       case 'dasterkhwaan token generator':
       case 'token generator':
       case 'dasterkhwaan':
-        return const DasterkhwaanOfficeBoy();
+        return DasterkhwaanOfficeBoy(branchId: branchId, userName: userName);
 
       case 'kitchen':
       case 'dasterkhwaan kitchen':
-        return const DasterkhwaanKitchen();
+        return DasterkhwaanKitchen(branchId: branchId, username: userName);
 
       // ✅ FIX: pass branchId, username and correct UserRole enum value
       case 'donations':
@@ -410,9 +416,9 @@ class HomeRouter extends StatelessWidget {
       future: Future.delayed(const Duration(milliseconds: 500), _fetchUserData),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(
-                child: CircularProgressIndicator(color: Color(0xFF4CAF50))),
+          return const GmwfLoadingView(
+            message: 'Loading your dashboard...',
+            subMessage: 'Fetching user data from Firestore',
           );
         }
 
@@ -422,13 +428,7 @@ class HomeRouter extends StatelessWidget {
 
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (context.mounted) {
-              Flushbar(
-                message:
-                    "Session expired or account not found. Please log in again.",
-                backgroundColor: Colors.orange.shade700,
-                duration: const Duration(seconds: 5),
-              ).show(context);
-
+              // Removed Flushbar to avoid navigator lock conflict with Navigator.push
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const LoginPage()),

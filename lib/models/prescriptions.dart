@@ -9,6 +9,8 @@ class Prescription {
   final List<Map<String, dynamic>> items; // {medId, name, qty, price}
   final num total;
   final String status; // pending, ready, dispensed, completed
+  final int daysOfMedicine;
+  final num extraCharge;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
@@ -20,6 +22,8 @@ class Prescription {
     required this.items,
     required this.total,
     required this.status,
+    this.daysOfMedicine = 1,
+    this.extraCharge = 0,
     this.createdAt,
     this.updatedAt,
   });
@@ -34,6 +38,8 @@ class Prescription {
       items: List<Map<String, dynamic>>.from(d['items'] ?? []),
       total: d['total'] ?? 0,
       status: d['status'] ?? 'pending',
+      daysOfMedicine: (d['daysOfMedicine'] as int?) ?? 1,
+      extraCharge: (d['extraCharge'] as num?) ?? 0,
       createdAt: d['createdAt'],
       updatedAt: d['updatedAt'],
     );
@@ -47,6 +53,8 @@ class Prescription {
       'items': items,
       'total': total,
       'status': status,
+      'daysOfMedicine': daysOfMedicine,
+      'extraCharge': extraCharge,
       'createdAt': createdAt ?? FieldValue.serverTimestamp(),
       'updatedAt': updatedAt ?? FieldValue.serverTimestamp(),
     };

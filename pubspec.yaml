@@ -79,16 +79,20 @@ dev_dependencies:
   crypto: ^3.0.7
 
 flutter_native_splash:
-  color: "#ffffff"
-  image: assets/logo/gmwf-1.png
+  color: "#F1F8E9"
+  image: assets/logo/gmwf.png
   android: true
   ios: true
   web: true
   fullscreen: true
-
+  
+  # Ensure the logo is centered and not stretched
+  android_gravity: center
+  ios_content_mode: center
+  
   android_12:
-    image: assets/logo/gmwf-1.png
-    icon_background_color: "#ffffff"
+    image: assets/logo/gmwf.png
+    icon_background_color: "#F1F8E9"
 
 flutter_launcher_icons:
   android: true

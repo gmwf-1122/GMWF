@@ -1,14 +1,45 @@
 // lib/pages/dasterkhwaan/kitchen.dart
+//
+// Main kitchen panel — initialises state, loads Firebase data, and
+// builds the 4-tab scaffold.  All dialog/sheet logic lives in:
+//   • widgets/cook_dialog.dart   — food logging (cook / received / saved)
+//   • widgets/stock_dialogs.dart — inventory add / adjust
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import '../../models/stock_item.dart';
+import 'widgets/cook_dialog.dart';
+import 'widgets/stock_dialogs.dart';
+
+export 'widgets/cook_dialog.dart'
+    show
+        kPrimary,
+        kAccent,
+        kSuccess,
+        kWarning,
+        kInfo,
+        kPurple,
+        kTeal,
+        kSurface,
+        kCardBg,
+        kTextDark,
+        kTextMid,
+        kTextLight;
 
 class DasterkhwaanKitchen extends StatefulWidget {
   static const String routeName = '/dasterkhwaan-kitchen';
-  const DasterkhwaanKitchen({super.key});
+  final String? branchId;
+  final String? username;
+
+  const DasterkhwaanKitchen({
+    super.key,
+    this.branchId,
+    this.username,
+  });
+
   @override
   State<DasterkhwaanKitchen> createState() => _DasterkhwaanKitchenState();
 }
@@ -16,61 +47,109 @@ class DasterkhwaanKitchen extends StatefulWidget {
 class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     with SingleTickerProviderStateMixin {
   int _currentNav = 0;
-  String _username = "Kitchen Staff";
+  String _username = 'Kitchen Staff';
   String? _branchId;
-  final DateFormat dateFormat = DateFormat('yyyy-MM-dd');
-  final DateFormat displayFormat = DateFormat('dd MMM yyyy');
-  late final String today = dateFormat.format(DateTime.now());
+
+  final DateFormat _dateFmt    = DateFormat('yyyy-MM-dd');
+  final DateFormat _displayFmt = DateFormat('dd MMM yyyy');
+  late final String today = _dateFmt.format(DateTime.now());
+
   List<StockItem> _allStockItems = [];
   bool _stockLoaded = false;
-  // Menu tracking
-  String _currentMenu = "";
-  Map<String, double> _menuIngredients = {};
-  // Modern Color Palette - Professional Kitchen Theme
-  static const Color _primary = Color(0xFF2C3E50);
-  static const Color _primaryLight = Color(0xFF34495E);
-  static const Color _accent = Color(0xFFE74C3C);
-  static const Color _success = Color(0xFF27AE60);
-  static const Color _warning = Color(0xFFF39C12);
-  static const Color _info = Color(0xFF3498DB);
-  static const Color _surface = Color(0xFFF8F9FA);
-  static const Color _cardBg = Colors.white;
-  static const Color _textDark = Color(0xFF2C3E50);
-  static const Color _textLight = Color(0xFF95A5A6);
-  // Default required ingredients per token (kg)
-  static const Map<String, double> requiredPerToken = {
-    'Piyaz': 0.05,
-    'Tamatar': 0.1,
-    'Aloo': 0.15,
-    'Ghee': 0.05,
-    'Oil': 0.05,
-    'Bara Gosht': 0.25,
-    'Chota Gosht': 0.2,
-    'Chawal': 0.2,
-    'Daal Masoor': 0.15,
-    'Daal Chana': 0.15,
-  };
-  late AnimationController _fabController;
-  late Animation<double> _fabAnimation;
+
+  late AnimationController _animCtrl;
+
+  // ── Default stock seeds ──────────────────────────────────────────────────
+  static const List<Map<String, String>> _defaultStockItems = [
+    {'name': 'Piyaz',        'unit': 'kg'},
+    {'name': 'Tamatar',      'unit': 'kg'},
+    {'name': 'Aloo',         'unit': 'kg'},
+    {'name': 'Gobi',         'unit': 'kg'},
+    {'name': 'Matar',        'unit': 'kg'},
+    {'name': 'Palak',        'unit': 'kg'},
+    {'name': 'Shaljam',      'unit': 'kg'},
+    {'name': 'Band Gobi',    'unit': 'kg'},
+    {'name': 'Phool Gobi',   'unit': 'kg'},
+    {'name': 'Kheera',       'unit': 'kg'},
+    {'name': 'Turai',        'unit': 'kg'},
+    {'name': 'Karela',       'unit': 'kg'},
+    {'name': 'Baingan',      'unit': 'kg'},
+    {'name': 'Arvi',         'unit': 'kg'},
+    {'name': 'Methi',        'unit': 'kg'},
+    {'name': 'Sarson',       'unit': 'kg'},
+    {'name': 'Gajar',        'unit': 'kg'},
+    {'name': 'Mooli',        'unit': 'kg'},
+    {'name': 'Shimla Mirch', 'unit': 'kg'},
+    {'name': 'Bara Gosht',   'unit': 'kg'},
+    {'name': 'Chota Gosht',  'unit': 'kg'},
+    {'name': 'Murgh',        'unit': 'kg'},
+    {'name': 'Keema',        'unit': 'kg'},
+    {'name': 'Machli',       'unit': 'kg'},
+    {'name': 'Anda',         'unit': 'piece'},
+    {'name': 'Chawal',       'unit': 'kg'},
+    {'name': 'Daal Masoor',  'unit': 'kg'},
+    {'name': 'Daal Chana',   'unit': 'kg'},
+    {'name': 'Daal Mash',    'unit': 'kg'},
+    {'name': 'Daal Moong',   'unit': 'kg'},
+    {'name': 'Maida',        'unit': 'kg'},
+    {'name': 'Atta',         'unit': 'kg'},
+    {'name': 'Suji',         'unit': 'kg'},
+    {'name': 'Besan',        'unit': 'kg'},
+    {'name': 'Ghee',         'unit': 'kg'},
+    {'name': 'Oil',          'unit': 'liter'},
+    {'name': 'Makhan',       'unit': 'kg'},
+    {'name': 'Masala',       'unit': 'gram'},
+    {'name': 'Namak',        'unit': 'kg'},
+    {'name': 'Hari Mirch',   'unit': 'kg'},
+    {'name': 'Lal Mirch',    'unit': 'gram'},
+    {'name': 'Haldi',        'unit': 'gram'},
+    {'name': 'Zeera',        'unit': 'gram'},
+    {'name': 'Dhania',       'unit': 'gram'},
+    {'name': 'Garam Masala', 'unit': 'gram'},
+    {'name': 'Adrak',        'unit': 'kg'},
+    {'name': 'Lehsan',       'unit': 'kg'},
+    {'name': 'Pudina',       'unit': 'gram'},
+    {'name': 'Limu',         'unit': 'piece'},
+    {'name': 'Dahi',         'unit': 'kg'},
+    {'name': 'Doodh',        'unit': 'liter'},
+    {'name': 'Paneer',       'unit': 'kg'},
+    {'name': 'Malai',        'unit': 'kg'},
+    {'name': 'Khajoor',      'unit': 'kg'},
+    {'name': 'Chini',        'unit': 'kg'},
+    {'name': 'Chai Patti',   'unit': 'gram'},
+    {'name': 'Paani',        'unit': 'liter'},
+    {'name': 'Imli',         'unit': 'gram'},
+    {'name': 'Sirka',        'unit': 'liter'},
+    {'name': 'Soya Sauce',   'unit': 'liter'},
+    {'name': 'Ketchup',      'unit': 'liter'},
+    {'name': 'Bread',        'unit': 'piece'},
+    {'name': 'Roti',         'unit': 'piece'},
+  ];
+
   @override
   void initState() {
     super.initState();
-    _fabController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _fabAnimation = CurvedAnimation(
-      parent: _fabController,
-      curve: Curves.easeInOut,
-    );
-    _fabController.forward();
-    _loadUserAndBranch();
+    _animCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 400))
+      ..forward();
+
+    if (widget.branchId != null) {
+      _branchId = widget.branchId;
+      _username = widget.username ?? 'Kitchen Staff';
+      _loadAllStockItems().then((_) => _applyPreviousDaySaved());
+    } else {
+      _loadUserAndBranch();
+    }
   }
+
   @override
   void dispose() {
-    _fabController.dispose();
+    _animCtrl.dispose();
     super.dispose();
   }
+
+  // ── Firebase helpers ─────────────────────────────────────────────────────
+
   Future<void> _loadUserAndBranch() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -82,46 +161,46 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       if (doc.exists) {
         final data = doc.data()!;
         setState(() {
-          _username =
-              data['username'] ?? user.email?.split('@').first ?? "Kitchen Staff";
+          _username = data['username'] ??
+              user.email?.split('@').first ??
+              'Kitchen Staff';
           _branchId = branch.id;
         });
         await _loadAllStockItems();
-        await _loadTodayMenu();
+        await _applyPreviousDaySaved();
         return;
       }
     }
   }
+
   Future<void> _loadAllStockItems() async {
     if (_branchId == null) return;
-    final snapshot = await FirebaseFirestore.instance
+    final snap = await FirebaseFirestore.instance
         .collection('branches')
         .doc(_branchId)
         .collection('dasterkhwaan_stock')
         .orderBy('name')
         .get();
+
     List<StockItem> items =
-        snapshot.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
+        snap.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
+
     if (items.isEmpty) {
-      const defaults = [
-        'Piyaz', 'Tamatar', 'Aloo', 'Ghee', 'Oil', 'Bara Gosht', 'Chota Gosht',
-        'Chawal', 'Daal Masoor', 'Daal Chana', 'Masala', 'Namak', 'Hari Mirch',
-        'Adrak', 'Lehsan', 'Dhania', 'Pudina', 'Limu', 'Gobi', 'Matar', 'Palak',
-        'Shaljam', 'Band Gobi', 'Phool Gobi', 'Kheera', 'Dahi', 'Doodh'
-      ];
       final batch = FirebaseFirestore.instance.batch();
-      for (var item in defaults) {
-        final ref = FirebaseFirestore.instance
-            .collection('branches')
-            .doc(_branchId)
-            .collection('dasterkhwaan_stock')
-            .doc(item);
-        batch.set(ref, {
-          'name': item,
-          'quantity': 0.0,
-          'unit': 'kg',
-          'lastUpdated': FieldValue.serverTimestamp(),
-        });
+      for (final item in _defaultStockItems) {
+        batch.set(
+          FirebaseFirestore.instance
+              .collection('branches')
+              .doc(_branchId)
+              .collection('dasterkhwaan_stock')
+              .doc(item['name']!),
+          {
+            'name':        item['name'],
+            'quantity':    0.0,
+            'unit':        item['unit'],
+            'lastUpdated': FieldValue.serverTimestamp(),
+          },
+        );
       }
       await batch.commit();
       final newSnap = await FirebaseFirestore.instance
@@ -130,836 +209,402 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           .collection('dasterkhwaan_stock')
           .orderBy('name')
           .get();
-      items =
-          newSnap.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
+      items = newSnap.docs
+          .map((e) => StockItem.fromMap(e.data(), e.id))
+          .toList();
     }
+
     setState(() {
       _allStockItems = items..sort((a, b) => a.name.compareTo(b.name));
-      _stockLoaded = true;
+      _stockLoaded   = true;
     });
   }
-  Future<void> _loadTodayMenu() async {
+
+  Future<void> _applyPreviousDaySaved() async {
     if (_branchId == null) return;
-    final doc = await dayDoc(today).get();
-    final data = doc.data();
-    if (data != null && data.containsKey('menu')) {
-      setState(() {
-        _currentMenu = data['menu'] as String;
-      });
+    final yesterday = _dateFmt
+        .format(DateTime.now().subtract(const Duration(days: 1)));
+    final dayRef = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(_branchId)
+        .collection('dasterkhwaan')
+        .doc(yesterday);
+
+    final daySnap = await dayRef.get();
+    if (!daySnap.exists) return;
+    final dayData = daySnap.data()!;
+    if (dayData['savedCarriedOver'] == true) return;
+
+    final cookingSnap =
+        await dayRef.collection('cooking_sessions').get();
+    if (cookingSnap.docs.isEmpty) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+    bool hasCarryOver = false;
+
+    for (final doc in cookingSnap.docs) {
+      final data    = doc.data();
+      final savedKg = (data['savedKg'] as num? ?? 0).toDouble();
+      if (savedKg <= 0) continue;
+      hasCarryOver = true;
+      final dish    = (data['dish'] as String? ?? 'Saved Food').trim();
+      final stockRef = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(_branchId)
+          .collection('dasterkhwaan_stock')
+          .doc('Saved: $dish');
+      batch.set(
+        stockRef,
+        {
+          'name':        'Saved: $dish',
+          'quantity':    FieldValue.increment(savedKg),
+          'unit':        'kg',
+          'lastUpdated': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
     }
-    if (data != null && data.containsKey('menuIngredients')) {
-      setState(() {
-        _menuIngredients = Map<String, double>.from(
-            data['menuIngredients'] as Map<dynamic, dynamic>);
-      });
+
+    if (hasCarryOver) {
+      batch.update(dayRef, {'savedCarriedOver': true});
+      await batch.commit();
+      await _loadAllStockItems();
+    } else {
+      await dayRef.update({'savedCarriedOver': true});
     }
   }
-  Future<void> _updateStock(String itemName, double delta) async {
+
+  Future<void> _adjustStock(String itemName, double delta) async {
     final ref = FirebaseFirestore.instance
         .collection('branches')
         .doc(_branchId)
         .collection('dasterkhwaan_stock')
         .doc(itemName);
     await ref.update({
-      'quantity': FieldValue.increment(delta),
+      'quantity':    FieldValue.increment(delta),
       'lastUpdated': FieldValue.serverTimestamp(),
     });
-    final index = _allStockItems.indexWhere((item) => item.name == itemName);
-    if (index != -1) {
+    final idx = _allStockItems.indexWhere((i) => i.name == itemName);
+    if (idx != -1) {
       setState(() {
-        _allStockItems[index].quantity += delta;
-        _allStockItems[index].lastUpdated = Timestamp.now();
+        _allStockItems[idx].quantity    += delta;
+        _allStockItems[idx].lastUpdated  = Timestamp.now();
       });
     }
   }
-  DocumentReference<Map<String, dynamic>> dayDoc(String date) =>
+
+  DocumentReference<Map<String, dynamic>> _dayDoc(String date) =>
       FirebaseFirestore.instance
           .collection('branches')
           .doc(_branchId!)
           .collection('dasterkhwaan')
           .doc(date);
-  CollectionReference<Map<String, dynamic>> tokensCol(String date) =>
-      FirebaseFirestore.instance
-          .collection('branches')
-          .doc(_branchId!)
-          .collection('dasterkhwaan')
-          .doc(date)
-          .collection('tokens');
-  CollectionReference<Map<String, dynamic>> wasteCol(String date) =>
-      FirebaseFirestore.instance
-          .collection('branches')
-          .doc(_branchId!)
-          .collection('dasterkhwaan')
-          .doc(date)
-          .collection('waste');
+
+  CollectionReference<Map<String, dynamic>> _tokensCol(String date) =>
+      _dayDoc(date).collection('tokens');
+
+  CollectionReference<Map<String, dynamic>> _cookingCol(String date) =>
+      _dayDoc(date).collection('cooking_sessions');
+
+  // ── Token serving ────────────────────────────────────────────────────────
+
   Future<void> _serveToken(String tokenId, int tokenNumber) async {
-    // Check if there's enough stock
-    bool canServe = true;
-    List<String> insufficientItems = [];
-    for (final entry in requiredPerToken.entries) {
-      final item = _allStockItems.firstWhere(
-        (i) => i.name == entry.key,
-        orElse: () => StockItem(
-          id: '',
-          name: entry.key,
-          unit: 'kg',
-          lastUpdated: Timestamp.now(),
-        ),
-      );
-      if (item.quantity < entry.value) {
-        canServe = false;
-        insufficientItems.add(entry.key);
-      }
-    }
-    if (!canServe) {
-      _showSnack(
-        "Cannot serve: Insufficient stock for ${insufficientItems.join(', ')}",
-        isError: true,
-      );
-      return;
-    }
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: _success.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.restaurant_rounded, color: _success, size: 24),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              "Serve Token #$tokenNumber",
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Required ingredients will be deducted:",
-              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-            ),
-            const SizedBox(height: 12),
-            ...requiredPerToken.entries.map((e) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(e.key, style: TextStyle(color: _textLight)),
-                    Text(
-                      "-${e.value} kg",
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: _accent,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
-          ],
-        ),
+      builder: (_) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+                color: kSuccess.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12)),
+            child: const Icon(Icons.restaurant_rounded,
+                color: kSuccess, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Text('Serve Token #$tokenNumber',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w800, fontSize: 18)),
+        ]),
+        content: const Text('Mark this token as served?',
+            style: TextStyle(fontSize: 14)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: _success,
+              backgroundColor: kSuccess,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+                  borderRadius: BorderRadius.circular(12)),
             ),
             onPressed: () async {
               Navigator.pop(context);
               HapticFeedback.mediumImpact();
               final batch = FirebaseFirestore.instance.batch();
-             
-              // Mark token as served
-              batch.update(tokensCol(today).doc(tokenId), {
-                'served': true,
+              batch.update(_tokensCol(today).doc(tokenId), {
+                'served':     true,
                 'servedTime': FieldValue.serverTimestamp(),
               });
-             
-              // Update served count
-              batch.update(dayDoc(today), {
-                'servedTokens': FieldValue.increment(1),
-              });
-             
-              // Deduct stock
-              for (final entry in requiredPerToken.entries) {
-                final stockRef = FirebaseFirestore.instance
-                    .collection('branches')
-                    .doc(_branchId)
-                    .collection('dasterkhwaan_stock')
-                    .doc(entry.key);
-                batch.update(stockRef, {
-                  'quantity': FieldValue.increment(-entry.value),
-                  'lastUpdated': FieldValue.serverTimestamp(),
-                });
-              }
-             
+              batch.set(
+                _dayDoc(today),
+                {'servedTokens': FieldValue.increment(1)},
+                SetOptions(merge: true),
+              );
               await batch.commit();
-              await _loadAllStockItems();
-              _showSnack("Token #$tokenNumber served successfully ✓");
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text('Token #$tokenNumber served ✓'),
+                  backgroundColor: kSuccess,
+                  behavior: SnackBarBehavior.floating,
+                  margin: const EdgeInsets.all(16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ));
+              }
             },
-            child: const Text(
-              "Confirm Serve",
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
+            child: const Text('Confirm Serve',
+                style: TextStyle(fontWeight: FontWeight.w700)),
           ),
         ],
       ),
     );
   }
-  void _showMenuDialog() {
-    final menuController = TextEditingController(text: _currentMenu);
-    final ingredientsControllers = <String, TextEditingController>{};
-    for (final key in requiredPerToken.keys) {
-      ingredientsControllers[key] = TextEditingController(
-        text: (_menuIngredients[key] ?? requiredPerToken[key]).toString(),
-      );
+
+  Future<void> _deleteCookSession(
+      String docId, Map<String, dynamic> data) async {
+    final isReceived  = data['isReceivedFood'] as bool? ?? false;
+    final isSavedFood = data['isSavedFood']    as bool? ?? false;
+    final batch       = FirebaseFirestore.instance.batch();
+
+    // Only restore stock for cooked-in-house sessions
+    if (!isReceived && !isSavedFood) {
+      final ingredients = List<Map<String, dynamic>>.from(
+          (data['ingredients'] as List<dynamic>? ?? [])
+              .map((e) => Map<String, dynamic>.from(e as Map)));
+      for (final ing in ingredients) {
+        batch.update(
+          FirebaseFirestore.instance
+              .collection('branches')
+              .doc(_branchId)
+              .collection('dasterkhwaan_stock')
+              .doc(ing['name'] as String),
+          {
+            'quantity':    FieldValue.increment((ing['qty'] as num).toDouble()),
+            'lastUpdated': FieldValue.serverTimestamp(),
+          },
+        );
+      }
     }
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Handle
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(top: 12, bottom: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                // Content
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: _warning.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Icon(
-                                Icons.restaurant_menu_rounded,
-                                color: _warning,
-                                size: 24,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            const Text(
-                              "Today's Menu Setup",
-                              style: TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 24),
-                        // Menu name
-                        const Text(
-                          "MENU NAME",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: _textLight,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: menuController,
-                          maxLines: 2,
-                          decoration: InputDecoration(
-                            hintText: "e.g., Beef Karahi, Daal, Chawal, Salad",
-                            filled: true,
-                            fillColor: _surface,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(14),
-                              borderSide: BorderSide(color: _warning, width: 2),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          "INGREDIENTS PER TOKEN (kg)",
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: _textLight,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        ...ingredientsControllers.entries.map((entry) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  flex: 2,
-                                  child: Text(
-                                    entry.key,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: TextField(
-                                    controller: entry.value,
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    textAlign: TextAlign.center,
-                                    decoration: InputDecoration(
-                                      filled: true,
-                                      fillColor: _surface,
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                        borderSide: BorderSide.none,
-                                      ),
-                                      contentPadding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
-                                        vertical: 12,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _warning,
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              elevation: 0,
-                            ),
-                            onPressed: () {
-                              final menu = menuController.text.trim();
-                              final ingredients = <String, double>{};
-                             
-                              for (final entry in ingredientsControllers.entries) {
-                                final value = double.tryParse(entry.value.text) ??
-                                    requiredPerToken[entry.key]!;
-                                ingredients[entry.key] = value;
-                              }
-                              dayDoc(today).set({
-                                'menu': menu,
-                                'menuIngredients': ingredients,
-                              }, SetOptions(merge: true));
-                              setState(() {
-                                _currentMenu = menu;
-                                _menuIngredients = ingredients;
-                              });
-                              Navigator.pop(context);
-                              _showSnack("Menu updated successfully");
-                            },
-                            child: const Text(
-                              "Save Menu",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-  void _showAddWasteDialog({Map<String, dynamic>? existing, String? docId}) {
-    final formKey = GlobalKey<FormState>();
-    final itemController = TextEditingController(text: existing?['item'] ?? '');
-    double qty = (existing?['quantity'] as double?) ?? 1.0;
-    String unit = existing?['unit'] ?? 'kg';
-    String type = existing?['type'] ?? 'rotten';
-    String reason = existing?['reason'] ?? '';
-    const units = ['kg', 'gram', 'liter', 'piece', 'packet', 'handi', 'plate'];
-    const types = ['rotten', 'unused', 'overcooked', 'burnt', 'expired'];
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: _cardBg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            ),
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Handle
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade300,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  // Title
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: _accent.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Icon(
-                          Icons.delete_outline_rounded,
-                          color: _accent,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Text(
-                        existing == null ? "Record Waste" : "Edit Waste",
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  // Item selector
-                  if (!_stockLoaded)
-                    const LinearProgressIndicator(color: _primary)
-                  else
-                    Autocomplete<String>(
-                      optionsBuilder: (v) {
-                        if (v.text.isEmpty) return const [];
-                        return _allStockItems
-                            .where((i) => i.name
-                                .toLowerCase()
-                                .contains(v.text.toLowerCase()))
-                            .map((e) => e.name)
-                            .take(8);
-                      },
-                      fieldViewBuilder: (context, ctrl, focus, onSubmit) {
-                        ctrl.text = itemController.text;
-                        return TextFormField(
-                          controller: ctrl,
-                          focusNode: focus,
-                          decoration: _inputDecoration(
-                            label: "Item Name *",
-                            icon: Icons.inventory_2_outlined,
-                          ),
-                          validator: (v) =>
-                              v?.trim().isEmpty ?? true ? "Required" : null,
-                          onChanged: (v) => itemController.text = v,
-                        );
-                      },
-                      onSelected: (s) => itemController.text = s,
-                    ),
-                  const SizedBox(height: 16),
-                  // Quantity and Unit
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          initialValue: qty.toString(),
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: _inputDecoration(
-                            label: "Quantity",
-                            icon: Icons.scale_rounded,
-                          ),
-                          validator: (v) =>
-                              v?.trim().isEmpty ?? true ? "Required" : null,
-                          onSaved: (v) => qty = double.tryParse(v!) ?? 1.0,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: unit,
-                          decoration: _inputDecoration(
-                            label: "Unit",
-                            icon: Icons.straighten,
-                          ),
-                          items: units
-                              .map((e) =>
-                                  DropdownMenuItem(value: e, child: Text(e)))
-                              .toList(),
-                          onChanged: (v) => setModalState(() => unit = v!),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Type
-                  DropdownButtonFormField<String>(
-                    value: type,
-                    decoration: _inputDecoration(
-                      label: "Waste Type",
-                      icon: Icons.category_rounded,
-                    ),
-                    items: types
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                        .toList(),
-                    onChanged: (v) => setModalState(() => type = v!),
-                  ),
-                  const SizedBox(height: 16),
-                  // Reason
-                  TextFormField(
-                    initialValue: reason,
-                    maxLines: 2,
-                    decoration: _inputDecoration(
-                      label: "Reason (optional)",
-                      icon: Icons.notes_rounded,
-                    ),
-                    onSaved: (v) => reason = v ?? '',
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          child: const Text(
-                            "Cancel",
-                            style: TextStyle(
-                              fontSize: 15,
-                              color: _textLight,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            if (!formKey.currentState!.validate()) return;
-                            formKey.currentState!.save();
-                           
-                            final itemName = itemController.text.trim();
-                            if (itemName.isEmpty) return;
-                            final data = {
-                              'item': itemName,
-                              'quantity': qty,
-                              'unit': unit,
-                              'type': type,
-                              'reason': reason,
-                              'addedAt': FieldValue.serverTimestamp(),
-                            };
-                            if (existing != null && docId != null) {
-                              final oldQty = existing['quantity'] as double;
-                              await _updateStock(itemName, oldQty - qty);
-                              await wasteCol(today).doc(docId).update(data);
-                            } else {
-                              await _updateStock(itemName, -qty);
-                              await wasteCol(today).add(data);
-                            }
-                            if (context.mounted) Navigator.pop(context);
-                            _showSnack(
-                              existing == null
-                                  ? "Waste recorded: $qty $unit $itemName"
-                                  : "Waste updated",
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _accent,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            existing == null ? "Record Waste" : "Update",
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-  void _showDeleteWasteDialog(String docId, String itemName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_rounded, color: _accent),
-            SizedBox(width: 8),
-            Text(
-              "Delete Waste?",
-              style: TextStyle(fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        content: Text("Remove \"$itemName\" from waste records?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _accent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            onPressed: () async {
-              final doc = await wasteCol(today).doc(docId).get();
-              final data = doc.data() as Map<String, dynamic>;
-              final qty = data['quantity'] as double;
-              await _updateStock(data['item'], qty);
-              await wasteCol(today).doc(docId).delete();
-              if (context.mounted) Navigator.pop(context);
-              _showSnack("$itemName deleted", isError: true);
-            },
-            child: const Text("Delete"),
-          ),
-        ],
-      ),
-    );
-  }
-  void _showSnack(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(
-              isError ? Icons.error_outline : Icons.check_circle_outline,
-              color: Colors.white,
-              size: 20,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                msg,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        ),
-        backgroundColor: isError ? _accent : _success,
+
+    batch.delete(_cookingCol(today).doc(docId));
+    await batch.commit();
+    await _loadAllStockItems();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(isSavedFood
+            ? 'Saved food entry deleted'
+            : isReceived
+                ? 'Entry deleted'
+                : 'Cooking session deleted — stock restored'),
+        backgroundColor: kSuccess,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-  }
-  InputDecoration _inputDecoration({
-    required String label,
-    required IconData icon,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      prefixIcon: Icon(icon, color: _primary, size: 20),
-      filled: true,
-      fillColor: _surface,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide.none,
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _primary, width: 2),
-      ),
-      contentPadding: const EdgeInsets.symmetric(
-        vertical: 16,
-        horizontal: 16,
-      ),
-    );
-  }
-  @override
-  Widget build(BuildContext context) {
-    if (_branchId == null) {
-      return const Scaffold(
-        backgroundColor: _primary,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(
-                color: Colors.white,
-                strokeWidth: 3,
-              ),
-              SizedBox(height: 20),
-              Text(
-                "Loading Kitchen Panel...",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
     }
-    return Scaffold(
-      backgroundColor: _surface,
-      body: IndexedStack(
-        index: _currentNav,
-        children: [
-          _TokensTab(
-            branchId: _branchId!,
-            today: today,
-            tokensCol: tokensCol(today),
-            serveToken: _serveToken,
-            username: _username,
-            onLogout: _logout,
-          ),
-          _InventoryTab(
-            branchId: _branchId!,
-            allStockItems: _allStockItems,
-            stockLoaded: _stockLoaded,
-            onRefresh: _loadAllStockItems,
-            username: _username,
-            onLogout: _logout,
-          ),
-          _WasteTab(
-            wasteCol: wasteCol(today),
-            onAddWaste: _showAddWasteDialog,
-            onDeleteWaste: _showDeleteWasteDialog,
-            username: _username,
-            onLogout: _logout,
-          ),
-          _MenuTab(
-            currentMenu: _currentMenu,
-            menuIngredients: _menuIngredients,
-            requiredPerToken: requiredPerToken,
-            onEditMenu: _showMenuDialog,
-            username: _username,
-            onLogout: _logout,
-          ),
-        ],
-      ),
-      bottomNavigationBar: _buildBottomNav(),
-    );
   }
+
   Future<void> _logout() async {
     await FirebaseAuth.instance.signOut();
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
     }
   }
+
+  // ── Build ────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    if (_branchId == null) {
+      return Scaffold(
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0F172A)],
+            ),
+          ),
+          child: Center(
+            child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.05),
+                  shape: BoxShape.circle,
+                  border:
+                      Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: const CircularProgressIndicator(
+                    color: kWarning, strokeWidth: 3),
+              ),
+              const SizedBox(height: 32),
+              Text('Loading Kitchen Panel…',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.9),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text('Preparing your workspace',
+                  style: TextStyle(
+                      color: Colors.white.withOpacity(0.5),
+                      fontSize: 13)),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: kSurface,
+      floatingActionButton: _currentNav == 1
+          ? FloatingActionButton.extended(
+              onPressed: () => showFoodTypeChooser(
+                context,
+                allStockItems: _allStockItems,
+                stockLoaded:   _stockLoaded,
+                branchId:      _branchId!,
+                today:         today,
+                onDone:        _loadAllStockItems,
+              ),
+              backgroundColor: kWarning,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              icon: const Icon(Icons.add_rounded, size: 22),
+              label: const Text('Log Food',
+                  style:
+                      TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            )
+          : null,
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
+      body: IndexedStack(
+        index: _currentNav,
+        children: [
+          _TokensTab(
+            branchId:   _branchId!,
+            today:      today,
+            tokensCol:  _tokensCol(today),
+            serveToken: _serveToken,
+            username:   _username,
+            onLogout:   _logout,
+          ),
+          _CookingTab(
+            branchId:   _branchId!,
+            today:      today,
+            cookingCol: _cookingCol(today),
+            onAdd: () => showFoodTypeChooser(
+              context,
+              allStockItems: _allStockItems,
+              stockLoaded:   _stockLoaded,
+              branchId:      _branchId!,
+              today:         today,
+              onDone:        _loadAllStockItems,
+            ),
+            onEdit: (data, id) {
+              final isSaved = data['isSavedFood'] as bool? ?? false;
+              if (isSaved) {
+                showSavedFoodDialog(
+                  context,
+                  existing:      data,
+                  docId:         id,
+                  allStockItems: _allStockItems,
+                  stockLoaded:   _stockLoaded,
+                  branchId:      _branchId!,
+                  today:         today,
+                  onDone:        _loadAllStockItems,
+                );
+              } else {
+                showCookDialog(
+                  context,
+                  existing:      data,
+                  docId:         id,
+                  allStockItems: _allStockItems,
+                  stockLoaded:   _stockLoaded,
+                  branchId:      _branchId!,
+                  today:         today,
+                  onDone:        _loadAllStockItems,
+                );
+              }
+            },
+            onDelete: _deleteCookSession,
+            username: _username,
+            onLogout: _logout,
+          ),
+          _InventoryTab(
+            branchId:      _branchId!,
+            allStockItems: _allStockItems,
+            stockLoaded:   _stockLoaded,
+            onRefresh:     _loadAllStockItems,
+            onAddNew: () => showAddStockDialog(
+              context,
+              branchId:      _branchId!,
+              allStockItems: _allStockItems,
+              onDone:        _loadAllStockItems,
+            ),
+            onEdit: (item) => showAddStockDialog(
+              context,
+              editItem:      item,
+              branchId:      _branchId!,
+              allStockItems: _allStockItems,
+              onDone:        _loadAllStockItems,
+            ),
+            onAdjust: (item, {required bool isAdd}) =>
+                showAdjustStockDialog(
+              context,
+              item,
+              isAdd:    isAdd,
+              branchId: _branchId!,
+              onAdjust: _adjustStock,
+            ),
+            username: _username,
+            onLogout: _logout,
+          ),
+          _HistoryTab(
+            branchId:   _branchId!,
+            dateFmt:    _dateFmt,
+            displayFmt: _displayFmt,
+            username:   _username,
+            onLogout:   _logout,
+          ),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
   Widget _buildBottomNav() {
-    final items = [
-      _NavItem(
-        icon: Icons.confirmation_number_rounded,
-        label: "Tokens",
-        color: _success,
-      ),
-      _NavItem(
-        icon: Icons.inventory_2_rounded,
-        label: "Inventory",
-        color: _info,
-      ),
-      _NavItem(
-        icon: Icons.delete_outline_rounded,
-        label: "Waste",
-        color: _accent,
-      ),
-      _NavItem(
-        icon: Icons.restaurant_menu_rounded,
-        label: "Menu",
-        color: _warning,
-      ),
+    const items = [
+      _NavItem(Icons.confirmation_number_rounded, 'Tokens',    kSuccess),
+      _NavItem(Icons.soup_kitchen_rounded,         'Cooking',   kWarning),
+      _NavItem(Icons.inventory_2_rounded,          'Inventory', kInfo),
+      _NavItem(Icons.history_rounded,              'History',   kPurple),
     ];
     return Container(
       decoration: BoxDecoration(
-        color: _cardBg,
+        color: kCardBg,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 20,
-            offset: const Offset(0, -4),
-          ),
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, -4))
         ],
       ),
       child: SafeArea(
@@ -969,7 +614,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(items.length, (idx) {
-              final item = items[idx];
+              final item     = items[idx];
               final selected = _currentNav == idx;
               return GestureDetector(
                 onTap: () {
@@ -979,36 +624,26 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+                      horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: selected
                         ? item.color.withOpacity(0.12)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        item.icon,
-                        color: selected ? item.color : _textLight,
-                        size: 24,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        item.label,
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(item.icon,
+                        color: selected ? item.color : kTextLight,
+                        size: 24),
+                    const SizedBox(height: 4),
+                    Text(item.label,
                         style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: selected
-                              ? FontWeight.w800
-                              : FontWeight.w600,
-                          color: selected ? item.color : _textLight,
-                        ),
-                      ),
-                    ],
-                  ),
+                            fontSize: 11,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                            color: selected ? item.color : kTextLight)),
+                  ]),
                 ),
               );
             }),
@@ -1023,23 +658,19 @@ class _NavItem {
   final IconData icon;
   final String label;
   final Color color;
-  const _NavItem({
-    required this.icon,
-    required this.label,
-    required this.color,
-  });
+  const _NavItem(this.icon, this.label, this.color);
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
 // TOKENS TAB
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _TokensTab extends StatelessWidget {
-  final String branchId;
-  final String today;
+  final String branchId, today, username;
   final CollectionReference<Map<String, dynamic>> tokensCol;
   final Function(String, int) serveToken;
-  final String username;
   final VoidCallback onLogout;
+
   const _TokensTab({
     required this.branchId,
     required this.today,
@@ -1048,88 +679,91 @@ class _TokensTab extends StatelessWidget {
     required this.username,
     required this.onLogout,
   });
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Header
-        _buildHeader(context),
-        // Content
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: tokensCol
-                .where('served', isEqualTo: false)
-                .orderBy('number')
-                .snapshots(),
-            builder: (_, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
+    return Column(children: [
+      _buildHeader(context),
+      Expanded(
+        child: StreamBuilder<QuerySnapshot>(
+          stream: tokensCol.snapshots(),
+          builder: (_, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(
                   child: CircularProgressIndicator(
-                    color: Color(0xFF27AE60),
-                    strokeWidth: 2,
-                  ),
-                );
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              final docs = snapshot.data!.docs;
-              if (docs.isEmpty) {
-                return Center(
-                  child: Column(
+                      color: kSuccess, strokeWidth: 2));
+            }
+            if (snap.hasError) {
+              return Center(
+                child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        Icons.check_circle_outline,
-                        size: 80,
-                        color: const Color(0xFF27AE60).withOpacity(0.3),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "All tokens served!",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        "No pending tokens",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
-                itemCount: docs.length,
-                itemBuilder: (_, i) {
-                  final e = docs[i].data() as Map<String, dynamic>;
-                  final time = (e['time'] as Timestamp?)?.toDate() ?? DateTime.now();
-                  final number = e['number'] as int;
-                  return _TokenCard(
+                  Icon(Icons.error_outline,
+                      size: 48, color: Colors.red.withOpacity(0.4)),
+                  const SizedBox(height: 12),
+                  Text('Could not load tokens',
+                      style: TextStyle(color: Colors.grey[500])),
+                  const SizedBox(height: 8),
+                  Text('${snap.error}',
+                      style: TextStyle(
+                          color: Colors.grey[400], fontSize: 11)),
+                ]),
+              );
+            }
+            final allDocs = snap.data?.docs ?? [];
+            final pending = allDocs
+                .where((d) =>
+                    (d.data() as Map<String, dynamic>)['served'] == false)
+                .toList()
+              ..sort((a, b) {
+                final aNum = (a.data() as Map)['number'] as int? ?? 0;
+                final bNum = (b.data() as Map)['number'] as int? ?? 0;
+                return aNum.compareTo(bNum);
+              });
+
+            if (pending.isEmpty) {
+              return Center(
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                Icon(Icons.check_circle_outline,
+                    size: 80, color: kSuccess.withOpacity(0.25)),
+                const SizedBox(height: 16),
+                const Text('All tokens served!',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kTextLight)),
+                const SizedBox(height: 6),
+                const Text('No pending tokens',
+                    style: TextStyle(fontSize: 14, color: kTextLight)),
+              ]));
+            }
+
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+              itemCount: pending.length,
+              itemBuilder: (_, i) {
+                final e    = pending[i].data() as Map<String, dynamic>;
+                final time = (e['time'] as Timestamp?)?.toDate() ?? DateTime.now();
+                final number = e['number'] as int? ?? (i + 1);
+                return _TokenCard(
                     number: number,
                     time: time,
-                    onServe: () => serveToken(docs[i].id, number),
-                  );
-                },
-              );
-            },
-          ),
+                    onServe: () => serveToken(pending[i].id, number));
+              },
+            );
+          },
         ),
-      ],
-    );
+      ),
+    ]);
   }
+
   Widget _buildHeader(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF27AE60), Color(0xFF229954)],
+          colors: [Color(0xFF16A34A), kSuccess],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1139,167 +773,103 @@ class _TokensTab extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Active Tokens",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      Text(
-                        username,
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.7),
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
+              Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                const Text('Active Tokens',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5)),
+                Text(username,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700)),
+              ]),
+              _logoutBtn(onLogout),
+            ]),
+            const SizedBox(height: 16),
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(branchId)
+                  .collection('dasterkhwaan')
+                  .doc(today)
+                  .collection('tokens')
+                  .snapshots(),
+              builder: (_, snap) {
+                final all     = snap.data?.docs ?? [];
+                final pending = all
+                    .where((d) => (d.data() as Map)['served'] == false)
+                    .length;
+                final served  = all.length - pending;
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.2)),
                   ),
-                  GestureDetector(
-                    onTap: onLogout,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE74C3C),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Icons.logout_rounded, color: Colors.white, size: 16),
-                          SizedBox(width: 6),
-                          Text(
-                            "Logout",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('branches')
-                    .doc(branchId)
-                    .collection('dasterkhwaan')
-                    .doc(today)
-                    .collection('tokens')
-                    .snapshots(),
-                builder: (_, snap) {
-                  final allTokens = snap.data?.docs ?? [];
-                  final pending = allTokens
-                      .where((d) => (d.data() as Map)['served'] == false)
-                      .length;
-                  final served = allTokens.length - pending;
-                  return Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.2),
-                      ),
-                    ),
-                    child: Row(
+                  child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                        _StatBadge(
-                          icon: Icons.hourglass_top_rounded,
-                          label: "Pending",
-                          value: "$pending",
-                          color: const Color(0xFFFFD54F),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 40,
-                          color: Colors.white.withOpacity(0.2),
-                        ),
-                        _StatBadge(
-                          icon: Icons.check_circle_rounded,
-                          label: "Served",
-                          value: "$served",
-                          color: const Color(0xFF81C784),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
+                    _statBadge(Icons.hourglass_top_rounded, 'Pending',
+                        '$pending', const Color(0xFFFFD54F)),
+                    Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.white.withOpacity(0.2)),
+                    _statBadge(Icons.check_circle_rounded, 'Served',
+                        '$served', const Color(0xFF86EFAC)),
+                    Container(
+                        width: 1,
+                        height: 40,
+                        color: Colors.white.withOpacity(0.2)),
+                    _statBadge(Icons.confirmation_number_rounded, 'Total',
+                        '${all.length}', Colors.white),
+                  ]),
+                );
+              },
+            ),
+          ]),
         ),
       ),
     );
   }
-}
 
-class _StatBadge extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-  final Color color;
-  const _StatBadge({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.color,
-  });
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Icon(icon, color: color, size: 20),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.7),
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _statBadge(
+          IconData icon, String label, String value, Color color) =>
+      Column(children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(height: 5),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w900)),
+        Text(label,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 11,
+                fontWeight: FontWeight.w600)),
+      ]);
 }
 
 class _TokenCard extends StatelessWidget {
   final int number;
   final DateTime time;
   final VoidCallback onServe;
-  const _TokenCard({
-    required this.number,
-    required this.time,
-    required this.onServe,
-  });
+  const _TokenCard(
+      {required this.number,
+      required this.time,
+      required this.onServe});
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1309,1170 +879,1600 @@ class _TokenCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF27AE60).withOpacity(0.1),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
+              color: kSuccess.withOpacity(0.1),
+              blurRadius: 16,
+              offset: const Offset(0, 4))
         ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Token number badge
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF27AE60), Color(0xFF229954)],
+        child: Row(children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                  colors: [Color(0xFF16A34A), kSuccess],
                   begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Center(
-                child: Text(
-                  "#$number",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
+                  end: Alignment.bottomRight),
+              borderRadius: BorderRadius.circular(16),
             ),
-            const SizedBox(width: 16),
-            // Info
-            Expanded(
+            child: Center(
+                child: Text('#$number',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900))),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Token Ready",
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF2C3E50),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.access_time_rounded,
-                        size: 14,
-                        color: const Color(0xFF95A5A6),
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        DateFormat('hh:mm a').format(time),
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF95A5A6),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            // Serve button
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF27AE60),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 14,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 0,
-              ),
-              onPressed: onServe,
-              child: const Text(
-                "Serve",
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+            const Text('Token Ready',
                 style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: kTextDark)),
+            const SizedBox(height: 4),
+            Row(children: [
+              const Icon(Icons.access_time_rounded,
+                  size: 13, color: kTextLight),
+              const SizedBox(width: 4),
+              Text(DateFormat('hh:mm a').format(time),
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: kTextLight,
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ])),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kSuccess,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 22, vertical: 14),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
             ),
-          ],
-        ),
+            onPressed: onServe,
+            child: const Text('Serve',
+                style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w800)),
+          ),
+        ]),
       ),
     );
   }
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// COOKING TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _CookingTab extends StatelessWidget {
+  final String branchId, today, username;
+  final CollectionReference<Map<String, dynamic>> cookingCol;
+  final VoidCallback onAdd;
+  final Function(Map<String, dynamic>, String) onEdit;
+  final Function(String, Map<String, dynamic>) onDelete;
+  final VoidCallback onLogout;
+
+  const _CookingTab({
+    required this.branchId,
+    required this.today,
+    required this.username,
+    required this.cookingCol,
+    required this.onAdd,
+    required this.onEdit,
+    required this.onDelete,
+    required this.onLogout,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(children: [
+      Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              colors: [Color(0xFFD97706), kWarning],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  const Text('Food Log',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5)),
+                  Text(username,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700)),
+                ]),
+                _logoutBtn(onLogout),
+              ]),
+              const SizedBox(height: 14),
+              StreamBuilder<QuerySnapshot>(
+                stream: cookingCol.snapshots(),
+                builder: (_, snap) {
+                  final docs = snap.data?.docs ?? [];
+                  double totalUsed = 0, totalSaved = 0, totalWasted = 0;
+                  for (final d in docs) {
+                    final data = d.data() as Map<String, dynamic>;
+                    totalUsed   += (data['usedKg']   as num? ?? 0).toDouble();
+                    totalSaved  += (data['savedKg']  as num? ?? 0).toDouble();
+                    totalWasted += (data['wastedKg'] as num? ?? 0).toDouble();
+                  }
+                  return FutureBuilder<QuerySnapshot>(
+                    future: FirebaseFirestore.instance
+                        .collection('branches')
+                        .doc(branchId)
+                        .collection('dasterkhwaan')
+                        .doc(today)
+                        .collection('tokens')
+                        .where('served', isEqualTo: true)
+                        .get(),
+                    builder: (_, tsnap) {
+                      final totalServedTokens =
+                          tsnap.data?.docs.length ?? 0;
+                      return Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 14, horizontal: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: Colors.white.withOpacity(0.2)),
+                        ),
+                        child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.spaceAround,
+                            children: [
+                          _cookStat('Used',
+                              '${totalUsed.toStringAsFixed(1)} kg',
+                              Icons.whatshot_rounded),
+                          _vDiv(),
+                          _cookStat('Served',
+                              '$totalServedTokens tokens',
+                              Icons.confirmation_number_rounded),
+                          _vDiv(),
+                          _cookStat('Saved',
+                              '${totalSaved.toStringAsFixed(1)} kg',
+                              Icons.save_rounded),
+                          _vDiv(),
+                          _cookStat('Wasted',
+                              '${totalWasted.toStringAsFixed(1)} kg',
+                              Icons.delete_outline_rounded),
+                        ]),
+                      );
+                    },
+                  );
+                },
+              ),
+            ]),
+          ),
+        ),
+      ),
+      Expanded(
+        child: StreamBuilder<QuerySnapshot>(
+          stream: cookingCol
+              .orderBy('createdAt', descending: true)
+              .snapshots(),
+          builder: (_, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                  child: CircularProgressIndicator(
+                      color: kWarning, strokeWidth: 2));
+            }
+            final docs = snap.data?.docs ?? [];
+            if (docs.isEmpty) {
+              return Center(
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                Icon(Icons.soup_kitchen_rounded,
+                    size: 80, color: kWarning.withOpacity(0.25)),
+                const SizedBox(height: 16),
+                const Text('No food logged yet',
+                    style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: kTextLight)),
+                const SizedBox(height: 8),
+                const Text('Tap + to log cooked or received food',
+                    style: TextStyle(fontSize: 13, color: kTextLight)),
+              ]));
+            }
+            return ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+              itemCount: docs.length,
+              itemBuilder: (_, i) {
+                final data = docs[i].data() as Map<String, dynamic>;
+                final time =
+                    (data['createdAt'] as Timestamp?)?.toDate() ??
+                        DateTime.now();
+                return _CookingCard(
+                  data:     data,
+                  time:     time,
+                  onEdit:   () => onEdit(data, docs[i].id),
+                  onDelete: () => _confirmDelete(context, docs[i].id, data),
+                );
+              },
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  void _confirmDelete(
+      BuildContext context, String docId, Map<String, dynamic> data) {
+    final isReceived  = data['isReceivedFood'] as bool? ?? false;
+    final isSavedFood = data['isSavedFood']    as bool? ?? false;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.warning_rounded, color: kAccent),
+          SizedBox(width: 8),
+          Text('Delete Entry?',
+              style: TextStyle(
+                  fontWeight: FontWeight.w800, fontSize: 16)),
+        ]),
+        content: Text(
+          isSavedFood
+              ? 'Delete this saved food entry?'
+              : isReceived
+                  ? 'Delete "${data['dish']}"?'
+                  : 'Delete "${data['dish']}"? Ingredients will be restored to stock.',
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+                backgroundColor: kAccent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12))),
+            onPressed: () {
+              Navigator.pop(context);
+              onDelete(docId, data);
+            },
+            child: const Text('Delete',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cookStat(String label, String value, IconData icon) =>
+      Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: Colors.white, size: 16),
+        const SizedBox(height: 5),
+        Text(value,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w900)),
+        Text(label,
+            style: TextStyle(
+                color: Colors.white.withOpacity(0.7),
+                fontSize: 10,
+                fontWeight: FontWeight.w600)),
+      ]);
+
+  Widget _vDiv() =>
+      Container(width: 1, height: 36, color: Colors.white.withOpacity(0.2));
+}
+
+// ── Cooking card ─────────────────────────────────────────────────────────────
+
+class _CookingCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final DateTime time;
+  final VoidCallback onEdit, onDelete;
+
+  const _CookingCard(
+      {required this.data,
+      required this.time,
+      required this.onEdit,
+      required this.onDelete});
+
+  String _fmt(num? v) {
+    final d = (v ?? 0).toDouble();
+    return d == d.roundToDouble()
+        ? d.toInt().toString()
+        : d.toStringAsFixed(1);
+  }
+
+  bool get _isReceived  => data['isReceivedFood'] as bool? ?? false;
+  bool get _isSavedFood => data['isSavedFood']    as bool? ?? false;
+
+  bool get _quantitiesMissing =>
+      (data['usedKg']   as num? ?? 0) == 0 &&
+      (data['savedKg']  as num? ?? 0) == 0 &&
+      (data['wastedKg'] as num? ?? 0) == 0;
+
+  Color get _typeColor {
+    if (_isSavedFood) return kTeal;
+    if (_isReceived)  return kPurple;
+    return kWarning;
+  }
+
+  IconData get _typeIcon {
+    if (_isSavedFood) return Icons.recycling_rounded;
+    if (_isReceived)  return Icons.delivery_dining_rounded;
+    return Icons.soup_kitchen_rounded;
+  }
+
+  String get _typeLabel {
+    if (_isSavedFood) return 'Saved Food';
+    if (_isReceived)  return 'Received';
+    return 'Cooked';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ingredients = List<Map<String, dynamic>>.from(
+        (data['ingredients'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map)));
+    final source = data['source'] as String? ?? '';
+    // For saved food, strip the "Saved: " prefix for display
+    final displayDish = _isSavedFood
+        ? (data['dish'] as String? ?? '—').replaceFirst('Saved: ', '')
+        : (data['dish'] as String? ?? '—');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: _quantitiesMissing
+            ? Border.all(color: _typeColor.withOpacity(0.5), width: 1.5)
+            : null,
+        boxShadow: [
+          BoxShadow(
+              color: _typeColor.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4))
+        ],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: _typeColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(_typeIcon, color: _typeColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+              Row(children: [
+                Expanded(
+                  child: Text(displayDish,
+                      style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          color: kTextDark)),
+                ),
+                Container(
+                  margin: const EdgeInsets.only(left: 6),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _typeColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(7),
+                  ),
+                  child: Text(
+                    _typeLabel,
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: _typeColor),
+                  ),
+                ),
+              ]),
+              const SizedBox(height: 2),
+              Row(children: [
+                Text(DateFormat('hh:mm a · dd MMM').format(time),
+                    style: const TextStyle(
+                        fontSize: 11, color: kTextLight)),
+                if (_quantitiesMissing) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: _typeColor.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text('Tap Edit to add quantities',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: _typeColor)),
+                  ),
+                ],
+              ]),
+            ])),
+            IconButton(
+              icon: const Icon(Icons.edit_rounded,
+                  size: 18, color: kInfo),
+              onPressed: onEdit,
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_rounded,
+                  size: 18, color: kAccent),
+              onPressed: onDelete,
+            ),
+          ]),
+        ),
+
+        // Source row (received / saved food)
+        if (source.isNotEmpty && source != 'Carry-over')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(children: [
+              Icon(Icons.store_rounded, size: 13, color: _typeColor),
+              const SizedBox(width: 5),
+              Text(source,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: _typeColor,
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ),
+
+        // Saved food carry-over label
+        if (_isSavedFood)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Row(children: [
+              const Icon(Icons.recycling_rounded, size: 13, color: kTeal),
+              const SizedBox(width: 5),
+              const Text('Carry-over from previous day',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: kTeal,
+                      fontWeight: FontWeight.w600)),
+            ]),
+          ),
+
+        // Quantity stats
+        if (!_quantitiesMissing)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(children: [
+              _statChip('${_fmt(data['usedKg'] as num?)} kg',
+                  'Used', _typeColor),
+              const SizedBox(width: 8),
+              _statChip('${_fmt(data['savedKg'] as num?)} kg',
+                  'Saved', kInfo),
+              const SizedBox(width: 8),
+              _statChip('${_fmt(data['wastedKg'] as num?)} kg',
+                  'Wasted', kAccent),
+            ]),
+          ),
+
+        // Served info
+        if (!_quantitiesMissing)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: kSuccess.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kSuccess.withOpacity(0.2)),
+              ),
+              child: const Row(children: [
+                Icon(Icons.confirmation_number_rounded,
+                    color: kSuccess, size: 14),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Served count comes from the Tokens tab automatically',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: kSuccess,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+
+        // Saved carry-over reminder
+        if (!_quantitiesMissing &&
+            (data['savedKg'] as num? ?? 0) > 0 &&
+            !_isSavedFood)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: kInfo.withOpacity(0.07),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kInfo.withOpacity(0.2)),
+              ),
+              child: Row(children: [
+                const Icon(Icons.schedule_rounded,
+                    color: kInfo, size: 14),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '${_fmt(data['savedKg'] as num?)} kg saved → carries over to tomorrow\'s inventory',
+                    style: const TextStyle(
+                        fontSize: 11,
+                        color: kInfo,
+                        fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+
+        // Ingredients (cooked only)
+        if (!_isReceived && !_isSavedFood && ingredients.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
+            child: Text('INGREDIENTS USED',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: kTextLight,
+                    letterSpacing: 1.0)),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: ingredients
+                  .map((ing) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                            color: kSurface,
+                            borderRadius: BorderRadius.circular(8)),
+                        child: Text(
+                            '${ing['name']}: ${_fmt(ing['qty'] as num?)} ${ing['unit']}',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: kTextMid)),
+                      ))
+                  .toList(),
+            ),
+          ),
+        ],
+
+        // Notes
+        if ((data['notes'] as String? ?? '').isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: kSurface,
+                  borderRadius: BorderRadius.circular(10)),
+              child: Text(data['notes'] as String,
+                  style:
+                      const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+            ),
+          ),
+
+        const SizedBox(height: 14),
+      ]),
+    );
+  }
+
+  Widget _statChip(String value, String label, Color color) =>
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10)),
+          child: Column(children: [
+            Text(value,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+            const SizedBox(height: 2),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: color.withOpacity(0.7))),
+          ]),
+        ),
+      );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // INVENTORY TAB
-// ═════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _InventoryTab extends StatefulWidget {
-  final String branchId;
+  final String branchId, username;
   final List<StockItem> allStockItems;
   final bool stockLoaded;
-  final VoidCallback onRefresh;
-  final String username;
-  final VoidCallback onLogout;
+  final VoidCallback onRefresh, onAddNew, onLogout;
+  final Function(StockItem) onEdit;
+  final Function(StockItem, {required bool isAdd}) onAdjust;
+
   const _InventoryTab({
     required this.branchId,
     required this.allStockItems,
     required this.stockLoaded,
     required this.onRefresh,
+    required this.onAddNew,
+    required this.onEdit,
+    required this.onAdjust,
     required this.username,
     required this.onLogout,
   });
+
   @override
   State<_InventoryTab> createState() => _InventoryTabState();
 }
 
 class _InventoryTabState extends State<_InventoryTab> {
-  final TextEditingController _searchController = TextEditingController();
+  final _searchCtrl   = TextEditingController();
+  bool _showLowOnly   = false;
+  bool _showSavedOnly = false;
+
   @override
   Widget build(BuildContext context) {
-    final filtered = _searchController.text.isEmpty
+    var items = _searchCtrl.text.isEmpty
         ? widget.allStockItems
         : widget.allStockItems
             .where((i) => i.name
                 .toLowerCase()
-                .contains(_searchController.text.toLowerCase()))
+                .contains(_searchCtrl.text.toLowerCase()))
             .toList();
-    final lowStock = widget.allStockItems.where((i) => i.quantity <= 2).length;
+    if (_showLowOnly)   items = items.where((i) => i.quantity <= 2).toList();
+    if (_showSavedOnly) items = items.where((i) => i.name.startsWith('Saved:')).toList();
+
+    final lowStock      = widget.allStockItems.where((i) => i.quantity <= 2).length;
     final criticalStock = widget.allStockItems.where((i) => i.quantity == 0).length;
-    return Column(
-      children: [
-        // Header
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF3498DB), Color(0xFF2980B9)],
+    final savedItems    = widget.allStockItems.where((i) => i.name.startsWith('Saved:')).length;
+
+    return Column(children: [
+      Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              colors: [Color(0xFF1D4ED8), kInfo],
               begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
+              end: Alignment.bottomRight),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Inventory",
+                  const Text('Inventory',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5)),
+                  Text(
+                      '${widget.allStockItems.length} items · $savedItems saved carry-overs',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12)),
+                ]),
+                Row(children: [
+                  GestureDetector(
+                    onTap: widget.onAddNew,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: Colors.white.withOpacity(0.3)),
+                      ),
+                      child: const Row(children: [
+                        Icon(Icons.add_rounded,
+                            color: Colors.white, size: 16),
+                        SizedBox(width: 4),
+                        Text('Add',
                             style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          Text(
-                            "${widget.allStockItems.length} items in stock",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      GestureDetector(
-                        onTap: widget.onLogout,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE74C3C),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(Icons.logout_rounded,
-                                  color: Colors.white, size: 16),
-                              SizedBox(width: 6),
-                              Text(
-                                "Logout",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                                color: Colors.white,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13)),
+                      ]),
+                    ),
                   ),
-                  const SizedBox(height: 16),
-                  // Stats row
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.2),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.warning_rounded,
-                                color: const Color(0xFFFFD54F),
-                                size: 20,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                "$lowStock",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              Text(
-                                "Low Stock",
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.7),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.2),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Icon(
-                                Icons.error_rounded,
-                                color: const Color(0xFFEF5350),
-                                size: 20,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                "$criticalStock",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                              Text(
-                                "Out of Stock",
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.7),
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  const SizedBox(width: 8),
+                  _logoutBtn(widget.onLogout),
+                ]),
+              ]),
+              const SizedBox(height: 14),
+              Row(children: [
+                Expanded(
+                    child: _invStat('$lowStock', 'Low Stock',
+                        Icons.warning_rounded,
+                        const Color(0xFFFFD54F))),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: _invStat('$criticalStock', 'Out of Stock',
+                        Icons.error_rounded,
+                        const Color(0xFFFCA5A5))),
+                const SizedBox(width: 8),
+                Expanded(
+                    child: _invStat('$savedItems', 'Saved Items',
+                        Icons.save_rounded,
+                        const Color(0xFF93C5FD))),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Search inventory…',
+                prefixIcon: const Icon(Icons.search,
+                    color: kTextLight, size: 20),
+                suffixIcon: _searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() {});
+                        })
+                    : null,
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none),
+                contentPadding: const EdgeInsets.symmetric(
+                    vertical: 13, horizontal: 16),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() {
+              _showLowOnly = !_showLowOnly;
+              if (_showLowOnly) _showSavedOnly = false;
+            }),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _showLowOnly ? kWarning : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
                 ],
               ),
+              child: Icon(Icons.warning_rounded,
+                  color: _showLowOnly ? Colors.white : kTextLight,
+                  size: 20),
             ),
           ),
-        ),
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: TextField(
-            controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: "Search inventory...",
-              prefixIcon: const Icon(
-                Icons.search,
-                color: Color(0xFF95A5A6),
-                size: 20,
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => setState(() {
+              _showSavedOnly = !_showSavedOnly;
+              if (_showSavedOnly) _showLowOnly = false;
+            }),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _showSavedOnly ? kTeal : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2))
+                ],
               ),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() {});
+              child: Icon(Icons.recycling_rounded,
+                  color: _showSavedOnly ? Colors.white : kTextLight,
+                  size: 20),
+            ),
+          ),
+        ]),
+      ),
+
+      Expanded(
+        child: !widget.stockLoaded
+            ? const Center(
+                child: CircularProgressIndicator(
+                    color: kInfo, strokeWidth: 2))
+            : items.isEmpty
+                ? Center(
+                    child: Text(
+                    _showLowOnly
+                        ? 'No low-stock items!'
+                        : _showSavedOnly
+                            ? 'No saved food carry-overs yet'
+                            : 'No items found',
+                    style: const TextStyle(
+                        fontSize: 15, color: kTextLight),
+                  ))
+                : RefreshIndicator(
+                    onRefresh: () async => widget.onRefresh(),
+                    color: kInfo,
+                    child: ListView.builder(
+                      padding:
+                          const EdgeInsets.fromLTRB(16, 4, 16, 100),
+                      itemCount: items.length,
+                      itemBuilder: (_, i) {
+                        final item = items[i];
+                        return _InventoryCard(
+                          item:       item,
+                          isLow:      item.quantity <= 2 && item.quantity > 0,
+                          isCritical: item.quantity == 0,
+                          isSaved:    item.name.startsWith('Saved:'),
+                          onAdd:    () => widget.onAdjust(item, isAdd: true),
+                          onRemove: () => widget.onAdjust(item, isAdd: false),
+                          onEdit:   () => widget.onEdit(item),
+                        );
                       },
-                    )
-                  : null,
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 14,
-                horizontal: 16,
-              ),
-            ),
-          ),
-        ),
-        // Content
-        Expanded(
-          child: widget.stockLoaded
-              ? (filtered.isEmpty
-                  ? const Center(
-                      child: Text(
-                        "No items found",
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: () async => widget.onRefresh(),
-                      color: const Color(0xFF3498DB),
-                      child: ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                        itemCount: filtered.length,
-                        itemBuilder: (_, i) {
-                          final item = filtered[i];
-                          final isLow = item.quantity <= 2;
-                          final isCritical = item.quantity == 0;
-                          return _InventoryCard(
-                            item: item,
-                            isLow: isLow,
-                            isCritical: isCritical,
-                          );
-                        },
-                      ),
-                    ))
-              : const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF3498DB),
-                    strokeWidth: 2,
+                    ),
                   ),
-                ),
-        ),
-      ],
-    );
+      ),
+    ]);
   }
+
+  Widget _invStat(
+          String value, String label, IconData icon, Color color) =>
+      Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.2)),
+        ),
+        child: Column(children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(height: 4),
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900)),
+          Text(label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: Colors.white.withOpacity(0.7),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600)),
+        ]),
+      );
 }
 
 class _InventoryCard extends StatelessWidget {
   final StockItem item;
-  final bool isLow;
-  final bool isCritical;
+  final bool isLow, isCritical, isSaved;
+  final VoidCallback onAdd, onRemove, onEdit;
   const _InventoryCard({
     required this.item,
     required this.isLow,
     required this.isCritical,
+    required this.isSaved,
+    required this.onAdd,
+    required this.onRemove,
+    required this.onEdit,
   });
+
   @override
   Widget build(BuildContext context) {
-    Color statusColor = const Color(0xFF27AE60);
+    Color statusColor   = kSuccess;
     IconData statusIcon = Icons.check_circle_rounded;
-    String statusText = "Good";
-    if (isCritical) {
-      statusColor = const Color(0xFFE74C3C);
-      statusIcon = Icons.error_rounded;
-      statusText = "Out";
+    if (isSaved) {
+      statusColor = kTeal;
+      statusIcon  = Icons.recycling_rounded;
+    } else if (isCritical) {
+      statusColor = kAccent;
+      statusIcon  = Icons.error_rounded;
     } else if (isLow) {
-      statusColor = const Color(0xFFF39C12);
-      statusIcon = Icons.warning_rounded;
-      statusText = "Low";
+      statusColor = kWarning;
+      statusIcon  = Icons.warning_rounded;
     }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isCritical || isLow
-              ? statusColor.withOpacity(0.3)
-              : Colors.transparent,
-        ),
+            color: (isCritical || isLow || isSaved)
+                ? statusColor.withOpacity(0.3)
+                : Colors.transparent),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 2))
         ],
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            // Icon
-            Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
+        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+        child: Row(children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
                 color: statusColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(
-                statusIcon,
-                color: statusColor,
-                size: 24,
-              ),
-            ),
-            const SizedBox(width: 14),
-            // Info
-            Expanded(
+                borderRadius: BorderRadius.circular(13)),
+            child: Icon(statusIcon, color: statusColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    item.name,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: Color(0xFF2C3E50),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Updated ${DateFormat('dd MMM, hh:mm a').format(item.lastUpdated.toDate())}",
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF95A5A6),
-                    ),
-                  ),
-                ],
-              ),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+            Text(item.name,
+                style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: kTextDark)),
+            const SizedBox(height: 2),
+            Text(
+                'Updated ${DateFormat('dd MMM, hh:mm a').format(item.lastUpdated.toDate())}',
+                style: const TextStyle(
+                    fontSize: 10, color: kTextLight)),
+          ])),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 8, vertical: 5),
+            decoration: BoxDecoration(
+              color: statusColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: statusColor.withOpacity(0.3)),
             ),
-            // Quantity and status
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: statusColor.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Text(
-                    "${item.quantity} ${item.unit}",
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: statusColor,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  statusText,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: statusColor,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+            child: Text('${item.quantity} ${item.unit}',
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: statusColor)),
+          ),
+          const SizedBox(width: 6),
+          Column(children: [
+            _miniBtn(Icons.add_rounded,    const Color(0xFF1D4ED8), onAdd),
+            const SizedBox(height: 3),
+            _miniBtn(Icons.remove_rounded, kAccent,                 onRemove),
+            const SizedBox(height: 3),
+            _miniBtn(Icons.edit_rounded,   kPurple,                 onEdit),
+          ]),
+        ]),
       ),
     );
   }
+
+  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, color: color, size: 16),
+        ),
+      );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// WASTE TAB
-// ═════════════════════════════════════════════════════════════════════════════
-class _WasteTab extends StatefulWidget {
-  final CollectionReference<Map<String, dynamic>> wasteCol;
-  final void Function({Map<String, dynamic>? existing, String? docId})
-      onAddWaste;
-  final Function(String, String) onDeleteWaste;
-  final String username;
+// ═══════════════════════════════════════════════════════════════════════════
+// HISTORY TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _HistoryTab extends StatefulWidget {
+  final String branchId, username;
+  final DateFormat dateFmt, displayFmt;
   final VoidCallback onLogout;
-  const _WasteTab({
-    required this.wasteCol,
-    required this.onAddWaste,
-    required this.onDeleteWaste,
+
+  const _HistoryTab({
+    required this.branchId,
+    required this.dateFmt,
+    required this.displayFmt,
     required this.username,
     required this.onLogout,
   });
+
   @override
-  State<_WasteTab> createState() => _WasteTabState();
+  State<_HistoryTab> createState() => _HistoryTabState();
 }
 
-class _WasteTabState extends State<_WasteTab> {
-  final TextEditingController _searchController = TextEditingController();
+class _HistoryTabState extends State<_HistoryTab> {
+  DateTime _selectedDate = DateTime.now();
+
+  Future<Map<String, dynamic>> _fetchDayData(String dateKey) async {
+    final dayDoc = await FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('dasterkhwaan')
+        .doc(dateKey)
+        .get();
+    final dayData    = dayDoc.data() ?? {};
+    final tokensSnap = await FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('dasterkhwaan')
+        .doc(dateKey)
+        .collection('tokens')
+        .get();
+    final cookingSnap = await FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('dasterkhwaan')
+        .doc(dateKey)
+        .collection('cooking_sessions')
+        .get();
+
+    final totalTokens  = tokensSnap.docs.length;
+    final servedTokens = tokensSnap.docs
+        .where((d) => (d.data())['served'] == true)
+        .length;
+    final sessions = cookingSnap.docs.map((d) {
+      final data = d.data();
+      return {
+        'dish':           data['dish'] ?? '—',
+        'isReceivedFood': data['isReceivedFood'] as bool? ?? false,
+        'isSavedFood':    data['isSavedFood']    as bool? ?? false,
+        'source':         data['source'] ?? '',
+        'usedKg':         (data['usedKg']   as num? ?? data['cookedKg'] as num? ?? 0).toDouble(),
+        'savedKg':        (data['savedKg']  as num? ?? 0).toDouble(),
+        'wastedKg':       (data['wastedKg'] as num? ?? 0).toDouble(),
+        'notes':          data['notes'] ?? '',
+        'ingredients':    data['ingredients'] ?? [],
+      };
+    }).toList();
+
+    return {
+      'menu':         dayData['menu'] ?? '',
+      'totalTokens':  totalTokens,
+      'servedTokens': servedTokens,
+      'sessions':     sessions,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Header
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFE74C3C), Color(0xFFC0392B)],
+    final dateKey     = widget.dateFmt.format(_selectedDate);
+    final displayDate = widget.displayFmt.format(_selectedDate);
+    final isToday     = dateKey == widget.dateFmt.format(DateTime.now());
+
+    return Column(children: [
+      Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              colors: [Color(0xFF7C3AED), kPurple],
               begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
+              end: Alignment.bottomRight),
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                Column(crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Waste Tracking",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                            ),
+                  const Text('Daily History',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5)),
+                  Text(widget.username,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700)),
+                ]),
+                _logoutBtn(widget.onLogout),
+              ]),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                      color: Colors.white.withOpacity(0.2)),
+                ),
+                child: Row(children: [
+                  _dateNavBtn(
+                    Icons.chevron_left_rounded,
+                    () => setState(() => _selectedDate =
+                        _selectedDate.subtract(const Duration(days: 1))),
+                  ),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDate,
+                          firstDate: DateTime(2024),
+                          lastDate: DateTime.now(),
+                          builder: (ctx, child) => Theme(
+                            data: ThemeData.light().copyWith(
+                                colorScheme: const ColorScheme.light(
+                                    primary: kPurple)),
+                            child: child!,
                           ),
+                        );
+                        if (picked != null) {
+                          setState(() => _selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 10),
+                        child: Row(
+                            mainAxisAlignment:
+                                MainAxisAlignment.center,
+                            children: [
+                          const Icon(Icons.calendar_today_rounded,
+                              color: Colors.white, size: 16),
+                          const SizedBox(width: 8),
                           Text(
-                            "Monitor & reduce waste",
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      GestureDetector(
-                        onTap: widget.onLogout,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF2C3E50),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(Icons.logout_rounded,
-                                  color: Colors.white, size: 16),
-                              SizedBox(width: 6),
-                              Text(
-                                "Logout",
-                                style: TextStyle(
+                              isToday
+                                  ? 'Today — $displayDate'
+                                  : displayDate,
+                              style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                                  fontSize: 14)),
+                        ]),
                       ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        // Search bar
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: TextField(
-            controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: "Search waste records...",
-              prefixIcon: const Icon(
-                Icons.search,
-                color: Color(0xFF95A5A6),
-                size: 20,
-              ),
-              suffixIcon: _searchController.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () {
-                        _searchController.clear();
-                        setState(() {});
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                vertical: 14,
-                horizontal: 16,
-              ),
-            ),
-          ),
-        ),
-        // Content
-        Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: widget.wasteCol.orderBy('addedAt', descending: true).snapshots(),
-            builder: (_, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFFE74C3C),
-                    strokeWidth: 2,
-                  ),
-                );
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              var docs = snapshot.data!.docs;
-              if (_searchController.text.isNotEmpty) {
-                final q = _searchController.text.toLowerCase();
-                docs = docs
-                    .where((d) =>
-                        (d['item'] as String).toLowerCase().contains(q))
-                    .toList();
-              }
-              if (docs.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.recycling_rounded,
-                        size: 80,
-                        color: const Color(0xFFE74C3C).withOpacity(0.3),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "No waste recorded",
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        "Keep up the good work!",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                itemCount: docs.length,
-                itemBuilder: (_, i) {
-                  final e = docs[i].data() as Map<String, dynamic>;
-                  final time =
-                      (e['addedAt'] as Timestamp?)?.toDate() ?? DateTime.now();
-                  return _WasteCard(
-                    item: e['item'],
-                    quantity: e['quantity'] as double,
-                    unit: e['unit'],
-                    type: e['type'],
-                    reason: e['reason'] ?? '',
-                    time: time,
-                    onEdit: () => widget.onAddWaste(
-                      existing: e,
-                      docId: docs[i].id,
                     ),
-                    onDelete: () => widget.onDeleteWaste(docs[i].id, e['item']),
-                  );
-                },
-              );
-            },
+                  ),
+                  _dateNavBtn(
+                    Icons.chevron_right_rounded,
+                    isToday
+                        ? null
+                        : () => setState(() => _selectedDate =
+                            _selectedDate.add(const Duration(days: 1))),
+                  ),
+                ]),
+              ),
+            ]),
           ),
         ),
-      ],
-    );
+      ),
+      Expanded(
+        child: FutureBuilder<Map<String, dynamic>>(
+          key: ValueKey(dateKey),
+          future: _fetchDayData(dateKey),
+          builder: (_, snap) {
+            if (snap.connectionState == ConnectionState.waiting) {
+              return const Center(
+                  child: CircularProgressIndicator(
+                      color: kPurple, strokeWidth: 2));
+            }
+            if (snap.hasError) {
+              return Center(child: Text('Error: ${snap.error}'));
+            }
+            final d            = snap.data!;
+            final menu         = d['menu'] as String;
+            final totalTokens  = d['totalTokens'] as int;
+            final servedTokens = d['servedTokens'] as int;
+            final sessions =
+                d['sessions'] as List<Map<String, dynamic>>;
+
+            if (totalTokens == 0 &&
+                sessions.isEmpty &&
+                menu.isEmpty) {
+              return Center(
+                  child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                Icon(Icons.event_note_rounded,
+                    size: 80, color: kPurple.withOpacity(0.2)),
+                const SizedBox(height: 16),
+                Text('No records for $displayDate',
+                    style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: kTextLight)),
+              ]));
+            }
+
+            return ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              children: [
+                _sectionCard(
+                  icon: Icons.confirmation_number_rounded,
+                  iconColor: kSuccess,
+                  title: 'Token Summary',
+                  child: Row(children: [
+                    Expanded(child: _histStat('Total',
+                        '$totalTokens',
+                        Icons.confirmation_number_rounded,
+                        kSuccess)),
+                    Expanded(child: _histStat('Served',
+                        '$servedTokens',
+                        Icons.check_circle_rounded, kInfo)),
+                    Expanded(child: _histStat('Pending',
+                        '${totalTokens - servedTokens}',
+                        Icons.hourglass_top_rounded, kWarning)),
+                  ]),
+                ),
+                const SizedBox(height: 14),
+                if (menu.isNotEmpty) ...[
+                  _sectionCard(
+                    icon: Icons.restaurant_menu_rounded,
+                    iconColor: kWarning,
+                    title: 'Menu',
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                          color: const Color(0xFFFFFBEB),
+                          borderRadius: BorderRadius.circular(10)),
+                      child: Text(menu,
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF92400E),
+                              height: 1.5)),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                if (sessions.isNotEmpty) ...[
+                  Text('FOOD LOG (${sessions.length})',
+                      style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: kTextLight,
+                          letterSpacing: 1.0)),
+                  const SizedBox(height: 8),
+                  ...sessions.map((s) => _HistCookCard(session: s)),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    ]);
   }
+
+  Widget _dateNavBtn(IconData icon, VoidCallback? onTap) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 40,
+          height: 40,
+          margin: const EdgeInsets.all(2),
+          decoration: BoxDecoration(
+            color: onTap == null
+                ? Colors.white.withOpacity(0.05)
+                : Colors.white.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(icon,
+              color: onTap == null
+                  ? Colors.white.withOpacity(0.3)
+                  : Colors.white,
+              size: 20),
+        ),
+      );
+
+  Widget _sectionCard({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required Widget child,
+  }) =>
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 3))
+          ],
+        ),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+          Row(children: [
+            Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                    color: iconColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10)),
+                child: Icon(icon, color: iconColor, size: 18)),
+            const SizedBox(width: 10),
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: kTextDark)),
+          ]),
+          const SizedBox(height: 14),
+          child,
+        ]),
+      );
+
+  Widget _histStat(
+          String label, String value, IconData icon, Color color) =>
+      Column(children: [
+        Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, color: color, size: 18)),
+        const SizedBox(height: 6),
+        Text(value,
+            style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+                color: color)),
+        const SizedBox(height: 2),
+        Text(label,
+            style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: kTextLight)),
+      ]);
 }
 
-class _WasteCard extends StatelessWidget {
-  final String item;
-  final double quantity;
-  final String unit;
-  final String type;
-  final String reason;
-  final DateTime time;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  const _WasteCard({
-    required this.item,
-    required this.quantity,
-    required this.unit,
-    required this.type,
-    required this.reason,
-    required this.time,
-    required this.onEdit,
-    required this.onDelete,
-  });
-  String _fmt(double qty) =>
-      qty == qty.toInt() ? qty.toInt().toString() : qty.toString();
+class _HistCookCard extends StatelessWidget {
+  final Map<String, dynamic> session;
+  const _HistCookCard({required this.session});
+
+  String _fmt(num? v) {
+    final d = (v ?? 0).toDouble();
+    return d == d.roundToDouble()
+        ? d.toInt().toString()
+        : d.toStringAsFixed(1);
+  }
+
+  bool get _isReceived  => session['isReceivedFood'] as bool? ?? false;
+  bool get _isSavedFood => session['isSavedFood']    as bool? ?? false;
+
+  Color get _typeColor {
+    if (_isSavedFood) return kTeal;
+    if (_isReceived)  return kPurple;
+    return kWarning;
+  }
+
+  IconData get _typeIcon {
+    if (_isSavedFood) return Icons.recycling_rounded;
+    if (_isReceived)  return Icons.delivery_dining_rounded;
+    return Icons.soup_kitchen_rounded;
+  }
+
+  String get _typeLabel {
+    if (_isSavedFood) return 'Saved Food';
+    if (_isReceived)  return 'Received';
+    return 'Cooked';
+  }
+
   @override
   Widget build(BuildContext context) {
-    Color typeColor = const Color(0xFFE74C3C);
-    IconData typeIcon = Icons.dangerous_rounded;
-    if (type == 'unused') {
-      typeColor = const Color(0xFFF39C12);
-      typeIcon = Icons.remove_circle_outline_rounded;
-    } else if (type == 'expired') {
-      typeColor = const Color(0xFF9B59B6);
-      typeIcon = Icons.event_busy_rounded;
-    }
+    final ingredients = List<Map<String, dynamic>>.from(
+        (session['ingredients'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map)));
+    final source      = session['source'] as String? ?? '';
+    final displayDish = _isSavedFood
+        ? (session['dish'] as String).replaceFirst('Saved: ', '')
+        : session['dish'] as String;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: typeColor.withOpacity(0.2),
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _typeColor.withOpacity(0.2)),
         boxShadow: [
           BoxShadow(
-            color: typeColor.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 2),
-          ),
+              color: _typeColor.withOpacity(0.07),
+              blurRadius: 10,
+              offset: const Offset(0, 3))
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: typeColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(typeIcon, color: typeColor, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item,
-                        style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF2C3E50),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        "${_fmt(quantity)} $unit • $type",
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: typeColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(
-                        Icons.edit_rounded,
-                        size: 18,
-                        color: Color(0xFF3498DB),
-                      ),
-                      onPressed: onEdit,
-                    ),
-                    IconButton(
-                      icon: const Icon(
-                        Icons.delete_rounded,
-                        size: 18,
-                        color: Color(0xFFE74C3C),
-                      ),
-                      onPressed: onDelete,
-                    ),
-                  ],
-                ),
-              ],
+        Row(children: [
+          Icon(_typeIcon, color: _typeColor, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+              child: Text(displayDish,
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: kTextDark))),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: _typeColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
             ),
-            if (reason.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF8F9FA),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.info_outline_rounded,
-                      size: 14,
-                      color: Color(0xFF95A5A6),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
+            child: Text(
+              _typeLabel,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: _typeColor),
+            ),
+          ),
+        ]),
+        if (_isSavedFood) ...[
+          const SizedBox(height: 4),
+          Row(children: [
+            const Icon(Icons.recycling_rounded, size: 12, color: kTeal),
+            const SizedBox(width: 4),
+            const Text('Carry-over from previous day',
+                style: TextStyle(
+                    fontSize: 11,
+                    color: kTeal,
+                    fontWeight: FontWeight.w600)),
+          ]),
+        ] else if (_isReceived && source.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Row(children: [
+            const Icon(Icons.store_rounded, size: 12, color: kPurple),
+            const SizedBox(width: 4),
+            Text(source,
+                style: const TextStyle(
+                    fontSize: 11,
+                    color: kPurple,
+                    fontWeight: FontWeight.w600)),
+          ]),
+        ],
+        const SizedBox(height: 10),
+        Row(children: [
+          _chip('${_fmt(session['usedKg'] as num?)} kg',
+              'Used', _typeColor),
+          const SizedBox(width: 6),
+          _chip('${_fmt(session['savedKg'] as num?)} kg',
+              'Saved', kInfo),
+          const SizedBox(width: 6),
+          _chip('${_fmt(session['wastedKg'] as num?)} kg',
+              'Wasted', kAccent),
+        ]),
+        if (!_isReceived && !_isSavedFood && ingredients.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            children: ingredients
+                .map((ing) => Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                          color: kSurface,
+                          borderRadius: BorderRadius.circular(6)),
                       child: Text(
-                        reason,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: Color(0xFF95A5A6),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text(
-              DateFormat('hh:mm a · dd MMM').format(time),
+                          '${ing['name']}: ${_fmt(ing['qty'] as num?)} ${ing['unit']}',
+                          style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: kTextMid)),
+                    ))
+                .toList(),
+          ),
+        ],
+        if ((session['notes'] as String? ?? '').isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(session['notes'] as String,
               style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFF95A5A6),
-              ),
-            ),
-          ],
-        ),
-      ),
+                  fontSize: 12, color: Color(0xFF64748B))),
+        ],
+      ]),
     );
   }
+
+  Widget _chip(String value, String label, Color color) =>
+      Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+              color: color.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8)),
+          child: Column(children: [
+            Text(value,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: color)),
+            Text(label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 9,
+                    color: color.withOpacity(0.7),
+                    fontWeight: FontWeight.w600)),
+          ]),
+        ),
+      );
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// MENU TAB
-// ═════════════════════════════════════════════════════════════════════════════
-class _MenuTab extends StatelessWidget {
-  final String currentMenu;
-  final Map<String, double> menuIngredients;
-  final Map<String, double> requiredPerToken;
-  final VoidCallback onEditMenu;
-  final String username;
-  final VoidCallback onLogout;
-  const _MenuTab({
-    required this.currentMenu,
-    required this.menuIngredients,
-    required this.requiredPerToken,
-    required this.onEditMenu,
-    required this.username,
-    required this.onLogout,
-  });
-  @override
-  Widget build(BuildContext context) {
-    final activeIngredients = menuIngredients.isNotEmpty
-        ? menuIngredients
-        : requiredPerToken;
-    return Column(
-      children: [
-        // Header
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFFF39C12), Color(0xFFE67E22)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            "Today's Menu",
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 26,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                          Text(
-                            DateFormat('EEE, dd MMM').format(DateTime.now()),
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.7),
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      GestureDetector(
-                        onTap: onLogout,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 10,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE74C3C),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: const [
-                              Icon(Icons.logout_rounded,
-                                  color: Colors.white, size: 16),
-                              SizedBox(width: 6),
-                              Text(
-                                "Logout",
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        // Content
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Menu card
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFF39C12).withOpacity(0.15),
-                        blurRadius: 20,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFF39C12).withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: const Icon(
-                                  Icons.restaurant_menu_rounded,
-                                  color: Color(0xFFF39C12),
-                                  size: 24,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                "Menu",
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFF2C3E50),
-                                ),
-                              ),
-                            ],
-                          ),
-                          IconButton(
-                            onPressed: onEditMenu,
-                            icon: const Icon(
-                              Icons.edit_rounded,
-                              color: Color(0xFFF39C12),
-                              size: 20,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        currentMenu.isEmpty
-                            ? "No menu set for today"
-                            : currentMenu,
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: currentMenu.isEmpty
-                              ? const Color(0xFF95A5A6)
-                              : const Color(0xFF2C3E50),
-                          fontWeight: currentMenu.isEmpty
-                              ? FontWeight.w500
-                              : FontWeight.w600,
-                          height: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                // Ingredients section
-                const Text(
-                  "INGREDIENTS PER TOKEN",
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF95A5A6),
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...activeIngredients.entries.map((entry) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFF39C12),
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              entry.key,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF2C3E50),
-                              ),
-                            ),
-                          ],
-                        ),
-                        Text(
-                          "${entry.value} kg",
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFF39C12),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-                const SizedBox(height: 20),
-                // Info banner
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF9E6),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: const Color(0xFFF39C12).withOpacity(0.2),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.info_outline_rounded,
-                        color: Color(0xFFF39C12),
-                        size: 20,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          "These quantities are automatically deducted when a token is served",
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: const Color(0xFFF39C12).withOpacity(0.8),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
+// ═══════════════════════════════════════════════════════════════════════════
+// SHARED HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+Widget _logoutBtn(VoidCallback onTap) => GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+            color: const Color(0xFFEF4444),
+            borderRadius: BorderRadius.circular(14)),
+        child: const Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.logout_rounded, color: Colors.white, size: 16),
+          SizedBox(width: 6),
+          Text('Logout',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13)),
+        ]),
+      ),
     );
-  }
-}

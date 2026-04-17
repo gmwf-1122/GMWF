@@ -6,10 +6,12 @@ import '../services/local_storage_service.dart';
 class InventoryDocPage extends StatefulWidget {
   final String branchId;
   final bool isStandalone;
+  final String role; // e.g. 'doctor' or 'supervisor'
   const InventoryDocPage({
     super.key,
     required this.branchId,
     this.isStandalone = true,
+    this.role = 'doctor',
   });
 
   @override
@@ -68,6 +70,8 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           'dose': dose,
           'quantity': qty,
           'classification': classification,
+          'formula': item['formula'] ?? '',
+          'formula_lower': item['formula_lower'] ?? '',
         };
       }
     }
@@ -123,13 +127,15 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
       appBar: AppBar(
         backgroundColor: _teal,
         elevation: 8,
-        leading: IconButton(
-          icon: const FaIcon(FontAwesomeIcons.arrowLeft, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
+        leading: widget.role == 'doctor'
+            ? IconButton(
+                icon: const FaIcon(FontAwesomeIcons.arrowLeft, color: Colors.white),
+                onPressed: () => Navigator.of(context).pop(),
+              )
+            : null,
         title: Row(
           children: [
-            FaIcon(FontAwesomeIcons.pills, color: Colors.white, size: 24),
+            const FaIcon(FontAwesomeIcons.pills, color: Colors.white, size: 24),
             const SizedBox(width: 12),
             const Text(
               'Inventory',
@@ -164,7 +170,9 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
-                boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))],
+                boxShadow: const [
+                  BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))
+                ],
               ),
               child: TextField(
                 controller: _searchCtrl,
@@ -172,10 +180,14 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                   hintText: 'Search medicines...',
                   prefixIcon: const Icon(Icons.search, color: _teal),
                   suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _searchCtrl.clear()))
+                      ? IconButton(
+                          icon: const Icon(Icons.clear),
+                          onPressed: () => setState(() => _searchCtrl.clear()),
+                        )
                       : null,
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -216,7 +228,10 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           children: [
             FaIcon(FontAwesomeIcons.boxOpen, size: 80, color: Colors.grey[400]),
             const SizedBox(height: 20),
-            Text('No inventory items found', style: TextStyle(fontSize: 18, color: Colors.grey[600])),
+            Text(
+              'No inventory items found',
+              style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+            ),
             const SizedBox(height: 10),
             ElevatedButton.icon(
               onPressed: () async {
@@ -225,7 +240,10 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
               },
               icon: const FaIcon(FontAwesomeIcons.arrowsRotate),
               label: const Text('Reload Inventory'),
-              style: ElevatedButton.styleFrom(backgroundColor: _teal),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _teal,
+                foregroundColor: Colors.white,
+              ),
             ),
           ],
         ),
@@ -238,12 +256,19 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
       final name = (b['name'] ?? '').toString().toLowerCase();
       final type = (b['type'] ?? '').toString().toLowerCase();
       final dose = (b['dose'] ?? '').toString().toLowerCase();
-      return name.contains(searchText) || type.contains(searchText) || dose.contains(searchText);
+      final formula = (b['formula'] ?? '').toString().toLowerCase();
+      return name.contains(searchText) ||
+          type.contains(searchText) ||
+          dose.contains(searchText) ||
+          formula.contains(searchText);
     }).toList();
 
     if (filtered.isEmpty) {
       return Center(
-        child: Text('No items match your search', style: TextStyle(fontSize: 16, color: Colors.grey[600])),
+        child: Text(
+          'No items match your search',
+          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+        ),
       );
     }
 
@@ -253,7 +278,14 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
       groupedByType.putIfAbsent(group, () => []).add(item);
     }
 
-    final List<String> sections = ['All Medicines', 'Capsule', 'Tablet', 'Syrup', 'Injection', 'Others'];
+    final List<String> sections = [
+      'All Medicines',
+      'Capsule',
+      'Tablet',
+      'Syrup',
+      'Injection',
+      'Others'
+    ];
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -276,11 +308,10 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           childAspectRatio = 1.5;
         }
 
-        // Prepare data
         final allMedicinesItems = List<Map<String, dynamic>>.from(filtered);
         _sortItems(allMedicinesItems);
 
-        final otherSections = sections.sublist(1); // Skip 'All Medicines'
+        final otherSections = sections.sublist(1);
         final List<Map<String, dynamic>> sectionData = [];
 
         for (final section in otherSections) {
@@ -291,13 +322,13 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           }
         }
 
-        // ── Mobile: one full-width card at a time, stacked vertically ──
         if (width <= 700) {
-          const double cardHeight = 340;
+          const double cardHeight = 380;
           final List<Widget> cards = [
             SizedBox(
               height: cardHeight,
-              child: _buildCategoryCard('All Medicines', allMedicinesItems, isFullHeight: true),
+              child: _buildCategoryCard('All Medicines', allMedicinesItems,
+                  isFullHeight: true),
             ),
             ...sectionData.map(
               (d) => SizedBox(
@@ -320,7 +351,6 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           );
         }
 
-        // ── Tablet / Desktop: side-by-side layout ──
         final List<Widget> gridItems = sectionData
             .map((d) => _buildCategoryCard(
                   d['section'] as String,
@@ -333,15 +363,13 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // All Medicines — left side, full height
               Expanded(
                 flex: 2,
-                child: _buildCategoryCard('All Medicines', allMedicinesItems, isFullHeight: true),
+                child: _buildCategoryCard('All Medicines', allMedicinesItems,
+                    isFullHeight: true),
               ),
-
               if (gridItems.isNotEmpty) ...[
                 const SizedBox(width: 16),
-                // Other categories in a grid on the right
                 Expanded(
                   flex: 3,
                   child: GridView.count(
@@ -360,7 +388,11 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
     );
   }
 
-  Widget _buildCategoryCard(String section, List<Map<String, dynamic>> items, {bool isFullHeight = false}) {
+  Widget _buildCategoryCard(
+    String section,
+    List<Map<String, dynamic>> items, {
+    bool isFullHeight = false,
+  }) {
     return Card(
       elevation: 5,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -369,12 +401,25 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header
             Row(
               children: [
-                FaIcon(
-                  section == 'All Medicines' ? FontAwesomeIcons.pills : FontAwesomeIcons.circleDot,
-                  color: _teal,
-                  size: 16,
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _teal.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: FaIcon(
+                      section == 'All Medicines'
+                          ? FontAwesomeIcons.pills
+                          : FontAwesomeIcons.circleDot,
+                      color: _teal,
+                      size: 15,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -387,16 +432,20 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                     ),
                   ),
                 ),
-                // Total count badge
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: _teal.withOpacity(0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
                     '${items.length}',
-                    style: const TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 12),
+                    style: const TextStyle(
+                      color: _teal,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ],
@@ -425,48 +474,141 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
 
     final abbrev = _getAbbrev(item['type']);
     final dose = (item['dose'] ?? '').toString().trim();
-    final suffix = dose.isNotEmpty ? " $dose" : "";
+    final formula = (item['formula'] ?? '').toString().trim();
+    final classification = (item['classification'] ?? '').toString().trim();
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
       decoration: BoxDecoration(
-        color: lowStock ? _lowStockRed.withOpacity(0.08) : Colors.transparent,
+        color: lowStock
+            ? _lowStockRed.withOpacity(0.06)
+            : Colors.grey.withOpacity(0.04),
         borderRadius: BorderRadius.circular(10),
-        border: lowStock ? Border.all(color: _lowStockRed.withOpacity(0.4), width: 1) : null,
+        border: lowStock
+            ? Border.all(color: _lowStockRed.withOpacity(0.35), width: 1)
+            : Border.all(color: Colors.grey.withOpacity(0.12), width: 1),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          FaIcon(_typeIcon(item['type']), color: textColor, size: 18),
-          const SizedBox(width: 8),
+          // Type icon bubble
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: lowStock
+                  ? _lowStockRed.withOpacity(0.12)
+                  : _teal.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(
+              child: FaIcon(
+                _typeIcon(item['type']),
+                color: lowStock ? _lowStockRed : _teal,
+                size: 16,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+
+          // Name + formula + classification
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
+                if (formula.isNotEmpty)
+                  Text(
+                    formula,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: _teal.withOpacity(0.8),
+                      fontStyle: FontStyle.italic,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.2,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 Text(
-                  "$abbrev ${item['name']}$suffix".trim(),
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+                  abbrev.isNotEmpty
+                      ? '$abbrev ${item['name']}'.trim()
+                      : item['name'].toString(),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                    height: 1.3,
+                  ),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
-                if (item['classification'] != null && item['classification'].toString().isNotEmpty)
+                if (classification.isNotEmpty)
                   Text(
-                    item['classification'],
-                    style: TextStyle(fontSize: 10.5, color: Colors.grey[700]),
-                    overflow: TextOverflow.ellipsis,
+                    classification,
+                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
                     maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
               ],
             ),
           ),
-          Text(
-            qty.toString(),
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
-          ),
-          if (lowStock)
-            const Padding(
-              padding: EdgeInsets.only(left: 4),
-              child: Text('LOW', style: TextStyle(fontSize: 9, color: _lowStockRed, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 8),
+
+          // Dose pill badge
+          if (dose.isNotEmpty)
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              decoration: BoxDecoration(
+                color: lowStock
+                    ? _lowStockRed.withOpacity(0.12)
+                    : _teal.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: lowStock
+                      ? _lowStockRed.withOpacity(0.3)
+                      : _teal.withOpacity(0.3),
+                  width: 0.8,
+                ),
+              ),
+              child: Text(
+                dose,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: lowStock ? _lowStockRed : _teal,
+                  letterSpacing: 0.3,
+                ),
+              ),
             ),
+          const SizedBox(width: 8),
+
+          // Quantity + LOW badge
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                qty.toString(),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+              if (lowStock)
+                Text(
+                  'LOW',
+                  style: TextStyle(
+                    fontSize: 8.5,
+                    color: _lowStockRed,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+            ],
+          ),
         ],
       ),
     );

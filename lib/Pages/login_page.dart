@@ -546,7 +546,10 @@ class _LoginPageState extends State<LoginPage> {
               onPressed: () => Navigator.pop(context),
               child: const Text("Cancel")),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00695C)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00695C),
+              foregroundColor: Colors.white,
+            ),
             onPressed: () async {
               if (!formKey.currentState!.validate()) return;
               try {
@@ -650,7 +653,9 @@ class _LoginPageState extends State<LoginPage> {
                                   ),
                                   ElevatedButton(
                                     style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF00695C)),
+                                      backgroundColor: const Color(0xFF00695C),
+                                      foregroundColor: Colors.white,
+                                    ),
                                     onPressed: () => Navigator.pop(context, true),
                                     child: const Text("Clear",
                                         style: TextStyle(color: Colors.white)),
