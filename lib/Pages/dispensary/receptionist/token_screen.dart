@@ -1162,7 +1162,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 SizedBox(height: isMobile ? 14 : 20),
-                Image.asset('assets/logo/gmwf.png',
+                Image.asset('assets/logo/gmwf-1.png',
                     height: isMobile ? 64 : 90),
                 SizedBox(height: isMobile ? 10 : 16),
                 Text('Issue Token',

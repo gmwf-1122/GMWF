@@ -23,6 +23,8 @@ import 'pages/overview.dart';
 import 'pages/dispensary/dispensar/dispensar_screen.dart';
 import 'pages/dispensary/dispensar/inventory.dart';
 import 'pages/donations/donations_screen.dart';
+import 'pages/donations/donations_shared.dart';
+
 
 import 'services/local_storage_service.dart';
 import 'services/donations_local_storage.dart';
@@ -250,6 +252,7 @@ class _InitializationScreenState extends State<InitializationScreen> {
         LocalStorageService.init(),
         DonationsLocalStorage.init(),
         ServerSyncManager.initHive(),
+        PdfAssetCache.preload(),
       ]).timeout(const Duration(seconds: 15));
 
       await LocalStorageService.seedLocalAdmins();

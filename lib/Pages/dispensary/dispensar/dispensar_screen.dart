@@ -303,38 +303,25 @@ class _DispensarScreenState extends State<DispensarScreen> {
     if (_isLoggingOut) return;
     if (mounted) setState(() => _isLoggingOut = true);
 
-    try {
-      await ConnectionManager().stop().timeout(const Duration(seconds: 3),
-          onTimeout: () => debugPrint('[Dispenser] ConnectionManager.stop() timed out'));
-    } catch (e) {
-      debugPrint('[Dispenser] ConnectionManager.stop() error: $e');
-    }
-
-    try { _connectionSub?.cancel(); } catch (_) {}
-    try { _connSub?.cancel(); } catch (_) {}
-    try { _realtimeSub?.cancel(); } catch (_) {}
-
-    try {
-      await AuthService().signOut().timeout(const Duration(seconds: 5),
-          onTimeout: () => debugPrint('[Dispenser] AuthService.signOut() timed out'));
-    } catch (e) {
-      debugPrint('[Dispenser] AuthService.signOut() error: $e');
-    }
-
-    if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
-    }
+    Future.wait([
+      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+    ]).whenComplete(() {
+      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    });
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     if (isMobile) {
       return AppBar(
+        automaticallyImplyLeading: false,
         backgroundColor: _teal,
         elevation: 4,
         toolbarHeight: 60,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf.png', height: 36),
+          Image.asset('assets/logo/gmwf-1.png', height: 36),
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
@@ -383,13 +370,14 @@ class _DispensarScreenState extends State<DispensarScreen> {
     }
 
     return AppBar(
+      automaticallyImplyLeading: false,
       backgroundColor: _teal,
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.png', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(

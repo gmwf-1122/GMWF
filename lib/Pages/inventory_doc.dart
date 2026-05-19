@@ -161,60 +161,113 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
 
   Widget _buildSearchAndSortBar() {
     return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.white,
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(30),
-                boxShadow: const [
-                  BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 4))
-                ],
-              ),
-              child: TextField(
-                controller: _searchCtrl,
-                decoration: InputDecoration(
-                  hintText: 'Search medicines...',
-                  prefixIcon: const Icon(Icons.search, color: _teal),
-                  suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.clear),
-                          onPressed: () => setState(() => _searchCtrl.clear()),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                ),
-                onChanged: (_) => setState(() {}),
-              ),
-            ),
-          ),
-          const SizedBox(width: 20),
-          Row(
-            children: [
-              const FaIcon(FontAwesomeIcons.arrowDownAZ, color: _teal, size: 18),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: _sortBy,
-                underline: const SizedBox(),
-                icon: const Icon(Icons.keyboard_arrow_down, color: _teal),
-                items: const [
-                  DropdownMenuItem(value: 'name', child: Text('Name')),
-                  DropdownMenuItem(value: 'quantity_asc', child: Text('Qty ↑')),
-                  DropdownMenuItem(value: 'quantity_desc', child: Text('Qty ↓')),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _sortBy = value);
-                },
+      color: const Color(0xFFE8F5E9), // Match the Scaffold background seamlessly
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: LayoutBuilder(builder: (context, constraints) {
+        final isWide = constraints.maxWidth > 600;
+
+        final searchWidget = Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: _teal.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
-        ],
-      ),
+          child: TextField(
+            controller: _searchCtrl,
+            cursorColor: _teal,
+            style: const TextStyle(fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'Search medicines...',
+              prefixIcon: const Icon(Icons.search_rounded, color: _teal, size: 20),
+              suffixIcon: _searchCtrl.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 18),
+                      onPressed: () => setState(() => _searchCtrl.clear()),
+                    )
+                  : null,
+              filled: true,
+              fillColor: Colors.transparent,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: _teal, width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        );
+
+        final sortWidget = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade200, width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: _teal.withValues(alpha: 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const FaIcon(FontAwesomeIcons.arrowDownAZ, color: _teal, size: 16),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _sortBy,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey, size: 20),
+                  style: const TextStyle(color: Colors.black87, fontSize: 13.5, fontWeight: FontWeight.w500),
+                  items: const [
+                    DropdownMenuItem(value: 'name', child: Text('Sort by Name')),
+                    DropdownMenuItem(value: 'quantity_asc', child: Text('Qty (Low to High)')),
+                    DropdownMenuItem(value: 'quantity_desc', child: Text('Qty (High to Low)')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _sortBy = value);
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+
+        if (isWide) {
+          return Row(
+            children: [
+              Expanded(flex: 3, child: searchWidget),
+              const SizedBox(width: 16),
+              Expanded(flex: 2, child: sortWidget),
+            ],
+          );
+        } else {
+          return Column(
+            children: [
+              searchWidget,
+              const SizedBox(height: 12),
+              sortWidget,
+            ],
+          );
+        }
+      }),
     );
   }
 
@@ -287,8 +340,12 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
       'Others'
     ];
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
+    return Column(
+      children: [
+        _buildMetricsRow(filtered),
+        Expanded(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
         final double width = constraints.maxWidth;
 
         int crossAxisCount = 1;
@@ -385,6 +442,106 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
           ),
         );
       },
+    ),
+  ),
+],
+);
+}
+
+  Widget _buildMetricsRow(List<Map<String, dynamic>> batches) {
+    final totalMedicines = batches.length;
+    final lowStockCount = batches.where((b) => (b['quantity'] as int) < 10).length;
+    final totalStockQty = batches.fold<int>(0, (sum, b) => sum + (b['quantity'] as int));
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 600) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal),
+                  const SizedBox(width: 12),
+                  _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, const Color(0xFF1976D2)),
+                  const SizedBox(width: 12),
+                  _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _lowStockRed),
+                ],
+              ),
+            );
+          } else {
+            return Row(
+              children: [
+                Expanded(child: _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, const Color(0xFF1976D2))),
+                const SizedBox(width: 16),
+                Expanded(child: _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _lowStockRed)),
+              ],
+            );
+          }
+        }
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF718096),
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: Color(0xFF1B2631),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -393,76 +550,98 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
     List<Map<String, dynamic>> items, {
     bool isFullHeight = false,
   }) {
-    return Card(
-      elevation: 5,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+              border: Border(bottom: BorderSide(color: Colors.grey.shade100, width: 1.5)),
+            ),
+            child: Row(
               children: [
                 Container(
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: _teal.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF00695C), Color(0xFF004D40)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _teal.withValues(alpha: 0.2),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
                   child: Center(
                     child: FaIcon(
                       section == 'All Medicines'
                           ? FontAwesomeIcons.pills
                           : FontAwesomeIcons.circleDot,
-                      color: _teal,
+                      color: Colors.white,
                       size: 15,
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     section,
                     style: const TextStyle(
-                      color: _teal,
-                      fontSize: 14,
+                      color: Color(0xFF1B2631),
+                      fontSize: 15,
                       fontWeight: FontWeight.bold,
+                      letterSpacing: 0.3,
                     ),
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _teal.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
+                    color: _teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '${items.length}',
                     style: const TextStyle(
                       color: _teal,
                       fontWeight: FontWeight.bold,
-                      fontSize: 12,
+                      fontSize: 13,
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            const Divider(height: 1, thickness: 0.8),
-            const SizedBox(height: 6),
-            Expanded(
-              child: ListView.separated(
-                padding: EdgeInsets.zero,
-                itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 5),
-                itemBuilder: (_, i) => _buildItemRow(items[i]),
-              ),
+          ),
+          Expanded(
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: items.length,
+              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade100),
+              itemBuilder: (_, i) => _buildItemRow(items[i]),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -470,7 +649,6 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
   Widget _buildItemRow(Map<String, dynamic> item) {
     final qty = _asInt(item['quantity']);
     final bool lowStock = qty < 10;
-    final Color textColor = lowStock ? _lowStockRed : Colors.black87;
 
     final abbrev = _getAbbrev(item['type']);
     final dose = (item['dose'] ?? '').toString().trim();
@@ -478,38 +656,36 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
     final classification = (item['classification'] ?? '').toString().trim();
 
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
-      decoration: BoxDecoration(
-        color: lowStock
-            ? _lowStockRed.withValues(alpha: 0.06)
-            : Colors.grey.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(10),
-        border: lowStock
-            ? Border.all(color: _lowStockRed.withValues(alpha: 0.35), width: 1)
-            : Border.all(color: Colors.grey.withValues(alpha: 0.12), width: 1),
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      color: lowStock ? _lowStockRed.withValues(alpha: 0.03) : Colors.transparent,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Type icon bubble
           Container(
-            width: 34,
-            height: 34,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: lowStock
-                  ? _lowStockRed.withValues(alpha: 0.12)
-                  : _teal.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade200),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.02),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             child: Center(
               child: FaIcon(
                 _typeIcon(item['type']),
-                color: lowStock ? _lowStockRed : _teal,
+                color: _teal,
                 size: 16,
               ),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 14),
 
           // Name + formula + classification
           Expanded(
@@ -522,23 +698,22 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                     formula,
                     style: TextStyle(
                       fontSize: 10,
-                      color: _teal.withValues(alpha: 0.8),
-                      fontStyle: FontStyle.italic,
-                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w600,
                       letterSpacing: 0.2,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                const SizedBox(height: 2),
                 Text(
                   abbrev.isNotEmpty
                       ? '$abbrev ${item['name']}'.trim()
                       : item['name'].toString(),
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                    height: 1.3,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: lowStock ? _lowStockRed : const Color(0xFF2D3748),
                   ),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
@@ -546,43 +721,33 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                 if (classification.isNotEmpty)
                   Text(
                     classification,
-                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 11, color: Colors.grey[500]),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
 
           // Dose pill badge
           if (dose.isNotEmpty)
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: lowStock
-                    ? _lowStockRed.withValues(alpha: 0.12)
-                    : _teal.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: lowStock
-                      ? _lowStockRed.withValues(alpha: 0.3)
-                      : _teal.withValues(alpha: 0.3),
-                  width: 0.8,
-                ),
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 dose,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  color: lowStock ? _lowStockRed : _teal,
-                  letterSpacing: 0.3,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF4A5568),
                 ),
               ),
             ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 16),
 
           // Quantity + LOW badge
           Column(
@@ -592,19 +757,27 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
               Text(
                 qty.toString(),
                 style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: lowStock ? _lowStockRed : _teal,
                 ),
               ),
               if (lowStock)
-                Text(
-                  'LOW',
-                  style: TextStyle(
-                    fontSize: 8.5,
-                    color: _lowStockRed,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
+                Container(
+                  margin: const EdgeInsets.only(top: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _lowStockRed.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'LOW',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      color: Color(0xFFC62828),
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
             ],

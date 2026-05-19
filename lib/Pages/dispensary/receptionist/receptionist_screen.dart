@@ -346,29 +346,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     if (_isLoggingOut) return;
     if (mounted) setState(() => _isLoggingOut = true);
 
-    try {
-      await ConnectionManager().stop().timeout(const Duration(seconds: 3),
-          onTimeout: () => debugPrint('[Receptionist] ConnectionManager.stop() timed out'));
-    } catch (e) {
-      debugPrint('[Receptionist] ConnectionManager.stop() error: $e');
-    }
-
-    try {
-      _connectionSub?.cancel();
-      _connSub?.cancel();
-      _realtimeSub?.cancel();
-    } catch (_) {}
-
-    try {
-      await AuthService().signOut().timeout(const Duration(seconds: 5),
-          onTimeout: () => debugPrint('[Receptionist] AuthService.signOut() timed out'));
-    } catch (e) {
-      debugPrint('[Receptionist] AuthService.signOut() error: $e');
-    }
-
-    if (mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-    }
+    Future.wait([
+      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+    ]).whenComplete(() {
+      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    });
   }
 
   void _handlePatientNotFound(String cnic) {
@@ -497,14 +481,24 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
+    final gradient = const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF004D40), // Premium Emerald Teal
+        Color(0xFF00796B), // Clean Jade Teal
+      ],
+    );
+
     if (isMobile) {
       return AppBar(
-        backgroundColor: _teal,
+        automaticallyImplyLeading: false,
+        flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
         elevation: 4,
         toolbarHeight: 56,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf.png', height: 32),
+          Image.asset('assets/logo/gmwf-1.png', height: 32),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -584,13 +578,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     // Desktop AppBar
     return AppBar(
-      backgroundColor: _teal,
+      automaticallyImplyLeading: false,
+      flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.png', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -657,10 +652,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 icon: const Icon(Icons.logout, size: 32, color: Colors.white),
                 onPressed: _logout,
               ),
-        const SizedBox(width: 12),
-      ],
-    );
-  }
+          const SizedBox(width: 12),
+        ],
+      );
+    }
 
   Widget _buildSummaryCards(bool isMobile) {
     final today = DateFormat('ddMMyy').format(DateTime.now());
@@ -738,39 +733,92 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     bool isImage = false,
     bool isMobile = false,
   }) {
-    return Card(
-      elevation: 4,
-      color: color,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Container(
-        height: isMobile ? 70 : 90,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (isImage)
-              Image.asset('assets/logo/gmwf.png', height: isMobile ? 18 : 22)
-            else if (icon != null)
-              Icon(icon, size: isMobile ? 16 : 22, color: Colors.white),
-            const SizedBox(height: 2),
-            Text(title,
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isMobile ? 9 : 11,
-                    fontWeight: FontWeight.bold),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
-            Text('$count',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: isMobile ? 18 : 22,
-                    fontWeight: FontWeight.bold)),
-            if (!isMobile)
-              Text(amount,
-                  style:
-                      const TextStyle(color: Colors.white70, fontSize: 9)),
-          ],
+    final gradientColors = [
+      color.withValues(alpha: 0.85),
+      color.withValues(alpha: 0.95),
+    ];
+    return Container(
+      height: isMobile ? 80 : 100,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: gradientColors,
         ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.25),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.2),
+          width: 1.5,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -10,
+            bottom: -10,
+            child: Icon(
+              icon ?? Icons.spa_rounded,
+              size: isMobile ? 40 : 54,
+              color: Colors.white.withValues(alpha: 0.12),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        fontSize: isMobile ? 10 : 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    if (isImage)
+                      Image.asset('assets/logo/gmwf.png', height: isMobile ? 14 : 18)
+                    else if (icon != null)
+                      Icon(icon, size: isMobile ? 12 : 16, color: Colors.white.withValues(alpha: 0.9)),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: isMobile ? 20 : 26,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    if (!isMobile)
+                      Text(
+                        amount,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.8),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

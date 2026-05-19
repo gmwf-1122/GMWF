@@ -189,7 +189,7 @@ class _OverviewScreenState extends State<OverviewScreen>
               )
             : null,
         title: Row(children: [
-          Image.asset('assets/logo/gmwf.png', height: 26, width: 26),
+          Image.asset('assets/logo/gmwf-1.png', height: 26, width: 26),
           const SizedBox(width: 10),
           Text(
             role.name.toUpperCase(),
@@ -335,7 +335,7 @@ class _OverviewHeader extends StatelessWidget {
               borderRadius: BorderRadius.circular(DS.r1 + 4),
               border: Border.all(color: const Color(0xFFEDD88A), width: 1.5),
             ),
-            child: Image.asset('assets/logo/gmwf.png', height: 36, width: 36),
+            child: Image.asset('assets/logo/gmwf-1.png', height: 36, width: 36),
           ),
           const SizedBox(width: DS.s2),
           Expanded(
@@ -390,6 +390,7 @@ class _DonationIntelligenceSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
     // We fetch ALL donations from local storage (synced from FS)
     final allDonations = DonationsLocalStorage.getAllDonations('all');
     
@@ -459,30 +460,47 @@ class _DonationIntelligenceSection extends StatelessWidget {
         ),
         const SizedBox(height: DS.s2),
         
-        // 1. Hero Summary Row
-        Row(
-          children: [
-            Expanded(
-              child: _DonationStatCard(
-                label: 'Jamia / Masjid',
-                value: totalJamia.toInt(),
-                color: don.DS.sapphire500,
-                icon: Icons.mosque_rounded,
-                t: t,
+        // 1. Hero Summary Cards (responsive layout)
+        if (isMobile) ...[
+          _DonationStatCard(
+            label: 'Jamia / Masjid',
+            value: totalJamia.toInt(),
+            color: don.DS.sapphire500,
+            icon: Icons.mosque_rounded,
+            t: t,
+          ),
+          const SizedBox(height: DS.s2),
+          _DonationStatCard(
+            label: 'GMWF General',
+            value: totalGmwf.toInt(),
+            color: don.DS.emerald500,
+            icon: Icons.volunteer_activism_rounded,
+            t: t,
+          ),
+        ] else
+          Row(
+            children: [
+              Expanded(
+                child: _DonationStatCard(
+                  label: 'Jamia / Masjid',
+                  value: totalJamia.toInt(),
+                  color: don.DS.sapphire500,
+                  icon: Icons.mosque_rounded,
+                  t: t,
+                ),
               ),
-            ),
-            const SizedBox(width: DS.s2),
-            Expanded(
-              child: _DonationStatCard(
-                label: 'GMWF General',
-                value: totalGmwf.toInt(),
-                color: don.DS.emerald500,
-                icon: Icons.volunteer_activism_rounded,
-                t: t,
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: _DonationStatCard(
+                  label: 'GMWF General',
+                  value: totalGmwf.toInt(),
+                  color: don.DS.emerald500,
+                  icon: Icons.volunteer_activism_rounded,
+                  t: t,
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          ),
         const SizedBox(height: DS.s3),
 
         // 2. Branch & Category Distribution
@@ -638,7 +656,15 @@ class _DistributionCard extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(item.label, style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Expanded(
+                          child: Text(
+                            item.label,
+                            style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         Text(fmtPKR(item.value.toInt()), style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
                       ],
                     ),
@@ -693,6 +719,7 @@ class _TopDonorsCard extends StatelessWidget {
               itemBuilder: (context, i) {
                 final entry = topDonors[i];
                 final name = names[entry.key] ?? 'Unknown Donor';
+                final isMobile = MediaQuery.of(context).size.width < 600;
                 return Row(
                   children: [
                     Container(
@@ -705,16 +732,22 @@ class _TopDonorsCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(name, style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w700)),
-                          Text('Donor ID: ${entry.key}', style: TextStyle(color: t.textTertiary, fontSize: 10)),
+                          Text(
+                            name,
+                            style: TextStyle(color: t.textPrimary, fontSize: isMobile ? 12 : 13, fontWeight: FontWeight.w700),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                          Text('Donor ID: ${entry.key}', style: TextStyle(color: t.textTertiary, fontSize: isMobile ? 9 : 10)),
                         ],
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(fmtPKR(entry.value.toInt()), style: const TextStyle(color: don.DS.emerald600, fontSize: 14, fontWeight: FontWeight.w900)),
-                        const Text('Total Contributions', style: TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.bold)),
+                        Text(fmtPKR(entry.value.toInt()), style: TextStyle(color: don.DS.emerald600, fontSize: isMobile ? 12 : 14, fontWeight: FontWeight.w900)),
+                        Text(isMobile ? 'Total' : 'Total Contributions', style: const TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ],

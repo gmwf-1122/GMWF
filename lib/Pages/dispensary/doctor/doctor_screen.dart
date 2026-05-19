@@ -50,6 +50,7 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   bool _isSaving = false;
   String? _username;
+  String? _doctorDegree;
   String? _branchName;
   bool _online = true;
   bool _isSyncing = false;
@@ -123,6 +124,10 @@ class _DoctorScreenState extends State<DoctorScreen>
     final localUser = LocalStorageService.getLocalUserByUid(widget.doctorId);
     resolvedName = (localUser?['username'] as String?)?.trim();
     if (resolvedName?.isEmpty == true) resolvedName = null;
+    final localDegree = (localUser?['degree'] as String?)?.trim();
+    if (localDegree != null && localDegree.isNotEmpty) {
+      _doctorDegree = localDegree;
+    }
 
     // 2. Fall back to the name passed as a widget param.
     resolvedName ??= widget.doctorName.trim().isNotEmpty ? widget.doctorName.trim() : null;
@@ -154,6 +159,10 @@ class _DoctorScreenState extends State<DoctorScreen>
         // [FIX-USERNAME] Push updated name into RealtimeManager so future
         // messages carry the correct attribution.
         RealtimeManager().updateUsername(firestoreName);
+      }
+      final firestoreDegree = (snap.data()?['degree'] as String?)?.trim() ?? '';
+      if (firestoreDegree.isNotEmpty) {
+        if (mounted) setState(() => _doctorDegree = firestoreDegree);
       }
     } catch (e) {
       debugPrint('[DoctorScreen] Could not fetch doctor name: $e');
@@ -311,10 +320,13 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   Future<void> _logout() async {
-    try { await ConnectionManager().stop().timeout(const Duration(seconds: 3)); } catch (_) {}
-    try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
-    try { await AuthService().signOut().timeout(const Duration(seconds: 5)); } catch (_) {}
-    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    Future.wait([
+      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
+    ]).whenComplete(() {
+      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
+    });
   }
 
   Future<void> _selectPatient(Map<String, dynamic> rawEntry) async {
@@ -394,13 +406,24 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
+    final gradient = const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF004D40), // Premium Emerald Teal
+        Color(0xFF00796B), // Clean Jade Teal
+      ],
+    );
+
     if (isMobile) {
       return AppBar(
-        backgroundColor: _teal,
+        automaticallyImplyLeading: false,
+        flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
+        elevation: 4,
         toolbarHeight: 56,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf.png', height: 32),
+          Image.asset('assets/logo/gmwf-1.png', height: 32),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -462,13 +485,14 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
 
     return AppBar(
-      backgroundColor: _teal,
+      automaticallyImplyLeading: false,
+      flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.png', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -551,6 +575,8 @@ class _DoctorScreenState extends State<DoctorScreen>
       serialId: _selectedPatientData!['serial']?.toString() ?? '',
       doctorId: widget.doctorId,
       doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
+      isPhysiotherapist: _doctorDegree?.toLowerCase().contains('physio') == true ||
+                         _doctorDegree?.toLowerCase().contains('dpt') == true,
       queueType: resolvedQueueType,
       complaintController: _complaintController,
       diagnosisController: _diagnosisController,

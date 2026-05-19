@@ -76,7 +76,7 @@ class _RegisterState extends State<Register>
     {'label': 'Madrassa Teacher', 'icon': Icons.school_rounded,               'type': 'madrassa'},
   ];
 
-  final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'Other'];
+  final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'DPT (Physiotherapist)', 'Other'];
   List<Map<String, dynamic>> _branches = [];
   String? _usernameError;
 

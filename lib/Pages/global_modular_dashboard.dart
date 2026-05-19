@@ -591,7 +591,7 @@ class _LogoPulse extends StatelessWidget {
         ),
         padding: const EdgeInsets.all(4),
         child: Image.asset(
-          'assets/logo/gmwf.png',
+          'assets/logo/gmwf-1.png',
           fit: BoxFit.contain,
         ),
       ),

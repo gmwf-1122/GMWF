@@ -680,7 +680,7 @@ class _LoginPageState extends State<LoginPage> {
                             }
                           },
                           child: Image.asset(
-                            "assets/logo/gmwf.png",
+                            "assets/logo/gmwf-1.png",
                             height: 120,
                             fit: BoxFit.contain,
                             errorBuilder: (_, __, ___) => const Icon(

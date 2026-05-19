@@ -866,7 +866,7 @@ class _CompactLatestCard extends StatelessWidget {
               const SizedBox(height: 4),
             ],
             if (e.labTests.isNotEmpty) ...[
-              _label('Lab Tests'), const SizedBox(height: 4),
+              _label(e.raw['isPhysiotherapist'] == true ? 'Physiotherapies' : 'Lab Tests'), const SizedBox(height: 4),
               Wrap(spacing: 5, runSpacing: 5,
                   children: e.labTests.map((t) => _labChip(t)).toList()),
               const SizedBox(height: 4),
@@ -1081,7 +1081,9 @@ class _HistoryCard extends StatelessWidget {
               const SizedBox(height: 12),
             ],
             if (e.labTests.isNotEmpty) ...[
-              _buildSectionTitle('Lab Tests', Icons.biotech),
+              _buildSectionTitle(
+                  e.raw['isPhysiotherapist'] == true ? 'Physiotherapies' : 'Lab Tests',
+                  e.raw['isPhysiotherapist'] == true ? Icons.accessibility : Icons.biotech),
               const SizedBox(height: 8),
               Wrap(spacing: 6, runSpacing: 6,
                   children: e.labTests.map((t) => Chip(

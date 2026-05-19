@@ -1434,7 +1434,8 @@ pw.Widget _pdfCell(String text, pw.Font font, double size, bool isHeader, {bool 
 Future<void> downloadReceiptPdf(DonationRecord r, BuildContext context) async {
   try {
     _showPdfLoadingDialog(context, 'Generating Receipt PDF...');
-    final enriched = await injectPdfAssets(r.toMap());
+    final map = r.toMap();
+    final enriched = await injectPdfAssets(map);
     final bytes = await compute(_buildReceiptPdfIsolate, enriched);
     
     if (context.mounted) Navigator.pop(context); // Close loading
@@ -1455,7 +1456,8 @@ Future<void> downloadReceiptPdf(DonationRecord r, BuildContext context) async {
 Future<void> printReceiptPdf(DonationRecord r, BuildContext context) async {
   try {
     _showPdfLoadingDialog(context, 'Preparing for Print...');
-    final enriched = await injectPdfAssets(r.toMap());
+    final map = r.toMap();
+    final enriched = await injectPdfAssets(map);
     
     if (context.mounted) Navigator.pop(context); // Close loading
 
@@ -1612,7 +1614,7 @@ Future<Uint8List> buildReceiptPdf(
 // SYNCHRONOUS PDF BUILD  (runs inside isolate, no async/rootBundle calls)
 // ─────────────────────────────────────────────────────────────────────────────
 
-Future<Uint8List> buildReceiptPdfSync(Map<String, dynamic> d) async {
+pw.Widget _buildSingleReceiptWidget(Map<String, dynamic> d, pw.Font fontBold, pw.Font fontReg) {
   final categoryId = (d['categoryId'] as String? ?? '').trim();
   final cat = DonationCategory.values.firstWhere(
     (c) => c.name == categoryId, orElse: () => DonationCategory.gmwf);
@@ -1702,290 +1704,433 @@ Future<Uint8List> buildReceiptPdfSync(Map<String, dynamic> d) async {
 
   final websiteUrl = cat.websiteUrl;
   final branchPhones = branchPhonesFor(branchId.isNotEmpty ? branchId : branchName.toLowerCase());
-  final pdf = pw.Document();
 
-  // Use standard fonts to keep PDF size small and generation instant.
-  // Standard Helvetica is safe for web/windows and opens without errors.
+  return pw.Stack(
+    children: [
+      pw.SizedBox(
+        width: 70 * PdfPageFormat.mm,
+        height: 99 * PdfPageFormat.mm,
+        child: pw.FittedBox(
+          fit: pw.BoxFit.contain,
+          child: pw.SizedBox(
+            width: PdfPageFormat.a4.width,
+            height: PdfPageFormat.a4.height,
+            child: pw.Padding(
+          padding: const pw.EdgeInsets.all(32),
+          child: pw.Stack(
+            children: [
+              // Watermark
+              pw.Center(
+                child: pw.Opacity(
+                  opacity: 0.08,
+                  child: logo != null ? pw.Image(logo, width: 350) : pw.SizedBox(),
+                ),
+              ),
+              
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  // Header Row
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          if (logoJpg != null)
+                            pw.Container(
+                              width: 70, height: 70,
+                              margin: const pw.EdgeInsets.only(bottom: 12),
+                              child: pw.Image(logoJpg),
+                            ),
+                          pw.Text('GULZAR MADINA',
+                              style: pw.TextStyle(font: fontBold, fontSize: 22, color: PdfColor.fromInt(0xFF0F172A))), // Navy 900
+                          pw.Text('WELFARE FOUNDATION',
+                              style: pw.TextStyle(font: fontBold, fontSize: 10, color: accent, letterSpacing: 1.5)),
+                        ],
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text('OFFICIAL RECEIPT',
+                              style: pw.TextStyle(font: fontBold, fontSize: 24, color: PdfColor.fromInt(0xFF64748B))), // Gray 500
+                          pw.SizedBox(height: 12),
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFF1E293B), borderRadius: pw.BorderRadius.circular(6)), // Navy 800
+                            child: pw.Text('NO: $receiptNo',
+                                style: pw.TextStyle(font: fontBold, fontSize: 13, color: cWhite)),
+                          ),
+                          pw.SizedBox(height: 6),
+                          pw.Text(dateDisplay, style: pw.TextStyle(font: fontReg, fontSize: 11, color: PdfColor.fromInt(0xFF334155))),
+                        ],
+                      ),
+                    ],
+                  ),
+                  
+                  pw.SizedBox(height: 40),
+                  pw.Divider(color: accentLt, thickness: 1),
+                  pw.SizedBox(height: 24),
+                  
+                  // Donor & Details Section
+                  pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Expanded(
+                        flex: 3,
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text('DONOR INFORMATION',
+                                style: pw.TextStyle(font: fontBold, fontSize: 10, color: cInkGrey, letterSpacing: 1)),
+                            pw.SizedBox(height: 8),
+                            pw.Text(donorName,
+                                style: pw.TextStyle(font: fontBold, fontSize: 20, color: cInkDark)),
+                            pw.SizedBox(height: 4),
+                            if (ytdTotal > 0)
+                              pw.Container(
+                                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: pw.BoxDecoration(
+                                  color: accent,
+                                  borderRadius: pw.BorderRadius.circular(4),
+                                ),
+                                child: pw.Text('Donations this year: PKR ${_fmtNum(ytdTotal)}',
+                                    style: pw.TextStyle(font: fontBold, fontSize: 10, color: cWhite)),
+                              ),
+                            pw.SizedBox(height: 4),
+                            pw.Text('Thank you for your generous contribution.',
+                                style: pw.TextStyle(font: fontReg, fontSize: 10, color: cInkGrey, fontStyle: pw.FontStyle.italic)),
+                          ],
+                        ),
+                      ),
+                      pw.Expanded(
+                        flex: 2,
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.all(16),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromInt(0xFFF8FAFC), // Gray 50
+                            borderRadius: pw.BorderRadius.circular(12),
+                            border: pw.Border.all(color: PdfColor.fromInt(0xFFF1F5F9), width: 1),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              _pdfDetailRowSmall('CATEGORY', cat.label.toUpperCase(), fontBold, accent),
+                              pw.SizedBox(height: 10),
+                              if (isGoods) ...[
+                                _pdfDetailRowSmall('STATUS', 'RECEIVED', fontBold, PdfColors.green),
+                                pw.SizedBox(height: 10),
+                              ] else ...[
+                                _pdfDetailRowSmall('PAYMENT', paymentMethod.toUpperCase(), fontBold, PdfColor.fromInt(0xFF1E293B)),
+                                pw.SizedBox(height: 10),
+                              ],
+                              _pdfDetailRowSmall('BRANCH', branchName.toUpperCase(), fontBold, PdfColor.fromInt(0xFF1E293B)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  
+                  pw.SizedBox(height: 40),
+                  
+                  // Amount Card
+                  pw.Container(
+                    padding: const pw.EdgeInsets.all(32),
+                    decoration: pw.BoxDecoration(
+                      gradient: pw.LinearGradient(
+                        colors: [accentDk, accent],
+                        begin: pw.Alignment.topLeft,
+                        end: pw.Alignment.bottomRight,
+                      ),
+                      borderRadius: pw.BorderRadius.circular(16),
+                      boxShadow: [
+                        pw.BoxShadow(color: accent.withOpacity(0.3), blurRadius: 10, offset: const PdfPoint(0, 4))
+                      ],
+                    ),
+                    child: pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(isGoods ? 'GOODS RECEIVED' : 'TOTAL CONTRIBUTION',
+                                style: pw.TextStyle(font: fontBold, fontSize: 10, color: cWhite.withOpacity(0.8), letterSpacing: 1.5)),
+                            pw.SizedBox(height: 8),
+                            if (isGoods && goodsItem.isNotEmpty) ...[
+                              pw.Text(goodsItem,
+                                  style: pw.TextStyle(font: fontBold, fontSize: 22, color: cWhite)),
+                              if (amountDisplay.trim().isNotEmpty && amountDisplay != '0 ') ...[
+                                pw.SizedBox(height: 4),
+                                pw.Text('Est. Value: $amountDisplay',
+                                    style: pw.TextStyle(font: fontBold, fontSize: 11, color: cWhite.withOpacity(0.75))),
+                              ],
+                            ] else ...[
+                              pw.Text(amountDisplay,
+                                  style: pw.TextStyle(font: fontBold, fontSize: 36, color: cWhite)),
+                            ],
+                          ],
+                        ),
+                        if (subtypeLabel.isNotEmpty)
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: pw.BoxDecoration(
+                              color: cWhite,
+                              borderRadius: pw.BorderRadius.circular(8),
+                            ),
+                            child: pw.Text(subtypeLabel.toUpperCase(),
+                                style: pw.TextStyle(font: fontBold, fontSize: 12, color: accentDk)),
+                          ),
+                      ],
+                    ),
+                  ),
+                  
+                  if (notes.isNotEmpty) ...[
+                    pw.SizedBox(height: 32),
+                    pw.Text('REMARKS / PURPOSE',
+                        style: pw.TextStyle(font: fontBold, fontSize: 10, color: cInkGrey, letterSpacing: 1)),
+                    pw.SizedBox(height: 8),
+                    pw.Text(notes,
+                        style: pw.TextStyle(font: fontReg, fontSize: 12, color: cInkDark, fontStyle: pw.FontStyle.italic)),
+                  ],
+                  
+                  pw.Spacer(),
+                  
+                  // Footer
+                  pw.Divider(color: AppColors.gray200.toPdfColor()),
+                  pw.SizedBox(height: 12),
+                  // Branch Phone Numbers
+                  pw.Row(
+                    children: [
+                      pw.Text('Contact: ', style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey)),
+                      pw.Text(branchPhones.join('  |  '), style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkDark)),
+                    ],
+                  ),
+                  pw.SizedBox(height: 12),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('TRANSACTED BY', style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey)),
+                          pw.SizedBox(height: 6),
+                          pw.Text(recordedBy.toUpperCase(), style: pw.TextStyle(font: fontBold, fontSize: 12, color: cInkDark)),
+                          pw.SizedBox(height: 4),
+                          pw.Row(
+                            children: [
+                              pw.Container(
+                                width: 5,
+                                height: 5,
+                                decoration: pw.BoxDecoration(
+                                  color: Colors.green.toPdfColor(),
+                                  shape: pw.BoxShape.circle,
+                                ),
+                              ),
+                              pw.SizedBox(width: 4),
+                              pw.Text('Digital Signature Applied', style: pw.TextStyle(fontSize: 7, color: Colors.green.toPdfColor(), font: fontBold)),
+                            ],
+                          ),
+                        ],
+                      ),
+                      pw.Row(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        mainAxisSize: pw.MainAxisSize.min,
+                        children: [
+                          pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.end,
+                            children: [
+                              pw.Text('SECURE DIGITAL VERIFICATION', 
+                                  style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey, letterSpacing: 0.5)),
+                              pw.SizedBox(height: 4),
+                              pw.Text('Scan or visit link to verify', 
+                                  style: pw.TextStyle(font: fontReg, fontSize: 7, color: cInkGrey)),
+                              pw.SizedBox(height: 4),
+                              pw.Text('https://$websiteUrl/verify?id=${cleanReceiptNumber(receiptNo)}', 
+                                  style: pw.TextStyle(font: fontBold, fontSize: 6.5, color: accentDk)),
+                            ],
+                          ),
+                          pw.SizedBox(width: 12),
+                          pw.Container(
+                            padding: const pw.EdgeInsets.all(4),
+                            decoration: pw.BoxDecoration(
+                              border: pw.Border.all(color: accentLt, width: 1),
+                              borderRadius: pw.BorderRadius.circular(6),
+                              color: cWhite,
+                            ),
+                            child: pw.BarcodeWidget(
+                              barcode: pw.Barcode.qrCode(),
+                              data: 'https://$websiteUrl/verify?id=${Uri.encodeComponent(cleanReceiptNumber(receiptNo))}',
+                              width: 45,
+                              height: 45,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  pw.SizedBox(height: 24),
+                  // Organization Websites
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                    children: [
+                      pw.Text('gulzarmadina.com', style: pw.TextStyle(font: fontBold, fontSize: 8, color: accentDk)),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.symmetric(horizontal: 12),
+                        child: pw.Text('|', style: pw.TextStyle(fontSize: 8, color: AppColors.gray300.toPdfColor())),
+                      ),
+                      pw.Text('gmwf.pk', style: pw.TextStyle(font: fontBold, fontSize: 8, color: accentDk)),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  ),
+  pw.Positioned.fill(
+    child: pw.CustomPaint(
+      painter: (canvas, size) {
+        canvas.setStrokeColor(PdfColors.grey400);
+        canvas.setLineWidth(0.5);
+        canvas.setLineDashPattern([3, 3]);
+        canvas.drawRect(0, 0, size.x, size.y);
+        canvas.strokePath();
+      },
+    ),
+  ),
+],
+);
+}
+
+Future<Uint8List> buildReceiptPdfSync(Map<String, dynamic> d) async {
+  final pdf = pw.Document();
   final fontBold = pw.Font.helveticaBold();
   final fontReg  = pw.Font.helvetica();
 
-  pdf.addPage(pw.Page(
-    pageFormat: PdfPageFormat.a4,
-    margin: const pw.EdgeInsets.all(32),
-    build: (ctx) => pw.Stack(
-      children: [
-        // Watermark
-        pw.Center(
-          child: pw.Opacity(
-            opacity: 0.08,
-            child: logo != null ? pw.Image(logo, width: 350) : pw.SizedBox(),
-          ),
-        ),
-        
-        pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            // Header Row
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    if (logoJpg != null)
-                      pw.Container(
-                        width: 70, height: 70,
-                        margin: const pw.EdgeInsets.only(bottom: 12),
-                        child: pw.Image(logoJpg),
-                      ),
-                    pw.Text('GULZAR MADINA',
-                        style: pw.TextStyle(font: fontBold, fontSize: 22, color: PdfColor.fromInt(0xFF0F172A))), // Navy 900
-                    pw.Text('WELFARE FOUNDATION',
-                        style: pw.TextStyle(font: fontBold, fontSize: 10, color: accent, letterSpacing: 1.5)),
-                  ],
-                ),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text('OFFICIAL RECEIPT',
-                        style: pw.TextStyle(font: fontBold, fontSize: 24, color: PdfColor.fromInt(0xFF64748B))), // Gray 500
-                    pw.SizedBox(height: 12),
-                    pw.Container(
-                      padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: pw.BoxDecoration(color: PdfColor.fromInt(0xFF1E293B), borderRadius: pw.BorderRadius.circular(6)), // Navy 800
-                      child: pw.Text('NO: $receiptNo',
-                          style: pw.TextStyle(font: fontBold, fontSize: 13, color: cWhite)),
-                    ),
-                    pw.SizedBox(height: 6),
-                    pw.Text(dateDisplay, style: pw.TextStyle(font: fontReg, fontSize: 11, color: PdfColor.fromInt(0xFF334155))),
-                  ],
-                ),
-              ],
-            ),
-            
-            pw.SizedBox(height: 40),
-            pw.Divider(color: accentLt, thickness: 1),
-            pw.SizedBox(height: 24),
-            
-            // Donor & Details Section
-            pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Expanded(
-                  flex: 3,
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('DONOR INFORMATION',
-                          style: pw.TextStyle(font: fontBold, fontSize: 10, color: cInkGrey, letterSpacing: 1)),
-                      pw.SizedBox(height: 8),
-                      pw.Text(donorName,
-                          style: pw.TextStyle(font: fontBold, fontSize: 20, color: cInkDark)),
-                      pw.SizedBox(height: 4),
-                      if (ytdTotal > 0)
-                        pw.Container(
-                          padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: pw.BoxDecoration(
-                            color: accent,
-                            borderRadius: pw.BorderRadius.circular(4),
-                          ),
-                          child: pw.Text('Donations this year: PKR ${_fmtNum(ytdTotal)}',
-                              style: pw.TextStyle(font: fontBold, fontSize: 10, color: cWhite)),
-                        ),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Thank you for your generous contribution.',
-                          style: pw.TextStyle(font: fontReg, fontSize: 10, color: cInkGrey, fontStyle: pw.FontStyle.italic)),
-                    ],
-                  ),
-                ),
-                pw.Expanded(
-                  flex: 2,
-                  child: pw.Container(
-                    padding: const pw.EdgeInsets.all(16),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColor.fromInt(0xFFF8FAFC), // Gray 50
-                      borderRadius: pw.BorderRadius.circular(12),
-                      border: pw.Border.all(color: PdfColor.fromInt(0xFFF1F5F9), width: 1),
-                    ),
-                    child: pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: [
-                        _pdfDetailRowSmall('CATEGORY', cat.label.toUpperCase(), fontBold, accent),
-                        pw.SizedBox(height: 10),
-                        if (isGoods) ...[
-                          _pdfDetailRowSmall('STATUS', 'RECEIVED', fontBold, PdfColors.green),
-                          pw.SizedBox(height: 10),
-                        ] else ...[
-                          _pdfDetailRowSmall('PAYMENT', paymentMethod.toUpperCase(), fontBold, PdfColor.fromInt(0xFF1E293B)),
-                          pw.SizedBox(height: 10),
-                        ],
-                        _pdfDetailRowSmall('BRANCH', branchName.toUpperCase(), fontBold, PdfColor.fromInt(0xFF1E293B)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            
-            pw.SizedBox(height: 40),
-            
-            // Amount Card
-            pw.Container(
-              padding: const pw.EdgeInsets.all(32),
-              decoration: pw.BoxDecoration(
-                gradient: pw.LinearGradient(
-                  colors: [accentDk, accent],
-                  begin: pw.Alignment.topLeft,
-                  end: pw.Alignment.bottomRight,
-                ),
-                borderRadius: pw.BorderRadius.circular(16),
-                boxShadow: [
-                  pw.BoxShadow(color: accent.withOpacity(0.3), blurRadius: 10, offset: const PdfPoint(0, 4))
-                ],
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(isGoods ? 'GOODS RECEIVED' : 'TOTAL CONTRIBUTION',
-                          style: pw.TextStyle(font: fontBold, fontSize: 10, color: cWhite.withOpacity(0.8), letterSpacing: 1.5)),
-                      pw.SizedBox(height: 8),
-                      if (isGoods && goodsItem.isNotEmpty) ...[
-                        pw.Text(goodsItem,
-                            style: pw.TextStyle(font: fontBold, fontSize: 22, color: cWhite)),
-                        if (amountDisplay.trim().isNotEmpty && amountDisplay != '0 ') ...[
-                          pw.SizedBox(height: 4),
-                          pw.Text('Est. Value: $amountDisplay',
-                              style: pw.TextStyle(font: fontBold, fontSize: 11, color: cWhite.withOpacity(0.75))),
-                        ],
-                      ] else ...[
-                        pw.Text(amountDisplay,
-                            style: pw.TextStyle(font: fontBold, fontSize: 36, color: cWhite)),
-                      ],
-                    ],
-                  ),
-                  if (subtypeLabel.isNotEmpty)
-                    pw.Container(
-                      padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: pw.BoxDecoration(
-                        color: cWhite,
-                        borderRadius: pw.BorderRadius.circular(8),
-                      ),
-                      child: pw.Text(subtypeLabel.toUpperCase(),
-                          style: pw.TextStyle(font: fontBold, fontSize: 12, color: accentDk)),
-                    ),
-                ],
-              ),
-            ),
-            
-            if (notes.isNotEmpty) ...[
-              pw.SizedBox(height: 32),
-              pw.Text('REMARKS / PURPOSE',
-                  style: pw.TextStyle(font: fontBold, fontSize: 10, color: cInkGrey, letterSpacing: 1)),
-              pw.SizedBox(height: 8),
-              pw.Text(notes,
-                  style: pw.TextStyle(font: fontReg, fontSize: 12, color: cInkDark, fontStyle: pw.FontStyle.italic)),
-            ],
-            
-            pw.Spacer(),
-            
-            // Footer
-            pw.Divider(color: AppColors.gray200.toPdfColor()),
-            pw.SizedBox(height: 12),
-            // Branch Phone Numbers
-            pw.Row(
-              children: [
-                pw.Text('Contact: ', style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey)),
-                pw.Text(branchPhones.join('  |  '), style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkDark)),
-              ],
-            ),
-            pw.SizedBox(height: 12),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text('TRANSACTED BY', style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey)),
-                    pw.SizedBox(height: 6),
-                    pw.Text(recordedBy.toUpperCase(), style: pw.TextStyle(font: fontBold, fontSize: 12, color: cInkDark)),
-                    pw.SizedBox(height: 4),
-                    pw.Row(
-                      children: [
-                        pw.Container(
-                          width: 5,
-                          height: 5,
-                          decoration: pw.BoxDecoration(
-                            color: Colors.green.toPdfColor(),
-                            shape: pw.BoxShape.circle,
-                          ),
-                        ),
-                        pw.SizedBox(width: 4),
-                        pw.Text('Digital Signature Applied', style: pw.TextStyle(fontSize: 7, color: Colors.green.toPdfColor(), font: fontBold)),
-                      ],
-                    ),
-                  ],
-                ),
-                pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  mainAxisSize: pw.MainAxisSize.min,
-                  children: [
-                    pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Text('SECURE DIGITAL VERIFICATION', 
-                            style: pw.TextStyle(font: fontBold, fontSize: 8, color: cInkGrey, letterSpacing: 0.5)),
-                        pw.SizedBox(height: 4),
-                        pw.Text('Scan or visit link to verify', 
-                            style: pw.TextStyle(font: fontReg, fontSize: 7, color: cInkGrey)),
-                        pw.SizedBox(height: 4),
-                        pw.Text('https://$websiteUrl/verify?id=${cleanReceiptNumber(receiptNo)}', 
-                            style: pw.TextStyle(font: fontBold, fontSize: 6.5, color: accentDk)),
-                      ],
-                    ),
-                    pw.SizedBox(width: 12),
-                    pw.Container(
-                      padding: const pw.EdgeInsets.all(4),
-                      decoration: pw.BoxDecoration(
-                        border: pw.Border.all(color: accentLt, width: 1),
-                        borderRadius: pw.BorderRadius.circular(6),
-                        color: cWhite,
-                      ),
-                      child: pw.BarcodeWidget(
-                        barcode: pw.Barcode.qrCode(),
-                        data: 'https://$websiteUrl/verify?id=${Uri.encodeComponent(cleanReceiptNumber(receiptNo))}',
-                        width: 45,
-                        height: 45,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            pw.SizedBox(height: 24),
-            // Organization Websites
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.center,
-              children: [
-                pw.Text('gulzarmadina.com', style: pw.TextStyle(font: fontBold, fontSize: 8, color: accentDk)),
-                pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 12),
-                  child: pw.Text('|', style: pw.TextStyle(fontSize: 8, color: AppColors.gray300.toPdfColor())),
-                ),
-                pw.Text('gmwf.pk', style: pw.TextStyle(font: fontBold, fontSize: 8, color: accentDk)),
-              ],
-            ),
-          ],
-        ),
-      ],
-    ),
-  ));
+  if (d['useA4Grid'] == true) {
+    final int targetRow = d['gridRow'] as int? ?? 0;
+    final int targetCol = d['gridCol'] as int? ?? 0;
+
+    pdf.addPage(pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(0),
+      build: (ctx) {
+        return pw.Column(
+          children: List.generate(3, (r) {
+            return pw.Row(
+              children: List.generate(3, (c) {
+                final isTarget = (r == targetRow && c == targetCol);
+                return pw.SizedBox(
+                  width: 70 * PdfPageFormat.mm,
+                  height: 99 * PdfPageFormat.mm,
+                  child: isTarget
+                      ? _buildSingleReceiptWidget(d, fontBold, fontReg)
+                      : pw.SizedBox(),
+                );
+              }),
+            );
+          }),
+        );
+      },
+    ));
+  } else {
+    pdf.addPage(pw.Page(
+      pageFormat: PdfPageFormat(
+        70 * PdfPageFormat.mm,
+        99 * PdfPageFormat.mm,
+        marginAll: 0,
+      ),
+      build: (ctx) => _buildSingleReceiptWidget(d, fontBold, fontReg),
+    ));
+  }
 
   return pdf.save();
+}
+
+
+Future<Uint8List> buildBulkReceiptsGridPdfSync(Map<String, dynamic> data) async {
+  final donations = (data['donations'] as List).cast<Map<String, dynamic>>();
+  
+  final pdf = pw.Document();
+  final fontBold = pw.Font.helveticaBold();
+  final fontReg  = pw.Font.helvetica();
+
+  final receiptFormat = PdfPageFormat(
+    70 * PdfPageFormat.mm,
+    99 * PdfPageFormat.mm,
+    marginAll: 0,
+  );
+
+  for (final d in donations) {
+    pdf.addPage(pw.Page(
+      pageFormat: receiptFormat,
+      build: (ctx) => _buildSingleReceiptWidget(d, fontBold, fontReg),
+    ));
+  }
+
+  return pdf.save();
+}
+
+Future<Uint8List> _buildBulkReceiptsGridPdfIsolate(Map<String, dynamic> data) async {
+  return await buildBulkReceiptsGridPdfSync(data);
+}
+
+Future<void> downloadBulkReceiptsGridPdf(List<DonationRecord> donations, String branchName, BuildContext context) async {
+  try {
+    _showPdfLoadingDialog(context, 'Generating Receipts Grid PDF...');
+    
+    if (PdfAssetCache.logo == null || PdfAssetCache.logoJpg == null) await PdfAssetCache.preload();
+    final logoBytes = PdfAssetCache.logo;
+    final logoJpgBytes = PdfAssetCache.logoJpg;
+
+    final List<Map<String, dynamic>> enrichedDonations = [];
+    for (var d in donations) {
+      final map = d.toMap();
+      if (logoBytes != null) map['_logoBytes'] = logoBytes;
+      if (logoJpgBytes != null) map['_logoJpgBytes'] = logoJpgBytes;
+      
+      try {
+        final donorId = d.donorId;
+        map['_ytdTotal'] = DonationsLocalStorage.getDonorYTDTotal(donorId);
+      } catch (_) {}
+      
+      enrichedDonations.add(map);
+    }
+
+    final enriched = {
+      'donations': enrichedDonations,
+      'branchName': branchName,
+    };
+
+    final bytes = await compute(_buildBulkReceiptsGridPdfIsolate, enriched);
+    
+    if (context.mounted) Navigator.pop(context); // Close loading
+
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save Receipts Grid',
+      fileName: 'GMWF-Receipts-Grid-${branchName.replaceAll(' ', '_')}-${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+      type: FileType.custom,
+      allowedExtensions: ['pdf'],
+    );
+
+    if (outputFile != null) {
+      final file = File(outputFile);
+      await file.writeAsBytes(bytes);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Receipts Grid PDF saved to: $outputFile'), backgroundColor: Colors.green));
+      }
+    }
+  } catch (e) {
+    if (context.mounted) {
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      _showPdfErrorSnackBar(context, 'Receipts Grid generation failed: $e');
+    }
+  }
 }
 
 pw.Widget _pdfDetailRowSmall(String label, String value, pw.Font font, PdfColor color) {
@@ -2513,14 +2658,24 @@ void showReceiptShareSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => StatefulBuilder(
-      builder: (context, setModalState) {
-        bool generating = false;
+    builder: (_) {
+      bool useA4Grid = false;
+      int gridRow = 0;
+      int gridCol = 0;
+      return StatefulBuilder(
+        builder: (context, setModalState) {
+          bool generating = false;
+
 
         Future<void> shareFile() async {
           setModalState(() => generating = true);
           try {
-            final enriched = await injectPdfAssets(donationData);
+            final Map<String, dynamic> enrichedData = Map.from(donationData);
+            enrichedData['useA4Grid'] = useA4Grid;
+            enrichedData['gridRow'] = gridRow;
+            enrichedData['gridCol'] = gridCol;
+
+            final enriched = await injectPdfAssets(enrichedData);
             final bytes = kIsWeb 
                 ? await _buildReceiptPdfIsolate(enriched)
                 : await compute(_buildReceiptPdfIsolate, enriched);
@@ -2567,7 +2722,12 @@ void showReceiptShareSheet(
         Future<void> printPdf() async {
           setModalState(() => generating = true);
           try {
-            final enriched = await injectPdfAssets(donationData);
+            final Map<String, dynamic> enrichedData = Map.from(donationData);
+            enrichedData['useA4Grid'] = useA4Grid;
+            enrichedData['gridRow'] = gridRow;
+            enrichedData['gridCol'] = gridCol;
+
+            final enriched = await injectPdfAssets(enrichedData);
             final bytes = kIsWeb 
                 ? await _buildReceiptPdfIsolate(enriched)
                 : await compute(_buildReceiptPdfIsolate, enriched);
@@ -2627,6 +2787,111 @@ void showReceiptShareSheet(
                           style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.gray900, fontFamily: 'DMMono')),
                     const SizedBox(height: 4),
                     Text('Receipt #$receiptNo', style: const TextStyle(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w700, fontFamily: 'DMMono')),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Layout Selection Card
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: AppColors.gray50,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.gray100),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('PRINT / PDF LAYOUT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.gray400, letterSpacing: 1.2)),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('Standalone Card')),
+                            selected: !useA4Grid,
+                            onSelected: (val) {
+                              if (val) setModalState(() => useA4Grid = false);
+                            },
+                            selectedColor: AppColors.primary,
+                            checkmarkColor: Colors.white,
+                            labelStyle: TextStyle(color: !useA4Grid ? Colors.white : AppColors.gray700, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ChoiceChip(
+                            label: const Center(child: Text('A4 Grid Slot (3x3)')),
+                            selected: useA4Grid,
+                            onSelected: (val) {
+                              if (val) setModalState(() => useA4Grid = true);
+                            },
+                            selectedColor: AppColors.primary,
+                            checkmarkColor: Colors.white,
+                            labelStyle: TextStyle(color: useA4Grid ? Colors.white : AppColors.gray700, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (useA4Grid) ...[
+                      const SizedBox(height: 16),
+                      const Text('SELECT SLOT (A1 TO C3)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.gray400, letterSpacing: 1.2)),
+                      const SizedBox(height: 12),
+                      Center(
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.gray100,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(3, (r) {
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: List.generate(3, (c) {
+                                  final String label = '${String.fromCharCode(65 + r)}${c + 1}'; // A1, A2... C3
+                                  final bool isSelected = (gridRow == r && gridCol == c);
+                                  return Padding(
+                                    padding: const EdgeInsets.all(4),
+                                    child: InkWell(
+                                      onTap: () => setModalState(() {
+                                        gridRow = r;
+                                        gridCol = c;
+                                      }),
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        width: 54,
+                                        height: 54,
+                                        decoration: BoxDecoration(
+                                          color: isSelected ? AppColors.primary : Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: isSelected ? AppColors.primary : AppColors.gray300, width: 1.5),
+                                          boxShadow: isSelected ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.3), blurRadius: 4)] : [],
+                                        ),
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          label,
+                                          style: TextStyle(
+                                            color: isSelected ? Colors.white : AppColors.gray700,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2731,8 +2996,9 @@ void showReceiptShareSheet(
           ),
         );
       }
-    ),
-  ).whenComplete(() => _shareSheetOpen = false);
+    );
+  }
+).whenComplete(() => _shareSheetOpen = false);
 }
 
 Future<void> _handlePdfShare(BuildContext context, Map<String, dynamic> donationData, String receiptNo) async {

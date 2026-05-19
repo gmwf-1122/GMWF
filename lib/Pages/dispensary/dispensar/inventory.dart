@@ -439,18 +439,7 @@ class _InventoryPageState extends State<InventoryPage>
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded,
               color: Colors.white, size: 20),
-          onPressed: () {
-            if (widget.isDispenser) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (_) =>
-                        DispensarScreen(branchId: widget.branchId)),
-              );
-            } else {
-              Navigator.pop(context);
-            }
-          },
+          onPressed: () => Navigator.pop(context),
         ),
         title: Row(children: [
           const Icon(FontAwesomeIcons.pills,
@@ -563,315 +552,562 @@ class _InventoryPageState extends State<InventoryPage>
       );
 
   // ── Stock Tab ─────────────────────────────────────────────────────────────
-  Widget _stockTab() => Column(children: [
-        Container(
-          color: _white,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-          child: Column(children: [
-            if (_isManager)
-              Container(
-                margin: const EdgeInsets.only(bottom: 10),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE3F2FD),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF90CAF9)),
-                ),
-                child: const Row(children: [
-                  Icon(Icons.touch_app_rounded,
-                      size: 15, color: Color(0xFF1565C0)),
-                  SizedBox(width: 8),
+  Widget _stockTab() => Column(
+        children: [
+          _buildFilterSection(),
+          Expanded(
+            child: ValueListenableBuilder<Box>(
+              valueListenable: Hive.box(LocalStorageService.stockBox).listenable(),
+              builder: (context, box, _) {
+                final rawItems = box.values
+                    .whereType<Map>()
+                    .map((v) => Map<String, dynamic>.from(v))
+                    .where((v) => v['branchId'] == widget.branchId)
+                    .toList();
+
+                if (rawItems.isEmpty) {
+                  return Center(
+                      child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                        Icon(Icons.inventory_2_outlined,
+                            size: 72, color: Colors.grey[300]),
+                        const SizedBox(height: 14),
+                        Text(
+                            widget.isAdmin
+                                ? 'No medicines in local stock.'
+                                : 'No medicines in local stock.\nChecking cloud...',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: _textLight, fontSize: 15)),
+                      ]));
+                }
+
+                final batches = _groupByBatch(rawItems);
+                var preFiltered = batches.where((b) {
+                  final name = b['name'].toString().toLowerCase();
+                  final formula =
+                      (b['formula'] ?? '').toString().toLowerCase();
+                  final type = b['type'];
+                  final query = _searchCtrl.text.toLowerCase();
+                  return (name.contains(query) ||
+                          formula.contains(query)) &&
+                      (_filterType == 'All' || type == _filterType);
+                }).toList();
+
+                _updateBatchKeys(preFiltered);
+
+                var filtered = _filterBatch == 'All Batches'
+                    ? preFiltered
+                    : preFiltered
+                        .where((b) => b['expiryDate'] == _filterBatch)
+                        .toList();
+
+                filtered.sort((a, b) {
+                  int cmp = switch (_sortField) {
+                    'name' => a['name']
+                        .toString()
+                        .toLowerCase()
+                        .compareTo(b['name'].toString().toLowerCase()),
+                    'formula' => (a['formula'] ?? '')
+                        .toString()
+                        .toLowerCase()
+                        .compareTo(
+                            (b['formula'] ?? '').toString().toLowerCase()),
+                    'dose' => (a['dose'] ?? '')
+                        .toString()
+                        .compareTo((b['dose'] ?? '').toString()),
+                    'quantity' =>
+                      (a['quantity'] as int).compareTo(b['quantity'] as int),
+                    'price' =>
+                      (a['price'] as double).compareTo(b['price'] as double),
+                    'expiry' => _parseExpiry(a['expiryDate'])
+                        .compareTo(_parseExpiry(b['expiryDate'])),
+                    _ => 0,
+                  };
+                  return _isAscending ? cmp : -cmp;
+                });
+
+                final totalPages =
+                    (filtered.length / _perPage).ceil().clamp(1, 9999);
+                final safePage = _page.clamp(0, totalPages - 1);
+                final start = safePage * _perPage;
+                final end = (start + _perPage).clamp(0, filtered.length);
+                final pageData = start < end
+                    ? filtered.sublist(start, end)
+                    : <Map<String, dynamic>>[];
+
+                final screenWidth = MediaQuery.of(context).size.width;
+                final isMobile = screenWidth < 640;
+
+                return Column(children: [
+                  _buildMetricsRow(batches, isMobile),
                   Expanded(
-                      child: Text(
+                      child: LayoutBuilder(builder: (ctx, constraints) {
+                    return constraints.maxWidth > 640
+                        ? _stockTable(pageData, start, constraints.maxWidth)
+                        : _stockCards(pageData, start);
+                  })),
+                  _pagination(safePage, totalPages),
+                ]);
+              },
+            ),
+          ),
+        ],
+      );
+
+  Widget _buildFilterSection() {
+    return Container(
+      color: _bg, // Seamless integration with background
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        children: [
+          if (_isManager)
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE3F2FD),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF90CAF9).withValues(alpha: 0.5)),
+              ),
+              child: const Row(children: [
+                Icon(Icons.touch_app_rounded, size: 18, color: Color(0xFF1565C0)),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
                     'Tap any medicine row to edit it directly.',
                     style: TextStyle(
-                        fontSize: 12,
-                        color: Color(0xFF1565C0),
-                        fontWeight: FontWeight.w500),
-                  )),
-                ]),
-              ),
-            TextField(
-              controller: _searchCtrl,
-              cursorColor: _teal,
-              style: const TextStyle(color: _textDark, fontSize: 14),
-              decoration: InputDecoration(
-                prefixIcon:
-                    const Icon(Icons.search_rounded, color: _teal, size: 18),
-                hintText: 'Search medicine...',
-                hintStyle:
-                    const TextStyle(color: _textLight, fontSize: 14),
-                filled: true,
-                fillColor: _green50,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none),
-                enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: _border)),
-                focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide:
-                        const BorderSide(color: _teal, width: 1.5)),
-                contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14, vertical: 11),
-              ),
-              onChanged: (_) => setState(() => _page = 0),
+                      fontSize: 13,
+                      color: Color(0xFF1565C0),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ]),
             ),
-            const SizedBox(height: 10),
-            Row(children: [
-              Expanded(
-                  child: _filterDropdown(
+          LayoutBuilder(builder: (context, constraints) {
+            final isWide = constraints.maxWidth > 800;
+            if (isWide) {
+              return Row(
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: _searchField(),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 2,
+                    child: _filterDropdown(
                       _filterType,
                       _types,
                       (v) => setState(() {
+                        _filterType = v ?? 'All';
+                        _page = 0;
+                      }),
+                      icon: Icons.category_rounded,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 2,
+                    child: _filterDropdown(
+                      _filterBatch,
+                      _batchKeys,
+                      (v) => setState(() {
+                        _filterBatch = v ?? 'All Batches';
+                        _page = 0;
+                      }),
+                      display: (k) => k == 'All Batches' ? k : 'Batch: $k',
+                      icon: Icons.calendar_today_rounded,
+                    ),
+                  ),
+                ],
+              );
+            } else {
+              return Column(
+                children: [
+                  _searchField(),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _filterDropdown(
+                          _filterType,
+                          _types,
+                          (v) => setState(() {
                             _filterType = v ?? 'All';
                             _page = 0;
-                          }))),
-              const SizedBox(width: 10),
-              Expanded(
-                  child: _filterDropdown(
-                _filterBatch,
-                _batchKeys,
-                (v) => setState(() {
-                  _filterBatch = v ?? 'All Batches';
-                  _page = 0;
-                }),
-                display: (k) => k == 'All Batches' ? k : 'Batch: $k',
-              )),
-            ]),
-          ]),
-        ),
-        Expanded(
-          child: ValueListenableBuilder<Box>(
-            valueListenable: Hive.box(LocalStorageService.stockBox).listenable(),
-            builder: (context, box, _) {
-              final rawItems = box.values
-                  .whereType<Map>()
-                  .map((v) => Map<String, dynamic>.from(v))
-                  .where((v) => v['branchId'] == widget.branchId)
-                  .toList();
+                          }),
+                          icon: Icons.category_rounded,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _filterDropdown(
+                          _filterBatch,
+                          _batchKeys,
+                          (v) => setState(() {
+                            _filterBatch = v ?? 'All Batches';
+                            _page = 0;
+                          }),
+                          display: (k) => k == 'All Batches' ? k : 'Batch: $k',
+                          icon: Icons.calendar_today_rounded,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            }
+          }),
+        ],
+      ),
+    );
+  }
 
-              if (rawItems.isEmpty) {
-                return Center(
-                    child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                      Icon(Icons.inventory_2_outlined,
-                          size: 72, color: Colors.grey[300]),
-                      const SizedBox(height: 14),
-                      Text(
-                          widget.isAdmin
-                              ? 'No medicines in local stock.'
-                              : 'No medicines in local stock.\nChecking cloud...',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              color: _textLight, fontSize: 15)),
-                    ]));
-              }
-
-              final batches = _groupByBatch(rawItems);
-              var preFiltered = batches.where((b) {
-                final name = b['name'].toString().toLowerCase();
-                final formula =
-                    (b['formula'] ?? '').toString().toLowerCase();
-                final type = b['type'];
-                final query = _searchCtrl.text.toLowerCase();
-                return (name.contains(query) ||
-                        formula.contains(query)) &&
-                    (_filterType == 'All' || type == _filterType);
-              }).toList();
-
-              _updateBatchKeys(preFiltered);
-
-              var filtered = _filterBatch == 'All Batches'
-                  ? preFiltered
-                  : preFiltered
-                      .where((b) => b['expiryDate'] == _filterBatch)
-                      .toList();
-
-              filtered.sort((a, b) {
-                int cmp = switch (_sortField) {
-                  'name' => a['name']
-                      .toString()
-                      .toLowerCase()
-                      .compareTo(b['name'].toString().toLowerCase()),
-                  'formula' => (a['formula'] ?? '')
-                      .toString()
-                      .toLowerCase()
-                      .compareTo(
-                          (b['formula'] ?? '').toString().toLowerCase()),
-                  'dose' => (a['dose'] ?? '')
-                      .toString()
-                      .compareTo((b['dose'] ?? '').toString()),
-                  'quantity' =>
-                    (a['quantity'] as int).compareTo(b['quantity'] as int),
-                  'price' =>
-                    (a['price'] as double).compareTo(b['price'] as double),
-                  'expiry' => _parseExpiry(a['expiryDate'])
-                      .compareTo(_parseExpiry(b['expiryDate'])),
-                  _ => 0,
-                };
-                return _isAscending ? cmp : -cmp;
-              });
-
-              final totalPages =
-                  (filtered.length / _perPage).ceil().clamp(1, 9999);
-              final safePage = _page.clamp(0, totalPages - 1);
-              final start = safePage * _perPage;
-              final end = (start + _perPage).clamp(0, filtered.length);
-              final pageData = start < end
-                  ? filtered.sublist(start, end)
-                  : <Map<String, dynamic>>[];
-
-              return Column(children: [
-                Expanded(
-                    child: LayoutBuilder(builder: (ctx, constraints) {
-                  return constraints.maxWidth > 640
-                      ? _stockTable(pageData, start, constraints.maxWidth)
-                      : _stockCards(pageData, start);
-                })),
-                _pagination(safePage, totalPages),
-              ]);
-            },
+  Widget _searchField() {
+    return Container(
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: _shadow.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
+        ],
+      ),
+      child: TextField(
+        controller: _searchCtrl,
+        cursorColor: _teal,
+        style: const TextStyle(color: _textDark, fontSize: 14),
+        decoration: InputDecoration(
+          prefixIcon: const Icon(Icons.search_rounded, color: _teal, size: 20),
+          hintText: 'Search by formula or name...',
+          hintStyle: const TextStyle(color: _textLight, fontSize: 14),
+          filled: true,
+          fillColor: Colors.transparent,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: _teal, width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         ),
-      ]);
+        onChanged: (_) => setState(() => _page = 0),
+      ),
+    );
+  }
+
+  Widget _buildMetricsRow(List<Map<String, dynamic>> batches, bool isMobile) {
+    final totalMedicines = batches.length;
+    final lowStockCount = batches.where((b) => (b['quantity'] as int) < 10).length;
+    final expiringSoonCount = batches.where((b) => _isExpiringSoon(b['expiryDate'] as String?)).length;
+    final totalStockQty = batches.fold<int>(0, (sum, b) => sum + (b['quantity'] as int));
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 600) {
+            // Horizontal scroll for mobile
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal),
+                  const SizedBox(width: 12),
+                  _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, _blue),
+                  const SizedBox(width: 12),
+                  _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _red),
+                  const SizedBox(width: 12),
+                  _buildMetricCard('NEAR EXPIRY', '$expiringSoonCount', Icons.access_time_rounded, _amber),
+                ],
+              ),
+            );
+          } else {
+            // Even distribution for tablet/desktop
+            return Row(
+              children: [
+                Expanded(child: _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, _blue)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _red)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildMetricCard('NEAR EXPIRY', '$expiringSoonCount', Icons.access_time_rounded, _amber)),
+              ],
+            );
+          }
+        }
+      ),
+    );
+  }
+
+  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: _white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: _textLight,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.8,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: TextStyle(
+                    color: _textDark,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _filterDropdown(
       String value, List<String> items, ValueChanged<String?> onChange,
-      {String Function(String)? display}) {
+      {String Function(String)? display, IconData? icon}) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
       decoration: BoxDecoration(
-        color: _green50,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _border),
+        color: _white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade200, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: _shadow.withValues(alpha: 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: DropdownButton<String>(
-        value: value,
-        isExpanded: true,
-        underline: const SizedBox(),
-        dropdownColor: _white,
-        style: const TextStyle(color: _textDark, fontSize: 13),
-        icon:
-            const Icon(Icons.expand_more_rounded, color: _teal, size: 18),
-        items: items
-            .map((t) => DropdownMenuItem<String>(
-                value: t,
-                child: Text(display != null ? display(t) : t,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _textDark, fontSize: 13))))
-            .toList(),
-        onChanged: onChange,
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: _teal, size: 16),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: DropdownButton<String>(
+              value: value,
+              isExpanded: true,
+              underline: const SizedBox(),
+              dropdownColor: _white,
+              style: const TextStyle(color: _textDark, fontSize: 13.5, fontWeight: FontWeight.w500),
+              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _textMid, size: 20),
+              items: items
+                  .map((t) => DropdownMenuItem<String>(
+                      value: t,
+                      child: Text(display != null ? display(t) : t,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: _textDark, fontSize: 13.5))))
+                  .toList(),
+              onChanged: onChange,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   // ── Stock Table (wide screens) ─────────────────────────────────────────────
   Widget _stockTable(
-      List<Map<String, dynamic>> data, int start, double w) {
+      List<Map<String, dynamic>> data, int start, double screenWidth) {
+    // 32 is the sum of horizontal margins (16 on each side)
+    final double cardInnerWidth = screenWidth - 32;
+    // Set a minimum width for the table. If inner width is smaller, it will scroll
+    final double w = cardInnerWidth < 1000 ? 1000 : cardInnerWidth;
+    
     final cols = [
       _Col('#', w * 0.04, null),
-      // "Formula" label instead of "Name"
-      _Col('Formula', w * 0.18, 'name'),
+      _Col('Formula', w * 0.20, 'name'), // slightly wider
       _Col('Type', w * 0.11, null),
-      _Col('Dose', w * 0.14, 'dose'),
+      _Col('Dose', w * 0.12, 'dose'),
       _Col('Qty', w * 0.08, 'quantity'),
       _Col('Price', w * 0.11, 'price'),
-      _Col('Expiry', w * 0.19, 'expiry'),
+      _Col('Expiry', w * 0.16, 'expiry'),
+      _Col('Status', w * 0.18, null),
     ];
-    return Column(children: [
-      Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF004D40),
-          border:
-              Border(bottom: BorderSide(color: Color(0xFF00695C), width: 2)),
-        ),
-        child: Row(
-            children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
-      ),
-      Expanded(
-          child: ListView.builder(
-        itemCount: data.length,
-        itemBuilder: (ctx, i) {
-          final b = data[i];
-          final qty = b['quantity'] as int;
-          final type = b['type'] as String;
-          final price = b['price'] as double;
-          final lowStock = qty < 10;
-          final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
-          final expText = _formatDate(b['expiryDate'] as String?);
-          final isWarning = lowStock || expSoon;
-          // Strong color: expired = deep red, low stock = deep red
-          final rowColor = isWarning
-              ? const Color(0xFFFFEBEE) // strong red tint
-              : (i % 2 == 0 ? _white : const Color(0xFFF0FAF4));
 
-          final rowContent = Container(
-            decoration: BoxDecoration(
-              color: rowColor,
-              border: Border(
-                  bottom: BorderSide(
-                      color: isWarning
-                          ? _red.withValues(alpha: 0.4)
-                          : const Color(0xFFDCEDDE),
-                      width: isWarning ? 1.2 : 0.8),
-                  left: isWarning
-                      ? const BorderSide(color: _red, width: 5)
-                      : BorderSide.none),
+    final tableWidget = Column(
+      children: [
+        Container(
+          height: 48,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF00695C), Color(0xFF004D40)], // Premium Teal gradient
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            child: Row(children: [
-              _dCell(
-                  cols[0].w,
-                  Text('${start + i + 1}',
-                      style:
-                          const TextStyle(color: _textLight, fontSize: 12))),
-              _dCell(
-                  cols[1].w,
-                  Row(children: [
-                    Expanded(
-                        child: Text(b['name'],
-                            style: TextStyle(
-                                color: isWarning ? _red : _textDark,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13),
-                            overflow: TextOverflow.ellipsis)),
-                    if (_isManager)
-                      const Padding(
-                        padding: EdgeInsets.only(left: 4),
-                        child: Icon(Icons.edit_rounded,
-                            size: 12, color: _teal),
-                      ),
-                  ])),
-              _dCell(cols[2].w, _typePill(type)),
-              _dCell(
-                  cols[3].w,
-                  Text(b['dose'] ?? '—',
-                      style: const TextStyle(color: _textMid, fontSize: 12))),
-              _dCell(cols[4].w, _qtyBadge(qty, lowStock)),
-              _dCell(cols[5].w, _priceBadge(price)),
-              _dCell(cols[6].w, _expBadge(expText, expSoon)),
-              if (lowStock || expSoon)
-                _dCell(
-                    120,
-                    _statusLabel(
-                        lowStock: lowStock, expSoon: expSoon, isTable: true)),
-            ]),
-          );
+          ),
+          child: Row(
+              children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.zero,
+            itemCount: data.length,
+            itemBuilder: (ctx, i) {
+              final b = data[i];
+              final qty = b['quantity'] as int;
+              final type = b['type'] as String;
+              final price = b['price'] as double;
+              final lowStock = qty < 10;
+              final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
+              final expText = _formatDate(b['expiryDate'] as String?);
+              final isWarning = lowStock || expSoon;
+              final rowColor = isWarning
+                  ? const Color(0xFFFFF5F5)
+                  : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA));
 
-          if (_isManager) {
-            return InkWell(
-              onTap: () => _showEditSheet(b),
-              hoverColor: _teal.withValues(alpha: 0.05),
-              child: rowContent,
-            );
-          }
-          return rowContent;
-        },
-      )),
-    ]);
+              final rowContent = Container(
+                decoration: BoxDecoration(
+                  color: rowColor,
+                  border: Border(
+                    bottom: BorderSide(
+                        color: isWarning
+                            ? _red.withValues(alpha: 0.15)
+                            : Colors.grey.shade100,
+                        width: 1.0),
+                  ),
+                ),
+                child: Stack(
+                  children: [
+                    Row(children: [
+                      _dCell(
+                          cols[0].w,
+                          Text('${start + i + 1}',
+                              style: const TextStyle(color: _textMid, fontSize: 13, fontWeight: FontWeight.bold))),
+                      _dCell(
+                          cols[1].w,
+                          Row(children: [
+                            Expanded(
+                                child: Text(b['name'],
+                                    style: TextStyle(
+                                        color: isWarning ? _red.withValues(alpha: 0.9) : _textDark,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13.5),
+                                    overflow: TextOverflow.ellipsis)),
+                            if (_isManager)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 6, right: 4),
+                                child: Icon(Icons.edit_rounded,
+                                    size: 14, color: _teal.withValues(alpha: 0.5)),
+                              ),
+                          ])),
+                      _dCell(cols[2].w, _typePill(type)),
+                      _dCell(
+                          cols[3].w,
+                          Text(b['dose'] ?? '—',
+                              style: const TextStyle(color: _textMid, fontSize: 13, fontWeight: FontWeight.w500))),
+                      _dCell(cols[4].w, _qtyBadge(qty, lowStock)),
+                      _dCell(cols[5].w, _priceBadge(price)),
+                      _dCell(cols[6].w, _expBadge(expText, expSoon)),
+                      _dCell(
+                          cols[7].w,
+                          _statusLabel(
+                              lowStock: lowStock, expSoon: expSoon, isTable: true)),
+                    ]),
+                    if (isWarning)
+                      Positioned(
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: 4,
+                        child: Container(color: _red),
+                      ),
+                  ],
+                ),
+              );
+
+              if (_isManager) {
+                return InkWell(
+                  onTap: () => _showEditSheet(b),
+                  hoverColor: _teal.withValues(alpha: 0.05),
+                  child: rowContent,
+                );
+              }
+              return rowContent;
+            },
+          ),
+        ),
+      ],
+    );
+
+    final cardContent = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: _shadow.withValues(alpha: 0.04),
+            blurRadius: 15,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: SizedBox(
+          width: w, 
+          child: tableWidget
+        ),
+      ),
+    );
+
+    return cardContent;
   }
 
   // ── Stock Cards (narrow screens) ──────────────────────────────────────────
@@ -2176,15 +2412,46 @@ class _InventoryPageState extends State<InventoryPage>
       {required bool lowStock, required bool expSoon, bool isTable = false}) {
     String label = '';
     IconData icon = Icons.warning_rounded;
+    Color badgeColor = _red;
+
     if (lowStock && expSoon) {
-      label = 'CRITICAL: LOW STOCK & NEAR EXPIRY';
+      label = isTable ? 'CRITICAL' : 'CRITICAL: LOW STOCK & NEAR EXPIRY';
+      icon = Icons.error_outline_rounded;
+      badgeColor = _red;
     } else if (lowStock) {
-      label = 'WARNING: LOW STOCK';
+      label = isTable ? 'LOW STOCK' : 'WARNING: LOW STOCK';
       icon = Icons.inventory_2_rounded;
+      badgeColor = _red;
     } else if (expSoon) {
-      label = 'ALERT: NEAR EXPIRY';
+      label = isTable ? 'NEAR EXPIRY' : 'ALERT: NEAR EXPIRY';
       icon = Icons.access_time_rounded;
+      badgeColor = _amber;
     } else {
+      if (isTable) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle_rounded, color: Color(0xFF2E7D32), size: 10),
+              SizedBox(width: 4),
+              Text(
+                'IN STOCK',
+                style: TextStyle(
+                  color: Color(0xFF2E7D32),
+                  fontSize: 8,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
       return const SizedBox.shrink();
     }
 
@@ -2192,11 +2459,11 @@ class _InventoryPageState extends State<InventoryPage>
       padding: EdgeInsets.symmetric(
           horizontal: isTable ? 8 : 12, vertical: isTable ? 3 : 5),
       decoration: BoxDecoration(
-        color: _red, // Solid vibrant red
+        color: badgeColor,
         borderRadius: BorderRadius.circular(4),
         boxShadow: [
           BoxShadow(
-            color: _red.withValues(alpha: 0.35),
+            color: badgeColor.withValues(alpha: 0.35),
             blurRadius: 5,
             offset: const Offset(0, 2),
           )
@@ -2207,13 +2474,16 @@ class _InventoryPageState extends State<InventoryPage>
         children: [
           Icon(icon, color: Colors.white, size: isTable ? 10 : 12),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: isTable ? 8 : 10,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0.5,
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: isTable ? 8 : 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.5,
+              ),
             ),
           ),
         ],

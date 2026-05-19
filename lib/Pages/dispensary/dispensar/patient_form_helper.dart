@@ -170,6 +170,7 @@ class PatientFormHelper {
     final english = await getEnglishFont();
     final logoBytes = await loadAssetBytes('assets/logo/gmwf.png');
 
+    final isPhysio = data['isPhysiotherapist'] == true;
     final labTests = (data['labResults'] ?? []) as List;
     final prescriptions = (data['prescriptions'] ?? []) as List;
 
@@ -231,8 +232,8 @@ class PatientFormHelper {
 
     pdf.addPage(
       pw.Page(
-        // 80mm thermal width; height auto via content — use A5 as fallback
-        pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity,
+        // 80mm thermal width; generous height boundary to prevent overflow freezes
+        pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, 500 * PdfPageFormat.mm,
             marginAll: 5 * PdfPageFormat.mm),
         build: (pw.Context ctx) {
           return pw.Column(
@@ -248,25 +249,27 @@ class PatientFormHelper {
                   else
                     pw.SizedBox(width: 36, height: 36),
                   pw.SizedBox(width: 6),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('Gulzar Madina Welfare Foundation',
-                          style: pw.TextStyle(
-                              font: english,
-                              fontSize: 9,
-                              fontWeight: pw.FontWeight.bold,
-                              color: teal)),
-                      pw.Text('Free Dispensary',
-                          style: pw.TextStyle(
-                              font: english,
-                              fontSize: 8,
-                              color: teal)),
-                      if (branchName.isNotEmpty && branchName != 'Free Dispensary')
-                        pw.Text(branchName,
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('Gulzar Madina Welfare Foundation',
                             style: pw.TextStyle(
-                                font: english, fontSize: 7, color: grey)),
-                    ],
+                                font: english,
+                                fontSize: 9,
+                                fontWeight: pw.FontWeight.bold,
+                                color: teal)),
+                        pw.Text('Free Dispensary',
+                            style: pw.TextStyle(
+                                font: english,
+                                fontSize: 8,
+                                color: teal)),
+                        if (branchName.isNotEmpty && branchName != 'Free Dispensary')
+                          pw.Text(branchName,
+                              style: pw.TextStyle(
+                                  font: english, fontSize: 7, color: grey)),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -274,7 +277,7 @@ class PatientFormHelper {
 
               // ── Lab Tests ────────────────────────────────────────────────
               if (labTests.isNotEmpty) ...[
-                _label('Lab Tests', size: 9, color: teal),
+                _label(isPhysio ? 'Physiotherapies' : 'Lab Tests', size: 9, color: teal),
                 pw.SizedBox(height: 3),
                 ...labTests.map((lab) => pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(vertical: 1),
@@ -384,15 +387,16 @@ class PatientFormHelper {
   }
 
   static pw.Widget buildPdfLabColumn(pw.Font english, List labTests,
-      {required bool isPrint}) {
+      {required bool isPrint, bool isPhysio = false}) {
     final titleColor = PdfColors.green;
     final titleSize = isPrint ? 12.0 : 18.0;
     final itemSize = isPrint ? 10.0 : 16.0;
     final paddingVertical = isPrint ? 2.0 : 6.0;
+    final titleText = isPhysio ? 'Physiotherapies' : 'Lab Tests';
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text('Lab Tests',
+        pw.Text(titleText,
             style: pw.TextStyle(
                 font: english,
                 fontSize: titleSize,
@@ -716,6 +720,8 @@ class PatientFormHelper {
     final customInjectables =
         prescriptions.where((m) => m['inventoryId'] == null && isInjectable(m)).toList();
 
+    final isPhysio = data['isPhysiotherapist'] == true;
+
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat.a4,
       build: (_) => pw.Column(children: [
@@ -728,7 +734,7 @@ class PatientFormHelper {
           if (labTests.isNotEmpty)
             pw.Expanded(
                 flex: 2,
-                child: buildPdfLabColumn(english, labTests, isPrint: false)),
+                child: buildPdfLabColumn(english, labTests, isPrint: false, isPhysio: isPhysio)),
           if (labTests.isNotEmpty) pdfVerticalDivider(),
           pw.Expanded(
             flex: 8,

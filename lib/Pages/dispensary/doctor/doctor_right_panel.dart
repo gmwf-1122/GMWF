@@ -33,6 +33,7 @@ class DoctorRightPanel extends StatefulWidget {
 
   final String doctorId;
   final String doctorName;
+  final bool isPhysiotherapist;
 
   /// Already-normalised queue type: 'zakat' | 'non-zakat' | 'gmwf'
   final String queueType;
@@ -57,6 +58,7 @@ class DoctorRightPanel extends StatefulWidget {
     required this.doctorId,
     required this.doctorName,
     required this.queueType,
+    required this.isPhysiotherapist,
   });
 
   @override
@@ -104,6 +106,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     "Urine R/E", "Lipid Profile", "ECG", "X-ray", "Ultrasound Abdomen",
   ];
 
+  final List<String> _quickPhysiotherapies = const [
+    "SWD (Shortwave Diathermy)", "Ultrasound Therapy", "TENS Therapy", "Cervical Traction", "Lumbar Traction",
+    "Manual Therapy", "Therapeutic Exercises", "Hot Pack / Cold Pack", "Infrared Therapy (IRR)", "Laser Therapy",
+  ];
+
+  List<String> get _currentQuickList => widget.isPhysiotherapist ? _quickPhysiotherapies : _quickLabTests;
+
   final Set<String> _selectedQuickTests = {};
 
   late final List<FocusNode> _tabOrder = [
@@ -130,9 +139,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     super.initState();
     _loadInventory();
 
+    final quickList = _currentQuickList;
     for (final lab in widget.labResults) {
       final name = lab['name']?.toString() ?? '';
-      if (_quickLabTests.contains(name)) _selectedQuickTests.add(name);
+      if (quickList.contains(name)) _selectedQuickTests.add(name);
     }
 
     // Restore days if re-opening a partially-saved entry, or use receptionist suggestion
@@ -200,7 +210,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           ..addAll(
             widget.labResults
                 .map((l) => l['name']?.toString() ?? '')
-                .where(_quickLabTests.contains),
+                .where(_currentQuickList.contains),
           );
         final d = data['daysOfMedicine'];
         if (d is int && d >= 1 && d <= 3) _daysOfMedicine = d;
@@ -678,13 +688,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
   Future<void> _addCustomLabTest() async {
     final ctrl = TextEditingController();
+    final titleText = widget.isPhysiotherapist ? 'Add Custom Physiotherapy' : 'Add Custom Lab Test';
+    final hintText = widget.isPhysiotherapist ? 'Therapy name' : 'Test name';
+    final errorText = widget.isPhysiotherapist ? 'Invalid or duplicate therapy' : 'Invalid or duplicate test';
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Add Custom Lab Test', style: TextStyle(fontSize: 16)),
+        title: Text(titleText, style: const TextStyle(fontSize: 16)),
         content: TextField(
           controller: ctrl, autofocus: true,
-          decoration: const InputDecoration(hintText: 'Test name', border: OutlineInputBorder(), isDense: true),
+          decoration: InputDecoration(hintText: hintText, border: const OutlineInputBorder(), isDense: true),
         ),
         actions: [
           TextButton(
@@ -699,8 +712,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             onPressed: () {
               final name = ctrl.text.trim();
               if (name.isEmpty || widget.labResults.any((l) => (l['name'] ?? '').toString().trim() == name)) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Invalid or duplicate test'), backgroundColor: Colors.redAccent));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(errorText), backgroundColor: Colors.redAccent));
                 return;
               }
               setState(() => widget.labResults.add({'name': name}));
@@ -1071,6 +1084,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         'extraCharge':     extraCharge,
         'completedAt':     nowIso,
         'updatedAt':       nowIso,
+        'isPhysiotherapist': widget.isPhysiotherapist,
       };
 
       final fullPrescriptionData = <String, dynamic>{
@@ -1104,6 +1118,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         // ── FIX: Mark as not yet dispensed so _buildReservedQuantities
         //         picks it up correctly for subsequent patients
         'dispenseStatus':  'pending',
+        'isPhysiotherapist': widget.isPhysiotherapist,
       };
 
       // 1. Hive prescriptions box
@@ -1624,7 +1639,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               SizedBox(height: compact ? 12 : 20),
 
               // ── Lab tests ─────────────────────────────────────────────
-              _sectionHeader('Lab Tests', FontAwesomeIcons.flask,
+              _sectionHeader(widget.isPhysiotherapist ? 'Physiotherapies' : 'Lab Tests', widget.isPhysiotherapist ? FontAwesomeIcons.personWalking : FontAwesomeIcons.flask,
                   compact: compact,
                   action: IconButton(
                     icon: Icon(Icons.add_circle_outline, color: _teal, size: compact ? 20 : 24),
@@ -1635,7 +1650,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
               Wrap(
                 spacing: compact ? 6 : 10, runSpacing: compact ? 6 : 10,
-                children: _quickLabTests.map((t) {
+                children: _currentQuickList.map((t) {
                   final selected = _selectedQuickTests.contains(t);
                   return FilterChip(
                     label: Text(t, style: TextStyle(fontSize: compact ? 11 : 13)),
@@ -1661,16 +1676,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 }).toList(),
               ),
 
-              if (widget.labResults.any((l) => !_quickLabTests.contains(l['name']))) ...[
+              if (widget.labResults.any((l) => !_currentQuickList.contains(l['name']))) ...[
                 const SizedBox(height: 12),
-                Text('Custom Tests',
+                Text(widget.isPhysiotherapist ? 'Custom Physiotherapies' : 'Custom Tests',
                     style: TextStyle(
                         fontSize: compact ? 13 : 16, fontWeight: FontWeight.bold, color: _teal)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6, runSpacing: 6,
                   children: widget.labResults
-                      .where((l) => !_quickLabTests.contains(l['name']))
+                      .where((l) => !_currentQuickList.contains(l['name']))
                       .map((l) => Chip(
                             label: Text(l['name'], style: TextStyle(fontSize: compact ? 11 : 13)),
                             backgroundColor: Colors.orange.shade600,

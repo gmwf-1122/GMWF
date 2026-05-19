@@ -506,6 +506,8 @@ class _DashboardTabState extends State<DashboardTab> {
     }
     if (type == 'EXCEL') {
       _exportToExcel(list);
+    } else if (type == 'PDF_RECEIPTS') {
+      downloadBulkReceiptsGridPdf(list, widget.branchName, context);
     } else {
       downloadTransactionsLedgerPdf(list, widget.branchName, context);
     }
@@ -1211,6 +1213,7 @@ class _ExportDialog extends StatefulWidget {
 
 class _ExportDialogState extends State<_ExportDialog> {
   late String _selectedType;
+  String _pdfExportMode = 'LEDGER';
 
   @override
   void initState() {
@@ -1283,8 +1286,11 @@ class _ExportDialogState extends State<_ExportDialog> {
         break;
     }
 
-    widget.onExport(_selectedType, list);
-    }
+    final String exportType = _selectedType == 'PDF'
+        ? (_pdfExportMode == 'RECEIPTS' ? 'PDF_RECEIPTS' : 'PDF_LEDGER')
+        : 'EXCEL';
+    widget.onExport(exportType, list);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1410,6 +1416,43 @@ class _ExportDialogState extends State<_ExportDialog> {
                     ],
                   ),
                 ),
+
+                if (_selectedType == 'PDF') ...[
+                  const SizedBox(height: 20),
+                  const Text('PDF EXPORT TYPE',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF94A3B8),
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        _formatToggleBtn(
+                          label: 'Ledger Table',
+                          icon: Icons.list_alt_rounded,
+                          color: pdfColor,
+                          isSelected: _pdfExportMode == 'LEDGER',
+                          onTap: () => setState(() => _pdfExportMode = 'LEDGER'),
+                        ),
+                        const SizedBox(width: 4),
+                        _formatToggleBtn(
+                          label: '3x3 Receipts',
+                          icon: Icons.grid_view_rounded,
+                          color: pdfColor,
+                          isSelected: _pdfExportMode == 'RECEIPTS',
+                          onTap: () => setState(() => _pdfExportMode = 'RECEIPTS'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 20),
 
