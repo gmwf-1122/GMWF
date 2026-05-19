@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/dispensar/dispensar_screen.dart
+// lib/pages/dispensary/dispensar/dispensar_screen.dart
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -8,21 +8,26 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 
-import '../../../config/constants.dart';
-import '../../../services/local_storage_service.dart';
-import '../../../services/sync_service.dart';
-import '../../../services/auth_service.dart';
-import '../../../realtime/connection_manager.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
-import '../../../widgets/connection_status_widget.dart';
+import 'package:gmwf/config/constants.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/auth_service.dart';
+import 'package:gmwf/realtime/connection_manager.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'inventory.dart';
 import 'patient_form.dart';
 import 'patient_list.dart';
 
 class DispensarScreen extends StatefulWidget {
   final String branchId;
-  const DispensarScreen({super.key, required this.branchId});
+  final bool isEmbedded;
+  const DispensarScreen({
+    super.key,
+    required this.branchId,
+    this.isEmbedded = false,
+  });
 
   @override
   State<DispensarScreen> createState() => _DispensarScreenState();
@@ -327,7 +332,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
         backgroundColor: _teal,
         elevation: 4,
         toolbarHeight: 60,
-        automaticallyImplyLeading: false,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           Image.asset('assets/logo/gmwf.png', height: 36),
           const SizedBox(width: 10),
@@ -382,7 +387,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
-      automaticallyImplyLeading: false,
+      iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
         Image.asset('assets/logo/gmwf.png', height: 60),
         const SizedBox(width: 16),
@@ -443,24 +448,28 @@ class _DispensarScreenState extends State<DispensarScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 700;
 
+    final bodyContent = Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+        ),
+      ),
+      child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+    );
+
     return ValueListenableBuilder<Box>(
       valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
       builder: (context, entriesBox, _) {
         return ValueListenableBuilder<Box>(
           valueListenable: Hive.box(LocalStorageService.prescriptionsBox).listenable(),
           builder: (context, prescriptionsBox, _) {
+            if (widget.isEmbedded) return bodyContent;
+
             return Scaffold(
               appBar: _buildAppBar(isMobile),
-              body: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
-                  ),
-                ),
-                child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
-              ),
+              body: bodyContent,
             );
           },
         );
@@ -524,7 +533,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
         Container(
           width: isTablet ? 480 : constraints.maxWidth * 0.42,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.7),
+            color: Colors.white.withValues(alpha: 0.7),
             borderRadius: const BorderRadius.only(
               topRight: Radius.circular(36),
               bottomRight: Radius.circular(36),

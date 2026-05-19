@@ -279,7 +279,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [t.accent.withOpacity(0.9), t.accentLight],
+                  colors: [t.accent.withValues(alpha: 0.9), t.accentLight],
                 ),
               ),
             ),
@@ -298,7 +298,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.20),
+                            color: Colors.white.withValues(alpha: 0.20),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
@@ -476,7 +476,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
                         label: 'Phone',
                         icon: Icons.phone_outlined,
                         keyboardType: TextInputType.phone,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(11),
+                        ]),
                     const SizedBox(height: 14),
                     _buildField(t,
                         controller: _emailController,
@@ -601,7 +604,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 label: 'Phone',
                 icon: Icons.phone_outlined,
                 keyboardType: TextInputType.phone,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(11),
+                ]),
             const SizedBox(height: 14),
             _buildField(t,
                 controller: _emailController,
@@ -734,7 +740,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 18, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 18, offset: const Offset(0, 4))],
       ),
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
       child: Column(children: [
@@ -746,7 +752,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 shape: BoxShape.circle,
                 border: Border.all(
                     color: _profileImageBytes != null ? t.accent : t.bgRule, width: 3),
-                boxShadow: [BoxShadow(color: t.accent.withOpacity(0.15), blurRadius: 18, offset: const Offset(0, 6))],
+                boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 6))],
               ),
               child: CircleAvatar(
                 radius: 50,
@@ -754,7 +760,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 backgroundImage: _profileImageBytes != null ? MemoryImage(_profileImageBytes!) : null,
                 child: _profileImageBytes == null
                     ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.person_outline_rounded, size: 34, color: t.accent.withOpacity(0.5)),
+                        Icon(Icons.person_outline_rounded, size: 34, color: t.accent.withValues(alpha: 0.5)),
                         const SizedBox(height: 4),
                         Text('Add Photo', style: TextStyle(fontSize: 10, color: t.textTertiary, fontWeight: FontWeight.w500)),
                       ])
@@ -833,7 +839,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(color: iconColor.withOpacity(0.13), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(8)),
                 child: Icon(role['icon'] as IconData, color: iconColor, size: 17),
               ),
               const SizedBox(width: 12),
@@ -860,8 +866,8 @@ class _BranchesRegisterState extends State<BranchesRegister>
 
   Widget _roleBadge(String text, Color color) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: color.withOpacity(0.13), borderRadius: BorderRadius.circular(20)),
-        child: Text(text, style: TextStyle(fontSize: 10, color: color.withOpacity(0.9), fontWeight: FontWeight.w700)),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(20)),
+        child: Text(text, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9), fontWeight: FontWeight.w700)),
       );
 
   Widget _buildCard(RoleThemeData t, {
@@ -875,7 +881,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
@@ -884,7 +890,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
           child: Row(children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: accent.withOpacity(0.10), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: accent.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
               child: Icon(icon, color: accent, size: 18),
             ),
             const SizedBox(width: 12),
@@ -990,13 +996,13 @@ class _BranchesRegisterState extends State<BranchesRegister>
         decoration: BoxDecoration(
           color: has ? t.accentMuted : t.bgCardAlt,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: has ? t.accent.withOpacity(0.4) : t.bgRule, width: 1.5),
+          border: Border.all(color: has ? t.accent.withValues(alpha: 0.4) : t.bgRule, width: 1.5),
         ),
         child: Row(children: [
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: has ? t.accent.withOpacity(0.15) : t.bgRule.withOpacity(0.5),
+              color: has ? t.accent.withValues(alpha: 0.15) : t.bgRule.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(has ? Icons.check_rounded : icon, color: has ? t.accent : t.textTertiary, size: 20),
@@ -1007,7 +1013,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
               Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: has ? t.accent : t.textPrimary)),
               const SizedBox(height: 2),
               Text(has ? file.name : subtitle,
-                  style: TextStyle(fontSize: 11, color: has ? t.accent.withOpacity(0.7) : t.textTertiary),
+                  style: TextStyle(fontSize: 11, color: has ? t.accent.withValues(alpha: 0.7) : t.textTertiary),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
             ]),
           ),
@@ -1016,7 +1022,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
               onTap: onRemove,
               child: Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: t.danger.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: t.danger.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(8)),
                 child: Icon(Icons.close_rounded, color: t.danger, size: 16),
               ),
             )
@@ -1038,7 +1044,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
               begin: Alignment.topLeft,
               end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: t.accent.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
+          boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.4), blurRadius: 16, offset: const Offset(0, 6))],
         ),
         child: _loading
             ? const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)))

@@ -1,14 +1,14 @@
-// lib/Pages/dispensary/dispensar/inventory_update.dart
+// lib/pages/dispensary/dispensar/inventory_update.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import '../../../services/local_storage_service.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
-import '../../request.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/pages/request.dart';
 
 class InventoryUpdatePage extends StatefulWidget {
   final String branchId;
@@ -220,7 +220,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         borderRadius: BorderRadius.circular(4),
         boxShadow: [
           BoxShadow(
-            color: _red.withOpacity(0.3),
+            color: _red.withValues(alpha: 0.3),
             blurRadius: 4,
             offset: const Offset(0, 2),
           )
@@ -742,7 +742,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             decoration: BoxDecoration(
               color: _white,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _teal.withOpacity(0.4), width: 1.5),
+              border: Border.all(color: _teal.withValues(alpha: 0.4), width: 1.5),
               boxShadow: [
                 BoxShadow(
                     color: _shadow,
@@ -929,7 +929,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
     final rowBg = isSelected 
         ? _green50 
-        : (isWarning ? _red.withOpacity(0.12) : _white);
+        : (isWarning ? _red.withValues(alpha: 0.12) : _white);
     final borderColor = isSelected
         ? _teal
         : (isWarning ? _red : _green100);
@@ -962,7 +962,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
                 color: isSelected
-                    ? _teal.withOpacity(0.12)
+                    ? _teal.withValues(alpha: 0.12)
                     : _green50,
                 borderRadius: BorderRadius.circular(9)),
             child: Icon(_typeIcon(type), color: _teal, size: 15),
@@ -998,11 +998,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                   horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
                 color: (lowStock ? _red : _green600)
-                    .withOpacity(0.1),
+                    .withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                     color: (lowStock ? _red : _green600)
-                        .withOpacity(0.3)),
+                        .withValues(alpha: 0.3)),
               ),
               child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1026,10 +1026,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 9, vertical: 5),
                 decoration: BoxDecoration(
-                  color: _purple.withOpacity(0.08),
+                  color: _purple.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                      color: _purple.withOpacity(0.3)),
+                      color: _purple.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1075,9 +1075,9 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: _teal.withOpacity(0.08),
+            color: _teal.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _teal.withOpacity(0.25)),
+            border: Border.all(color: _teal.withValues(alpha: 0.25)),
           ),
           child: Icon(icon, color: _teal, size: 22),
         ),
@@ -1344,9 +1344,9 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         padding:
             const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
         ),
         child: Text(label,
             style: TextStyle(
@@ -1522,7 +1522,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _purple.withOpacity(0.1),
+              color: _purple.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(Icons.edit_rounded,
@@ -1559,7 +1559,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
             color: const Color(0xFFF3E5F5),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-                color: _purple.withOpacity(0.2)),
+                color: _purple.withValues(alpha: 0.2)),
           ),
           child: Row(children: [
             const Icon(Icons.info_outline_rounded,
@@ -1786,7 +1786,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _purple,
                       disabledBackgroundColor:
-                          _purple.withOpacity(0.5),
+                          _purple.withValues(alpha: 0.5),
                       shape: RoundedRectangleBorder(
                           borderRadius:
                               BorderRadius.circular(12)),

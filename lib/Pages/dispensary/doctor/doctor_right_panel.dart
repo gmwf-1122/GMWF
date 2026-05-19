@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/doctor/doctor_right_panel.dart
+// lib/pages/dispensary/doctor/doctor_right_panel.dart
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,10 +9,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
 
-import '../../../services/local_storage_service.dart';
-import '../../../services/sync_service.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 class DoctorRightPanel extends StatefulWidget {
   final String branchId;
@@ -122,6 +122,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     return (_daysOfMedicine - 1) * pricePerDay;
   }
 
+  // ── Rule: if any injection is prescribed, only 1 day is allowed ───────────
+  bool get _hasInjection => widget.prescriptions.any(_isInjectionOrDrip);
+
   @override
   void initState() {
     super.initState();
@@ -132,11 +135,17 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (_quickLabTests.contains(name)) _selectedQuickTests.add(name);
     }
 
-    // Restore days if re-opening a partially-saved entry
+    // Restore days if re-opening a partially-saved entry, or use receptionist suggestion
     final existing = widget.selectedPatientData?['prescription'];
     if (existing is Map) {
       final d = existing['daysOfMedicine'];
       if (d is int && d >= 1 && d <= 3) _daysOfMedicine = d;
+    } else {
+      // Receptionist suggestion (1, 2, or 3)
+      final suggested = widget.selectedPatientData?['suggestedDays'];
+      if (suggested is int && suggested >= 1 && suggested <= 3) {
+        _daysOfMedicine = suggested;
+      }
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -573,9 +582,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: _teal)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _teal),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _teal,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               final name = nameCtrl.text.trim();
               if (name.isEmpty) {
@@ -629,10 +644,28 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 };
               }
 
-              setState(() => widget.prescriptions.add(newMed));
+              bool wasReset = false;
+              setState(() {
+                widget.prescriptions.add(newMed);
+                // ── Rule: injection prescribed → force 1 day ───────────────
+                if (_isInjectionOrDrip(newMed) && _daysOfMedicine > 1) {
+                  _daysOfMedicine = 1;
+                  wasReset = true;
+                }
+              });
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Added $name'), backgroundColor: Colors.green));
+              
+              if (wasReset) {
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(SnackBar(
+                      content: Text('Added $name. 💉 Duration reset to 1 day due to injection.'),
+                      backgroundColor: Colors.orange.shade800,
+                      duration: const Duration(seconds: 4)));
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Added $name'), backgroundColor: Colors.green));
+              }
               _searchController.clear();
               _searchResults.clear();
             },
@@ -654,9 +687,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           decoration: const InputDecoration(hintText: 'Test name', border: OutlineInputBorder(), isDense: true),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: _teal)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _teal),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _teal,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               final name = ctrl.text.trim();
               if (name.isEmpty || widget.labResults.any((l) => (l['name'] ?? '').toString().trim() == name)) {
@@ -761,53 +800,91 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
         Row(
           children: [1, 2, 3].map((day) {
-            final isSelected = _daysOfMedicine == day;
+            final isSelected  = _daysOfMedicine == day;
+            // Disable multi-day buttons when injection is prescribed
+            final isDisabled  = _hasInjection && day > 1;
+            final effectiveColor = isDisabled
+                ? Colors.grey.shade200
+                : isSelected
+                    ? _teal
+                    : Colors.white;
             return Expanded(
               child: Padding(
                 padding: EdgeInsets.only(right: day < 3 ? 8 : 0),
-                child: GestureDetector(
-                  onTap: () => setState(() => _daysOfMedicine = day),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: EdgeInsets.symmetric(vertical: compact ? 10 : 13),
-                    decoration: BoxDecoration(
-                      color: isSelected ? _teal : Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: isSelected ? _teal : Colors.grey.shade300,
-                          width: isSelected ? 2 : 1),
-                      boxShadow: isSelected
-                          ? [BoxShadow(color: _teal.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 3))]
-                          : [],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '$day',
-                          style: TextStyle(
-                              fontSize: compact ? 18 : 22,
-                              fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : Colors.grey.shade700),
-                        ),
-                        Text(
-                          day == 1 ? 'day' : 'days',
-                          style: TextStyle(
-                              fontSize: compact ? 10 : 12,
-                              color: isSelected ? Colors.white70 : Colors.grey.shade500),
-                        ),
-                        if ((_baseDayPrice[widget.queueType] ?? 0) > 0 && day > 1)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 3),
-                            child: Text(
-                              '+PKR ${(day - 1) * (_baseDayPrice[widget.queueType] ?? 0)}',
-                              style: TextStyle(
-                                  fontSize: compact ? 9 : 10,
-                                  color: isSelected ? Colors.white70 : Colors.orange.shade600,
-                                  fontWeight: FontWeight.w600),
-                            ),
+                child: Tooltip(
+                  message: isDisabled ? 'Injection prescribed — only 1 day allowed' : '',
+                  child: GestureDetector(
+                    onTap: isDisabled
+                        ? () {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text(
+                                  '💉 Injection prescribed — only 1 day of medicine is allowed'),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 2),
+                            ));
+                          }
+                        : () => setState(() => _daysOfMedicine = day),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: EdgeInsets.symmetric(vertical: compact ? 10 : 13),
+                      decoration: BoxDecoration(
+                        color: effectiveColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                            color: isDisabled
+                                ? Colors.grey.shade300
+                                : isSelected
+                                    ? _teal
+                                    : Colors.grey.shade300,
+                            width: isSelected && !isDisabled ? 2 : 1),
+                        boxShadow: isSelected && !isDisabled
+                            ? [BoxShadow(color: _teal.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 3))]
+                            : [],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            '$day',
+                            style: TextStyle(
+                                fontSize: compact ? 18 : 22,
+                                fontWeight: FontWeight.bold,
+                                color: isDisabled
+                                    ? Colors.grey.shade400
+                                    : isSelected
+                                        ? Colors.white
+                                        : Colors.grey.shade700),
                           ),
-                      ],
+                          Text(
+                            day == 1 ? 'day' : 'days',
+                            style: TextStyle(
+                                fontSize: compact ? 10 : 12,
+                                color: isDisabled
+                                    ? Colors.grey.shade400
+                                    : isSelected
+                                        ? Colors.white70
+                                        : Colors.grey.shade500),
+                          ),
+                          if (!isDisabled && (_baseDayPrice[widget.queueType] ?? 0) > 0 && day > 1)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 3),
+                              child: Text(
+                                '+PKR ${(day - 1) * (_baseDayPrice[widget.queueType] ?? 0)}',
+                                style: TextStyle(
+                                    fontSize: compact ? 9 : 10,
+                                    color: isSelected ? Colors.white70 : Colors.orange.shade600,
+                                    fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          if (isDisabled)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: FaIcon(FontAwesomeIcons.syringe,
+                                  size: compact ? 9 : 10,
+                                  color: Colors.grey.shade400),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -832,17 +909,41 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               fontStyle: FontStyle.italic),
         ),
 
-        if (_daysOfMedicine > 1) ...[
+        if (_hasInjection) ...[
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: _teal.withOpacity(0.06),
+              color: Colors.orange.shade50,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _teal.withOpacity(0.2)),
+              border: Border.all(color: Colors.orange.shade300),
             ),
             child: Row(children: [
-              Icon(Icons.info_outline, size: 14, color: _teal.withOpacity(0.7)),
+              FaIcon(FontAwesomeIcons.syringe, size: 13, color: Colors.orange.shade700),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Injection prescribed — only 1 day of medicine is allowed. '
+                  'Multi-day selection is disabled.',
+                  style: TextStyle(
+                      fontSize: compact ? 10 : 11,
+                      color: Colors.orange.shade800,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ]),
+          ),
+        ] else if (_daysOfMedicine > 1) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: _teal.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _teal.withValues(alpha: 0.2)),
+            ),
+            child: Row(children: [
+              Icon(Icons.info_outline, size: 14, color: _teal.withValues(alpha: 0.7)),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -851,7 +952,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   'tablet/capsule/syrup in one go.',
                   style: TextStyle(
                       fontSize: compact ? 10 : 11,
-                      color: _teal.withOpacity(0.8)),
+                      color: _teal.withValues(alpha: 0.8)),
                 ),
               ),
             ]),
@@ -1438,7 +1539,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                   fontSize: compact ? 10 : 12,
                                   color: isOutOfStock
                                       ? Colors.grey.shade400
-                                      : _teal.withOpacity(0.75),
+                                      : _teal.withValues(alpha: 0.75),
                                   fontStyle: FontStyle.italic,
                                 ),
                                 overflow: TextOverflow.ellipsis,

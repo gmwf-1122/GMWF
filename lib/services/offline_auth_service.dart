@@ -21,15 +21,50 @@ class OfflineAuthService {
   // ✅ FIX: Added resetOnError + IOSOptions for better cross-platform reliability.
   // resetOnError: true ensures keystore corruption (common after OS updates) 
   // doesn't permanently block storage — it resets and allows fresh writes.
-  static const _secure = FlutterSecureStorage(
-    aOptions: AndroidOptions(
+  //
+  // ✅ FIX (Windows Guest Accounts): On Windows, DPAPI (used by flutter_secure_storage
+  // for encryption) can hang indefinitely on restricted/guest accounts because it
+  // requires a fully-accessible user profile. We use useBackwardCompatibility: true
+  // which falls back to a non-DPAPI path on Windows so guest accounts are not blocked.
+  static final _secure = FlutterSecureStorage(
+    aOptions: const AndroidOptions(
       encryptedSharedPreferences: true,
       resetOnError: true, // Recover from keystore corruption
     ),
-    iOptions: IOSOptions(
+    iOptions: const IOSOptions(
       accessibility: KeychainAccessibility.first_unlock, // Accessible after first unlock
     ),
+    // useBackwardCompatibility skips DPAPI encryption on Windows,
+    // preventing indefinite hangs on guest/restricted accounts.
+    wOptions: const WindowsOptions(useBackwardCompatibility: true),
   );
+
+  // ── Safe timeout wrapper for all secure storage operations ───────────────
+  // On Windows guest accounts, DPAPI calls can hang forever instead of throwing.
+  // This wrapper ensures we always get a result within 5 seconds.
+  static Future<String?> _secureRead(String key) async {
+    try {
+      return await _secure.read(key: key)
+          .timeout(const Duration(seconds: 5), onTimeout: () {
+        debugPrint('[OfflineAuth] ⚠️ Secure storage read timed out for key: $key (guest account DPAPI restriction)');
+        return null;
+      });
+    } catch (e) {
+      debugPrint('[OfflineAuth] ⚠️ Secure storage read error for key $key: $e');
+      return null;
+    }
+  }
+
+  static Future<void> _secureWrite(String key, String value) async {
+    try {
+      await _secure.write(key: key, value: value)
+          .timeout(const Duration(seconds: 5), onTimeout: () {
+        debugPrint('[OfflineAuth] ⚠️ Secure storage write timed out for key: $key');
+      });
+    } catch (e) {
+      debugPrint('[OfflineAuth] ⚠️ Secure storage write error for key $key: $e');
+    }
+  }
 
   // ── Save credentials after a successful login ────────────────────────────
   /// Returns true if credentials were saved and verified successfully.
@@ -44,10 +79,10 @@ class OfflineAuthService {
 
     try {
       // Write password
-      await _secure.write(key: _pwKey(key), value: password);
+      await _secureWrite(_pwKey(key), password);
 
       // Verify password write
-      final savedPw = await _secure.read(key: _pwKey(key));
+      final savedPw = await _secureRead(_pwKey(key));
       if (savedPw != password) {
         debugPrint('[OfflineAuth] ❌ Password verification failed — storage may be unavailable');
         return false;
@@ -55,10 +90,10 @@ class OfflineAuthService {
       debugPrint('[OfflineAuth] Password saved and verified');
 
       // Write user data blob
-      await _secure.write(key: _dataKey(key), value: jsonEncode(userData));
+      await _secureWrite(_dataKey(key), jsonEncode(userData));
 
       // Verify data write
-      final savedData = await _secure.read(key: _dataKey(key));
+      final savedData = await _secureRead(_dataKey(key));
       if (savedData == null) {
         debugPrint('[OfflineAuth] ❌ User data verification failed — storage may be unavailable');
         return false;
@@ -91,8 +126,8 @@ class OfflineAuthService {
     try {
       // Look up this specific user's credentials directly — do NOT rely on
       // the global _keyHasLoggedIn flag, which only tells us SOMEONE logged in.
-      final cachedPw   = await _secure.read(key: _pwKey(key));
-      final cachedData = await _secure.read(key: _dataKey(key));
+      final cachedPw   = await _secureRead(_pwKey(key));
+      final cachedData = await _secureRead(_dataKey(key));
 
       if (cachedPw == null || cachedData == null) {
         debugPrint('[OfflineAuth] No cached credentials found for $key');
@@ -139,7 +174,7 @@ class OfflineAuthService {
 
       if (key == null) return null;
 
-      final raw = await _secure.read(key: _dataKey(key));
+      final raw = await _secureRead(_dataKey(key));
       if (raw == null) return null;
       return jsonDecode(raw) as Map<String, dynamic>;
     } catch (e) {
@@ -163,10 +198,10 @@ class OfflineAuthService {
         return false;
       }
 
-      await _secure.write(key: _pwKey(key), value: newPassword);
+      await _secureWrite(_pwKey(key), newPassword);
 
       // Verify
-      final saved = await _secure.read(key: _pwKey(key));
+      final saved = await _secureRead(_pwKey(key));
       if (saved != newPassword) {
         debugPrint('[OfflineAuth] ❌ Password update verification failed');
         return false;
@@ -204,7 +239,7 @@ class OfflineAuthService {
   static Future<bool> hasCachedCredentialsFor(String usernameOrEmail) async {
     try {
       final key = usernameOrEmail.trim().toLowerCase();
-      final pw  = await _secure.read(key: _pwKey(key));
+      final pw  = await _secureRead(_pwKey(key));
       return pw != null && pw.isNotEmpty;
     } catch (_) {
       return false;

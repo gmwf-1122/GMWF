@@ -136,25 +136,33 @@ class ConnectionManager {
   Future<void> _tryConnect() async {
     if (!_running || _disposed) return;
 
-    // ── [FIX-NET-1] Dedicated-server fast-path ─────────────────────────────
-    // Skip all discovery when a fixed server IP is configured. This is the
-    // correct approach for production deployments and avoids every UDP/mDNS
-    // failure mode including AP isolation.
-    if (AppNetwork.useDedicatedServer) {
+    // ── [FIX-NET-1] Dedicated-server fast-path (and Web Fallback) ──────────────
+    // Skip all discovery when a fixed server IP is configured OR if running on Web.
+    // Web browsers cannot perform UDP/mDNS network discovery due to security limits.
+    if (AppNetwork.useDedicatedServer || kIsWeb) {
+      String targetIp = AppNetwork.dedicatedServerIp;
+      
+      if (kIsWeb && !AppNetwork.useDedicatedServer) {
+        targetIp = Uri.base.host;
+        if (targetIp.isEmpty || targetIp == 'localhost') {
+          targetIp = '127.0.0.1';
+        }
+      }
+
       _emit(ConnectionStatus(
         state: LanConnectionState.connecting,
-        ip: AppNetwork.dedicatedServerIp,
+        ip: targetIp,
         port: AppNetwork.websocketPort,
-        message: 'Connecting to ${AppNetwork.dedicatedServerIp}...',
+        message: 'Connecting to $targetIp...',
       ));
       final ok = await _connectTo(
-        AppNetwork.dedicatedServerIp,
+        targetIp,
         AppNetwork.websocketPort,
       );
       if (!ok) {
         _emit(ConnectionStatus(
           state: LanConnectionState.disconnected,
-          message: 'Cannot reach server at ${AppNetwork.dedicatedServerIp}:${AppNetwork.websocketPort}. '
+          message: 'Cannot reach server at $targetIp:${AppNetwork.websocketPort}. '
               'Check the IP and that the server is running.',
         ));
         _scheduleReconnect();

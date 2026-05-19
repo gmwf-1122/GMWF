@@ -17,7 +17,11 @@ import '../theme/app_theme.dart';
 enum DateFilterMode { allTime, singleDay, dateRange }
 
 class DownloadScreen extends StatefulWidget {
-  const DownloadScreen({super.key});
+  /// When non-null, the screen is locked to this branch only.
+  /// Pass this for branch managers and supervisors.
+  final String? lockedBranchId;
+
+  const DownloadScreen({super.key, this.lockedBranchId});
 
   @override
   State<DownloadScreen> createState() => _DownloadScreenState();
@@ -37,13 +41,9 @@ class _DownloadScreenState extends State<DownloadScreen>
   DateTime? _rangeEnd;
 
   // Live counts
-  int _totalPatients = 0;
-  int _totalTokens = 0;
-  int _totalPrescriptions = 0;
-  int _totalDonations = 0;
-  int _totalFood = 0;
-  int _totalCredits = 0;
-  int _totalDispensary = 0;
+  int _totalPatients = 0, _totalTokens = 0, _totalPrescriptions = 0;
+  int _totalDonations = 0, _totalFood = 0, _totalCredits = 0, _totalDispensary = 0;
+  int _totalMadrassaS = 0, _totalMadrassaL = 0;
 
   // Animation controllers
   late AnimationController _cardController;
@@ -51,13 +51,16 @@ class _DownloadScreenState extends State<DownloadScreen>
   late Animation<double> _cardFade;
   late Animation<double> _statsFade;
 
-  final Map<String, String> branches = {
-    "all": "All Branches",
-    "gujrat": "Gujrat",
-    "sialkot": "Sialkot",
-    "karachi-1": "Karachi-1",
-    "karachi-2": "Karachi-2",
-  };
+  final List<Map<String, String>> _availableBranches = [];
+  final Set<String> _selectedCategories = {'dispensary', 'donations'};
+  bool _isLoadingBranches = true;
+
+  final List<Map<String, dynamic>> _categoryDef = [
+    {'id': 'dispensary', 'label': 'Dispensary', 'icon': Icons.medication_outlined, 'color': const Color(0xFF0D9488)},
+    {'id': 'dasterkhwaan', 'label': 'Dasterkhwaan', 'icon': Icons.restaurant_rounded, 'color': const Color(0xFFEA580C)},
+    {'id': 'madrassa', 'label': 'Madrassa', 'icon': Icons.menu_book_rounded, 'color': const Color(0xFF4F46E5)},
+    {'id': 'donations', 'label': 'Donations', 'icon': Icons.volunteer_activism_outlined, 'color': const Color(0xFFBE185D)},
+  ];
 
   @override
   void initState() {
@@ -71,6 +74,66 @@ class _DownloadScreenState extends State<DownloadScreen>
     _statsFade = CurvedAnimation(
         parent: _statsController, curve: Curves.easeOutCubic);
     _cardController.forward();
+
+    // Pre-select locked branch immediately.
+    if (widget.lockedBranchId != null && widget.lockedBranchId!.isNotEmpty) {
+      _selectedBranch = widget.lockedBranchId;
+    }
+
+    _loadBranches();
+  }
+
+  Future<void> _loadBranches() async {
+    // ── Branch-locked mode: only fetch the one assigned branch ────────────
+    if (widget.lockedBranchId != null && widget.lockedBranchId!.isNotEmpty) {
+      final bid = widget.lockedBranchId!;
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(bid)
+            .get();
+        final name = (doc.data()?['name'] as String?) ?? bid;
+        if (mounted) {
+          setState(() {
+            _availableBranches
+              ..clear()
+              ..add({'id': bid, 'name': name});
+            _selectedBranch = bid;
+            _isLoadingBranches = false;
+          });
+        }
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _availableBranches
+              ..clear()
+              ..add({'id': bid, 'name': bid});
+            _selectedBranch = bid;
+            _isLoadingBranches = false;
+          });
+        }
+      }
+      return;
+    }
+    // ── Global roles: fetch all branches ─────────────────────────────────
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      final list = snap.docs.map((d) {
+        final data = d.data();
+        return {'id': d.id, 'name': (data['name'] ?? d.id).toString()};
+      }).toList();
+      
+      if (mounted) {
+        setState(() {
+          _availableBranches.clear();
+          _availableBranches.add({'id': 'all', 'name': 'All Branches'});
+          _availableBranches.addAll(list);
+          _isLoadingBranches = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingBranches = false);
+    }
   }
 
   @override
@@ -208,8 +271,10 @@ class _DownloadScreenState extends State<DownloadScreen>
 
     List<String> branchIdsToProcess = [];
     if (downloadAll) {
-      final snap = await db.collection('branches').get();
-      branchIdsToProcess = snap.docs.map((d) => d.id).toList();
+      branchIdsToProcess = _availableBranches
+          .where((b) => b['id'] != 'all')
+          .map((b) => b['id']!)
+          .toList();
       if (branchIdsToProcess.isEmpty) throw 'No branches found';
     } else {
       branchIdsToProcess = [selectedId];
@@ -222,24 +287,22 @@ class _DownloadScreenState extends State<DownloadScreen>
     final List<Map<String, dynamic>> allFood = [];
     final List<Map<String, dynamic>> allCredits = [];
     final List<Map<String, dynamic>> allDispensary = [];
+    final List<Map<String, dynamic>> allMadrassaStudents = [];
+    final List<Map<String, dynamic>> allMadrassaLogs = [];
 
-    int patients = 0, tokens = 0, prescriptions = 0, donations = 0, food = 0, credits = 0, dispensary = 0;
+    int patients = 0, tokens = 0, prescriptions = 0, donations = 0, food = 0, credits = 0, dispensary = 0, madrassaS = 0, madrassaL = 0;
 
-    // Pre-calculate date keys for range if not allTime
+    // Pre-calculate date keys
     List<String> dsLegacyKeys = []; // ddMMyy
     List<String> dsDashKeys   = []; // yyyy-MM-dd
 
     if (_dateMode != DateFilterMode.allTime) {
       DateTime start = _dateMode == DateFilterMode.singleDay ? _singleDate! : _rangeStart!;
       DateTime end   = _dateMode == DateFilterMode.singleDay ? _singleDate! : _rangeEnd!;
-      
-      // Safety: Normalize times
       start = DateTime(start.year, start.month, start.day);
       end   = DateTime(end.year, end.month, end.day);
-
       int days = end.difference(start).inDays + 1;
-      // Cap at 366 days for safety
-      if (days > 366) days = 366;
+      if (days > 400) days = 400;
 
       for (int i = 0; i < days; i++) {
         final d = start.add(Duration(days: i));
@@ -248,172 +311,210 @@ class _DownloadScreenState extends State<DownloadScreen>
       }
     }
 
+    final hasDispensary    = _selectedCategories.contains('dispensary');
+    final hasDasterkhwaan  = _selectedCategories.contains('dasterkhwaan');
+    final hasMadrassa      = _selectedCategories.contains('madrassa');
+    final hasDonations     = _selectedCategories.contains('donations');
+
     for (final bid in branchIdsToProcess) {
-      setState(() => _statusMessage = 'Fetching $bid patterns...');
+      final bName = _availableBranches.firstWhere((b) => b['id'] == bid, orElse: () => {'name': bid})['name'] ?? bid;
+      setState(() => _statusMessage = 'Fetching $bName records...');
 
-      // ── Patients (Always fetch all for now, but filter by date) ──
-      try {
-        final snap = await db.collection('branches').doc(bid).collection('patients').get();
-        for (final doc in snap.docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          data['patientId'] = doc.id;
-          data['branchId'] = bid;
-          final sanitized = _sanitizeForJson(data);
-          final regDate = sanitized['registrationDate'] ?? sanitized['createdAt'];
-          if (_isDateInRange(regDate?.toString())) {
-            allPatients.add(sanitized);
-            patients++;
+      // ── Dispensary ──
+      if (hasDispensary) {
+        try {
+          final snap = await db.collection('branches').doc(bid).collection('patients').get();
+          for (final doc in snap.docs) {
+            final data = doc.data() as Map<String, dynamic>;
+            data['patientId'] = doc.id; data['branchId'] = bid;
+            final sanitized = _sanitizeForJson(data);
+            if (_isDateInRange(sanitized['registrationDate'] ?? sanitized['createdAt'])) {
+              allPatients.add(sanitized); patients++;
+            }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
 
-      // ── Tokens (serials: ddMMyy) ──
-      try {
-        if (_dateMode == DateFilterMode.allTime) {
-          final snap = await db.collection('branches').doc(bid).collection('serials').get();
-          for (final dateDoc in snap.docs) {
-            for (final type in ['zakat', 'non-zakat', 'gmwf']) {
-              final qSnap = await dateDoc.reference.collection(type).get();
-              for (final doc in qSnap.docs) {
-                final d = doc.data() as Map<String, dynamic>;
-                d['serial'] = doc.id; d['date'] = dateDoc.id; d['queueType'] = type; d['branchId'] = bid;
-                allTokens.add(_sanitizeForJson(d)); tokens++;
+        try {
+          if (_dateMode == DateFilterMode.allTime) {
+            final snap = await db.collection('branches').doc(bid).collection('serials').get();
+            for (final dateDoc in snap.docs) {
+              for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+                final qSnap = await dateDoc.reference.collection(type).get();
+                for (final doc in qSnap.docs) {
+                  final d = doc.data() as Map<String, dynamic>;
+                  d['serial'] = doc.id; d['date'] = dateDoc.id; d['queueType'] = type; d['branchId'] = bid;
+                  allTokens.add(_sanitizeForJson(d)); tokens++;
+                }
+              }
+            }
+          } else {
+            await Future.wait(dsLegacyKeys.map((key) async {
+              final dateDoc = db.collection('branches').doc(bid).collection('serials').doc(key);
+              await Future.wait(['zakat', 'non-zakat', 'gmwf'].map((type) async {
+                try {
+                  final qSnap = await dateDoc.collection(type).get();
+                  for (final doc in qSnap.docs) {
+                    final d = doc.data();
+                    d['serial'] = doc.id; d['date'] = key; d['queueType'] = type; d['branchId'] = bid;
+                    allTokens.add(_sanitizeForJson(d)); tokens++;
+                  }
+                } catch (_) {}
+              }));
+            }));
+          }
+        } catch (_) {}
+
+        try {
+          final patientSnap = await db.collection('branches').doc(bid).collection('prescriptions').get();
+          for (final pDoc in patientSnap.docs) {
+            final prescSnap = await pDoc.reference.collection('prescriptions').get();
+            for (final doc in prescSnap.docs) {
+              final data = doc.data();
+              data['prescriptionId'] = doc.id; data['patientCnic'] = pDoc.id; data['branchId'] = bid;
+              final sanitized = _sanitizeForJson(data);
+              if (_isDateInRange(sanitized['date'] ?? sanitized['createdAt'])) {
+                allPrescriptions.add(sanitized); prescriptions++;
               }
             }
           }
-        } else {
-          // Optimized: Fetch only specific days
-          await Future.wait(dsLegacyKeys.map((key) async {
-            final dateDoc = db.collection('branches').doc(bid).collection('serials').doc(key);
-            await Future.wait(['zakat', 'non-zakat', 'gmwf'].map((type) async {
+        } catch (_) {}
+
+        try {
+          final snap = await db.collection('branches').doc(bid).collection('inventory').get();
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            data['itemId'] = doc.id; data['branchId'] = bid;
+            allDispensary.add(_sanitizeForJson(data)); dispensary++;
+          }
+        } catch (_) {}
+      }
+
+      // ── Dasterkhwaan ──
+      if (hasDasterkhwaan) {
+        try {
+          if (_dateMode == DateFilterMode.allTime) {
+            final snap = await db.collection('branches').doc(bid).collection('dasterkhwaan').get();
+            for (final dateDoc in snap.docs) {
+              final qSnap = await dateDoc.reference.collection('tokens').get();
+              for (final doc in qSnap.docs) {
+                final d = doc.data();
+                d['id'] = doc.id; d['date'] = dateDoc.id; d['branchId'] = bid;
+                allFood.add(_sanitizeForJson(d)); food++;
+              }
+            }
+          } else {
+            await Future.wait(dsDashKeys.map((key) async {
               try {
-                final qSnap = await dateDoc.collection(type).get();
+                final qSnap = await db.collection('branches').doc(bid).collection('dasterkhwaan').doc(key).collection('tokens').get();
                 for (final doc in qSnap.docs) {
-                  final d = doc.data() as Map<String, dynamic>;
-                  d['serial'] = doc.id; d['date'] = key; d['queueType'] = type; d['branchId'] = bid;
-                  allTokens.add(_sanitizeForJson(d)); tokens++;
+                  final d = doc.data();
+                  d['id'] = doc.id; d['date'] = key; d['branchId'] = bid;
+                  allFood.add(_sanitizeForJson(d)); food++;
                 }
               } catch (_) {}
             }));
-          }));
-        }
-      } catch (_) {}
-
-      // ── Food Tokens (dasterkhwaan: yyyy-MM-dd) ──
-      try {
-        if (_dateMode == DateFilterMode.allTime) {
-          final snap = await db.collection('branches').doc(bid).collection('dasterkhwaan').get();
-          for (final dateDoc in snap.docs) {
-            final qSnap = await dateDoc.reference.collection('tokens').get();
-            for (final doc in qSnap.docs) {
-              final d = doc.data() as Map<String, dynamic>;
-              d['id'] = doc.id; d['date'] = dateDoc.id; d['branchId'] = bid;
-              allFood.add(_sanitizeForJson(d)); food++;
-            }
           }
-        } else {
-          await Future.wait(dsDashKeys.map((key) async {
-            try {
-              final qSnap = await db.collection('branches').doc(bid).collection('dasterkhwaan').doc(key).collection('tokens').get();
-              for (final doc in qSnap.docs) {
-                final d = doc.data() as Map<String, dynamic>;
-                d['id'] = doc.id; d['date'] = key; d['branchId'] = bid;
-                allFood.add(_sanitizeForJson(d)); food++;
-              }
-            } catch (_) {}
-          }));
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
-      // ── Donations (date: yyyy-MM-dd) ──
-      try {
-        Query query = db.collection('branches').doc(bid).collection('donations');
-        if (_dateMode != DateFilterMode.allTime) {
-          if (_dateMode == DateFilterMode.singleDay) {
-            query = query.where('date', isEqualTo: dsDashKeys.first);
-          } else {
-            query = query.where('date', isGreaterThanOrEqualTo: dsDashKeys.first)
-                         .where('date', isLessThanOrEqualTo: dsDashKeys.last);
+      // ── Donations ──
+      if (hasDonations) {
+        try {
+          Query q = db.collection('branches').doc(bid).collection('donations');
+          if (_dateMode != DateFilterMode.allTime) {
+            q = q.where('date', isGreaterThanOrEqualTo: dsDashKeys.first).where('date', isLessThanOrEqualTo: dsDashKeys.last);
           }
-        }
-        final snap = await query.get();
-        for (final doc in snap.docs) {
-          if (doc.id == 'credit_ledger') continue;
-          final d = doc.data() as Map<String, dynamic>;
-          d['id'] = doc.id; d['branchId'] = bid;
-          allDonations.add(_sanitizeForJson(d)); donations++;
-        }
-      } catch (_) {}
-
-      // ── Credit Ledger (date: yyyy-MM-dd) ──
-      try {
-        Query query = db.collection('branches').doc(bid).collection('creditLedger');
-        if (_dateMode != DateFilterMode.allTime) {
-          if (_dateMode == DateFilterMode.singleDay) {
-            query = query.where('date', isEqualTo: dsDashKeys.first);
-          } else {
-            query = query.where('date', isGreaterThanOrEqualTo: dsDashKeys.first)
-                         .where('date', isLessThanOrEqualTo: dsDashKeys.last);
+          final snap = await q.get();
+          for (final doc in snap.docs) {
+            if (doc.id == 'credit_ledger') continue;
+            final d = doc.data() as Map<String, dynamic>;
+            d['id'] = doc.id; d['branchId'] = bid;
+            allDonations.add(_sanitizeForJson(d)); donations++;
           }
-        }
-        final snap = await query.get();
-        for (final doc in snap.docs) {
-          final d = doc.data() as Map<String, dynamic>;
-          d['id'] = doc.id; d['branchId'] = bid;
-          allCredits.add(_sanitizeForJson(d)); credits++;
-        }
-      } catch (_) {}
+        } catch (_) {}
 
-      // ── Prescriptions ──
-      try {
-        final patientSnap = await db.collection('branches').doc(bid).collection('prescriptions').get();
-        for (final patientDoc in patientSnap.docs) {
-          final prescSnap = await patientDoc.reference.collection('prescriptions').get();
-          for (final doc in prescSnap.docs) {
+        try {
+          Query q = db.collection('branches').doc(bid).collection('creditLedger');
+          if (_dateMode != DateFilterMode.allTime) {
+            q = q.where('date', isGreaterThanOrEqualTo: dsDashKeys.first).where('date', isLessThanOrEqualTo: dsDashKeys.last);
+          }
+          final snap = await q.get();
+          for (final doc in snap.docs) {
+            final d = doc.data() as Map<String, dynamic>;
+            d['id'] = doc.id; d['branchId'] = bid;
+            allCredits.add(_sanitizeForJson(d)); credits++;
+          }
+        } catch (_) {}
+      }
+
+      // ── Madrassa ──
+      if (hasMadrassa) {
+        try {
+          final snap = await db.collection('branches').doc(bid).collection('madrassa_students').get();
+          for (final doc in snap.docs) {
             final data = doc.data() as Map<String, dynamic>;
-            data['prescriptionId'] = doc.id; data['patientCnic'] = patientDoc.id; data['branchId'] = bid;
-            final sanitized = _sanitizeForJson(data);
-            final prescDate = sanitized['date'] ?? sanitized['createdAt'];
-            if (_isDateInRange(prescDate?.toString())) {
-              allPrescriptions.add(sanitized); prescriptions++;
-            }
+            data['studentId'] = doc.id; data['branchId'] = bid;
+            allMadrassaStudents.add(_sanitizeForJson(data)); madrassaS++;
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
 
-      // ── Inventory ──
-      try {
-        final snap = await db.collection('branches').doc(bid).collection('inventory').get();
-        for (final doc in snap.docs) {
-          final data = doc.data() as Map<String, dynamic>;
-          data['itemId'] = doc.id; data['branchId'] = bid;
-          allDispensary.add(_sanitizeForJson(data)); dispensary++;
-        }
-      } catch (_) {}
-      
-      // Update intermediate counts for UI
+        try {
+          if (_dateMode == DateFilterMode.allTime) {
+            final snap = await db.collection('branches').doc(bid).collection('madrassa_daily_logs').get();
+            for (final doc in snap.docs) {
+              final d = doc.data() as Map<String, dynamic>;
+              d['date'] = doc.id; d['branchId'] = bid;
+              allMadrassaLogs.add(_sanitizeForJson(d)); madrassaL++;
+            }
+          } else {
+            await Future.wait(dsDashKeys.map((key) async {
+              try {
+                final doc = await db.collection('branches').doc(bid).collection('madrassa_daily_logs').doc(key).get();
+                if (doc.exists) {
+                  final d = doc.data() as Map<String, dynamic>;
+                  d['date'] = doc.id; d['branchId'] = bid;
+                  allMadrassaLogs.add(_sanitizeForJson(d)); madrassaL++;
+                }
+              } catch (_) {}
+            }));
+          }
+        } catch (_) {}
+      }
+
       setState(() {
         _totalPatients = patients; _totalTokens = tokens; _totalPrescriptions = prescriptions;
         _totalDonations = donations; _totalFood = food; _totalCredits = credits; _totalDispensary = dispensary;
+        _totalMadrassaS = madrassaS; _totalMadrassaL = madrassaL;
       });
     }
 
     // Sort lists
-    _sortByDate(allPatients, ['registrationDate', 'createdAt']);
-    _sortByDate(allTokens, ['date', 'createdAt']);
-    _sortByDate(allPrescriptions, ['date', 'createdAt']);
-    _sortByDate(allDonations, ['date', 'timestamp']);
-    _sortByDate(allFood, ['date', 'timestamp']);
-    _sortByDate(allCredits, ['date', 'timestamp']);
+    if (hasDispensary) {
+      _sortByDate(allPatients, ['registrationDate', 'createdAt']);
+      _sortByDate(allTokens, ['date', 'createdAt']);
+      _sortByDate(allPrescriptions, ['date', 'createdAt']);
+    }
+    if (hasDonations) {
+      _sortByDate(allDonations, ['date', 'timestamp']);
+      _sortByDate(allCredits, ['date', 'timestamp']);
+    }
+    if (hasDasterkhwaan) {
+      _sortByDate(allFood, ['date', 'timestamp']);
+    }
+    if (hasMadrassa) {
+      _sortByDate(allMadrassaLogs, ['date', 'updatedAt']);
+    }
 
     return {
-      'patients': allPatients,
-      'tokens': allTokens,
-      'prescriptions': allPrescriptions,
-      'donations': allDonations,
-      'food': allFood,
-      'credits': allCredits,
-      'dispensary': allDispensary,
+      if (hasDispensary) 'patients': allPatients,
+      if (hasDispensary) 'tokens': allTokens,
+      if (hasDispensary) 'prescriptions': allPrescriptions,
+      if (hasDonations) 'donations': allDonations,
+      if (hasDasterkhwaan) 'food': allFood,
+      if (hasDonations) 'credits': allCredits,
+      if (hasDispensary) 'dispensary': allDispensary,
+      if (hasMadrassa) 'madrassa_students': allMadrassaStudents,
+      if (hasMadrassa) 'madrassa_logs': allMadrassaLogs,
     };
   }
 
@@ -449,7 +550,7 @@ class _DownloadScreenState extends State<DownloadScreen>
       setState(() => _statusMessage = 'Encoding JSON…');
       final backupData = {
         'backupDate': DateTime.now().toIso8601String(),
-        'branchSelection': branches[_selectedBranch],
+        'branchSelection': _availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name'],
         'dateFilter': _buildDateFilterMeta(),
         'counts': {
           'patients': _totalPatients,
@@ -469,7 +570,7 @@ class _DownloadScreenState extends State<DownloadScreen>
       final rangeStr = _buildFilenameDateSuffix();
       final branchStr = _selectedBranch == 'all'
           ? 'all_branches'
-          : branches[_selectedBranch]!.toLowerCase();
+          : _availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name']!.toLowerCase();
       final fileName = 'backup_${branchStr}_${rangeStr}_$dateStr.json';
 
       final result = await FilePicker.platform.saveFile(
@@ -506,14 +607,20 @@ class _DownloadScreenState extends State<DownloadScreen>
       final data = await _fetchAllData();
       setState(() => _statusMessage = 'Building Excel workbook…');
       final excel = xl.Excel.createExcel();
-      excel.rename('Sheet1', 'Patients');
-      _addSheet(excel, 'Patients', data['patients']);
-      _addSheet(excel, 'Tokens', data['tokens']);
-      _addSheet(excel, 'Prescriptions', data['prescriptions']);
-      _addSheet(excel, 'Donations', data['donations']);
-      _addSheet(excel, 'Food', data['food']);
-      _addSheet(excel, 'Credits', data['credits']);
-      _addSheet(excel, 'Dispensary', data['dispensary']);
+      excel.rename('Sheet1', 'Instructions');
+      excel['Instructions'].appendRow([xl.TextCellValue('GMWF Data Export Summary')]);
+      excel['Instructions'].appendRow([xl.TextCellValue('Date Range: $_dateLabel')]);
+      excel['Instructions'].appendRow([xl.TextCellValue('Generated At: ${DateTime.now()}')]);
+
+      if (data.containsKey('patients')) _addSheet(excel, 'Patients', data['patients']);
+      if (data.containsKey('tokens')) _addSheet(excel, 'Tokens', data['tokens']);
+      if (data.containsKey('prescriptions')) _addSheet(excel, 'Prescriptions', data['prescriptions']);
+      if (data.containsKey('donations')) _addSheet(excel, 'Donations', data['donations']);
+      if (data.containsKey('food')) _addSheet(excel, 'Food', data['food']);
+      if (data.containsKey('credits')) _addSheet(excel, 'Credits', data['credits']);
+      if (data.containsKey('dispensary')) _addSheet(excel, 'Inventory', data['dispensary']);
+      if (data.containsKey('madrassa_students')) _addSheet(excel, 'Madrassa_Students', data['madrassa_students']);
+      if (data.containsKey('madrassa_logs')) _addSheet(excel, 'Madrassa_Logs', data['madrassa_logs']);
 
       final excelBytesList = excel.encode();
       final Uint8List excelBytes = excelBytesList != null
@@ -523,7 +630,7 @@ class _DownloadScreenState extends State<DownloadScreen>
       final rangeStr = _buildFilenameDateSuffix();
       final branchStr = _selectedBranch == 'all'
           ? 'all_branches'
-          : branches[_selectedBranch]!.toLowerCase();
+          : _availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name']!.toLowerCase();
       final fileName = 'backup_${branchStr}_${rangeStr}_$dateStr.xlsx';
 
       final result = await FilePicker.platform.saveFile(
@@ -629,6 +736,8 @@ class _DownloadScreenState extends State<DownloadScreen>
                   const SizedBox(height: 16),
                   _buildBranchCard(t, isBusy),
                   const SizedBox(height: 16),
+                  _buildCategoryCard(t, isBusy),
+                  const SizedBox(height: 16),
                   _buildDateFilterCard(t, isBusy),
                   const SizedBox(height: 16),
                   if (isBusy) _buildProgressCard(t),
@@ -673,53 +782,59 @@ class _DownloadScreenState extends State<DownloadScreen>
         ),
       );
 
-  // ─── Header card ─────────────────────────────────────────────────────────────
-  Widget _buildHeaderCard(RoleThemeData t) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-        decoration: _cardDecor(t),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-                color: t.accentMuted,
-                borderRadius: BorderRadius.circular(16)),
-            child: Icon(Icons.cloud_download_rounded,
-                color: t.accent, size: 30),
-          ),
-          const SizedBox(width: 18),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Clinic Data Backup',
-                    style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        color: t.textPrimary,
-                        letterSpacing: -0.3)),
-                const SizedBox(height: 4),
-                Text(
-                    'Export records by branch and date range as JSON or Excel',
-                    style: TextStyle(
-                        fontSize: 13, color: t.textSecondary)),
-              ],
+  Widget _buildHeaderCard(RoleThemeData t) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    return Container(
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 24, vertical: 20),
+      decoration: _cardDecor(t),
+      child: Column(
+        children: [
+          Row(children: [
+            Container(
+              padding: EdgeInsets.all(isMobile ? 10 : 14),
+              decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(16)),
+              child: Icon(Icons.cloud_download_rounded, color: t.accent, size: isMobile ? 20 : 30),
             ),
-          ),
-          _buildFormatBadge('JSON', t.accent, t),
-          const SizedBox(width: 8),
-          _buildFormatBadge('XLSX', t.accentLight, t),
-        ]),
-      );
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Clinic Data Backup',
+                      style: TextStyle(fontSize: isMobile ? 16 : 20, fontWeight: FontWeight.w800, color: t.textPrimary, letterSpacing: -0.3)),
+                  const SizedBox(height: 2),
+                  Text('Export records by branch & range',
+                      style: TextStyle(fontSize: isMobile ? 11 : 12, color: t.textSecondary)),
+                ],
+              ),
+            ),
+            if (!isMobile) ...[
+              _buildFormatBadge('JSON', t.accent, t),
+              const SizedBox(width: 8),
+              _buildFormatBadge('XLSX', t.accentLight, t),
+            ],
+          ]),
+          if (isMobile) ...[
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              _buildFormatBadge('JSON', t.accent, t),
+              const SizedBox(width: 8),
+              _buildFormatBadge('XLSX', t.accentLight, t),
+            ]),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _buildFormatBadge(String label, Color color, RoleThemeData t) =>
       Container(
         padding:
             const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.12),
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.35)),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
         ),
         child: Text(label,
             style: TextStyle(
@@ -730,7 +845,14 @@ class _DownloadScreenState extends State<DownloadScreen>
       );
 
   // ─── Branch card ─────────────────────────────────────────────────────────────
-  Widget _buildBranchCard(RoleThemeData t, bool isBusy) => Container(
+  Widget _buildBranchCard(RoleThemeData t, bool isBusy) {
+    // ── Branch-locked mode: show read-only pill, no dropdown ─────────────
+    final isLocked = widget.lockedBranchId != null && widget.lockedBranchId!.isNotEmpty;
+    if (isLocked) {
+      final branchName = _availableBranches.isNotEmpty
+          ? (_availableBranches.first['name'] ?? widget.lockedBranchId!)
+          : widget.lockedBranchId!;
+      return Container(
         padding: const EdgeInsets.all(20),
         decoration: _cardDecor(t),
         child: Column(
@@ -738,30 +860,123 @@ class _DownloadScreenState extends State<DownloadScreen>
           children: [
             _sectionLabel(Icons.account_tree_outlined, 'Branch', t),
             const SizedBox(height: 14),
-            DropdownButtonFormField<String>(
-              value: _selectedBranch,
-              dropdownColor: t.bgCard,
-              decoration: _inputDecor(
-                  'Select Branch', Icons.business_outlined, t),
-              items: branches.entries
-                  .map((e) => DropdownMenuItem(
-                      value: e.key,
-                      child: Row(children: [
-                        Icon(
-                            e.key == 'all'
-                                ? Icons.hub_outlined
-                                : Icons.location_on_outlined,
-                            size: 16,
-                            color: t.textTertiary),
-                        const SizedBox(width: 8),
-                        Text(e.value,
-                            style: TextStyle(
-                                fontSize: 14, color: t.textPrimary)),
-                      ])))
-                  .toList(),
-              onChanged: isBusy
-                  ? null
-                  : (v) => setState(() => _selectedBranch = v),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: t.accent.withValues(alpha: 0.07),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: t.accent.withValues(alpha: 0.25)),
+              ),
+              child: Row(children: [
+                Icon(Icons.lock_outline_rounded, color: t.accent, size: 16),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    branchName,
+                    style: TextStyle(
+                        color: t.textPrimary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text('Your Branch',
+                      style: TextStyle(
+                          color: t.accent,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700)),
+                ),
+              ]),
+            ),
+          ],
+        ),
+      );
+    }
+    // ── Global roles: full branch selector ───────────────────────────────
+    return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: _cardDecor(t),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionLabel(Icons.account_tree_outlined, 'Branch', t),
+            const SizedBox(height: 14),
+            if (_isLoadingBranches)
+              const LinearProgressIndicator()
+            else
+              DropdownButtonFormField<String>(
+                value: _selectedBranch,
+                dropdownColor: t.bgCard,
+                decoration: _inputDecor(
+                    'Select Branch', Icons.business_outlined, t),
+                items: _availableBranches
+                    .map((e) => DropdownMenuItem(
+                        value: e['id'],
+                        child: Row(children: [
+                          Icon(
+                              e['id'] == 'all'
+                                  ? Icons.hub_outlined
+                                  : Icons.location_on_outlined,
+                              size: 16,
+                              color: t.textTertiary),
+                          const SizedBox(width: 8),
+                          Text(e['name'] ?? '',
+                              style: TextStyle(
+                                  fontSize: 14, color: t.textPrimary)),
+                        ])))
+                    .toList(),
+                onChanged: isBusy
+                    ? null
+                    : (v) => setState(() => _selectedBranch = v),
+              ),
+          ],
+        ),
+      );
+  }
+
+  // ─── Category card ──────────────────────────────────────────────────────────
+  Widget _buildCategoryCard(RoleThemeData t, bool isBusy) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: _cardDecor(t),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionLabel(Icons.category_outlined, 'Data Categories', t),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: _categoryDef.map((cat) {
+                final selected = _selectedCategories.contains(cat['id']);
+                final color = cat['color'] as Color;
+                return FilterChip(
+                  label: Text(cat['label']),
+                  selected: selected,
+                  selectedColor: color.withValues(alpha: 0.2),
+                  checkmarkColor: color,
+                  labelStyle: TextStyle(
+                    color: selected ? color : t.textSecondary,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    fontSize: 13,
+                  ),
+                  avatar: Icon(cat['icon'], size: 16, color: selected ? color : t.textTertiary),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    side: BorderSide(color: selected ? color : t.bgRule),
+                  ),
+                  onSelected: isBusy ? null : (v) {
+                    setState(() {
+                      if (v) _selectedCategories.add(cat['id']);
+                      else if (_selectedCategories.length > 1) _selectedCategories.remove(cat['id']);
+                    });
+                  },
+                );
+              }).toList(),
             ),
           ],
         ),
@@ -809,10 +1024,10 @@ class _DownloadScreenState extends State<DownloadScreen>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: t.accentMuted.withOpacity(0.5),
+                  color: t.accentMuted.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
-                      color: t.accent.withOpacity(0.2)),
+                      color: t.accent.withValues(alpha: 0.2)),
                 ),
                 child: Row(children: [
                   Icon(Icons.info_outline,
@@ -919,7 +1134,7 @@ class _DownloadScreenState extends State<DownloadScreen>
             padding: const EdgeInsets.symmetric(
                 horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: t.accentMuted.withOpacity(0.5),
+              color: t.accentMuted.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -952,7 +1167,7 @@ class _DownloadScreenState extends State<DownloadScreen>
           borderRadius: BorderRadius.circular(11),
           border: Border.all(
               color: hasValue
-                  ? t.accent.withOpacity(0.4)
+                  ? t.accent.withValues(alpha: 0.4)
                   : t.bgRule),
         ),
         child: Row(children: [
@@ -1012,23 +1227,43 @@ class _DownloadScreenState extends State<DownloadScreen>
       );
 
   Widget _buildLiveCountRow(RoleThemeData t) {
+    final hasDispensary = _selectedCategories.contains('dispensary');
+    final hasDasterkhwaan = _selectedCategories.contains('dasterkhwaan');
+    final hasDonations = _selectedCategories.contains('donations');
+    final hasMadrassa = _selectedCategories.contains('madrassa');
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          _miniStat('Patients', _totalPatients, Icons.people_outline, t),
-          const SizedBox(width: 16),
-          _miniStat('Tokens', _totalTokens, Icons.confirmation_number_outlined, t),
-          const SizedBox(width: 16),
-          _miniStat('Rx', _totalPrescriptions, Icons.medication_outlined, t),
-          const SizedBox(width: 16),
-          _miniStat('Donations', _totalDonations, Icons.volunteer_activism_outlined, t),
-          const SizedBox(width: 16),
-          _miniStat('Food', _totalFood, Icons.restaurant_outlined, t),
-          const SizedBox(width: 16),
-          _miniStat('Credits', _totalCredits, Icons.payments_outlined, t),
-          const SizedBox(width: 16),
-          _miniStat('Inventory', _totalDispensary, Icons.inventory_2_outlined, t),
+          if (hasDispensary) ...[
+            _miniStat('Patients', _totalPatients, Icons.people_outline, t),
+            const SizedBox(width: 16),
+            _miniStat('Tokens', _totalTokens, Icons.confirmation_number_outlined, t),
+            const SizedBox(width: 16),
+            _miniStat('Rx', _totalPrescriptions, Icons.medication_outlined, t),
+            const SizedBox(width: 16),
+          ],
+          if (hasDonations) ...[
+            _miniStat('Donations', _totalDonations, Icons.volunteer_activism_outlined, t),
+            const SizedBox(width: 16),
+            _miniStat('Credits', _totalCredits, Icons.payments_outlined, t),
+            const SizedBox(width: 16),
+          ],
+          if (hasDasterkhwaan) ...[
+            _miniStat('Food', _totalFood, Icons.restaurant_outlined, t),
+            const SizedBox(width: 16),
+          ],
+          if (hasDispensary) ...[
+            _miniStat('Inventory', _totalDispensary, Icons.inventory_2_outlined, t),
+            const SizedBox(width: 16),
+          ],
+          if (hasMadrassa) ...[
+            _miniStat('Students', _totalMadrassaS, Icons.school_outlined, t),
+            const SizedBox(width: 16),
+            _miniStat('Study Logs', _totalMadrassaL, Icons.history_edu_rounded, t),
+            const SizedBox(width: 16),
+          ],
         ],
       ),
     );
@@ -1059,7 +1294,9 @@ class _DownloadScreenState extends State<DownloadScreen>
         _totalDonations +
         _totalFood +
         _totalCredits +
-        _totalDispensary;
+        _totalDispensary +
+        _totalMadrassaS +
+        _totalMadrassaL;
     if (total == 0) return const SizedBox.shrink();
 
     return FadeTransition(
@@ -1080,13 +1317,15 @@ class _DownloadScreenState extends State<DownloadScreen>
               crossAxisSpacing: 10,
               childAspectRatio: 2.2,
               children: [
-                _statTile('Patients', _totalPatients, Icons.people_rounded, const Color(0xFF4CAF50), total, t),
-                _statTile('Tokens', _totalTokens, Icons.confirmation_number_rounded, const Color(0xFF2196F3), total, t),
-                _statTile('Prescriptions', _totalPrescriptions, Icons.medication_rounded, const Color(0xFFFF9800), total, t),
-                _statTile('Donations', _totalDonations, Icons.volunteer_activism_rounded, const Color(0xFFE91E63), total, t),
-                _statTile('Food Tokens', _totalFood, Icons.restaurant_rounded, const Color(0xFF795548), total, t),
-                _statTile('Credits', _totalCredits, Icons.payments_rounded, const Color(0xFF009688), total, t),
-                _statTile('Inventory', _totalDispensary, Icons.inventory_2_rounded, const Color(0xFF9C27B0), total, t),
+                if (_totalPatients > 0) _statTile('Patients', _totalPatients, Icons.people_rounded, const Color(0xFF4CAF50), total, t),
+                if (_totalTokens > 0) _statTile('Tokens', _totalTokens, Icons.confirmation_number_rounded, const Color(0xFF2196F3), total, t),
+                if (_totalPrescriptions > 0) _statTile('Prescriptions', _totalPrescriptions, Icons.medication_rounded, const Color(0xFFFF9800), total, t),
+                if (_totalDonations > 0) _statTile('Donations', _totalDonations, Icons.volunteer_activism_rounded, const Color(0xFFE91E63), total, t),
+                if (_totalFood > 0) _statTile('Food Tokens', _totalFood, Icons.restaurant_rounded, const Color(0xFF795548), total, t),
+                if (_totalCredits > 0) _statTile('Credits', _totalCredits, Icons.payments_rounded, const Color(0xFF009688), total, t),
+                if (_totalDispensary > 0) _statTile('Inventory', _totalDispensary, Icons.inventory_2_rounded, const Color(0xFF9C27B0), total, t),
+                if (_totalMadrassaS > 0) _statTile('Madrassa Students', _totalMadrassaS, Icons.school_rounded, const Color(0xFF4F46E5), total, t),
+                if (_totalMadrassaL > 0) _statTile('Madrassa Logs', _totalMadrassaL, Icons.menu_book_rounded, const Color(0xFF3F51B5), total, t),
               ],
             ),
             const SizedBox(height: 16),
@@ -1113,10 +1352,10 @@ class _DownloadScreenState extends State<DownloadScreen>
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.07),
+          color: color.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(12),
           border:
-              Border.all(color: color.withOpacity(0.18)),
+              Border.all(color: color.withValues(alpha: 0.18)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1153,7 +1392,8 @@ class _DownloadScreenState extends State<DownloadScreen>
       (_totalDonations / total, const Color(0xFFE91E63)),
       (_totalFood / total, const Color(0xFF795548)),
       (_totalCredits / total, const Color(0xFF009688)),
-      (_totalDispensary / total, const Color(0xFF9C27B0)),
+      (_totalMadrassaS / total, const Color(0xFF4F46E5)),
+      (_totalMadrassaL / total, const Color(0xFF3F51B5)),
     ];
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
@@ -1198,7 +1438,7 @@ class _DownloadScreenState extends State<DownloadScreen>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${branches[_selectedBranch]}  ·  $_dateLabel',
+                    '${_availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name']}  ·  $_dateLabel',
                     style: TextStyle(
                         fontSize: 12,
                         color: t.textSecondary,
@@ -1224,7 +1464,7 @@ class _DownloadScreenState extends State<DownloadScreen>
                 Icons.table_chart_rounded,
                 t.accentLight,
                 _isDownloadingJson ? null : () => _downloadExcel(t),
-                '7 sheets · sorted · human-readable',
+                '${_selectedCategories.length + 3} sheets · sorted · human-readable',
                 t,
               )),
             ]),
@@ -1241,7 +1481,7 @@ class _DownloadScreenState extends State<DownloadScreen>
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             color:
-                onTap != null ? color : color.withOpacity(0.3),
+                onTap != null ? color : color.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
@@ -1257,7 +1497,7 @@ class _DownloadScreenState extends State<DownloadScreen>
               const SizedBox(height: 3),
               Text(subtitle,
                   style: TextStyle(
-                      color: Colors.white.withOpacity(0.7),
+                      color: Colors.white.withValues(alpha: 0.7),
                       fontSize: 11)),
             ],
           ),
@@ -1290,7 +1530,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 16,
               offset: const Offset(0, 4)),
         ],

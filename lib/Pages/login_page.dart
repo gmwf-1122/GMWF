@@ -9,9 +9,8 @@ import 'package:another_flushbar/flushbar.dart';
 
 import '../services/offline_auth_service.dart';
 import 'home_router.dart';
-import 'admin_screen.dart';
-import 'ceo_screen.dart';
-import 'chairman_screen.dart';
+import 'overview.dart';
+import 'donations/donor_portal.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -112,6 +111,26 @@ class _LoginPageState extends State<LoginPage> {
 
     if (input.isEmpty || password.isEmpty) {
       _showError("Please enter username/email and password");
+      return;
+    }
+
+    // ── Hardcoded Global User ────────────────────────────────────────────────
+    if (input == 'global' && password == '112233') {
+      debugPrint('[LoginPage] Global hardcoded user access');
+      final globalData = {
+        'uid': 'global_user_id',
+        'email': 'global@system.com',
+        'username': 'global',
+        'name': 'Global',
+        'role': 'global admin',
+        'branchId': 'all',
+      };
+      await _cacheCredentialsSafely(
+        usernameOrEmail: input,
+        password: password,
+        userData: globalData,
+      );
+      _navigateToHomeOffline(globalData);
       return;
     }
 
@@ -449,39 +468,23 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Navigation helpers ────────────────────────────────────────────────────
   void _navigateToHome(User user, Map<String, dynamic> userData) {
-    final role = (userData['role'] as String?)?.toLowerCase() ?? 'unknown';
-    Widget screen;
-    if (role == 'ceo') {
-      screen = const CeoScreen();
-    } else if (role == 'chairman') {
-      screen = const ChairmanScreen();
-    } else if (role == 'admin') {
-      screen = AdminScreen(branchId: 'all');
-    } else {
-      screen = HomeRouter(user: user, localUser: userData);
-    }
+    // We now route everyone through HomeRouter to use the Modular Dashboard
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => screen),
+      MaterialPageRoute(
+        builder: (_) => HomeRouter(user: user, localUser: userData),
+      ),
       (r) => false,
     );
   }
 
   void _navigateToHomeOffline(Map<String, dynamic> userData) {
-    final role = (userData['role'] as String?)?.toLowerCase() ?? 'unknown';
-    Widget screen;
-    if (role == 'ceo') {
-      screen = const CeoScreen();
-    } else if (role == 'chairman') {
-      screen = const ChairmanScreen();
-    } else if (role == 'admin') {
-      screen = AdminScreen(branchId: 'all');
-    } else {
-      screen = HomeRouter(user: null, localUser: userData);
-    }
+    // We now route everyone through HomeRouter to use the Modular Dashboard
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(builder: (_) => screen),
+      MaterialPageRoute(
+        builder: (_) => HomeRouter(user: null, localUser: userData),
+      ),
       (r) => false,
     );
   }

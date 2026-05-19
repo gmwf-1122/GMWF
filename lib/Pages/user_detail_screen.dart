@@ -107,107 +107,109 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     final ctrl = TextEditingController();
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        backgroundColor: t.bgCard,
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                      color: t.accentMuted,
-                      borderRadius: BorderRadius.circular(12)),
-                  child: Icon(Icons.lock_outline_rounded,
-                      color: t.accent, size: 22),
-                ),
-                const SizedBox(width: 12),
-                Text('Admin Verification',
-                    style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: t.textPrimary)),
-              ]),
-              const SizedBox(height: 20),
-              TextField(
-                controller: ctrl,
-                obscureText: true,
-                autofocus: true,
-                style: TextStyle(fontSize: 14, color: t.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Enter admin password',
-                  hintStyle: TextStyle(color: t.textTertiary),
-                  prefixIcon: Icon(Icons.password_rounded,
-                      color: t.textTertiary, size: 20),
-                  filled: true,
-                  fillColor: t.bg,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: t.bgRule)),
-                  enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: t.bgRule)),
-                  focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide:
-                          BorderSide(color: t.accent, width: 2)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Row(children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      completer.complete(false);
-                    },
-                    style: TextButton.styleFrom(
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: t.bgRule)),
-                    ),
-                    child: Text('Cancel',
-                        style: TextStyle(
-                            color: t.textSecondary,
-                            fontWeight: FontWeight.w600)),
+      builder: (ctx) {
+        void onVerify() {
+          if (ctrl.text == 'admin1122') {
+            Navigator.pop(ctx);
+            completer.complete(true);
+          } else {
+            _snack('Wrong password', error: true);
+          }
+        }
+
+        return Dialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: t.bgCard,
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                        color: t.accentMuted,
+                        borderRadius: BorderRadius.circular(12)),
+                    child: Icon(Icons.lock_outline_rounded,
+                        color: t.accent, size: 22),
                   ),
+                  const SizedBox(width: 12),
+                  Text('Admin Verification',
+                      style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: t.textPrimary)),
+                ]),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: ctrl,
+                  obscureText: true,
+                  autofocus: true,
+                  style: TextStyle(fontSize: 14, color: t.textPrimary),
+                  decoration: InputDecoration(
+                    hintText: 'Enter admin password',
+                    hintStyle: TextStyle(color: t.textTertiary),
+                    prefixIcon: Icon(Icons.password_rounded,
+                        color: t.textTertiary, size: 20),
+                    filled: true,
+                    fillColor: t.bg,
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: t.bgRule)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: t.bgRule)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: t.accent, width: 2)),
+                  ),
+                  onSubmitted: (_) => onVerify(),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      if (ctrl.text == 'admin1122') {
+                const SizedBox(height: 20),
+                Row(children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () {
                         Navigator.pop(ctx);
-                        completer.complete(true);
-                      } else {
-                        _snack('Wrong password', error: true);
-                      }
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: t.accent,
-                      foregroundColor: Colors.white,
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      elevation: 0,
+                        completer.complete(false);
+                      },
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: t.bgRule)),
+                      ),
+                      child: Text('Cancel',
+                          style: TextStyle(
+                              color: t.textSecondary,
+                              fontWeight: FontWeight.w600)),
                     ),
-                    child: const Text('Verify',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
                   ),
-                ),
-              ]),
-            ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: onVerify,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: t.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        elevation: 0,
+                      ),
+                      child: const Text('Verify',
+                          style: TextStyle(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
     return completer.future;
   }
@@ -228,7 +230,21 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     _usernameController.text = data['username'] ?? '';
     _emailController.text = data['email'] ?? '';
     _phoneController.text = data['phone'] ?? '';
-    _selectedRole = data['role'] ?? '';
+    
+    // Roles list for normalization and dropdown
+    final List<String> allRoles = [
+      'CEO', 'Admin', 'Chairman', 'HQ Manager', 'Branch Manager',
+      'Doctor', 'Receptionist', 'Dispenser', 'Supervisor',
+      'Server', 'Office Boy', 'Kitchen', 'Food Token Generator',
+      'Madrassa Admin', 'Madrassa Teacher', 'Madrassa Parent'
+    ];
+
+    final String rawRole = (data['role'] ?? '').toString();
+    // Normalize _selectedRole to match the casing in allRoles
+    _selectedRole = allRoles.firstWhere(
+      (r) => r.toLowerCase() == rawRole.toLowerCase(),
+      orElse: () => allRoles.contains(rawRole) ? rawRole : allRoles.first,
+    );
     _degreeController.text = data['degree'] ?? '';
     _identificationController.text = data['identification'] ?? '';
     _addressController.text = data['address'] ?? '';
@@ -333,9 +349,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           label: 'Role',
                           icon: Icons.badge_outlined,
                           items: const [
-                            'CEO', 'Admin', 'Chairman', 'Doctor',
-                            'Receptionist', 'Dispenser', 'Supervisor',
-                            'Server', 'Food Token Generator', 'Kitchen'
+                            'CEO', 'Admin', 'Chairman', 'HQ Manager', 'Branch Manager',
+                            'Doctor', 'Receptionist', 'Dispenser', 'Supervisor',
+                            'Server', 'Office Boy', 'Kitchen', 'Food Token Generator',
+                            'Madrassa Admin', 'Madrassa Teacher', 'Madrassa Parent'
                           ],
                           onChanged: (v) =>
                               setS(() => _selectedRole = v),
@@ -429,8 +446,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       bool isDoctor) async {
     if (!key.currentState!.validate()) return;
     final updates = <String, dynamic>{
-      'username': _usernameController.text.trim(),
-      'email': _emailController.text.trim(),
+      'username': _usernameController.text.trim(),                              // original casing
+      'usernameLower': _usernameController.text.trim().toLowerCase(),            // for lookup
+      'email': _emailController.text.trim().toLowerCase(),
       'phone': _phoneController.text.trim().isNotEmpty
           ? _phoneController.text.trim()
           : null,
@@ -501,7 +519,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                    color: t.danger.withOpacity(0.1),
+                    color: t.danger.withValues(alpha: 0.1),
                     shape: BoxShape.circle),
                 child: Icon(Icons.delete_forever_rounded,
                     color: t.danger, size: 32),
@@ -692,7 +710,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           icon: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10)),
             child: const Icon(Icons.edit_rounded,
                 size: 18, color: Colors.white),
@@ -707,7 +725,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           icon: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10)),
             child: const Icon(Icons.delete_outline_rounded,
                 size: 18, color: Colors.white),
@@ -725,7 +743,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               colors: [
                 t.bg == const Color(0xFF080C14)
                     ? const Color(0xFF080C14)
-                    : t.accent.withOpacity(0.9),
+                    : t.accent.withValues(alpha: 0.9),
                 t.accent,
                 t.accentLight,
               ],
@@ -742,14 +760,14 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     height: 80,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       image: photoUrl != null
                           ? DecorationImage(
                               image: NetworkImage(photoUrl),
                               fit: BoxFit.cover)
                           : null,
                       border: Border.all(
-                          color: Colors.white.withOpacity(0.4),
+                          color: Colors.white.withValues(alpha: 0.4),
                           width: 2.5),
                     ),
                     alignment: Alignment.center,
@@ -780,7 +798,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
                             color:
-                                Colors.white.withOpacity(0.2),
+                                Colors.white.withValues(alpha: 0.2),
                             borderRadius:
                                 BorderRadius.circular(20),
                           ),
@@ -794,7 +812,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                         Text(branchName ?? widget.branchId,
                             style: TextStyle(
                                 color:
-                                    Colors.white.withOpacity(0.7),
+                                    Colors.white.withValues(alpha: 0.7),
                                 fontSize: 12)),
                       ],
                     ),
@@ -901,7 +919,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         border: Border.all(color: t.bgRule, width: 0.8),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               blurRadius: 16,
               offset: const Offset(0, 4))
         ],
@@ -916,7 +934,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    color: accent.withOpacity(0.10),
+                    color: accent.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(10)),
                 child: Icon(icon, color: accent, size: 18),
               ),
@@ -1195,7 +1213,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   Widget _errorState(RoleThemeData t) => Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.error_outline_rounded,
-              size: 48, color: t.danger.withOpacity(0.6)),
+              size: 48, color: t.danger.withValues(alpha: 0.6)),
           const SizedBox(height: 12),
           Text('Error loading user',
               style: TextStyle(

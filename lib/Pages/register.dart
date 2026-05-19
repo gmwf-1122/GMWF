@@ -41,6 +41,10 @@ class _RegisterState extends State<Register>
   final TextEditingController _bankAccountController    = TextEditingController();
   final TextEditingController _customDegreeController   = TextEditingController();
   final TextEditingController _salaryController         = TextEditingController();
+  final TextEditingController _studentRollSearchController = TextEditingController();
+
+  String? _selectedStudentId;
+  List<Map<String, dynamic>> _branchStudents = [];
 
   XFile?        _profileImageXFile;
   Uint8List?    _profileImageBytes;
@@ -55,18 +59,21 @@ class _RegisterState extends State<Register>
 
   // ── Roles ────────────────────────────────────────────────────────────────
   static const List<Map<String, dynamic>> _roleItems = [
-    {'label': 'CEO',            'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Admin',          'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Chairman',       'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'HQ Manager',     'icon': Icons.business_center_rounded,      'type': 'crown'},
-    {'label': 'Branch Manager', 'icon': Icons.manage_accounts_rounded,      'type': 'crown'},
-    {'label': 'Server',         'icon': Icons.shield_rounded,               'type': 'shield'},
-    {'label': 'Doctor',         'icon': Icons.medical_services_outlined,    'type': 'normal'},
-    {'label': 'Receptionist',   'icon': Icons.support_agent_rounded,        'type': 'normal'},
-    {'label': 'Dispenser',      'icon': Icons.medication_outlined,          'type': 'normal'},
-    {'label': 'Supervisor',     'icon': Icons.manage_accounts_outlined,     'type': 'normal'},
-    {'label': 'Office Boy',     'icon': Icons.confirmation_number_outlined, 'type': 'normal'},
-    {'label': 'Kitchen',        'icon': Icons.restaurant_outlined,          'type': 'normal'},
+    {'label': 'CEO',              'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'Admin',            'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'Chairman',         'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
+    {'label': 'HQ Manager',       'icon': Icons.business_center_rounded,      'type': 'crown'},
+    {'label': 'Branch Manager',   'icon': Icons.manage_accounts_rounded,      'type': 'crown'},
+    {'label': 'Server',           'icon': Icons.shield_rounded,               'type': 'shield'},
+    {'label': 'Doctor',           'icon': Icons.medical_services_outlined,    'type': 'normal'},
+    {'label': 'Receptionist',     'icon': Icons.support_agent_rounded,        'type': 'normal'},
+    {'label': 'Dispenser',        'icon': Icons.medication_outlined,          'type': 'normal'},
+    {'label': 'Supervisor',       'icon': Icons.manage_accounts_outlined,     'type': 'normal'},
+    {'label': 'Office Boy',       'icon': Icons.confirmation_number_outlined, 'type': 'normal'},
+    {'label': 'Kitchen',          'icon': Icons.restaurant_outlined,          'type': 'normal'},
+    // ── Madrassa Roles (Staff only) ──────────────────────────────────────────
+    {'label': 'Madrassa Admin',   'icon': Icons.menu_book_rounded,            'type': 'madrassa'},
+    {'label': 'Madrassa Teacher', 'icon': Icons.school_rounded,               'type': 'madrassa'},
   ];
 
   final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'Other'];
@@ -111,6 +118,23 @@ class _RegisterState extends State<Register>
     }
   }
 
+  Future<void> _loadStudentsForBranch(String bId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(bId)
+          .collection('madrassa_students')
+          .where('isActive', isEqualTo: true)
+          .get();
+      setState(() {
+        _branchStudents = snap.docs.map((d) => {'id': d.id, ...d.data()}).toList();
+        _branchStudents.sort((a, b) => (a['rollNumber'] ?? '').compareTo(b['rollNumber'] ?? ''));
+      });
+    } catch (e) {
+      _snack('Failed to load students: $e', error: true);
+    }
+  }
+
   Future<bool> _usernameExists(String username) async {
     final lower = username.trim().toLowerCase();
     final snap = await FirebaseFirestore.instance.collection('branches').get();
@@ -119,7 +143,7 @@ class _RegisterState extends State<Register>
           .collection('branches')
           .doc(doc.id)
           .collection('users')
-          .where('username', isEqualTo: lower)
+          .where('usernameLower', isEqualTo: lower)
           .limit(1)
           .get();
       if (res.docs.isNotEmpty) return true;
@@ -129,13 +153,16 @@ class _RegisterState extends State<Register>
 
   bool _requiresBranch() {
     final r = _selectedRole?.toLowerCase();
-    return r != 'ceo' && r != 'chairman' && r != 'admin';
+    // Global executive roles — no branch scoping needed.
+    return r != 'ceo' && r != 'chairman' && r != 'admin' && r != 'hq manager';
   }
 
   String _getBranchId() {
     if (!_requiresBranch()) return 'global';
-    if (_selectedBranch == null) throw Exception('Branch must be selected for this role');
-    return _branches.firstWhere((b) => b['name'] == _selectedBranch)['id'] as String;
+    if (_selectedBranch == null) throw Exception('Please select a branch for this role');
+    final match = _branches.where((b) => b['name'] == _selectedBranch).toList();
+    if (match.isEmpty) throw Exception('Selected branch not found — please re-select');
+    return match.first['id'] as String;
   }
 
   String _getBranchName() =>
@@ -210,9 +237,25 @@ class _RegisterState extends State<Register>
       _snack('Please fill all required fields', error: true);
       return;
     }
+    if (_selectedRole == null) {
+      _snack('Please select a role', error: true);
+      return;
+    }
+    if (_requiresBranch() && _selectedBranch == null) {
+      _snack('Please select a branch for this role', error: true);
+      return;
+    }
+    if (_selectedRole == 'Madrassa Parent' && _selectedStudentId == null) {
+      _snack('Please select a student for this parent', error: true);
+      return;
+    }
+
     setState(() { _usernameError = null; _loading = true; });
+
+    final email    = _emailController.text.trim().toLowerCase();
+    final username = _usernameController.text.trim(); // preserve original casing
+
     try {
-      final username = _usernameController.text.trim().toLowerCase();
       if (await _usernameExists(username)) {
         setState(() => _usernameError = 'Username already taken');
         _snack('Username already exists', error: true);
@@ -233,12 +276,14 @@ class _RegisterState extends State<Register>
         }
       }
 
+      final branchId = _getBranchId();
+
       final user = await _authService.signUp(
-        email:              _emailController.text.trim().toLowerCase(),
+        email:              email,
         password:           _passwordController.text.trim(),
         username:           username,
         role:               _selectedRole!,
-        branchId:           _getBranchId(),
+        branchId:           branchId,
         branchName:         _getBranchName(),
         phone:              _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
         identification:     _identificationController.text.trim().isNotEmpty ? _identificationController.text.trim() : null,
@@ -247,17 +292,43 @@ class _RegisterState extends State<Register>
         bankAccount:        _bankAccountController.text.trim().isNotEmpty ? _bankAccountController.text.trim() : null,
         degree:             degree.isNotEmpty ? degree : null,
         salary:             salary,
+        studentId:          _selectedStudentId, // Pass the student ID
         profileImageXFile:  _profileImageXFile,
         profileImageBytes:  _profileImageBytes,
         identificationFile: _identificationFile,
         degreeFile:         _degreeFile,
       );
 
-      if (user == null) throw 'Failed to create account';
-      _snack('${_usernameController.text} registered successfully!', success: true);
-      if (mounted) Navigator.pop(context);
+      if (user == null) throw Exception(
+        'Account could not be created. If this persists, check Firebase Console '
+        'for a partial account under $email and delete it before retrying.',
+      );
+
+      final registeredName = _usernameController.text.trim();
+      // Reset the form so the admin can register another user without leaving the page.
+      _formKey.currentState!.reset();
+      setState(() {
+        _selectedRole         = null;
+        _selectedBranch       = null;
+        _selectedDegree       = null;
+        _selectedStudentId    = null;
+        _profileImageXFile    = null;
+        _profileImageBytes    = null;
+        _identificationFile   = null;
+        _degreeFile           = null;
+        _usernameError        = null;
+      });
+      for (final c in [
+        _usernameController, _emailController, _passwordController,
+        _phoneController, _identificationController, _addressController,
+        _bankNameController, _bankAccountController,
+        _customDegreeController, _salaryController,
+      ]) { c.clear(); }
+      _snack('$registeredName registered successfully!', success: true);
+    } on Exception catch (e) {
+      _snack(e.toString().replaceAll('Exception: ', ''), error: true);
     } catch (e) {
-      _snack('Error: $e', error: true);
+      _snack('Unexpected error: $e', error: true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -300,7 +371,7 @@ class _RegisterState extends State<Register>
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [t.accent.withOpacity(0.9), t.accentLight],
+                  colors: [t.accent.withValues(alpha: 0.9), t.accentLight],
                 ),
               ),
             ),
@@ -309,13 +380,28 @@ class _RegisterState extends State<Register>
             child: Column(
               children: [
                 // ── Header ──────────────────────────────────────────────
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 16, 16, 0),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 16, 16, 0),
                   child: Row(
                     children: [
-                      Text(
-                        'Register New User',
-                        style: TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                      GestureDetector(
+                        onTap: () => Navigator.pop(context),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.20),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      const Expanded(
+                        child: Text(
+                          'Register New User',
+                          style: TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -348,7 +434,31 @@ class _RegisterState extends State<Register>
                                     items: _branches.map((b) => b['name'] as String).toList(),
                                     hint: _branches.isEmpty ? 'Loading branches...' : 'Select Branch *',
                                     icon: Icons.location_city_rounded,
-                                    onChanged: (v) => setState(() => _selectedBranch = v),
+                                    onChanged: (v) {
+                                      setState(() {
+                                        _selectedBranch = v;
+                                        _selectedStudentId = null;
+                                        if (_selectedRole == 'Madrassa Parent') {
+                                          final bId = _getBranchId();
+                                          _loadStudentsForBranch(bId);
+                                        }
+                                      });
+                                    },
+                                    validator: (v) => v == null ? 'Required' : null,
+                                  ),
+                                ],
+                                if (_selectedRole == 'Madrassa Parent' && _selectedBranch != null) ...[
+                                  const SizedBox(height: 14),
+                                  _buildSimpleDropdown(t,
+                                    value: _selectedStudentId,
+                                    items: _branchStudents.map((s) => s['id'] as String).toList(),
+                                    hint: _branchStudents.isEmpty ? 'No students found' : 'Select Child (Student) *',
+                                    icon: Icons.child_care_rounded,
+                                    itemLabel: (id) {
+                                      final s = _branchStudents.firstWhere((element) => element['id'] == id);
+                                      return "${s['name']} (Roll: ${s['rollNumber']})";
+                                    },
+                                    onChanged: (v) => setState(() => _selectedStudentId = v),
                                     validator: (v) => v == null ? 'Required' : null,
                                   ),
                                 ],
@@ -394,7 +504,10 @@ class _RegisterState extends State<Register>
                                       label: 'Phone',
                                       icon: Icons.phone_outlined,
                                       keyboardType: TextInputType.phone,
-                                      inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter.digitsOnly,
+                                        LengthLimitingTextInputFormatter(11),
+                                      ]),
                                 ]),
                               ]),
                             ),
@@ -558,7 +671,7 @@ class _RegisterState extends State<Register>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 18, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 18, offset: const Offset(0, 4))],
       ),
       padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
       child: Column(children: [
@@ -569,7 +682,7 @@ class _RegisterState extends State<Register>
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: _profileImageBytes != null ? t.accent : t.bgRule, width: 3),
-                boxShadow: [BoxShadow(color: t.accent.withOpacity(0.15), blurRadius: 18, offset: const Offset(0, 6))],
+                boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 6))],
               ),
               child: CircleAvatar(
                 radius: 54,
@@ -577,7 +690,7 @@ class _RegisterState extends State<Register>
                 backgroundImage: _profileImageBytes != null ? MemoryImage(_profileImageBytes!) : null,
                 child: _profileImageBytes == null
                     ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withOpacity(0.4)),
+                        Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withValues(alpha: 0.4)),
                         const SizedBox(height: 4),
                         Text('Add Photo', style: TextStyle(fontSize: 11, color: t.textTertiary, fontWeight: FontWeight.w500)),
                       ])
@@ -636,7 +749,13 @@ class _RegisterState extends State<Register>
       ),
       selectedItemBuilder: (context) => _roleItems.map((role) {
         final type = role['type'] as String;
-        final Color iconColor = type == 'crown' ? t.accent : type == 'shield' ? t.accentLight : t.textSecondary;
+        final Color iconColor = type == 'crown'
+            ? t.accent
+            : type == 'shield'
+                ? t.accentLight
+                : type == 'madrassa'
+                    ? const Color(0xFF5C6BC0)
+                    : t.textSecondary;
         return Row(children: [
           Icon(role['icon'] as IconData, color: iconColor, size: 18),
           const SizedBox(width: 10),
@@ -646,11 +765,29 @@ class _RegisterState extends State<Register>
       }).toList(),
       items: _roleItems.map((role) {
         final type = role['type'] as String;
-        final isCrown  = type == 'crown';
-        final isShield = type == 'shield';
-        final Color iconColor = isCrown ? t.accent : isShield ? t.accentLight : t.textSecondary;
-        final Color textColor = isCrown ? t.accent : isShield ? t.accentLight : t.textPrimary;
-        final Color bgColor   = (isCrown || isShield) ? t.accentMuted : t.bgCardAlt;
+        final isCrown    = type == 'crown';
+        final isShield   = type == 'shield';
+        final isMadrassa = type == 'madrassa';
+        const madrassaColor = Color(0xFF5C6BC0); // indigo-ish
+        final Color iconColor = isCrown
+            ? t.accent
+            : isShield
+                ? t.accentLight
+                : isMadrassa
+                    ? madrassaColor
+                    : t.textSecondary;
+        final Color textColor = isCrown
+            ? t.accent
+            : isShield
+                ? t.accentLight
+                : isMadrassa
+                    ? madrassaColor
+                    : t.textPrimary;
+        final Color bgColor = (isCrown || isShield)
+            ? t.accentMuted
+            : isMadrassa
+                ? madrassaColor.withValues(alpha: 0.07)
+                : t.bgCardAlt;
 
         return DropdownMenuItem<String>(
           value: role['label'] as String,
@@ -660,7 +797,7 @@ class _RegisterState extends State<Register>
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(color: iconColor.withOpacity(0.13), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(8)),
                 child: Icon(role['icon'] as IconData, color: iconColor, size: 17),
               ),
               const SizedBox(width: 12),
@@ -668,11 +805,12 @@ class _RegisterState extends State<Register>
                 child: Text(role['label'] as String,
                     style: TextStyle(
                         fontSize: 14,
-                        fontWeight: (isCrown || isShield) ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: (isCrown || isShield || isMadrassa) ? FontWeight.w700 : FontWeight.w500,
                         color: textColor)),
               ),
-              if (isCrown)  _roleBadge('Authority', t.accent),
-              if (isShield) _roleBadge('Server', t.accentLight),
+              if (isCrown)    _roleBadge('Authority', t.accent),
+              if (isShield)   _roleBadge('Server', t.accentLight),
+              if (isMadrassa) _roleBadge('Madrassa', madrassaColor),
             ]),
           ),
         );
@@ -692,17 +830,17 @@ class _RegisterState extends State<Register>
 
   Widget _roleBadge(String text, Color color) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: color.withOpacity(0.13), borderRadius: BorderRadius.circular(20)),
-        child: Text(text, style: TextStyle(fontSize: 10, color: color.withOpacity(0.9), fontWeight: FontWeight.w700)),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(20)),
+        child: Text(text, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9), fontWeight: FontWeight.w700)),
       );
 
   Widget _buildGlobalBadge(RoleThemeData t) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [t.accent.withOpacity(0.10), t.accent.withOpacity(0.04)]),
+        gradient: LinearGradient(colors: [t.accent.withValues(alpha: 0.10), t.accent.withValues(alpha: 0.04)]),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.accent.withOpacity(0.35), width: 1.5),
+        border: Border.all(color: t.accent.withValues(alpha: 0.35), width: 1.5),
       ),
       child: Row(children: [
         Container(
@@ -731,7 +869,7 @@ class _RegisterState extends State<Register>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 16, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
@@ -740,7 +878,7 @@ class _RegisterState extends State<Register>
           child: Row(children: [
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: accent.withOpacity(0.10), borderRadius: BorderRadius.circular(10)),
+              decoration: BoxDecoration(color: accent.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
               child: Icon(icon, color: accent, size: 18),
             ),
             const SizedBox(width: 12),
@@ -811,7 +949,8 @@ class _RegisterState extends State<Register>
     required String hint,
     required IconData icon,
     required Function(String?) onChanged,
-    required String? Function(String?) validator,
+    String? Function(String?)? validator,
+    String Function(String)? itemLabel,
   }) {
     return DropdownButtonFormField<String>(
       value: value,
@@ -855,13 +994,13 @@ class _RegisterState extends State<Register>
         decoration: BoxDecoration(
           color: has ? t.accentMuted : t.bgCardAlt,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: has ? t.accent.withOpacity(0.4) : t.bgRule, width: 1.5),
+          border: Border.all(color: has ? t.accent.withValues(alpha: 0.4) : t.bgRule, width: 1.5),
         ),
         child: Row(children: [
           Container(
             padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
-              color: has ? t.accent.withOpacity(0.15) : t.bgRule.withOpacity(0.5),
+              color: has ? t.accent.withValues(alpha: 0.15) : t.bgRule.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(has ? Icons.check_rounded : icon, color: has ? t.accent : t.textTertiary, size: 22),
@@ -872,7 +1011,7 @@ class _RegisterState extends State<Register>
               Text(title, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: has ? t.accent : t.textPrimary)),
               const SizedBox(height: 3),
               Text(has ? file.name : subtitle,
-                  style: TextStyle(fontSize: 12, color: has ? t.accent.withOpacity(0.7) : t.textTertiary),
+                  style: TextStyle(fontSize: 12, color: has ? t.accent.withValues(alpha: 0.7) : t.textTertiary),
                   maxLines: 1, overflow: TextOverflow.ellipsis),
             ]),
           ),
@@ -881,7 +1020,7 @@ class _RegisterState extends State<Register>
               onTap: onRemove,
               child: Container(
                 padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(color: t.danger.withOpacity(0.10), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: t.danger.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(8)),
                 child: Icon(Icons.close_rounded, color: t.danger, size: 18),
               ),
             )
@@ -903,7 +1042,7 @@ class _RegisterState extends State<Register>
               begin: Alignment.topLeft,
               end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: t.accent.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6))],
+          boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.4), blurRadius: 16, offset: const Offset(0, 6))],
         ),
         child: _loading
             ? const Center(child: SizedBox(width: 24, height: 24,

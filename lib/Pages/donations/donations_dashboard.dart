@@ -1,124 +1,49 @@
-// lib/pages/donations/donations_dashboard.dart
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:rxdart/rxdart.dart';
 import 'package:intl/intl.dart';
-
-import '../../services/donations_local_storage.dart';
-import '../../services/local_storage_service.dart';
-import '../../theme/role_theme_provider.dart';
-import '../../theme/app_theme.dart';
+import 'package:excel/excel.dart' hide Border;
+import 'dart:io';
+import 'dart:async';
+import 'package:shimmer/shimmer.dart';
+import '../../constants/colors.dart';
 import 'donations_shared.dart';
-import 'donations_screen.dart';
-import 'donations_form.dart';
-
-double _toAmt(dynamic v) {
-  if (v == null)   return 0.0;
-  if (v is num)    return v.toDouble();
-  if (v is String) return double.tryParse(v) ?? 0.0;
-  return 0.0;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// KPI ROW
-// ─────────────────────────────────────────────────────────────────────────────
-
-class MiniKpiRow extends StatelessWidget {
-  final String   branchId, today;
-  final UserRole role;
-  const MiniKpiRow({super.key,
-      required this.branchId, required this.today, required this.role});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: DonationsLocalStorage.streamDonationsForDate(branchId, today)
-          .map((list) => list
-              .map((r) => {'hiveKey': r.hiveKey, ...r.toMap()})
-              .toList()),
-      builder: (_, snap) {
-        final docs  = snap.data ?? [];
-        final count = docs.length;
-        final total = docs.fold<double>(0, (s, d) {
-          final isGoods = (d['entryType'] as String? ?? '') == 'goods';
-          return isGoods ? s : s + _toAmt(d['amount']);
-        });
-        String fmt(double v) {
-          if (v >= 1e6)  return '${(v / 1e6).toStringAsFixed(1)}M';
-          if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}K';
-          return v.toStringAsFixed(0);
-        }
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [DonDS.headerTop, DonDS.headerBot],
-              begin: Alignment.topLeft, end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(DS.rLg),
-            boxShadow: [BoxShadow(
-                color: DonDS.teal.withOpacity(0.12),
-                blurRadius: 12, offset: const Offset(0, 4))],
-          ),
-          child: Row(children: [
-            _kpiCell(Icons.receipt_long_rounded, '$count',
-                "Today's Records", DonDS.tealLight),
-            _kpiDiv(),
-            _kpiCell(Icons.payments_rounded, 'PKR ${fmt(total)}',
-                'Cash Collected', DonDS.amber),
-            _kpiDiv(),
-            _kpiCell(Icons.calendar_today_rounded,
-                DateFormat('dd MMM').format(DateTime.now()),
-                'Date', const Color(0xFF94B4B4)),
-          ]),
-        );
-      },
-    );
-  }
-
-  Widget _kpiDiv() => Container(
-      width: 1, height: 32,
-      margin: const EdgeInsets.symmetric(horizontal: 10),
-      color: DonDS.headerBorder);
-
-  Widget _kpiCell(IconData icon, String val, String lbl, Color accent) =>
-      Expanded(child: Column(children: [
-        Icon(icon, color: accent, size: 13),
-        const SizedBox(height: 4),
-        Text(val, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                fontSize: val.length > 7 ? 11 : 14,
-                fontWeight: FontWeight.w800,
-                color: DonDS.onDark,
-                fontFeatures: const [FontFeature.tabularFigures()])),
-        const SizedBox(height: 2),
-        Text(lbl, textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: 9, fontWeight: FontWeight.w600,
-                color: DonDS.onDarkSub, letterSpacing: 0.2)),
-      ]));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD TAB
-// ─────────────────────────────────────────────────────────────────────────────
+import 'widgets/transaction_card.dart';
+import '../../models/donation_models.dart';
+import '../../services/donations_local_storage.dart';
+import 'package:file_picker/file_picker.dart';
+import 'widgets/dashboard_premium_overview.dart';
+import 'widgets/dashboard_analytics_panel.dart';
+import 'widgets/dashboard_empty_state.dart';
 
 class DashboardTab extends StatefulWidget {
-  final String branchId, username, branchName, userId, today;
-  final CollectionReference         col;
-  final UserRole                    role;
-  final Future<String> Function()   nextReceiptNumber;
-  final DonationCategory            selectedCategory;
+  final String branchId;
+  final String username;
+  final String branchName;
+  final String userId;
+  final dynamic col;
+  final String today;
+  final UserRole role;
+  final Future<String> Function() nextReceiptNumber;
+  final DonationCategory selectedCategory;
   final ValueChanged<DonationCategory> onCatChanged;
+  final VoidCallback onAddTap;
+  final Function(double total, double received, double pending, int count)? onStatsChanged;
 
-  const DashboardTab({super.key,
-    required this.branchId,   required this.username,
-    required this.branchName, required this.userId,
-    required this.col,        required this.today,
-    required this.role,       required this.nextReceiptNumber,
-    required this.selectedCategory, required this.onCatChanged,
+  const DashboardTab({
+    super.key,
+    required this.branchId,
+    required this.username,
+    required this.branchName,
+    required this.userId,
+    required this.col,
+    required this.today,
+    required this.role,
+    required this.nextReceiptNumber,
+    required this.selectedCategory,
+    required this.onCatChanged,
+    required this.onAddTap,
+    this.onStatsChanged,
   });
 
   @override
@@ -126,1566 +51,1507 @@ class DashboardTab extends StatefulWidget {
 }
 
 class _DashboardTabState extends State<DashboardTab> {
-  late String _from, _to;
-  DonationCategory?  _filterCat;
-  GmwfSubCategory?   _filterGmwfSub;
-  late Stream<List<Map<String, dynamic>>> _stream;
+  GmwfSubCategory? _selectedGmwfSub;
+  DonationSubtype? _selectedSubtype;
 
-  Stream<List<Map<String, dynamic>>> _buildStream(String branchId) =>
-      DonationsLocalStorage.streamAllDonations(branchId)
-          .map((list) => list
-              .map((r) => {'hiveKey': r.hiveKey, ...r.toMap()})
-              .toList());
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String _statusFilter = 'All';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  // Advanced filters
+  String _paymentMethodFilter = 'All';
+  double? _minAmount;
+  double? _maxAmount;
+
+  late Stream<List<DonationRecord>> _donationsStream;
+  List<DonationRecord> _currentDonations = [];
+  Timer? _searchDebounce;
+
+  // ── Valid items for each dropdown ──────────────────────────────────────────
+  static const _statusItems = ['All', 'Pending', 'Received'];
+  static const _paymentItems = ['All', 'Cash', 'Bank Transfer', 'Cheque', 'Online'];
 
   @override
   void initState() {
     super.initState();
-    _from   = widget.today;
-    _to     = widget.today;
-    _stream = _buildStream(widget.branchId);
+    _searchCtrl.addListener(_onSearchChanged);
+    DonationsLocalStorage.downloadAllDonations(widget.branchId);
+    _initStream();
   }
 
-  @override
-  void didUpdateWidget(DashboardTab old) {
-    super.didUpdateWidget(old);
-    if (old.branchId != widget.branchId) {
-      setState(() {
-        _stream        = _buildStream(widget.branchId);
-        _from          = widget.today;
-        _to            = widget.today;
-        _filterGmwfSub = null;
-      });
-    }
-  }
-
-  Future<void> _pickDate(bool isFrom) async {
-    final init = DateTime.tryParse(isFrom ? _from : _to) ?? DateTime.now();
-    final p    = await showDatePicker(
-      context: context, initialDate: init,
-      firstDate: DateTime(2020),
-      lastDate: DateTime.now().add(const Duration(days: 1)),
-    );
-    if (p == null || !mounted) return;
-    final s = DateFormat('yyyy-MM-dd').format(p);
-    setState(() {
-      if (isFrom) {
-        _from = s;
-        if (_from.compareTo(_to) > 0) _to = s;
-      } else {
-        _to = s;
-        if (_to.compareTo(_from) < 0) _from = s;
-      }
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) _initStream();
     });
   }
 
-  void _reset() => setState(() { _from = widget.today; _to = widget.today; });
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchDebounce?.cancel();
+    super.dispose();
+  }
 
   @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: _stream,
-      builder: (context, snap) {
-        if (snap.hasError) return _ErrorView(error: '${snap.error}');
+  void didUpdateWidget(DashboardTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.branchId != widget.branchId ||
+        oldWidget.selectedCategory != widget.selectedCategory ||
+        oldWidget.role != widget.role) {
+      _initStream();
+    }
+  }
 
-        final all = snap.data ?? [];
+  void _initStream() {
+    final localStream = DonationsLocalStorage.streamAllDonations(widget.branchId);
 
-        final roleFilt = widget.role.isOfficeBoy
-            ? all.where((d) =>
-                (d['recordedBy'] as String? ?? '').toLowerCase() ==
-                widget.username.toLowerCase()).toList()
-            : all;
+    Query<Map<String, dynamic>> query;
+    if (widget.branchId == 'all') {
+      query = FirebaseFirestore.instance.collectionGroup('donations');
+    } else {
+      query = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('donations');
+    }
 
-        final dateFilt = roleFilt.where((d) {
-          final date = (d['date'] as String?) ?? '';
-          if (_from.isNotEmpty && date.compareTo(_from) < 0) return false;
-          if (_to.isNotEmpty   && date.compareTo(_to)   > 0) return false;
-          return true;
-        }).toList();
+    if (widget.selectedCategory != DonationCategory.all) {
+      query = query.where('categoryId', isEqualTo: widget.selectedCategory.name);
+    }
 
-        final catFilt = _filterCat == null
-            ? dateFilt
-            : dateFilt.where((d) =>
-                (d['categoryId'] as String?) == _filterCat!.name).toList();
+    final cloudStream = query
+        .snapshots()
+        .map((snap) => snap.docs.map((doc) {
+              final data = Map<String, dynamic>.from(doc.data() as Map);
+              // Fallback for branchId if not in document data (needed for collectionGroup)
+              if (data['branchId'] == null || data['branchId'].toString().isEmpty) {
+                data['branchId'] = doc.reference.parent.parent?.id ?? '';
+              }
+              return DonationRecord.fromMap(data, doc.id);
+            }).toList())
+        .onErrorReturnWith((e, s) {
+      debugPrint("[DashboardTab] Firestore Stream Error: $e");
+      return [];
+    });
 
-        final donations = _filterGmwfSub == null
-            ? catFilt
-            : catFilt.where((d) =>
-                (d['gmwfSubCategoryId'] as String?) ==
-                _filterGmwfSub!.name).toList();
+    _donationsStream = Rx.combineLatest2<List<DonationRecord>, List<DonationRecord>,
+        List<DonationRecord>>(
+      localStream,
+      cloudStream,
+      (localList, cloudList) {
+        debugPrint("[DashboardTab] Local: ${localList.length}, Cloud: ${cloudList.length}");
 
-        final form = AddDonationForm(
-          category:          widget.selectedCategory,
-          onCatChanged:      widget.onCatChanged,
-          col:               widget.col,
-          today:             widget.today,
-          username:          widget.username,
-          branchId:          widget.branchId,
-          branchName:        widget.branchName,
-          userId:            widget.userId,
-          role:              widget.role,
-          nextReceiptNumber: widget.nextReceiptNumber,
-        );
-
-        final showGmwfSubs =
-            _filterCat == DonationCategory.gmwf || _filterCat == null;
-
-        return Container(
-          color: t.bg,
-          child: LayoutBuilder(builder: (_, box) {
-            if (box.maxWidth >= 700) {
-              return _WideLayout(
-                branchId: widget.branchId, today: widget.today,
-                role: widget.role, form: form, donations: donations,
-                activeCat: widget.selectedCategory,
-                filterCat: _filterCat,
-                onFilter: (c) => setState(() {
-                  _filterCat     = c;
-                  _filterGmwfSub = null;
-                }),
-                filterGmwfSub: _filterGmwfSub,
-                onGmwfFilter:  (s) => setState(() => _filterGmwfSub = s),
-                showGmwfSubs:  showGmwfSubs,
-                col: widget.col, from: _from, to: _to,
-                onFrom: () => _pickDate(true),
-                onTo:   () => _pickDate(false),
-                onReset: _reset, branchName: widget.branchName,
-              );
+        List<DonationRecord> filterByDate(List<DonationRecord> list) {
+          if (_startDate == null && _endDate == null) return list;
+          return list.where((d) {
+            final date = DateTime.tryParse(d.date) ?? DateTime.now();
+            final dateOnly = DateTime(date.year, date.month, date.day);
+            if (_startDate != null) {
+              final start = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+              if (dateOnly.isBefore(start)) return false;
             }
-            return _NarrowLayout(
-              branchId: widget.branchId, today: widget.today,
-              role: widget.role, form: form, donations: donations,
-              activeCat: widget.selectedCategory,
-              filterCat: _filterCat,
-              onFilter: (c) => setState(() {
-                _filterCat     = c;
-                _filterGmwfSub = null;
-              }),
-              filterGmwfSub: _filterGmwfSub,
-              onGmwfFilter:  (s) => setState(() => _filterGmwfSub = s),
-              showGmwfSubs:  showGmwfSubs,
-              col: widget.col, from: _from, to: _to,
-              onFrom: () => _pickDate(true),
-              onTo:   () => _pickDate(false),
-              onReset: _reset, branchName: widget.branchName,
-            );
-          }),
-        );
+            if (_endDate != null) {
+              final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+              if (dateOnly.isAfter(end)) return false;
+            }
+            return true;
+          }).toList();
+        }
+
+        final filteredLocal = filterByDate(localList);
+        final filteredCloud = filterByDate(cloudList);
+
+        // ── Last-writer-wins merge using lastUpdatedAt timestamps ─────────────
+        // Helper: parse lastUpdatedAt falling back to timestamp or epoch-zero
+        DateTime ts(DonationRecord r) {
+          final raw = r.lastUpdatedAt ?? r.timestamp;
+          if (raw != null) {
+            final parsed = DateTime.tryParse(raw);
+            if (parsed != null) return parsed;
+          }
+          // Fallback: treat localId as ms-since-epoch if numeric
+          final ms = int.tryParse(r.localId);
+          if (ms != null && ms > 1000000000000) {
+            return DateTime.fromMillisecondsSinceEpoch(ms);
+          }
+          return DateTime.fromMillisecondsSinceEpoch(0);
+        }
+
+        final Map<String, DonationRecord> merged = {};
+        // Seed with cloud data
+        for (var d in filteredCloud) {
+          final mergeKey = '${d.branchId}_${d.localId}';
+          merged[mergeKey] = d;
+        }
+        // Local wins only if its lastUpdatedAt >= cloud's lastUpdatedAt
+        for (var local in filteredLocal) {
+          final mergeKey = '${local.branchId}_${local.localId}';
+          final existing = merged[mergeKey];
+          if (existing == null) {
+            // Not in Firestore yet — always include local (new/unsynced)
+            merged[mergeKey] = local;
+          } else {
+            // Keep whichever is newer (last-writer-wins)
+            if (!ts(local).isBefore(ts(existing))) {
+              merged[mergeKey] = local;
+            }
+          }
+        }
+
+        // ── Filter out tombstoned (deleted) records AFTER merging ─────────────
+        final allRecords = merged.values.where((d) => d.syncStatus != 'deleted').toList();
+        allRecords.sort((a, b) {
+          final dateCmp = b.date.compareTo(a.date);
+          if (dateCmp != 0) return dateCmp;
+          return b.localId.compareTo(a.localId);
+        });
+
+        final filtered = allRecords.where((d) {
+          if (_statusFilter != 'All' && d.status.toLowerCase() != _statusFilter.toLowerCase()) {
+            return false;
+          }
+          if (widget.selectedCategory != DonationCategory.all &&
+              d.categoryId != widget.selectedCategory.name) {
+            return false;
+          }
+          if (_selectedGmwfSub != null && d.gmwfSubCategoryId != _selectedGmwfSub!.name) {
+            return false;
+          }
+          if (_selectedSubtype != null && d.subtypeId != _selectedSubtype!.name) return false;
+
+          if (_searchCtrl.text.isNotEmpty) {
+            final q = _searchCtrl.text.toLowerCase();
+            final donorMatch = d.donorName.toLowerCase().contains(q);
+            final receiptMatch = d.receiptNo.toLowerCase().contains(q);
+            final goodsMatch = d.goodsItem?.toLowerCase().contains(q) ?? false;
+            if (!donorMatch && !receiptMatch && !goodsMatch) return false;
+          }
+
+          if (_paymentMethodFilter != 'All' && d.paymentMethod != _paymentMethodFilter) {
+            return false;
+          }
+          final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+          if (_minAmount != null && amt < _minAmount!) return false;
+          if (_maxAmount != null && amt > _maxAmount!) return false;
+
+          if (widget.role == UserRole.chairman || widget.role == UserRole.hqManager) return true;
+          if (d.collectorId == widget.userId) return true;
+          if (widget.role == UserRole.manager) return true;
+          return false;
+        });
+
+        final result = filtered.toList()
+          ..sort((a, b) {
+            int cmp = b.date.compareTo(a.date);
+            if (cmp != 0) return cmp;
+            return b.localId.compareTo(a.localId);
+          });
+
+        _currentDonations = result;
+
+        double total = 0, received = 0, pending = 0;
+        for (var d in result) {
+          final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+          total += amt;
+          if (d.status == DonationStatus.received) {
+            received += amt;
+          } else {
+            pending += amt;
+          }
+        }
+
+        if (widget.onStatsChanged != null) {
+          Future.microtask(
+              () => widget.onStatsChanged!(total, received, pending, result.length));
+        }
+
+        return result;
       },
     );
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WIDE LAYOUT
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _WideLayout extends StatelessWidget {
-  final String branchId, today, branchName, from, to;
-  final UserRole role;
-  final Widget   form;
-  final List<Map<String, dynamic>> donations;
-  final DonationCategory   activeCat;
-  final DonationCategory?  filterCat;
-  final GmwfSubCategory?   filterGmwfSub;
-  final bool               showGmwfSubs;
-  final ValueChanged<DonationCategory?>  onFilter;
-  final ValueChanged<GmwfSubCategory?>   onGmwfFilter;
-  final CollectionReference col;
-  final VoidCallback onFrom, onTo, onReset;
-
-  const _WideLayout({
-    required this.branchId,   required this.today,
-    required this.branchName, required this.role,
-    required this.form,       required this.donations,
-    required this.activeCat,  required this.filterCat,
-    required this.filterGmwfSub, required this.showGmwfSubs,
-    required this.onFilter,   required this.onGmwfFilter,
-    required this.col,        required this.from, required this.to,
-    required this.onFrom,     required this.onTo, required this.onReset,
-  });
 
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(
-        width: 420,
-        child: Column(children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 12, 10),
-            child: MiniKpiRow(branchId: branchId, today: today, role: role),
-          ),
-          Expanded(child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 0, 12, 32),
-            child: form,
-          )),
-        ]),
-      ),
-      Container(width: 1, color: t.bgRule),
-      Expanded(child: _RightList(
-        donations: donations, branchId: branchId,
-        activeCat: activeCat, filterCat: filterCat,
-        filterGmwfSub: filterGmwfSub, showGmwfSubs: showGmwfSubs,
-        onFilter: onFilter, onGmwfFilter: onGmwfFilter,
-        col: col, from: from, to: to, today: today,
-        onFrom: onFrom, onTo: onTo, onReset: onReset,
-        branchName: branchName, hPad: 14, rPad: 20,
-      )),
-    ]);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NARROW LAYOUT
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _NarrowLayout extends StatelessWidget {
-  final String branchId, today, branchName, from, to;
-  final UserRole role;
-  final Widget   form;
-  final List<Map<String, dynamic>> donations;
-  final DonationCategory   activeCat;
-  final DonationCategory?  filterCat;
-  final GmwfSubCategory?   filterGmwfSub;
-  final bool               showGmwfSubs;
-  final ValueChanged<DonationCategory?>  onFilter;
-  final ValueChanged<GmwfSubCategory?>   onGmwfFilter;
-  final CollectionReference col;
-  final VoidCallback onFrom, onTo, onReset;
-
-  const _NarrowLayout({
-    required this.branchId,   required this.today,
-    required this.branchName, required this.role,
-    required this.form,       required this.donations,
-    required this.activeCat,  required this.filterCat,
-    required this.filterGmwfSub, required this.showGmwfSubs,
-    required this.onFilter,   required this.onGmwfFilter,
-    required this.col,        required this.from, required this.to,
-    required this.onFrom,     required this.onTo, required this.onReset,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t    = RoleThemeScope.dataOf(context);
-    final cat  = filterCat ?? activeCat;
-    final items = _buildItems(donations);
-
-    return CustomScrollView(
-      cacheExtent: 400,
-      slivers: [
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _NarrowHeaderDelegate(
-            bgColor:       t.bg,
-            branchId:      branchId, today: today, role: role,
-            from: from,    to: to,
-            onFrom: onFrom, onTo: onTo, onReset: onReset,
-            filterCat: filterCat,   onFilter: onFilter,
-            filterGmwfSub: filterGmwfSub,
-            onGmwfFilter:  onGmwfFilter,
-            showGmwfSubs:  showGmwfSubs,
-          ),
-        ),
-        SliverToBoxAdapter(child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-          child: form,
-        )),
-        SliverToBoxAdapter(child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-          child: _SummaryCard(donations: donations, category: cat,
-              filterGmwfSub: filterGmwfSub),
-        )),
-        SliverToBoxAdapter(child: _SectionHeader(
-          cat: cat, count: donations.length,
-          from: from, to: to, today: today, hPad: 16,
-          filterGmwfSub: filterGmwfSub,
-        )),
-        if (donations.isEmpty)
-          SliverToBoxAdapter(child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-            child: _EmptyState(cat: cat),
-          ))
-        else
-          _DonationSliver(
-            items: items, donations: donations,
-            branchId: branchId, col: col, activeCat: activeCat,
-            branchName: branchName, today: today,
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-          ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RIGHT LIST (wide)
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _RightList extends StatelessWidget {
-  final List<Map<String, dynamic>> donations;
-  final String branchId, from, to, today, branchName;
-  final DonationCategory   activeCat;
-  final DonationCategory?  filterCat;
-  final GmwfSubCategory?   filterGmwfSub;
-  final bool               showGmwfSubs;
-  final ValueChanged<DonationCategory?>  onFilter;
-  final ValueChanged<GmwfSubCategory?>   onGmwfFilter;
-  final CollectionReference col;
-  final VoidCallback onFrom, onTo, onReset;
-  final double hPad, rPad;
-
-  const _RightList({
-    required this.donations,      required this.branchId,
-    required this.activeCat,      required this.filterCat,
-    required this.filterGmwfSub,  required this.showGmwfSubs,
-    required this.onFilter,       required this.onGmwfFilter,
-    required this.col,            required this.from,
-    required this.to,             required this.today,
-    required this.onFrom,         required this.onTo,
-    required this.onReset,        required this.branchName,
-    required this.hPad,           required this.rPad,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t    = RoleThemeScope.dataOf(context);
-    final cat  = filterCat ?? activeCat;
-    final items = _buildItems(donations);
-
-    return CustomScrollView(
-      cacheExtent: 400,
-      slivers: [
-        SliverPersistentHeader(
-          pinned: true,
-          delegate: _WideRightHeaderDelegate(
-            bgColor: t.bg, hPad: hPad, rPad: rPad,
-            from: from, to: to, today: today,
-            onFrom: onFrom, onTo: onTo, onReset: onReset,
-            filterCat: filterCat,  onFilter: onFilter,
-            filterGmwfSub: filterGmwfSub,
-            onGmwfFilter:  onGmwfFilter,
-            showGmwfSubs:  showGmwfSubs,
-          ),
-        ),
-        SliverToBoxAdapter(child: Padding(
-          padding: EdgeInsets.fromLTRB(hPad, 8, rPad, 0),
-          child: _SummaryCard(donations: donations, category: cat,
-              filterGmwfSub: filterGmwfSub),
-        )),
-        SliverToBoxAdapter(child: _SectionHeader(
-          cat: cat, count: donations.length,
-          from: from, to: to, today: today, hPad: hPad,
-          filterGmwfSub: filterGmwfSub,
-        )),
-        if (donations.isEmpty)
-          SliverToBoxAdapter(child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: hPad),
-            child: _EmptyState(cat: cat),
-          ))
-        else
-          _DonationSliver(
-            items: items, donations: donations,
-            branchId: branchId, col: col, activeCat: activeCat,
-            branchName: branchName, today: today,
-            padding: EdgeInsets.fromLTRB(hPad, 0, rPad, 32),
-          ),
-      ],
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// NARROW HEADER DELEGATE
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _NarrowHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final Color    bgColor;
-  final String   branchId, today, from, to;
-  final UserRole role;
-  final VoidCallback onFrom, onTo, onReset;
-  final DonationCategory?               filterCat;
-  final GmwfSubCategory?                filterGmwfSub;
-  final bool                            showGmwfSubs;
-  final ValueChanged<DonationCategory?> onFilter;
-  final ValueChanged<GmwfSubCategory?>  onGmwfFilter;
-
-  double get _h => showGmwfSubs ? 222.0 : 184.0;
-
-  const _NarrowHeaderDelegate({
-    required this.bgColor,    required this.branchId,
-    required this.today,      required this.role,
-    required this.from,       required this.to,
-    required this.onFrom,     required this.onTo, required this.onReset,
-    required this.filterCat,  required this.onFilter,
-    required this.filterGmwfSub, required this.onGmwfFilter,
-    required this.showGmwfSubs,
-  });
-
-  @override double get minExtent => _h;
-  @override double get maxExtent => _h;
-
-  @override
-  Widget build(BuildContext ctx, double shrink, bool overlaps) {
-    final shadow = overlaps || shrink > 0;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      height: _h,
-      decoration: BoxDecoration(
-        color: bgColor,
-        boxShadow: shadow
-            ? [const BoxShadow(color: Color(0x14000000),
-                blurRadius: 10, offset: Offset(0, 4))]
-            : null,
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-          child: MiniKpiRow(branchId: branchId, today: today, role: role),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _DateBar(from: from, to: to, today: today,
-              onFrom: onFrom, onTo: onTo, onReset: onReset),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.only(left: 16, right: 16),
-          child: _CategoryChips(filterCat: filterCat, onChanged: onFilter),
-        ),
-        if (showGmwfSubs) ...[
-          const SizedBox(height: 6),
-          Padding(
-            padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-            child: _GmwfSubChips(
-                filterSub: filterGmwfSub, onChanged: onGmwfFilter),
-          ),
-        ] else
-          const SizedBox(height: 10),
-      ]),
-    );
-  }
-
-  @override
-  bool shouldRebuild(_NarrowHeaderDelegate o) =>
-      o.bgColor != bgColor || o.from != from || o.to != to ||
-      o.filterCat != filterCat || o.filterGmwfSub != filterGmwfSub ||
-      o.showGmwfSubs != showGmwfSubs || o.branchId != branchId;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WIDE RIGHT HEADER DELEGATE
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _WideRightHeaderDelegate extends SliverPersistentHeaderDelegate {
-  final Color  bgColor;
-  final double hPad, rPad;
-  final String from, to, today;
-  final VoidCallback onFrom, onTo, onReset;
-  final DonationCategory?               filterCat;
-  final GmwfSubCategory?                filterGmwfSub;
-  final bool                            showGmwfSubs;
-  final ValueChanged<DonationCategory?> onFilter;
-  final ValueChanged<GmwfSubCategory?>  onGmwfFilter;
-
-  double get _h => showGmwfSubs ? 148.0 : 106.0;
-
-  const _WideRightHeaderDelegate({
-    required this.bgColor,   required this.hPad,  required this.rPad,
-    required this.from,      required this.to,    required this.today,
-    required this.onFrom,    required this.onTo,  required this.onReset,
-    required this.filterCat, required this.onFilter,
-    required this.filterGmwfSub, required this.onGmwfFilter,
-    required this.showGmwfSubs,
-  });
-
-  @override double get minExtent => _h;
-  @override double get maxExtent => _h;
-
-  @override
-  Widget build(BuildContext ctx, double shrink, bool overlaps) {
-    final shadow = overlaps || shrink > 0;
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
-      height: _h,
-      decoration: BoxDecoration(
-        color: bgColor,
-        boxShadow: shadow
-            ? [const BoxShadow(color: Color(0x10000000),
-                blurRadius: 8, offset: Offset(0, 3))]
-            : null,
-      ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(hPad, 8, rPad, 8),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          _DateBar(from: from, to: to, today: today,
-              onFrom: onFrom, onTo: onTo, onReset: onReset),
-          const SizedBox(height: 8),
-          _CategoryChips(filterCat: filterCat, onChanged: onFilter),
-          if (showGmwfSubs) ...[
-            const SizedBox(height: 6),
-            _GmwfSubChips(
-                filterSub: filterGmwfSub, onChanged: onGmwfFilter),
-          ],
-        ]),
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(_WideRightHeaderDelegate o) =>
-      o.bgColor != bgColor || o.from != from || o.to != to ||
-      o.filterCat != filterCat || o.filterGmwfSub != filterGmwfSub ||
-      o.showGmwfSubs != showGmwfSubs || o.hPad != hPad;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS
-// ─────────────────────────────────────────────────────────────────────────────
-
-List<_Item> _buildItems(List<Map<String, dynamic>> donations) {
-  final items = <_Item>[];
-  String? last;
-  for (int i = 0; i < donations.length; i++) {
-    final dk = donations[i]['date'] as String? ?? '';
-    if (dk != last) { last = dk; items.add(_Item.sep(dk)); }
-    items.add(_Item.tile(i));
-  }
-  return items;
-}
-
-class _Item {
-  final bool isSep; final String? dateKey; final int? index;
-  const _Item.sep(String k) : isSep = true,  dateKey = k,    index = null;
-  const _Item.tile(int i)   : isSep = false, dateKey = null, index = i;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DONATION SLIVER
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DonationSliver extends StatelessWidget {
-  final List<_Item>                items;
-  final List<Map<String, dynamic>> donations;
-  final String              branchId, branchName, today;
-  final CollectionReference col;
-  final DonationCategory    activeCat;
-  final EdgeInsets          padding;
-
-  const _DonationSliver({
-    required this.items,      required this.donations,
-    required this.branchId,   required this.col,
-    required this.activeCat,  required this.branchName,
-    required this.today,      required this.padding,
-  });
-
-  @override
-  Widget build(BuildContext context) => SliverPadding(
-    padding: padding,
-    sliver: SliverList(
-      delegate: SliverChildBuilderDelegate(
-        (ctx, idx) {
-          final item = items[idx];
-          if (item.isSep) {
-            return _DateSep(dateKey: item.dateKey!, today: today);
-          }
-          final d   = donations[item.index!];
-          final cat = DonationCategory.values
-              .firstWhereOrNull(
-                  (c) => c.name == (d['categoryId'] as String?)) ??
-              activeCat;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _DonationTile(
-                data: d, branchId: branchId, col: col,
-                category: cat, branchName: branchName),
-          );
-        },
-        childCount: items.length,
-        addRepaintBoundaries: true, addAutomaticKeepAlives: false,
-      ),
-    ),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DATE BAR  — two plain tap targets, no pills-within-pills
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DateBar extends StatelessWidget {
-  final String from, to, today;
-  final VoidCallback onFrom, onTo, onReset;
-  const _DateBar({required this.from, required this.to, required this.today,
-      required this.onFrom, required this.onTo, required this.onReset});
-
-  String _p(String d) {
-    try { return DateFormat('dd MMM').format(DateTime.parse(d)); }
-    catch (_) { return d; }
-  }
-  bool get _isToday => from == today && to == today;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-          color: t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rMd),
-          border: Border.all(color: t.bgRule),
-          boxShadow: DS.shadowSm),
-      child: Row(children: [
-        Icon(Icons.date_range_rounded, size: 14, color: DonDS.teal),
-        const SizedBox(width: 10),
-        // From target
-        GestureDetector(
-          onTap: onFrom,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('From ', style: DS.caption(color: t.textTertiary)
-                .copyWith(fontSize: 11)),
-            Text(_p(from), style: DS.label(color: t.textPrimary)
-                .copyWith(fontSize: 12)),
-            const SizedBox(width: 2),
-            Icon(Icons.keyboard_arrow_down_rounded, size: 13, color: DonDS.teal),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Icon(Icons.arrow_forward_rounded, size: 11, color: t.textTertiary),
-        ),
-        // To target
-        GestureDetector(
-          onTap: onTo,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('To ', style: DS.caption(color: t.textTertiary)
-                .copyWith(fontSize: 11)),
-            Text(_p(to), style: DS.label(color: t.textPrimary)
-                .copyWith(fontSize: 12)),
-            const SizedBox(width: 2),
-            Icon(Icons.keyboard_arrow_down_rounded, size: 13, color: DonDS.teal),
-          ]),
-        ),
-        const Spacer(),
-        if (!_isToday)
-          GestureDetector(
-            onTap: onReset,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-              decoration: BoxDecoration(
-                  color: DonDS.teal.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(DS.rSm),
-                  border: Border.all(color: DonDS.teal.withOpacity(0.25))),
-              child: Row(mainAxisSize: MainAxisSize.min, children: const [
-                Icon(Icons.today_rounded, size: 10, color: DonDS.teal),
-                SizedBox(width: 3),
-                Text('Today',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700,
-                        color: DonDS.teal)),
-              ]),
-            ),
-          ),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CATEGORY CHIPS
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _CategoryChips extends StatelessWidget {
-  final DonationCategory?               filterCat;
-  final ValueChanged<DonationCategory?> onChanged;
-  const _CategoryChips({required this.filterCat, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(children: [
-        _Chip(label: 'All', icon: Icons.grid_view_rounded,
-            color: DonDS.teal,
-            sel: filterCat == null, onTap: () => onChanged(null)),
-        ...DonationCategory.values.map((cat) {
-          final sel = filterCat == cat;
-          return Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: _Chip(
-                label: cat.label, icon: cat.icon, color: cat.color,
-                sel: sel, onTap: () => onChanged(sel ? null : cat)),
-          );
-        }),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GMWF SUB-CATEGORY CHIPS
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _GmwfSubChips extends StatelessWidget {
-  final GmwfSubCategory?               filterSub;
-  final ValueChanged<GmwfSubCategory?> onChanged;
-  const _GmwfSubChips({required this.filterSub, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(children: [
-        Container(
-          margin: const EdgeInsets.only(right: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          decoration: BoxDecoration(
-            color: DS.emerald100,
-            borderRadius: BorderRadius.circular(DS.rSm),
-          ),
-          child: const Text('GMWF',
-              style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800,
-                  color: DS.emerald600, letterSpacing: 0.8)),
-        ),
-        ...GmwfSubCategory.values.map((sub) {
-          final sel  = filterSub == sub;
-          final last = sub == GmwfSubCategory.values.last;
-          return Padding(
-            padding: EdgeInsets.only(right: last ? 0 : 6),
-            child: GestureDetector(
-              onTap: () => onChanged(sel ? null : sub),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-                decoration: BoxDecoration(
-                  color: sel ? sub.color : t.bgCard,
-                  borderRadius: BorderRadius.circular(DS.rSm),
-                  border: Border.all(
-                      color: sel ? sub.color : t.bgRule,
-                      width: sel ? 1.5 : 1),
-                  boxShadow: sel
-                      ? [BoxShadow(color: sub.color.withOpacity(0.2),
-                          blurRadius: 4, offset: const Offset(0, 2))]
-                      : null,
-                ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(sub.icon, size: 11,
-                      color: sel ? Colors.white : sub.color),
-                  const SizedBox(width: 5),
-                  Text(sub.label,
-                      style: TextStyle(fontSize: 10,
-                          fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                          color: sel ? Colors.white : sub.color)),
-                ]),
-              ),
-            ),
-          );
-        }),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CHIP
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _Chip extends StatelessWidget {
-  final String label; final IconData icon;
-  final Color color;  final bool sel;
-  final VoidCallback onTap;
-  const _Chip({required this.label, required this.icon,
-      required this.color, required this.sel, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: sel ? color : t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rXl),
-          border: Border.all(color: sel ? color : t.bgRule),
-          boxShadow: sel
-              ? [BoxShadow(color: color.withOpacity(0.22),
-                  blurRadius: 6, offset: const Offset(0, 2))]
-              : null,
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 13, color: sel ? Colors.white : color),
-          const SizedBox(width: 6),
-          Text(label,
-              style: DS.label(color: sel ? Colors.white : color)
-                  .copyWith(fontSize: 12,
-                      fontWeight: sel ? FontWeight.w700 : FontWeight.w500)),
-        ]),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SECTION HEADER
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SectionHeader extends StatelessWidget {
-  final DonationCategory  cat;
-  final GmwfSubCategory?  filterGmwfSub;
-  final int    count;
-  final String from, to, today;
-  final double hPad;
-  const _SectionHeader({
-    required this.cat, required this.count,
-    required this.from, required this.to, required this.today,
-    this.hPad = 16, this.filterGmwfSub,
-  });
-
-  String _p(String d) {
-    try { return DateFormat('dd MMM yy').format(DateTime.parse(d)); }
-    catch (_) { return d; }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t   = RoleThemeScope.dataOf(context);
-    final sub = from == to
-        ? (from == today ? 'Today' : _p(from))
-        : '${_p(from)} – ${_p(to)}';
-    final accent = filterGmwfSub?.color ?? cat.color;
     return Padding(
-      padding: EdgeInsets.fromLTRB(hPad, 14, hPad, 6),
-      child: Row(children: [
-        Expanded(child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(filterGmwfSub != null
-              ? '${filterGmwfSub!.label} Transactions'
-              : 'Transactions',
-              style: DS.heading(color: t.textPrimary)),
-          Text(sub, style: DS.caption(color: t.textTertiary)),
-        ])),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-          decoration: BoxDecoration(
-              color:        accent.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(DS.rSm),
-              border: Border.all(color: accent.withOpacity(0.25))),
-          child: Text('$count records',
-              style: DS.label(color: accent)
-                  .copyWith(letterSpacing: 0.3)),
-        ),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUMMARY CARD  — 4 flat cells, NO progress bar
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SummaryCard extends StatelessWidget {
-  final List<Map<String, dynamic>> donations;
-  final DonationCategory           category;
-  final GmwfSubCategory?           filterGmwfSub;
-  const _SummaryCard({
-    required this.donations, required this.category,
-    this.filterGmwfSub,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    double total = 0, approved = 0, pending = 0;
-    int goodsCnt = 0, cashCnt = 0;
-
-    for (final d in donations) {
-      final amt     = _toAmt(d['amount']);
-      final isGoods = (d['entryType'] as String? ?? '') == 'goods';
-      final status  = d['status'] as String? ?? kStatusPending;
-      if (!isGoods) {
-        total += amt; cashCnt++;
-        if (status == kStatusApproved)     approved += amt;
-        else if (status == kStatusPending) pending  += amt;
-      } else { goodsCnt++; }
-    }
-
-    final color = filterGmwfSub?.color ?? category.color;
-
-    return Container(
-      margin:  const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color:        t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: color.withOpacity(0.18)),
-          boxShadow:    DS.shadowSm),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Header row
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-                color: color.withOpacity(0.10),
-                borderRadius: BorderRadius.circular(DS.rSm)),
-            child: Icon(Icons.analytics_rounded, color: color, size: 14)),
-          const SizedBox(width: 10),
-          Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Summary', style: DS.subheading(color: t.textPrimary)),
-            Text('${donations.length} donation${donations.length != 1 ? "s" : ""}',
-                style: DS.caption(color: t.textTertiary)),
-          ])),
-          Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-            Text('PKR ${fmtNum(total)}',
-                style: DS.mono(color: color, size: 17)),
-            Text('Cash total', style: DS.caption(color: t.textTertiary)),
-          ]),
-        ]),
-        const SizedBox(height: 12),
-        // ── 4 flat stat cells — replaces progress bar ─────────────────────
-        Row(children: [
-          _StatCell('Total', 'PKR ${fmtNum(total)}', color),
-          const SizedBox(width: 8),
-          _StatCell('Approved', 'PKR ${fmtNum(approved)}', DS.statusApproved),
-          const SizedBox(width: 8),
-          _StatCell('Pending', 'PKR ${fmtNum(pending)}', DS.statusPending),
-          const SizedBox(width: 8),
-          _StatCell('Records', '${donations.length}', DS.ink500),
-        ]),
-        if (goodsCnt > 0) ...[
-          const SizedBox(height: 8),
-          Row(children: [
-            Icon(Icons.inventory_2_rounded, size: 12, color: DS.plum500),
-            const SizedBox(width: 5),
-            Text('$goodsCnt goods donation${goodsCnt != 1 ? "s" : ""} in range',
-                style: DS.caption(color: DS.plum700).copyWith(fontSize: 11)),
-          ]),
-        ],
-      ]),
-    );
-  }
-}
-
-class _StatCell extends StatelessWidget {
-  final String label, value;
-  final Color  color;
-  const _StatCell(this.label, this.value, this.color);
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-        decoration: BoxDecoration(
-            color:        color.withOpacity(0.07),
-            borderRadius: BorderRadius.circular(DS.rSm),
-            border:       Border.all(color: color.withOpacity(0.18))),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label,
-              style: DS.label(color: color)
-                  .copyWith(fontSize: 9, letterSpacing: 0.5)),
-          const SizedBox(height: 3),
-          Text(value,
-              style: DS.mono(color: color, size: 10.5),
-              overflow: TextOverflow.ellipsis),
-        ]),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DATE SEPARATOR
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DateSep extends StatelessWidget {
-  final String dateKey, today;
-  const _DateSep({required this.dateKey, required this.today});
-
-  String get _lbl {
-    try {
-      final d    = DateTime.parse(dateKey);
-      final tDay = DateTime.parse(today);
-      final diff = tDay.difference(d).inDays;
-      if (diff == 0) return 'Today';
-      if (diff == 1) return 'Yesterday';
-      if (diff < 7)  return DateFormat('EEEE').format(d);
-      return DateFormat('dd MMM yyyy').format(d);
-    } catch (_) { return dateKey; }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(children: [
-        Expanded(child: Container(height: 0.5, color: t.bgRule)),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-          decoration: BoxDecoration(
-              color:        t.bgCard,
-              borderRadius: BorderRadius.circular(20),
-              border:       Border.all(color: t.bgRule),
-              boxShadow:    DS.shadowSm),
-          child: Text(_lbl,
-              style: DS.label(color: t.textTertiary)
-                  .copyWith(fontSize: 10, letterSpacing: 0.4)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: Container(height: 0.5, color: t.bgRule)),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EMPTY STATE
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _EmptyState extends StatelessWidget {
-  final DonationCategory cat;
-  const _EmptyState({required this.cat});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 56),
-      margin: const EdgeInsets.only(top: 8),
-      decoration: BoxDecoration(
-          color:        t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: t.bgRule)),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Container(
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-              color: cat.color.withOpacity(0.07), shape: BoxShape.circle),
-          child: Icon(Icons.receipt_long_rounded,
-              size: 30, color: cat.color.withOpacity(0.4)),
-        ),
-        const SizedBox(height: 16),
-        Text('No Transactions', style: DS.subheading(color: t.textTertiary)),
-        const SizedBox(height: 4),
-        Text('No records for the selected date range',
-            style: DS.caption(color: t.textTertiary)),
-      ]),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ERROR VIEW
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _ErrorView extends StatelessWidget {
-  final String error;
-  const _ErrorView({required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Center(child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.cloud_off_rounded, size: 48,
-            color: DS.statusRejected.withOpacity(0.5)),
-        const SizedBox(height: 16),
-        Text('Could not load donations',
-            style: DS.subheading(color: t.textSecondary)),
-        const SizedBox(height: 6),
-        Text(error, textAlign: TextAlign.center,
-            style: DS.caption(color: t.textTertiary)),
-      ]),
-    ));
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// DONATION TILE  — 3-zone layout: donor+amount / badges / secondary actions
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _DonationTile extends StatefulWidget {
-  final Map<String, dynamic> data;
-  final String               branchId, branchName;
-  final CollectionReference  col;
-  final DonationCategory     category;
-  const _DonationTile({
-    required this.data,       required this.branchId,
-    required this.col,        required this.category,
-    required this.branchName,
-  });
-
-  @override
-  State<_DonationTile> createState() => _DonationTileState();
-}
-
-class _DonationTileState extends State<_DonationTile> {
-  bool _exp = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final t         = RoleThemeScope.dataOf(context);
-    final d         = widget.data;
-    final cat       = widget.category;
-    final amt       = (d['amount'] as num?)?.toDouble() ?? 0;
-    final prob      = (d['probableAmount'] as num?)?.toDouble();
-    final isGoods   = (d['entryType'] as String? ?? '') == 'goods';
-    final receiptNo = d['receiptNo']  as String? ?? '';
-    final donor     = d['donorName']  as String? ?? '-';
-    final phone     = d['phone']      as String? ?? '';
-    final subId     = d['subtypeId']  as String?;
-    final gmwfSubId = d['gmwfSubCategoryId'] as String?;
-    final goodsItem = d['goodsItem']  as String? ?? '';
-    final notes     = d['notes']      as String? ?? '';
-    final status    = d['status']     as String? ?? kStatusPending;
-    final unit      = d['unit']       as String? ?? '';
-    final recorder  = d['recordedBy'] as String? ?? '';
-    final colRole   = d['collectorRole'] as String? ?? '';
-
-    final subtype = subId != null
-        ? DonationSubtype.values.firstWhereOrNull((s) => s.name == subId)
-        : null;
-    final gmwfSub = gmwfSubId != null
-        ? GmwfSubCategory.values.firstWhereOrNull((s) => s.name == gmwfSubId)
-        : null;
-
-    final Color accent =
-        (!isGoods && cat == DonationCategory.gmwf && gmwfSub != null)
-            ? gmwfSub.color : cat.color;
-
-    final amtDisplay = isGoods
-        ? (prob != null ? 'PKR ${fmtNum(prob)}'
-            : '${amt % 1 == 0 ? amt.toInt() : amt} $unit')
-        : 'PKR ${fmtNum(amt)}';
-
-    String? collectorLabel;
-    if (colRole.isNotEmpty && colRole != 'Staff' && recorder.isNotEmpty) {
-      collectorLabel = '$colRole · $recorder';
-    } else if (recorder.isNotEmpty) {
-      collectorLabel = recorder;
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-          color:        t.bgCard,
-          borderRadius: BorderRadius.circular(DS.rLg),
-          border:       Border.all(color: accent.withOpacity(0.20)),
-          boxShadow:    DS.shadowSm),
-      clipBehavior: Clip.antiAlias,
-      child: IntrinsicHeight(
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-
-          // ── Left accent bar ──────────────────────────────────────────────
-          Container(width: 4, color: accent),
-
-          // ── Content ──────────────────────────────────────────────────────
-          Expanded(
+      padding: const EdgeInsets.all(24),
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-
-                // ── ZONE 1: Donor name + amount ───────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 11, 12, 0),
-                  child: Row(children: [
-                    Expanded(
-                      child: Text(donor,
-                          style: DS.subheading(color: t.textPrimary)
-                              .copyWith(fontSize: 14.5),
-                          overflow: TextOverflow.ellipsis),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(amtDisplay,
-                        style: DS.mono(color: accent, size: 15)),
-                  ]),
+                DashboardPremiumOverview(
+                  currentDonations: _currentDonations,
+                  branchName: widget.branchName,
+                  branchId: widget.branchId,
+                  role: widget.role,
+                  onAddTap: widget.onAddTap,
+                  onExportTap: () => _showExportDialog(context, 'EXCEL'),
+                  onSummaryTap: _showAnalyticsDialog,
+                  isAnalyticsActive: false,
                 ),
-
-                // ── ZONE 2: Badges + status ───────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                  child: Wrap(spacing: 5, runSpacing: 4, children: [
-                    // Receipt no as tiny mono badge
-                    if (receiptNo.isNotEmpty)
-                      _MonoBadge(text: receiptNo, color: accent),
-                    _CatBadge(cat: cat),
-                    if (gmwfSub != null) _GmwfSubBadge(sub: gmwfSub),
-                    if (isGoods) _GoodsBadge(),
-                    if (subtype != null) DSSubtypeBadge(subtype: subtype),
-                    if (!isGoods) DSStatusBadge(status: status),
-                  ]),
+                const SizedBox(height: 24),
+                _buildSearchAndFilterBar(),
+                _buildActiveFilterChips(),
+                const SizedBox(height: 12),
+                if (widget.branchId == 'all') _buildBranchSummary(),
+                const SizedBox(height: 8),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
+                  child: Text('TRANSACTIONS',
+                      style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.gray400,
+                          letterSpacing: 1.2)),
                 ),
-
-                // ── ZONE 3: Recorder + contact (muted) ───────────────────
-                if (collectorLabel != null || phone.isNotEmpty || goodsItem.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 5, 12, 0),
-                    child: Row(children: [
-                      if (collectorLabel != null) ...[
-                        Icon(Icons.badge_outlined, size: 10, color: t.textTertiary),
-                        const SizedBox(width: 3),
-                        Expanded(
-                          child: Text(collectorLabel,
-                              style: DS.caption(color: t.textTertiary)
-                                  .copyWith(fontSize: 10),
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                      ] else
-                        const Spacer(),
-                      if (phone.isNotEmpty) ...[
-                        Icon(Icons.phone_outlined, size: 10, color: t.textTertiary),
-                        const SizedBox(width: 3),
-                        Text(phone,
-                            style: DS.caption(color: t.textTertiary)
-                                .copyWith(fontSize: 10)),
-                      ],
-                      if ((d['paymentMethod'] as String? ?? 'Cash') != 'Cash') ...[
-                        const SizedBox(width: 8),
-                        Icon(Icons.credit_card_rounded, size: 10, color: DonDS.teal),
-                        const SizedBox(width: 3),
-                        Text(d['paymentMethod'] as String,
-                            style: DS.caption(color: DonDS.teal)
-                                .copyWith(fontSize: 10)),
-                      ],
-                    ]),
-                  ),
-
-                // ── Notes ─────────────────────────────────────────────────
-                if (notes.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 7, 12, 0),
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                          color: t.bgCardAlt,
-                          borderRadius: BorderRadius.circular(DS.rSm),
-                          border: Border.all(color: t.bgRule)),
-                      child: Text(notes,
-                          style: DS.caption(color: t.textSecondary)
-                              .copyWith(fontStyle: FontStyle.italic,
-                                  fontSize: 11)),
-                    ),
-                  ),
-
-                // ── Action row (secondary — compact) ──────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-                  child: Row(children: [
-                    // Print
-                    _TinyAction(
-                        icon: Icons.print_rounded, label: 'Print',
-                        color: accent,
-                        onTap: () => printReceiptPdf(d, receiptNo)),
-                    const SizedBox(width: 5),
-                    // PDF
-                    _TinyAction(
-                        icon: Icons.download_rounded, label: 'PDF',
-                        color: DonDS.teal,
-                        onTap: () => downloadReceiptPdf(d, receiptNo, context)),
-                    const SizedBox(width: 5),
-                    // WhatsApp
-                    _TinyAction(
-                        assetImage: 'assets/icons/WA.png', label: 'WA',
-                        color: const Color(0xFF25D366),
-                        disabled: phone.isEmpty,
-                        onTap: () => shareReceiptWhatsApp(
-                            d, receiptNo, phone, widget.branchName)),
-                    const SizedBox(width: 5),
-                    // SMS
-                    _TinyAction(
-                        icon: Icons.sms_rounded, label: 'SMS',
-                        color: accent, disabled: phone.isEmpty,
-                        onTap: () => sendSmsThankYou(
-                            phone, donor, cat, amt,
-                            unit.isEmpty ? 'PKR' : unit,
-                            receiptNo, widget.branchName,
-                            subtype: subtype, gmwfSub: gmwfSub,
-                            paymentMethod: d['paymentMethod'] as String? ?? 'Cash',
-                            isGoods: isGoods)),
-                    const Spacer(),
-                    // Details toggle
-                    GestureDetector(
-                      onTap: () => setState(() => _exp = !_exp),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                            color: t.bgCardAlt,
-                            borderRadius: BorderRadius.circular(DS.rSm),
-                            border: Border.all(color: t.bgRule)),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Text(_exp ? 'Less' : 'Details',
-                              style: DS.label(color: t.textTertiary)
-                                  .copyWith(fontSize: 10)),
-                          const SizedBox(width: 2),
-                          Icon(_exp
-                                  ? Icons.expand_less_rounded
-                                  : Icons.expand_more_rounded,
-                              size: 13, color: t.textTertiary),
-                        ]),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    // Delete — small, right-edge, destructive
-                    GestureDetector(
-                      onTap: () => _confirmDelete(context),
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                            color: DS.statusRejected.withOpacity(0.07),
-                            borderRadius: BorderRadius.circular(DS.rSm),
-                            border: Border.all(
-                                color: DS.statusRejected.withOpacity(0.22))),
-                        child: Icon(Icons.delete_outline_rounded,
-                            size: 15, color: DS.statusRejected),
-                      ),
-                    ),
-                  ]),
-                ),
-
-                // ── Expanded details ───────────────────────────────────────
-                if (_exp)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
-                    decoration: BoxDecoration(
-                        color:  t.bgCardAlt,
-                        border: Border(top: BorderSide(color: t.bgRule))),
-                    child: Wrap(spacing: 22, runSpacing: 10, children: [
-                      _Cell('Receipt No', receiptNo.isNotEmpty ? receiptNo : '-'),
-                      _Cell('Category', cat.label),
-                      if (gmwfSub != null) _Cell('Programme', gmwfSub.label),
-                      if (subtype  != null) _Cell('Sub-Type', subtype.label),
-                      _Cell('Entry', isGoods ? 'Goods / Ajnas' : 'Cash'),
-                      _Cell('Recorded By', recorder.isNotEmpty ? recorder : '-'),
-                      if (colRole.isNotEmpty) _Cell('Collector Role', colRole),
-                      _Cell('Date', d['date'] as String? ?? '-'),
-                      if (d['paymentMethod'] != null && !isGoods)
-                        _Cell('Payment', d['paymentMethod'] as String),
-                      if (!isGoods)
-                        _Cell('Status',
-                            status[0].toUpperCase() + status.substring(1)),
-                      if (isGoods && prob != null)
-                        _Cell('Est. Value', 'PKR ${fmtNum(prob)}'),
-                      _Cell('Sync',
-                          (d['syncStatus'] as String? ?? 'pending') == 'pending'
-                              ? 'Queued' : 'Synced'),
-                    ]),
-                  ),
+                const SizedBox(height: 8),
               ],
             ),
           ),
-        ]),
+          StreamBuilder<List<DonationRecord>>(
+            stream: _donationsStream,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return SliverFillRemaining(
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.error_outline_rounded,
+                            color: Colors.redAccent, size: 48),
+                        const SizedBox(height: 16),
+                        Text('Sync Error: ${snapshot.error}',
+                            style: const TextStyle(color: AppColors.gray600)),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) => Shimmer.fromColors(
+                      baseColor: AppColors.gray100,
+                      highlightColor: Colors.white,
+                      child: Container(
+                        height: 72,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                    childCount: 5,
+                  ),
+                );
+              }
+
+              final donations = snapshot.data ?? [];
+              if (donations.isEmpty) {
+                return SliverFillRemaining(
+                  child: DashboardEmptyState(
+                    selectedCategory: widget.selectedCategory,
+                    selectedSubtype: _selectedSubtype,
+                    selectedGmwfSub: _selectedGmwfSub,
+                    isSearchActive: _searchCtrl.text.isNotEmpty,
+                    paymentMethodFilter: _paymentMethodFilter,
+                    minAmount: _minAmount,
+                    maxAmount: _maxAmount,
+                    onClearFilters: () {
+                      setState(() {
+                        _selectedGmwfSub = null;
+                        _selectedSubtype = null;
+                        _searchCtrl.clear();
+                        _paymentMethodFilter = 'All';
+                        _minAmount = null;
+                        _maxAmount = null;
+                        _startDate = null;
+                        _endDate = null;
+                      });
+                      widget.onCatChanged(DonationCategory.all);
+                      _initStream();
+                    },
+                    onAddTap: widget.onAddTap,
+                  ),
+                );
+              }
+
+              return SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final donation = donations[index];
+                    final prevDonation = index > 0 ? donations[index - 1] : null;
+
+                    bool showHeader = false;
+                    if (prevDonation == null || prevDonation.date != donation.date) {
+                      showHeader = true;
+                    }
+
+                    final card = TransactionCard(
+                      donation: donation,
+                      currentUserRole: widget.role,
+                      currentUsername: widget.username,
+                      onTap: () {},
+                    );
+
+                    if (showHeader) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildDateHeader(donation.date),
+                          card,
+                        ],
+                      );
+                    }
+                    return card;
+                  },
+                  childCount: donations.length,
+                ),
+              );
+            },
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+        ],
       ),
     );
   }
 
-  void _confirmDelete(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
+  void _showAnalyticsDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AnalyticsInsightsDialog(
+        currentDonations: _currentDonations,
+        branchName: widget.branchName,
+        role: widget.role,
+      ),
+    );
+  }
+
+  Widget _buildDateHeader(String dateStr) {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final yesterdayStr =
+        DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+
+    String label;
+    if (dateStr == todayStr) {
+      label = 'TODAY';
+    } else if (dateStr == yesterdayStr) {
+      label = 'YESTERDAY';
+    } else {
+      final date = DateTime.tryParse(dateStr) ?? DateTime.now();
+      label = DateFormat('EEEE, dd MMM yyyy').format(date).toUpperCase();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.gray200.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: AppColors.gray600,
+                letterSpacing: 1,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Divider(color: AppColors.gray200, thickness: 1),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // REDESIGNED EXPORT DIALOG — Excel + PDF side by side
+  // ════════════════════════════════════════════════════════════════════════════
+
+  void _showExportDialog(BuildContext context, String type) {
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(DS.rXl)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-              color:        t.bgCard,
-              borderRadius: BorderRadius.circular(DS.rXl),
-              border:       Border.all(color: t.bgRule)),
-          child: Column(mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Remove Transaction',
-                style: DS.heading(color: t.textPrimary)),
-            const SizedBox(height: 10),
-            Text('This will permanently delete this donation record.',
-                style: DS.body(color: t.textSecondary)),
-            const SizedBox(height: 20),
-            Row(children: [
-              Expanded(child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                    foregroundColor: t.textSecondary,
-                    side: BorderSide(color: t.bgRule),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(DS.rMd)),
-                    padding: const EdgeInsets.symmetric(vertical: 12)),
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel'),
-              )),
-              const SizedBox(width: 10),
-              Expanded(child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: DS.statusRejected,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(DS.rMd)),
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    elevation: 0),
-                onPressed: () async {
-                  Navigator.pop(ctx);
-                  await _doDelete();
-                },
-                child: const Text('Delete',
-                    style: TextStyle(fontWeight: FontWeight.w700)),
-              )),
-            ]),
-          ]),
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+        child: _ExportDialog(
+          initialType: type,
+          onExport: (selectedType, donations) {
+            Navigator.pop(ctx);
+            _runExport(selectedType, donations);
+          },
+          currentDonations: _currentDonations,
         ),
       ),
     );
   }
 
-  Future<void> _doDelete() async {
-    try {
-      final hiveKey = widget.data['hiveKey'] as String?;
-      if (hiveKey == null || hiveKey.isEmpty) return;
-      await DonationsLocalStorage.deleteDonation(hiveKey, widget.branchId);
-    } catch (e) { debugPrint('[Tile] Delete error: $e'); }
+  void _runExport(String type, List<DonationRecord> list) {
+    if (list.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data found for the selected range')));
+      return;
+    }
+    if (type == 'EXCEL') {
+      _exportToExcel(list);
+    } else {
+      downloadTransactionsLedgerPdf(list, widget.branchName, context);
+    }
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MICRO WIDGETS
-// ─────────────────────────────────────────────────────────────────────────────
+  Future<void> _exportToExcel(List<DonationRecord> donations) async {
+    final excel = Excel.createExcel();
+    final sheet = excel['Donations'];
+    excel.delete('Sheet1');
 
-/// Tiny mono badge for receipt number
-class _MonoBadge extends StatelessWidget {
-  final String text;
-  final Color  color;
-  const _MonoBadge({required this.text, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(
-        color:        color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(DS.rSm),
-        border:       Border.all(color: color.withOpacity(0.22))),
-    child: Text(text,
-        style: TextStyle(
-            fontSize: 9, fontWeight: FontWeight.w700,
-            color: color,
-            fontFeatures: const [FontFeature.tabularFigures()])),
-  );
-}
-
-/// Compact action button — icon + short label, no tall button
-class _TinyAction extends StatelessWidget {
-  final IconData?    icon;
-  final String?      assetImage;
-  final String       label;
-  final Color        color;
-  final bool         disabled;
-  final VoidCallback onTap;
-  const _TinyAction({
-    this.icon, this.assetImage,
-    required this.label, required this.color,
-    this.disabled = false, required this.onTap,
-  }) : assert(icon != null || assetImage != null);
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    final c = disabled ? t.textTertiary : color;
-    final Widget iconW = assetImage != null
-        ? ColorFiltered(colorFilter: ColorFilter.mode(c, BlendMode.srcIn),
-            child: Image.asset(assetImage!, width: 12, height: 12))
-        : Icon(icon!, size: 12, color: c);
-    return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: disabled ? t.bgCardAlt : color.withOpacity(0.06),
-          borderRadius: BorderRadius.circular(DS.rSm),
-          border: Border.all(color: disabled ? t.bgRule : color.withOpacity(0.20)),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          iconW, const SizedBox(width: 4),
-          Text(label, style: DS.label(color: c)
-              .copyWith(fontSize: 10, letterSpacing: 0.2)),
-        ]),
-      ),
-    );
-  }
-}
-
-class _CatBadge extends StatelessWidget {
-  final DonationCategory cat;
-  const _CatBadge({required this.cat});
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-        color:        cat.color.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(20),
-        border:       Border.all(color: cat.color.withOpacity(0.25))),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(cat.icon, size: 9, color: cat.color),
-      const SizedBox(width: 4),
-      Text(cat.shortLabel,
-          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700,
-              color: cat.color, letterSpacing: 0.3)),
-    ]),
-  );
-}
-
-class _GmwfSubBadge extends StatelessWidget {
-  final GmwfSubCategory sub;
-  const _GmwfSubBadge({required this.sub});
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-        color:        sub.lightColor,
-        borderRadius: BorderRadius.circular(20),
-        border:       Border.all(color: sub.color.withOpacity(0.25))),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(sub.icon, size: 9, color: sub.color),
-      const SizedBox(width: 4),
-      Text(sub.label,
-          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700,
-              color: sub.color, letterSpacing: 0.3)),
-    ]),
-  );
-}
-
-class _GoodsBadge extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-    decoration: BoxDecoration(
-        color:        DS.plum100,
-        borderRadius: BorderRadius.circular(20),
-        border:       Border.all(color: DS.plum500.withOpacity(0.25))),
-    child: Row(mainAxisSize: MainAxisSize.min, children: const [
-      Icon(Icons.inventory_2_rounded, size: 9, color: DS.plum700),
-      SizedBox(width: 4),
-      Text('Goods', style: TextStyle(
-          fontSize: 9, fontWeight: FontWeight.w700,
-          color: DS.plum700, letterSpacing: 0.3)),
-    ]),
-  );
-}
-
-class _Cell extends StatelessWidget {
-  final String label, value;
-  const _Cell(this.label, this.value);
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: DS.label(color: t.textTertiary)),
-      const SizedBox(height: 3),
-      Text(value, style: DS.subheading(color: t.textPrimary)
-          .copyWith(fontSize: 12.5)),
+    sheet.appendRow([
+      TextCellValue('Date'),
+      TextCellValue('Receipt #'),
+      TextCellValue('Donor'),
+      TextCellValue('Category'),
+      TextCellValue('Program'),
+      TextCellValue('Type'),
+      TextCellValue('Amount'),
+      TextCellValue('Method'),
+      TextCellValue('Recorded By'),
+      TextCellValue('Branch'),
     ]);
+
+    for (var d in donations) {
+      final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+      final String cat = d.categoryId;
+      final String prog = d.gmwfSubCategoryId ?? '';
+      final String sub = d.subtypeId ?? '';
+      final bool isGoods = d.isGoods;
+
+      final String finalProgram = (cat.toUpperCase() == 'JAMIA') ? '' : prog;
+      final String finalType =
+          (cat.toUpperCase() == 'JAMIA') ? sub : (isGoods ? (d.goodsItem ?? '') : sub);
+      final String finalMethod = isGoods ? 'GOODS' : d.paymentMethod;
+
+      sheet.appendRow([
+        TextCellValue(d.date),
+        TextCellValue(d.receiptNo),
+        TextCellValue(d.donorName),
+        TextCellValue(cat.toUpperCase()),
+        TextCellValue(finalProgram),
+        TextCellValue(finalType),
+        DoubleCellValue(amt),
+        TextCellValue(finalMethod),
+        TextCellValue(d.recordedBy),
+        TextCellValue(d.branchName),
+      ]);
+    }
+
+    final bytes = excel.encode();
+    if (bytes == null) return;
+
+    final String? outputFile = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save Excel Report',
+      fileName:
+          'GMWF_Donations_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx',
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+    );
+
+    if (outputFile != null) {
+      final file = File(outputFile);
+      await file.writeAsBytes(bytes);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Report saved to: $outputFile'),
+            backgroundColor: Colors.green));
+      }
+    }
   }
+
+  void _showSyncProgress(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => Center(
+        child: Card(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(color: AppColors.primary),
+                const SizedBox(height: 24),
+                Text(message,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 15)),
+                const SizedBox(height: 8),
+                const Text('Communicating with Firestore...',
+                    style: TextStyle(
+                        color: AppColors.gray500, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchAndFilterBar() {
+    final bool hasFilters = _paymentMethodFilter != 'All' ||
+        _minAmount != null ||
+        _maxAmount != null ||
+        _startDate != null ||
+        _endDate != null;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 50,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.gray200),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.03),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3)),
+                ],
+              ),
+              child: TextField(
+                controller: _searchCtrl,
+                decoration: InputDecoration(
+                  hintText: 'Search by donor, receipt #, or goods...',
+                  hintStyle: const TextStyle(
+                      fontSize: 14, color: AppColors.gray400),
+                  prefixIcon: const Icon(Icons.search_rounded,
+                      color: AppColors.gray400, size: 20),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear_rounded,
+                              size: 18, color: AppColors.gray400),
+                          onPressed: () => _searchCtrl.clear())
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          ScaleButton(
+            onTap: _showAdvancedFilterDialog,
+            child: Container(
+              height: 50,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              decoration: BoxDecoration(
+                color: hasFilters
+                    ? AppColors.primary.withValues(alpha: 0.06)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                    color:
+                        hasFilters ? AppColors.primary : AppColors.gray200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.tune_rounded,
+                      size: 18,
+                      color: hasFilters
+                          ? AppColors.primary
+                          : AppColors.gray600),
+                  const SizedBox(width: 8),
+                  Text('Filters',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: hasFilters
+                              ? AppColors.primary
+                              : AppColors.gray700)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          ScaleButton(
+            onTap: _showSortDialog,
+            child: Container(
+              height: 50,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.gray200),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.swap_vert_rounded,
+                      size: 18, color: AppColors.gray600),
+                  SizedBox(width: 8),
+                  Text('Sort',
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.gray700)),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSortDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                      color: AppColors.gray300,
+                      borderRadius: BorderRadius.circular(2))),
+            ),
+            const SizedBox(height: 20),
+            const Text('Sort By',
+                style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.gray900)),
+            const SizedBox(height: 16),
+            _sortOption(Icons.arrow_downward_rounded, 'Newest First',
+                () { setState(() {}); Navigator.pop(context); }),
+            _sortOption(Icons.arrow_upward_rounded, 'Oldest First',
+                () { setState(() {}); Navigator.pop(context); }),
+            _sortOption(Icons.attach_money_rounded, 'Highest Amount',
+                () { setState(() {}); Navigator.pop(context); }),
+            _sortOption(Icons.money_off_rounded, 'Lowest Amount',
+                () { setState(() {}); Navigator.pop(context); }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sortOption(IconData icon, String label, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: AppColors.gray500),
+            const SizedBox(width: 14),
+            Text(label,
+                style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.gray800)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAdvancedFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
+          title: const Text('Filter Records',
+              style: TextStyle(fontWeight: FontWeight.w900)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Date Range',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final range = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2030),
+                      initialDateRange: _startDate != null && _endDate != null
+                          ? DateTimeRange(
+                              start: _startDate!, end: _endDate!)
+                          : null,
+                    );
+                    if (range != null) {
+                      setLocalState(() {
+                        _startDate = range.start;
+                        _endDate = range.end;
+                      });
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                        border: Border.all(color: AppColors.gray200),
+                        borderRadius: BorderRadius.circular(8)),
+                    child: Row(children: [
+                      const Icon(Icons.calendar_today_rounded,
+                          size: 16, color: AppColors.gray600),
+                      const SizedBox(width: 8),
+                      Text(
+                        _startDate != null
+                            ? '${DateFormat('MMM d').format(_startDate!)} - ${DateFormat('MMM d').format(_endDate!)}'
+                            : 'Select Dates',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Text('Category',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                // ── FIX: safe dropdown with validated value ────────────────
+                _dropdownFilter(
+                  value: _safeDropdownValue(
+                    widget.selectedCategory.name,
+                    DonationCategory.values.map((c) => c.name).toList(),
+                    DonationCategory.all.name,
+                  ),
+                  items: DonationCategory.values.map((c) => c.name).toList(),
+                  labels: DonationCategory.values.map((c) => c.label).toList(),
+                  onChanged: (cat) {
+                    if (cat != null) {
+                      final category = DonationCategory.values
+                          .firstWhere((e) => e.name == cat);
+                      setLocalState(() => widget.onCatChanged(category));
+                    }
+                  },
+                ),
+                const SizedBox(height: 20),
+                const Text('Status',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                // ── FIX: safe dropdown ─────────────────────────────────────
+                _dropdownFilter(
+                  value: _safeDropdownValue(
+                      _statusFilter, _statusItems, 'All'),
+                  items: _statusItems,
+                  onChanged: (v) =>
+                      setLocalState(() => _statusFilter = v!),
+                ),
+                const SizedBox(height: 20),
+                const Text('Payment Method',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                // ── FIX: safe dropdown ─────────────────────────────────────
+                _dropdownFilter(
+                  value: _safeDropdownValue(
+                      _paymentMethodFilter, _paymentItems, 'All'),
+                  items: _paymentItems,
+                  onChanged: (v) =>
+                      setLocalState(() => _paymentMethodFilter = v!),
+                ),
+                const SizedBox(height: 20),
+                const Text('Amount Range (PKR)',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Min',
+                            isDense: true,
+                            border: OutlineInputBorder()),
+                        onChanged: (v) => _minAmount = double.tryParse(v),
+                        controller: TextEditingController(
+                            text: _minAmount?.toString() ?? ''),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                            labelText: 'Max',
+                            isDense: true,
+                            border: OutlineInputBorder()),
+                        onChanged: (v) => _maxAmount = double.tryParse(v),
+                        controller: TextEditingController(
+                            text: _maxAmount?.toString() ?? ''),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _startDate = null;
+                  _endDate = null;
+                  _statusFilter = 'All';
+                  _paymentMethodFilter = 'All';
+                  _minAmount = null;
+                  _maxAmount = null;
+                  widget.onCatChanged(DonationCategory.all);
+                });
+                _initStream();
+                Navigator.pop(ctx);
+              },
+              child:
+                  const Text('Reset', style: TextStyle(color: Colors.red)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                setState(() {});
+                _initStream();
+                Navigator.pop(ctx);
+              },
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white),
+              child: const Text('Apply'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ensures [value] is one of [validItems]; falls back to [fallback].
+  /// This prevents the DropdownButton assertion crash.
+  String _safeDropdownValue(
+      String value, List<String> validItems, String fallback) {
+    return validItems.contains(value) ? value : fallback;
+  }
+
+
+  Widget _buildActiveFilterChips() {
+    final List<Widget> chips = [];
+    if (_startDate != null) {
+      chips.add(_activeChip('Dates', () => setState(() {
+            _startDate = null;
+            _endDate = null;
+            _initStream();
+          })));
+    }
+    if (widget.selectedCategory != DonationCategory.all) {
+      chips.add(_activeChip(widget.selectedCategory.label,
+          () => setState(() {
+                widget.onCatChanged(DonationCategory.all);
+                _initStream();
+              })));
+    }
+    if (_statusFilter != 'All') {
+      chips.add(_activeChip(_statusFilter, () => setState(() {
+            _statusFilter = 'All';
+            _initStream();
+          })));
+    }
+    if (_paymentMethodFilter != 'All') {
+      chips.add(_activeChip(_paymentMethodFilter, () => setState(() {
+            _paymentMethodFilter = 'All';
+            _initStream();
+          })));
+    }
+    if (_minAmount != null || _maxAmount != null) {
+      chips.add(_activeChip('Amount Range', () => setState(() {
+            _minAmount = null;
+            _maxAmount = null;
+            _initStream();
+          })));
+    }
+
+    if (chips.isEmpty) return const SizedBox.shrink();
+    return Container(
+      height: 32,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: chips,
+      ),
+    );
+  }
+
+  Widget _activeChip(String label, VoidCallback onClear) {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3))),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primary)),
+          const SizedBox(width: 4),
+          InkWell(
+              onTap: onClear,
+              child: const Icon(Icons.close_rounded,
+                  size: 14, color: AppColors.primary)),
+        ],
+      ),
+    );
+  }
+
+  Widget _dropdownFilter({
+    required String value,
+    required List<String> items,
+    List<String>? labels,
+    required void Function(String?) onChanged,
+  }) {
+    // Guard: if value not in items, fall back to first item
+    final safeValue = items.contains(value) ? value : items.first;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: AppColors.gray200),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: safeValue,
+          isExpanded: true,
+          icon: const Icon(Icons.arrow_drop_down_rounded),
+          style: const TextStyle(fontSize: 14, color: AppColors.gray900),
+          onChanged: onChanged,
+          items: List.generate(
+              items.length,
+              (i) => DropdownMenuItem(
+                    value: items[i],
+                    child: Text(labels != null ? labels[i] : items[i]),
+                  )),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBranchSummary() {
+    final Map<String, ({double received, double pending, int count})> branchData = {};
+    
+    for (var d in _currentDonations) {
+      final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+      final isRec = d.status == 'Received';
+      
+      final current = branchData[d.branchName] ?? (received: 0.0, pending: 0.0, count: 0);
+      branchData[d.branchName] = (
+        received: current.received + (isRec ? amt : 0),
+        pending: current.pending + (!isRec ? amt : 0),
+        count: current.count + 1,
+      );
+    }
+
+    if (branchData.isEmpty) return const SizedBox.shrink();
+
+    final sortedBranches = branchData.entries.toList()..sort((a, b) => (b.value.received + b.value.pending).compareTo(a.value.received + a.value.pending));
+
+    return Container(
+      margin: const EdgeInsets.only(top: 24, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4),
+            child: Text('BRANCH PERFORMANCE SUMMARY',
+                style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.gray400,
+                    letterSpacing: 1.2)),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 160,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: sortedBranches.length,
+              itemBuilder: (context, index) {
+                final entry = sortedBranches[index];
+                final data = entry.value;
+                return Container(
+                  width: 240,
+                  margin: EdgeInsets.only(right: 16, left: index == 0 ? 4 : 0),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppColors.gray200),
+                    boxShadow: [
+                      BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 5)),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(color: AppColors.primary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+                            child: const Icon(Icons.business_rounded, size: 16, color: AppColors.primary),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(entry.key.toUpperCase(),
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.gray900),
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      _SummaryRow(label: 'Received', value: data.received, color: AppColors.primary, isBold: true),
+                      const SizedBox(height: 10),
+                      _SummaryRow(label: 'Pending', value: data.pending, color: Colors.orange, isBold: false),
+                      const Divider(height: 24, color: AppColors.gray100),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('${data.count} entries', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.gray400)),
+                          Text('PKR ${NumberFormat('#,###').format(data.received + data.pending)}', 
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.gray900, fontFamily: 'DMMono')),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _SummaryRow({required String label, required double value, required Color color, required bool isBold}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.gray500, fontWeight: FontWeight.w500)),
+        Text('PKR ${NumberFormat('#,###').format(value)}', 
+            style: TextStyle(
+              fontSize: 12, 
+              fontWeight: isBold ? FontWeight.w900 : FontWeight.w700, 
+              color: isBold ? color : AppColors.gray700,
+              fontFamily: 'DMMono'
+            )),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// REDESIGNED EXPORT DIALOG WIDGET
+// ════════════════════════════════════════════════════════════════════════════════
+
+class _ExportDialog extends StatefulWidget {
+  final String initialType;
+  final void Function(String type, List<DonationRecord> donations) onExport;
+  final List<DonationRecord> currentDonations;
+
+  const _ExportDialog({
+    required this.initialType,
+    required this.onExport,
+    required this.currentDonations,
+  });
+
+  @override
+  State<_ExportDialog> createState() => _ExportDialogState();
+}
+
+class _ExportDialogState extends State<_ExportDialog> {
+  late String _selectedType;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedType = widget.initialType;
+  }
+
+  // ── Date range options ──────────────────────────────────────────────────────
+  static const _ranges = [
+    _RangeOption(
+        id: 'today',
+        label: "Today's Data",
+        sublabel: 'Only today\'s transactions',
+        icon: Icons.today_rounded),
+    _RangeOption(
+        id: 'specific',
+        label: 'Specific Date',
+        sublabel: 'Pick a single date',
+        icon: Icons.event_rounded),
+    _RangeOption(
+        id: 'range',
+        label: 'Date Range',
+        sublabel: 'Start date to end date',
+        icon: Icons.date_range_rounded),
+    _RangeOption(
+        id: 'all',
+        label: 'All Time',
+        sublabel: 'Complete history',
+        icon: Icons.all_inclusive_rounded),
+  ];
+
+  Future<void> _handleRange(_RangeOption opt) async {
+    List<DonationRecord>? list;
+
+    switch (opt.id) {
+      case 'today':
+        final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        list = widget.currentDonations.where((d) => d.date == today).toList();
+        break;
+
+      case 'specific':
+        final date = await showDatePicker(
+          context: context,
+          initialDate: DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+        );
+        if (date == null || !mounted) return;
+        final ds = DateFormat('yyyy-MM-dd').format(date);
+        list = widget.currentDonations.where((d) => d.date == ds).toList();
+        break;
+
+      case 'range':
+        final range = await showDateRangePicker(
+          context: context,
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+        );
+        if (range == null || !mounted) return;
+        list = widget.currentDonations.where((d) {
+          final dt = DateTime.tryParse(d.date) ?? DateTime.now();
+          return dt.isAfter(range.start.subtract(const Duration(days: 1))) &&
+              dt.isBefore(range.end.add(const Duration(days: 1)));
+        }).toList();
+        break;
+
+      case 'all':
+      default:
+        list = widget.currentDonations;
+        break;
+    }
+
+    widget.onExport(_selectedType, list);
+    }
+
+  @override
+  Widget build(BuildContext context) {
+    const excelColor = Color(0xFF217346);
+    const pdfColor = Color(0xFFC62828);
+
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 480),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 40,
+              offset: const Offset(0, 12)),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Header ──────────────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              border: Border(
+                  bottom:
+                      BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: (_selectedType == 'EXCEL' ? excelColor : pdfColor)
+                        .withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    _selectedType == 'EXCEL'
+                        ? Icons.table_view_rounded
+                        : Icons.picture_as_pdf_rounded,
+                    color:
+                        _selectedType == 'EXCEL' ? excelColor : pdfColor,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Export Report',
+                          style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              color: Color(0xFF0F172A),
+                              letterSpacing: -0.4)),
+                      const SizedBox(height: 2),
+                      Text(
+                        _selectedType == 'EXCEL'
+                            ? 'Exports as .xlsx spreadsheet'
+                            : 'Exports as printable PDF',
+                        style: const TextStyle(
+                            fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close_rounded,
+                      color: Color(0xFF94A3B8), size: 20),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFFE2E8F0),
+                    padding: const EdgeInsets.all(6),
+                    minimumSize: const Size(32, 32),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Format toggle ──────────────────────────────────────────
+                const Text('FORMAT',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF94A3B8),
+                        letterSpacing: 1.2)),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(
+                    children: [
+                      _formatToggleBtn(
+                        label: 'Excel',
+                        icon: Icons.table_view_rounded,
+                        color: excelColor,
+                        isSelected: _selectedType == 'EXCEL',
+                        onTap: () => setState(() => _selectedType = 'EXCEL'),
+                      ),
+                      const SizedBox(width: 4),
+                      _formatToggleBtn(
+                        label: 'PDF',
+                        icon: Icons.picture_as_pdf_rounded,
+                        color: pdfColor,
+                        isSelected: _selectedType == 'PDF',
+                        onTap: () => setState(() => _selectedType = 'PDF'),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Date range options ─────────────────────────────────────
+                const Text('DATE RANGE',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF94A3B8),
+                        letterSpacing: 1.2)),
+                const SizedBox(height: 10),
+                GridView.count(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  childAspectRatio: 2.8,
+                  children: _ranges
+                      .map((opt) => _rangeCard(opt))
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _formatToggleBtn({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2)),
+                  ]
+                : [],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: isSelected ? color : const Color(0xFF94A3B8)),
+              const SizedBox(width: 7),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isSelected ? color : const Color(0xFF94A3B8),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _rangeCard(_RangeOption opt) {
+    final activeColor =
+        _selectedType == 'EXCEL' ? const Color(0xFF217346) : const Color(0xFFC62828);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _handleRange(opt),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: activeColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(opt.icon, size: 15, color: activeColor),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(opt.label,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF1E293B))),
+                    Text(opt.sublabel,
+                        style: const TextStyle(
+                            fontSize: 10, color: Color(0xFF94A3B8)),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios_rounded,
+                  size: 11, color: Color(0xFFCBD5E1)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RangeOption {
+  final String id;
+  final String label;
+  final String sublabel;
+  final IconData icon;
+  const _RangeOption({
+    required this.id,
+    required this.label,
+    required this.sublabel,
+    required this.icon,
+  });
 }

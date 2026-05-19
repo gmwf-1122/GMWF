@@ -28,6 +28,8 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
   late Animation<Offset> _slideIn;
 
   Timer? _messageTimer;
+  Timer? _emergencyTimer;
+  bool _showEmergencyButton = false;
   int _messageIndex = 0;
 
   final List<String> _defaultMessages = [
@@ -79,6 +81,15 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
         });
       });
     }
+
+    // Emergency timer: Show button after 15 seconds of spinning
+    _emergencyTimer = Timer(const Duration(seconds: 15), () {
+      if (mounted) {
+        setState(() {
+          _showEmergencyButton = true;
+        });
+      }
+    });
   }
 
   @override
@@ -86,6 +97,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
     _loopController.dispose();
     _entryController.dispose();
     _messageTimer?.cancel();
+    _emergencyTimer?.cancel();
     super.dispose();
   }
 
@@ -179,6 +191,50 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                       color: Colors.grey[600],
                     ),
                   ),
+
+                // Emergency Button
+                if (_showEmergencyButton) ...[
+                  const SizedBox(height: 40),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text(
+                          "Taking longer than usual?",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "The system might be offline or blocked.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            // This will force the router to try offline path
+                            // by clearing any navigator lock or just refreshing.
+                            Navigator.pushReplacementNamed(context, '/');
+                          },
+                          icon: const Icon(Icons.flash_on),
+                          label: const Text("Force Start Offline"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

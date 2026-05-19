@@ -12,7 +12,7 @@ import '../theme/role_theme_provider.dart';
 import 'dispensary/dispensar/inventory.dart';
 import 'assets.dart';
 import 'branches_register.dart';
-import 'patient_detail_screen.dart';
+import 'dispensary/patient_detail_screen.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -36,25 +36,6 @@ DateTime _parseDispensedAt(dynamic raw, String dateKeyFallback) {
   }
   try { return DateFormat('ddMMyy').parse(dateKeyFallback); }
   catch (_) { return DateTime.now(); }
-}
-
-String _formatJoinedDate(dynamic raw) {
-  if (raw == null) return 'N/A';
-  try {
-    if (raw is Timestamp) return DateFormat('dd MMM yyyy').format(raw.toDate());
-    if (raw is String && raw.isNotEmpty) return DateFormat('dd MMM yyyy').format(DateTime.parse(raw));
-  } catch (_) {}
-  return 'N/A';
-}
-
-/// Returns formatted time string (HH:mm) from a Timestamp or ISO string, or '' if unavailable.
-String _formatTime(dynamic raw) {
-  if (raw == null) return '';
-  try {
-    if (raw is Timestamp) return DateFormat('HH:mm').format(raw.toDate());
-    if (raw is String && raw.isNotEmpty) return DateFormat('HH:mm').format(DateTime.parse(raw));
-  } catch (_) {}
-  return '';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,29 +119,55 @@ class PatientSummaryCard extends StatelessWidget {
         final revenue = d['revenue'] ?? 0;
         final minis   = <Widget>[];
         for (final key in valueLabels.keys.where((k) => k.startsWith('v'))) {
-          minis.add(_mini(valueLabels[key]!, d[key] ?? 0, valueIcons[key] ?? Icons.help_outline));
+          minis.add(_mini(
+            valueLabels[key]!, 
+            d[key] ?? 0, 
+            valueIcons[key] ?? Icons.help_outline,
+            subValue: d['${key}_sub'],
+          ));
         }
-        minis.add(_mini("Total", d['total'] ?? 0, valueIcons['total'] ?? Icons.people));
+        minis.add(_mini(
+          valueLabels['total'] ?? "Total", 
+          d['total'] ?? 0, 
+          valueIcons['total'] ?? Icons.people,
+          subValue: showRevenue ? revenue : null,
+        ));
 
         return _shell(
           fill: fill, t: t,
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             _header(),
             const SizedBox(height: 16),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: minis),
-            const SizedBox(height: 12),
-            Opacity(
-              opacity: showRevenue ? 1.0 : 0.0,
-              child: Row(children: [
-                const Icon(Icons.payments_rounded, size: 15, color: Colors.white70),
-                const SizedBox(width: 4),
-                Text(
-                  "PKR ${NumberFormat('#,##0').format(revenue)}",
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white),
-                ),
-              ]),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: minis,
             ),
+            if (showRevenue && revenue > 0) ...[
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.15),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    const Icon(Icons.payments_rounded, size: 13, color: Colors.white60),
+                    const SizedBox(width: 6),
+                    const Text("Today's Revenue",
+                        style: TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w600)),
+                  ]),
+                  Text(
+                    "PKR ${NumberFormat('#,##0').format(revenue)}",
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                  ),
+                ],
+              ),
+            ],
           ]),
         );
       },
@@ -180,7 +187,7 @@ class PatientSummaryCard extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
-          BoxShadow(color: fill.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 6)),
+          BoxShadow(color: fill.withValues(alpha: 0.35), blurRadius: 14, offset: const Offset(0, 6)),
         ],
       ),
       child: child,
@@ -195,13 +202,14 @@ class PatientSummaryCard extends StatelessWidget {
             color: Colors.white, letterSpacing: 0.3))),
   ]);
 
-  Widget _mini(String label, int value, IconData icon) => Expanded(
+  Widget _mini(String label, int value, IconData icon, {int? subValue}) => Expanded(
     child: Column(children: [
       Icon(icon, size: 19, color: Colors.white60),
       const SizedBox(height: 4),
       Text(label, style: const TextStyle(fontSize: 10, color: Colors.white60)),
       Text("$value", style: const TextStyle(
           fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+
     ]),
   );
 }
@@ -229,19 +237,22 @@ class Branches extends StatefulWidget {
   final String? branchId;
   final bool showRegisterButton;
   final bool isManager;
+  final String? initialBranchId;
 
   const Branches({
     super.key,
     this.branchId,
     this.showRegisterButton = true,
     this.isManager = false,
+    this.initialBranchId,
   });
 
   @override
   State<Branches> createState() => _BranchesState();
 }
 
-class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin {
+class _BranchesState extends State<Branches> with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  late TabController _mobileTabController;
   String? selectedTypeFilter;
   bool filterMultiDay   = false;
   bool filterMultiVisit = false;
@@ -250,18 +261,20 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
 
   final Set<String> _revertedPatientIds = {};
 
-  String _searchQuery  = '';
-  bool   _showSearch   = false;
-  final TextEditingController _searchController = TextEditingController();
-
   @override
-  bool get wantKeepAlive => true;
+  void initState() {
+    super.initState();
+    _mobileTabController = TabController(length: 3, vsync: this);
+  }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _mobileTabController.dispose();
     super.dispose();
   }
+
+  @override
+  bool get wantKeepAlive => true;
 
   DateTime get effectiveStart {
     if (selectedStartDate != null && selectedEndDate != null) return selectedStartDate!;
@@ -281,19 +294,31 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
   /// Tokens summary — revenue = base price × daysOfMedicine per token.
   /// Zakat: PKR 20/day, Non-zakat: PKR 100/day, GMWF: PKR 0.
   Stream<Map<String, int>> _tokensStream(String branchId) {
-    return streamBranchStats(branchId, filter: DashboardFilter(timeRange: _resolveSelectedRange())).map((s) => {
+    return streamBranchStats(branchId, filter: _resolveFilter()).map((s) => {
       'v1': s.zakat,
+      'v1_sub': s.zakatRevenue,
       'v2': s.nonZakat,
+      'v2_sub': s.nonZakatRevenue,
       'v3': s.gmwf,
+      'v3_sub': s.gmwfRevenue,
       'total': s.tokens,
       'revenue': s.dispensaryRevenue,
     });
   }
 
-  TimeRange _resolveSelectedRange() {
-     if (selectedStartDate == null) return TimeRange.today;
-     return TimeRange.custom;
+  DashboardFilter _resolveFilter() {
+    if (selectedStartDate == null) {
+      return const DashboardFilter(timeRange: TimeRange.today);
+    }
+    return DashboardFilter(
+      timeRange: TimeRange.custom,
+      customRange: DateTimeRange(
+        start: selectedStartDate!,
+        end: selectedEndDate ?? selectedStartDate!,
+      ),
+    );
   }
+
 
   Stream<Map<String, int>> _prescriptionsStream(String branchId) {
     try {
@@ -750,9 +775,6 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         if (type == 'zakat')     tokenAmount = 20  * medicDays;
         if (type == 'non-zakat') tokenAmount = 100 * medicDays;
 
-        // Preserve token-creation time before 'createdAt' gets overwritten by patient join date.
-        final tokenCreatedAt = data['createdAt'];
-
         enriched.add({
           ...data,
           'name':           name,
@@ -764,8 +786,6 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           'isChild':        isChild,
           if (guardianName != null) 'guardianName': guardianName,
           'patientId':      pid,
-          'createdAt':      p?['createdAt'],    // patient registration date
-          'tokenCreatedAt': tokenCreatedAt,      // token-creation timestamp
           'possibleIds':    possibleIds.toList(),
           'doctorName':     _firstNonEmpty([
             data['doctorName'], data['prescribedBy'], data['updatedBy'],
@@ -876,7 +896,6 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
               latestDispensary['guardianCnic'], patientData['guardianCnic']?.toString(),
             ]),
             'frequentFlag': patientData['frequentFlag'] ?? true,
-            'createdAt': patientData['createdAt'],
           },
           streakDays: streak,
         ));
@@ -949,7 +968,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           decoration: BoxDecoration(
             color: t.bgCardAlt,
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: isToday ? t.bgRule : t.accent.withOpacity(0.5)),
+            border: Border.all(color: isToday ? t.bgRule : t.accent.withValues(alpha: 0.5)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(Icons.date_range_rounded, size: 16, color: isToday ? t.textTertiary : t.accent),
@@ -1002,7 +1021,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         else
           Text("(Today)",
               style: TextStyle(
-                  color: t.accent.withOpacity(0.7),
+                  color: t.accent.withValues(alpha: 0.7),
                   fontStyle: FontStyle.italic,
                   fontSize: 12)),
       ],
@@ -1147,105 +1166,35 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
   // ── Filters ───────────────────────────────────────────────────────────────
 
   Widget _typeFilter(RoleThemeData t) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(children: [
-                  _filterChip(t, "All", null),
-                  const SizedBox(width: 6),
-                  _filterChip(t, "Zakat", "zakat"),
-                  const SizedBox(width: 6),
-                  _filterChip(t, "Non-Zakat", "non-zakat"),
-                  const SizedBox(width: 6),
-                  _filterChip(t, "GMWF", "gmwf"),
-                  const SizedBox(width: 6),
-                  _toggleChip(
-                    t,
-                    label: "Multi-day",
-                    icon: Icons.calendar_month_rounded,
-                    color: Colors.deepOrange,
-                    active: filterMultiDay,
-                    onTap: () => setState(() => filterMultiDay = !filterMultiDay),
-                  ),
-                  const SizedBox(width: 6),
-                  _toggleChip(
-                    t,
-                    label: "2+ Visits",
-                    icon: Icons.repeat_rounded,
-                    color: Colors.blue,
-                    active: filterMultiVisit,
-                    onTap: () => setState(() => filterMultiVisit = !filterMultiVisit),
-                  ),
-                ]),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // ── Search toggle ──────────────────────────────────────────────
-            GestureDetector(
-              onTap: () => setState(() {
-                _showSearch = !_showSearch;
-                if (!_showSearch) {
-                  _searchController.clear();
-                  _searchQuery = '';
-                }
-              }),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _showSearch ? t.accent.withOpacity(0.12) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: _showSearch ? t.accent.withOpacity(0.5) : t.bgRule),
-                ),
-                child: Icon(Icons.search_rounded, size: 18,
-                    color: _showSearch ? t.accent : t.textSecondary),
-              ),
-            ),
-          ],
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: [
+        _filterChip(t, "All", null),
+        const SizedBox(width: 6),
+        _filterChip(t, "Zakat", "zakat"),
+        const SizedBox(width: 6),
+        _filterChip(t, "Non-Zakat", "non-zakat"),
+        const SizedBox(width: 6),
+        _filterChip(t, "GMWF", "gmwf"),
+        const SizedBox(width: 6),
+        _toggleChip(
+          t,
+          label: "Multi-day",
+          icon: Icons.calendar_month_rounded,
+          color: Colors.deepOrange,
+          active: filterMultiDay,
+          onTap: () => setState(() => filterMultiDay = !filterMultiDay),
         ),
-        if (_showSearch) ...[
-          const SizedBox(height: 10),
-          TextField(
-            controller: _searchController,
-            autofocus: true,
-            onChanged: (v) => setState(() => _searchQuery = v.toLowerCase().trim()),
-            style: TextStyle(fontSize: 13, color: t.textPrimary),
-            decoration: InputDecoration(
-              hintText: 'Search by name, CNIC, guardian CNIC, phone or serial…',
-              hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
-              prefixIcon: Icon(Icons.search_rounded, color: t.textTertiary, size: 18),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? GestureDetector(
-                      onTap: () => setState(() {
-                        _searchController.clear();
-                        _searchQuery = '';
-                      }),
-                      child: Icon(Icons.close_rounded, color: t.textTertiary, size: 16),
-                    )
-                  : null,
-              filled: true,
-              fillColor: t.bgCardAlt,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: t.bgRule)),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: t.bgRule)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(color: t.accent, width: 1.5)),
-            ),
-          ),
-        ],
-      ],
+        const SizedBox(width: 6),
+        _toggleChip(
+          t,
+          label: "2+ Visits",
+          icon: Icons.repeat_rounded,
+          color: Colors.blue,
+          active: filterMultiVisit,
+          onTap: () => setState(() => filterMultiVisit = !filterMultiVisit),
+        ),
+      ]),
     );
   }
 
@@ -1263,9 +1212,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? chipColor.withOpacity(0.15) : Colors.transparent,
+          color: selected ? chipColor.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? chipColor.withOpacity(0.5) : t.bgRule),
+          border: Border.all(color: selected ? chipColor.withValues(alpha: 0.5) : t.bgRule),
         ),
         child: type == 'gmwf'
             ? Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1296,9 +1245,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? color.withOpacity(0.15) : Colors.transparent,
+          color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: active ? color.withOpacity(0.5) : t.bgRule),
+          border: Border.all(color: active ? color.withValues(alpha: 0.5) : t.bgRule),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 13, color: active ? color : t.textSecondary),
@@ -1314,9 +1263,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
 
   // ── Info row ──────────────────────────────────────────────────────────────
 
-  /// [meta] is shown below [value] in a smaller, muted style (e.g. a timestamp).
-  Widget _infoRow(BuildContext context, IconData icon, String label, String value,
-      {String? copy, String? meta}) {
+  Widget _infoRow(BuildContext context, IconData icon, String label, String value, {String? copy}) {
     final t = RoleThemeScope.dataOf(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2.5),
@@ -1327,30 +1274,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           const SizedBox(width: 8),
           SizedBox(
             width: 100,
-            child: Text(label,
-                style: TextStyle(
-                    fontSize: 13,
-                    color: t.textSecondary,
-                    fontWeight: FontWeight.w500)),
+            child: Text(label, style: TextStyle(fontSize: 13, color: t.textSecondary, fontWeight: FontWeight.w500)),
           ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(value,
-                    style: TextStyle(
-                        fontSize: 14,
-                        color: t.textPrimary,
-                        fontWeight: FontWeight.w700)),
-                if (meta != null && meta.isNotEmpty)
-                  Text(meta,
-                      style: TextStyle(
-                          fontSize: 10,
-                          color: t.textTertiary,
-                          fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
+          Expanded(child: Text(value, style: TextStyle(fontSize: 14, color: t.textPrimary, fontWeight: FontWeight.w700))),
           if (copy != null && copy.isNotEmpty && copy != 'N/A')
             GestureDetector(
               onTap: () {
@@ -1363,8 +1289,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                   ),
                   backgroundColor: const Color(0xFF1C1C1E),
                   behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ));
               },
               child: Padding(
@@ -1390,9 +1315,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
       decoration: BoxDecoration(
         color: t.bgCard,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: streakColor.withOpacity(0.5), width: 1.5),
+        border: Border.all(color: streakColor.withValues(alpha: 0.5), width: 1.5),
         boxShadow: [
-          BoxShadow(color: streakColor.withOpacity(0.12), blurRadius: 8, offset: const Offset(0, 3)),
+          BoxShadow(color: streakColor.withValues(alpha: 0.12), blurRadius: 8, offset: const Offset(0, 3)),
         ],
       ),
       child: Column(
@@ -1401,7 +1326,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
-              color: streakColor.withOpacity(0.12),
+              color: streakColor.withValues(alpha: 0.12),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
             ),
             child: Row(children: [
@@ -1440,9 +1365,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                      color: streakColor.withOpacity(0.15),
+                      color: streakColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: streakColor.withOpacity(0.4)),
+                      border: Border.all(color: streakColor.withValues(alpha: 0.4)),
                     ),
                     child: Row(mainAxisSize: MainAxisSize.min, children: [
                       Icon(Icons.undo_rounded, size: 13, color: streakColor),
@@ -1462,39 +1387,16 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     color: streakColor, size: 22),
                 const SizedBox(width: 8),
                 Expanded(child: Text(p['name'] ?? 'Unknown',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: t.textPrimary))),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary))),
               ]),
-              Divider(height: 14, color: t.bgRule),
-              _infoRow(context, Icons.calendar_today_rounded, 'Last visit', p['dispenseDate'] ?? 'N/A'),
-              if (p['createdAt'] != null)
-                _infoRow(context, Icons.how_to_reg_rounded, 'Joined Since', _formatJoinedDate(p['createdAt'])),
-              if (p['serial'] != null)
-                _infoRow(context, Icons.tag_rounded, 'Serial', p['serial'] ?? 'N/A', copy: p['serial']?.toString()),
-              _infoRow(context, Icons.badge_rounded, 'CNIC', p['displayCnic'] ?? 'N/A',
-                  copy: p['displayCnic']),
-              _infoRow(context, Icons.phone_rounded, 'Phone', p['phone'] ?? 'N/A', copy: p['phone']),
-              _infoRow(context, Icons.cake_rounded, 'Age', '${p['age'] ?? 'N/A'} yrs'),
-              _infoRow(context, Icons.wc_rounded, 'Gender', p['gender'] ?? 'N/A'),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PatientDetailScreen(
-                    patientId: p['patientId']?.toString() ?? '',
-                    isOnline: true,
-                    localBox: Hive.box('local_patients'),
-                    branchId: branchId,
-                    doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
-                    isAdmin: true,
-                  ))),
-                  icon: const Icon(Icons.person_search_rounded, size: 15),
-                  label: const Text('View Full Profile', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: streakColor, foregroundColor: Colors.white,
-                    elevation: 0, padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Column(children: [
+                  _infoRow(context, Icons.phone_rounded, 'Phone', p['phone'] ?? 'N/A'),
+                  _infoRow(context, Icons.badge_rounded, isChild ? 'Guardian' : 'CNIC', p['displayCnic'] ?? 'N/A'),
+                  _infoRow(context, Icons.calendar_today_rounded, 'Last Visit', p['dispenseDate'] ?? 'N/A'),
+                ]),
               ),
             ]),
           ),
@@ -1527,6 +1429,77 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
       final presStream = _prescriptionsStream(branchId);
       final dispStream = _dispensaryCountStream(branchId);
 
+      if (isMobile) {
+        return Scaffold(
+          backgroundColor: t.bg,
+          appBar: AppBar(
+            backgroundColor: t.bgCard,
+            elevation: 0,
+            automaticallyImplyLeading: false,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(branchName, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w900, fontSize: 16)),
+                Text('Branch Performance', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+              ],
+            ),
+            actions: [
+              _dateRangeSelector(t, compact: true),
+              const SizedBox(width: 8),
+            ],
+            bottom: TabBar(
+              controller: _mobileTabController,
+              labelColor: t.accent,
+              unselectedLabelColor: t.textTertiary,
+              indicatorColor: t.accent,
+              indicatorWeight: 3,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+              tabs: const [
+                Tab(text: "Overview"),
+                Tab(text: "Patient Log"),
+                Tab(text: "Flags"),
+              ],
+            ),
+          ),
+          body: TabBarView(
+            controller: _mobileTabController,
+            children: [
+              // Tab 1: Overview
+              SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (!isSupervisor) ...[
+                      Row(children: [
+                        Expanded(child: _actionButton(t,
+                            icon: Icons.inventory_rounded, label: "Inventory", color: t.nonZakat,
+                            onPressed: () => Navigator.push(context,
+                                MaterialPageRoute(builder: (_) => InventoryPage(
+                                  branchId: branchId, isDispenser: false))))),
+                        const SizedBox(width: 10),
+                        Expanded(child: _actionButton(t,
+                            icon: Icons.account_balance_wallet_rounded, label: "Assets", color: t.gmwf,
+                            onPressed: () => Navigator.push(context,
+                                MaterialPageRoute(builder: (_) => AssetsPage(branchId: branchId, isAdmin: true))))),
+                      ]),
+                      const SizedBox(height: 16),
+                    ],
+                    _buildSummaryCardsMobile(tokStream, presStream, dispStream),
+                    const SizedBox(height: 24),
+                    _buildActiveFiltersMobile(t),
+                  ],
+                ),
+              ),
+              // Tab 2: Patient Log
+              _buildPatientLogTab(branchId, t),
+              // Tab 3: Flags
+              _buildFlagsTab(branchId, t),
+            ],
+          ),
+        );
+      }
+
       return Container(
         color: t.bg,
         child: SingleChildScrollView(
@@ -1536,58 +1509,32 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
               // ── Header ────────────────────────────────────────────────────
-              if (isMobile) ...[
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(branchName, style: TextStyle(
-                        fontSize: 20, fontWeight: FontWeight.w900, color: t.textPrimary)),
-                    Text('Branch Performance', style: TextStyle(color: t.textTertiary, fontSize: 12)),
-                  ])),
-                  _dateRangeSelector(t, compact: true),
-                ]),
-                if (!isSupervisor) ...[
+              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(branchName, style: TextStyle(
+                      fontSize: 28, fontWeight: FontWeight.w900, color: t.textPrimary)),
+                  const SizedBox(height: 4),
+                  Text('Branch Performance', style: TextStyle(color: t.textTertiary, fontSize: 13)),
+                ])),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  if (!isSupervisor)
+                    Row(children: [
+                      _actionButton(t, icon: Icons.inventory_rounded,
+                          label: "Inventory", color: t.nonZakat,
+                          onPressed: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => InventoryPage(
+                                branchId: branchId, isDispenser: false)))),
+                      const SizedBox(width: 10),
+                      _actionButton(t, icon: Icons.account_balance_wallet_rounded,
+                          label: "Assets", color: t.gmwf,
+                          onPressed: () => Navigator.push(context,
+                              MaterialPageRoute(builder: (_) => AssetsPage(branchId: branchId, isAdmin: true)))),
+                    ]),
                   const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(child: _actionButton(t,
-                        icon: Icons.inventory_rounded, label: "Inventory", color: t.nonZakat,
-                        onPressed: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => InventoryPage(
-                              branchId: branchId, isDispenser: false))))),
-                    const SizedBox(width: 10),
-                    Expanded(child: _actionButton(t,
-                        icon: Icons.account_balance_wallet_rounded, label: "Assets", color: t.gmwf,
-                        onPressed: () => Navigator.push(context,
-                            MaterialPageRoute(builder: (_) => AssetsPage(branchId: branchId, isAdmin: true))))),
-                  ]),
-                ],
-              ] else ...[
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(branchName, style: TextStyle(
-                        fontSize: 28, fontWeight: FontWeight.w900, color: t.textPrimary)),
-                    const SizedBox(height: 4),
-                    Text('Branch Performance', style: TextStyle(color: t.textTertiary, fontSize: 13)),
-                  ])),
-                  Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                    if (!isSupervisor)
-                      Row(children: [
-                        _actionButton(t, icon: Icons.inventory_rounded,
-                            label: "Inventory", color: t.nonZakat,
-                            onPressed: () => Navigator.push(context,
-                                MaterialPageRoute(builder: (_) => InventoryPage(
-                                  branchId: branchId, isDispenser: false)))),
-                        const SizedBox(width: 10),
-                        _actionButton(t, icon: Icons.account_balance_wallet_rounded,
-                            label: "Assets", color: t.gmwf,
-                            onPressed: () => Navigator.push(context,
-                                MaterialPageRoute(builder: (_) => AssetsPage(branchId: branchId, isAdmin: true)))),
-                      ]),
-                    const SizedBox(height: 12),
-                    _dateRangeSelector(t),
-                  ]),
+                  _dateRangeSelector(t),
                 ]),
-              ],
+              ]),
 
               const SizedBox(height: 22),
 
@@ -1662,7 +1609,8 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                 ),
                 const SizedBox(height: 12),
                 PatientSummaryCard(
-                  title: "Dispensary", dataStream: dispStream,
+                  title: "Dispensary",
+                  dataStream: dispStream,
                   variant: SummaryCardVariant.dispensary,
                   titleIcon: Icons.local_pharmacy_rounded,
                   valueIcons: {
@@ -1692,9 +1640,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFFF6B35).withOpacity(0.10),
+                          color: const Color(0xFFFF6B35).withValues(alpha: 0.10),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFF6B35).withOpacity(0.35)),
+                          border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.35)),
                         ),
                         child: Row(children: [
                           const Text('🔥', style: TextStyle(fontSize: 18)),
@@ -1754,7 +1702,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
 
                   final all = snapshot.data!['dispensed'] as List<Map<String, dynamic>>;
 
-                  // Apply type + multi-day + search filters synchronously
+                  // Apply type + multi-day filters synchronously
                   final filtered = all.where((p) {
                     if (selectedTypeFilter != null &&
                         p['type']?.toString().toLowerCase() != selectedTypeFilter) {
@@ -1763,21 +1711,6 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                     if (filterMultiDay) {
                       final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
                       if (days <= 1) return false;
-                    }
-                    if (_searchQuery.isNotEmpty) {
-                      final q = _searchQuery.replaceAll('-', '');
-                      final name        = (p['name'] ?? '').toString().toLowerCase();
-                      final cnic        = (p['displayCnic'] ?? '').toString().toLowerCase().replaceAll('-', '');
-                      final guardCnic   = (p['guardianCnic'] ?? '').toString().toLowerCase().replaceAll('-', '');
-                      final phone       = (p['phone'] ?? '').toString().toLowerCase();
-                      final serial      = (p['serial'] ?? '').toString().toLowerCase();
-                      if (!name.contains(_searchQuery) &&
-                          !cnic.contains(q) &&
-                          !guardCnic.contains(q) &&
-                          !phone.contains(_searchQuery) &&
-                          !serial.contains(_searchQuery)) {
-                        return false;
-                      }
                     }
                     return true;
                   }).toList();
@@ -1827,7 +1760,7 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
                                   color: isFrequent
-                                      ? const Color(0xFFFF6B35).withOpacity(0.5)
+                                      ? const Color(0xFFFF6B35).withValues(alpha: 0.5)
                                       : t.bgRule,
                                   width: isFrequent ? 1.5 : 1,
                                 ),
@@ -1856,9 +1789,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: Colors.deepOrange.withOpacity(0.12),
+                                            color: Colors.deepOrange.withValues(alpha: 0.12),
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.deepOrange.withOpacity(0.4)),
+                                            border: Border.all(color: Colors.deepOrange.withValues(alpha: 0.4)),
                                           ),
                                           child: Text('$medicDays d',
                                               style: const TextStyle(
@@ -1871,9 +1804,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                                       decoration: BoxDecoration(
-                                          color: typeColor.withOpacity(0.1),
+                                          color: typeColor.withValues(alpha: 0.1),
                                           borderRadius: BorderRadius.circular(20),
-                                          border: Border.all(color: typeColor.withOpacity(0.3))),
+                                          border: Border.all(color: typeColor.withValues(alpha: 0.3))),
                                       child: Text((p['type'] ?? '??').toString().toUpperCase().substring(0, 1),
                                           style: TextStyle(color: typeColor,
                                               fontWeight: FontWeight.w800, fontSize: 9)),
@@ -1890,9 +1823,6 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                     children: [
                                       _infoRow(context, Icons.calendar_today_rounded, 'Date',
                                           p['dispenseDate'] ?? 'N/A'),
-                                      if (p['createdAt'] != null)
-                                        _infoRow(context, Icons.how_to_reg_rounded, 'Joined Since',
-                                            _formatJoinedDate(p['createdAt'])),
                                       _infoRow(context, Icons.tag_rounded,
                                           'Serial', p['serial'] ?? 'N/A',
                                           copy: p['serial']?.toString()),
@@ -1912,15 +1842,12 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
                                       if (p['bloodGroup'] != null && p['bloodGroup'] != 'N/A')
                                         _infoRow(context, Icons.bloodtype_rounded,
                                             'Blood', p['bloodGroup']),
-                                      _infoRow(context, Icons.confirmation_number_rounded,
-                                          'Token by', p['tokenBy'] ?? 'Unknown',
-                                          meta: _formatTime(p['tokenCreatedAt'])),
                                       _infoRow(context, Icons.medical_services_rounded,
-                                          'Prescribed', p['doctorName'] ?? 'Unknown',
-                                          meta: _formatTime(p['completedAt'])),
+                                          'Doctor', p['doctorName'] ?? 'Unknown'),
+                                      _infoRow(context, Icons.confirmation_number_rounded,
+                                          'Token by', p['tokenBy'] ?? 'Unknown'),
                                       _infoRow(context, Icons.local_pharmacy_rounded,
-                                          'Dispensed', p['dispenserName'] ?? 'Unknown',
-                                          meta: _formatTime(p['dispensedAt'])),
+                                          'Disp', p['dispenserName'] ?? 'Unknown'),
                                       if (medicDays > 1)
                                         _infoRow(context, Icons.calendar_month_rounded,
                                             'Medicine', '$medicDays days'),
@@ -1974,11 +1901,11 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
       icon: Icon(icon, color: color, size: 15),
       label: Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
       style: ElevatedButton.styleFrom(
-        backgroundColor: color.withOpacity(0.1), elevation: 0,
+        backgroundColor: color.withValues(alpha: 0.1), elevation: 0,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
-            side: BorderSide(color: color.withOpacity(0.3))),
+            side: BorderSide(color: color.withValues(alpha: 0.3))),
       ),
       onPressed: onPressed,
     );
@@ -2013,7 +1940,9 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
     return Scaffold(
       backgroundColor: t.bg,
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('branches').snapshots(),
+        stream: widget.branchId != null
+            ? FirebaseFirestore.instance.collection('branches').where(FieldPath.documentId, isEqualTo: widget.branchId).snapshots()
+            : FirebaseFirestore.instance.collection('branches').snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Center(child: CircularProgressIndicator(color: t.accent));
@@ -2041,9 +1970,10 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           return DefaultTabController(
             length: branches.length,
             child: Column(children: [
-              Container(
-                color: t.bgCard,
-                child: Row(children: [
+              if (branches.length > 1)
+                Container(
+                  color: t.bgCard,
+                  child: Row(children: [
                   Expanded(child: TabBar(
                     isScrollable: true,
                     labelColor: t.accent,
@@ -2102,6 +2032,166 @@ class _BranchesState extends State<Branches> with AutomaticKeepAliveClientMixin 
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
       onPressed: () => Navigator.push(
           context, MaterialPageRoute(builder: (_) => const BranchesRegister())),
+    );
+  }
+
+  Widget _buildSummaryCardsMobile(Stream<Map<String, int>> tok, Stream<Map<String, int>> pres, Stream<Map<String, int>> disp) {
+    return Column(children: [
+      PatientSummaryCard(
+        title: "Tokens", dataStream: tok,
+        variant: SummaryCardVariant.tokens,
+        titleIcon: Icons.people_alt_rounded, showRevenue: true,
+        valueIcons: {
+          'v1': Icons.favorite_rounded, 'v2': Icons.group_rounded,
+          'v3': Icons.handshake_rounded, 'total': Icons.people_alt_rounded,
+        },
+        valueLabels: {'v1': 'Zakat', 'v2': 'Non-Zakat', 'v3': 'GMWF'},
+      ),
+      const SizedBox(height: 12),
+      PatientSummaryCard(
+        title: "Prescriptions", dataStream: pres,
+        variant: SummaryCardVariant.prescriptions,
+        titleIcon: Icons.medical_information_rounded,
+        valueIcons: {
+          'v1': Icons.timer_rounded, 'v2': Icons.check_circle_rounded,
+          'total': Icons.medical_information_rounded,
+        },
+        valueLabels: {'v1': 'Waiting', 'v2': 'Prescribed'},
+      ),
+      const SizedBox(height: 12),
+      PatientSummaryCard(
+        title: "Dispensary", dataStream: disp,
+        variant: SummaryCardVariant.dispensary,
+        titleIcon: Icons.local_pharmacy_rounded,
+        valueIcons: {
+          'v1': Icons.access_time_rounded, 'v2': Icons.done_all_rounded,
+          'total': Icons.local_pharmacy_rounded,
+        },
+        valueLabels: {'v1': 'Pending', 'v2': 'Dispensed'},
+      ),
+    ]);
+  }
+
+  Widget _buildActiveFiltersMobile(RoleThemeData t) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Icon(Icons.filter_list_rounded, color: t.accent, size: 18),
+            const SizedBox(width: 8),
+            Text("Active Filters", style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
+          ]),
+          const SizedBox(height: 12),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            _filterChipMobile("Start: ${DateFormat('dd MMM').format(effectiveStart)}", t),
+            _filterChipMobile("End: ${DateFormat('dd MMM').format(effectiveEnd)}", t),
+            if (selectedTypeFilter != null) _filterChipMobile("Type: $selectedTypeFilter", t),
+          ]),
+        ],
+      ),
+    );
+  }
+
+  Widget _filterChipMobile(String label, RoleThemeData t) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: t.accent.withValues(alpha: 0.2))),
+      child: Text(label, style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _buildPatientLogTab(String branchId, RoleThemeData t) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Dispensed Patients", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: t.textPrimary)),
+          const SizedBox(height: 12),
+          _typeFilter(t),
+          const SizedBox(height: 16),
+          FutureBuilder<Map<String, dynamic>>(
+            key: ValueKey('dispensed-$branchId-$selectedStartDate-$selectedEndDate-$selectedTypeFilter-$filterMultiDay-$filterMultiVisit'),
+            future: _dispensaryFuture(branchId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) return Center(child: Padding(padding: const EdgeInsets.all(40), child: CircularProgressIndicator(color: t.accent)));
+              if (!snapshot.hasData || (snapshot.data!['dispensed'] as List).isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(40), child: Text("No records found", style: TextStyle(color: t.textTertiary))));
+
+              final all = snapshot.data!['dispensed'] as List<Map<String, dynamic>>;
+              final filtered = all.where((p) {
+                if (selectedTypeFilter != null && p['type']?.toString().toLowerCase() != selectedTypeFilter) return false;
+                if (filterMultiDay) {
+                  final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
+                  if (days <= 1) return false;
+                }
+                return true;
+              }).toList();
+
+              if (filtered.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(40), child: Text("No matches", style: TextStyle(color: t.textTertiary))));
+
+              return Column(
+                children: filtered.map((p) {
+                  final pid = p['patientId']?.toString() ?? '';
+                  final isFrequent = !_revertedPatientIds.contains(pid) && (p['frequentFlag'] == true);
+                  final medicDays = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
+                  final type = p['type']?.toString() ?? 'unknown';
+                  Color typeColor = type == 'zakat' ? t.zakat : (type == 'non-zakat' ? t.nonZakat : (type == 'gmwf' ? t.gmwf : t.textTertiary));
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(color: t.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: isFrequent ? const Color(0xFFFF6B35).withValues(alpha: 0.5) : t.bgRule, width: isFrequent ? 1.5 : 1)),
+                    child: Column(children: [
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Row(children: [
+                          Icon(p['isChild'] == true ? Icons.child_care_rounded : Icons.person_rounded, color: typeColor, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(p['name'] ?? 'Unknown', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary))),
+                          if (isFrequent) const Text('🔥', style: TextStyle(fontSize: 14)),
+                          if (medicDays > 1) Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2), decoration: BoxDecoration(color: Colors.deepOrange.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)), child: Text('$medicDays d', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.deepOrange))),
+                        ]),
+                      ),
+                      const Divider(height: 1),
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(children: [
+                          _infoRow(context, Icons.calendar_today_rounded, 'Date', p['dispenseDate'] ?? 'N/A'),
+                          _infoRow(context, Icons.tag_rounded, 'Serial', p['serial'] ?? 'N/A'),
+                          _infoRow(context, Icons.badge_rounded, p['isChild'] == true ? "Guardian" : "CNIC", p['displayCnic'] ?? 'N/A'),
+                        ]),
+                      ),
+                    ]),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFlagsTab(String branchId, RoleThemeData t) {
+    return FutureBuilder<List<_ConsecutivePatient>>(
+      future: _consecutivePatientsFuture(branchId),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+        final patients = snap.data ?? [];
+        if (patients.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_circle_outline_rounded, size: 48, color: Colors.green.withValues(alpha: 0.3)), const SizedBox(height: 16), Text("No flagged patients", style: TextStyle(color: t.textTertiary))]));
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: patients.length,
+          itemBuilder: (context, i) => _frequentPatientCard(context, patients[i], branchId, widget.isManager),
+        );
+      },
     );
   }
 }

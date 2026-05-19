@@ -408,7 +408,7 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: _teal.withOpacity(0.12),
+                    color: _teal.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Center(
@@ -436,7 +436,7 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: _teal.withOpacity(0.15),
+                    color: _teal.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -481,12 +481,12 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
       padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
       decoration: BoxDecoration(
         color: lowStock
-            ? _lowStockRed.withOpacity(0.06)
-            : Colors.grey.withOpacity(0.04),
+            ? _lowStockRed.withValues(alpha: 0.06)
+            : Colors.grey.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(10),
         border: lowStock
-            ? Border.all(color: _lowStockRed.withOpacity(0.35), width: 1)
-            : Border.all(color: Colors.grey.withOpacity(0.12), width: 1),
+            ? Border.all(color: _lowStockRed.withValues(alpha: 0.35), width: 1)
+            : Border.all(color: Colors.grey.withValues(alpha: 0.12), width: 1),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -497,8 +497,8 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
             height: 34,
             decoration: BoxDecoration(
               color: lowStock
-                  ? _lowStockRed.withOpacity(0.12)
-                  : _teal.withOpacity(0.1),
+                  ? _lowStockRed.withValues(alpha: 0.12)
+                  : _teal.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Center(
@@ -522,7 +522,7 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                     formula,
                     style: TextStyle(
                       fontSize: 10,
-                      color: _teal.withOpacity(0.8),
+                      color: _teal.withValues(alpha: 0.8),
                       fontStyle: FontStyle.italic,
                       fontWeight: FontWeight.w500,
                       letterSpacing: 0.2,
@@ -562,13 +562,13 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
                   const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
                 color: lowStock
-                    ? _lowStockRed.withOpacity(0.12)
-                    : _teal.withOpacity(0.12),
+                    ? _lowStockRed.withValues(alpha: 0.12)
+                    : _teal.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(
                   color: lowStock
-                      ? _lowStockRed.withOpacity(0.3)
-                      : _teal.withOpacity(0.3),
+                      ? _lowStockRed.withValues(alpha: 0.3)
+                      : _teal.withValues(alpha: 0.3),
                   width: 0.8,
                 ),
               ),

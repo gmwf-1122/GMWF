@@ -27,7 +27,7 @@ class ConnectionStatusBadge extends StatelessWidget {
           borderRadius: BorderRadius.circular(30),
           boxShadow: [
             BoxShadow(
-              color: _bgColor.withOpacity(0.4),
+              color: _bgColor.withValues(alpha: 0.4),
               blurRadius: 8,
               offset: const Offset(0, 2),
             )
@@ -85,7 +85,7 @@ class ConnectionStatusBadge extends StatelessWidget {
         shape: BoxShape.circle,
         color: Colors.white,
         boxShadow: status.isConnected
-            ? [BoxShadow(color: Colors.white.withOpacity(0.8), blurRadius: 4)]
+            ? [BoxShadow(color: Colors.white.withValues(alpha: 0.8), blurRadius: 4)]
             : null,
       ),
     );

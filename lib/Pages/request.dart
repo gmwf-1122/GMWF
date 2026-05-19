@@ -566,7 +566,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   alignment: Alignment.centerRight,
                   child: Chip(
                     label: const Text('PENDING APPROVAL'),
-                    backgroundColor: Colors.orange.withOpacity(0.1),
+                    backgroundColor: Colors.orange.withValues(alpha: 0.1),
                     labelStyle: TextStyle(
                         color: Colors.orange.shade800,
                         fontWeight: FontWeight.bold,
@@ -579,8 +579,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 child: Chip(
                   label: Text(widget.status.toUpperCase()),
                   backgroundColor: widget.status == 'approved' 
-                      ? Colors.teal.withOpacity(0.15) 
-                      : Colors.red.withOpacity(0.1),
+                      ? Colors.teal.withValues(alpha: 0.15) 
+                      : Colors.red.withValues(alpha: 0.1),
                   labelStyle: TextStyle(
                       color: widget.status == 'approved' 
                           ? Colors.teal.shade800 

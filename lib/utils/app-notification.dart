@@ -22,12 +22,12 @@ class AppNotification {
       flushbarPosition: FlushbarPosition.TOP,
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       borderRadius: BorderRadius.circular(50),
-      backgroundColor: color.withOpacity(0.85),
+      backgroundColor: color.withValues(alpha: 0.85),
       icon: Icon(icon, color: Colors.white, size: 26),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       boxShadows: [
         BoxShadow(
-          color: Colors.black.withOpacity(0.25),
+          color: Colors.black.withValues(alpha: 0.25),
           blurRadius: 8,
           offset: const Offset(0, 4),
         ),

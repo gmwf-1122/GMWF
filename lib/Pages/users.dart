@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
 import 'package:flutter/services.dart';
-import 'patient_detail_screen.dart';
+import 'dispensary/patient_detail_screen.dart';
 import 'user_detail_screen.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
@@ -13,7 +13,8 @@ import '../theme/app_theme.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
-  const UsersScreen({super.key, this.isPatientMode = false});
+  final String? branchId;
+  const UsersScreen({super.key, this.isPatientMode = false, this.branchId});
 
   @override
   State<UsersScreen> createState() => _UsersScreenState();
@@ -45,11 +46,16 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _loadBranches() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
-      final branches = snap.docs.map((d) {
+      var branches = snap.docs.map((d) {
         final data = d.data();
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-      }).toList()
-        ..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      }).toList();
+
+      if (widget.branchId != null) {
+        branches = branches.where((b) => b['id'] == widget.branchId).toList();
+      }
+
+      branches.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
       setState(() {
         _branches = branches;
         _tabController = TabController(length: branches.length, vsync: this);
@@ -84,41 +90,66 @@ class _UsersScreenState extends State<UsersScreen>
       ]));
     }
 
-    return Column(children: [
-      // ── Tab bar ──
-      Container(
-        color: t.bgCard,
-        child: TabBar(
-          controller: _tabController!,
-          isScrollable: true,
-          labelColor: t.accent,
-          unselectedLabelColor: t.textTertiary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-          indicator: UnderlineTabIndicator(
-            borderSide: BorderSide(color: t.accent, width: 3),
-            insets: const EdgeInsets.symmetric(horizontal: 12),
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(
+        backgroundColor: t.bgCard,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, color: t.textPrimary, size: 22),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          widget.isPatientMode ? 'Patients' : 'Staff',
+          style: TextStyle(
+            color: t.textPrimary,
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.5,
           ),
-          tabAlignment: TabAlignment.start,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          tabs: _branches.map((b) => Tab(
-            child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(b['name'] as String)),
-          )).toList(),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: t.bgRule),
         ),
       ),
-
-      // ── Filter bar ──
-      _buildFilterBar(t),
-
-      // ── Content ──
-      Expanded(
-        child: TabBarView(
-          controller: _tabController!,
-          children: _branches.map((b) => _buildList(b['id'] as String, t)).toList(),
+      body: Column(children: [
+        // ── Tab bar ──
+        Container(
+          color: t.bgCard,
+          child: TabBar(
+            controller: _tabController!,
+            isScrollable: true,
+            labelColor: t.accent,
+            unselectedLabelColor: t.textTertiary,
+            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+            indicator: UnderlineTabIndicator(
+              borderSide: BorderSide(color: t.accent, width: 3),
+              insets: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            tabAlignment: TabAlignment.start,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            tabs: _branches.map((b) => Tab(
+              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(b['name'] as String)),
+            )).toList(),
+          ),
         ),
-      ),
-    ]);
+
+        // ── Filter bar ──
+        _buildFilterBar(t),
+
+        // ── Content ──
+        Expanded(
+          child: TabBarView(
+            controller: _tabController!,
+            children: _branches.map((b) => _buildList(b['id'] as String, t)).toList(),
+          ),
+        ),
+      ]),
+    );
   }
 
   Widget _buildFilterBar(RoleThemeData t) {
@@ -140,11 +171,11 @@ class _UsersScreenState extends State<UsersScreen>
                 onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
                 style: TextStyle(fontSize: 14, color: t.textPrimary),
                 decoration: InputDecoration(
-                  hintText: widget.isPatientMode ? 'Search name, CNIC, phone…' : 'Search by username…',
+                  hintText: widget.isPatientMode ? 'Search records…' : 'Search by username…',
                   hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
-                  prefixIcon: Icon(Icons.search_rounded, color: t.accent, size: 20),
+                  prefixIcon: Icon(Icons.search_rounded, color: t.accent, size: 18),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 11),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
             ),
@@ -326,12 +357,12 @@ class _UsersScreenState extends State<UsersScreen>
         return Column(children: [
           // Count bar
           Container(
-            color: t.accentMuted.withOpacity(0.3),
+            color: t.accentMuted.withValues(alpha: 0.3),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(color: t.accent.withOpacity(0.12), borderRadius: BorderRadius.circular(20)),
+                decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
                   Icon(widget.isPatientMode ? Icons.people_rounded : Icons.badge_rounded, color: t.accent, size: 14),
                   const SizedBox(width: 5),
@@ -371,52 +402,57 @@ class _UsersScreenState extends State<UsersScreen>
         name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: t.accent.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           onTap: () => _openDetail(itemId, branchId),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            padding: const EdgeInsets.all(12),
             child: Row(children: [
               // Avatar
               Container(
-                width: 46, height: 46,
+                width: 44, height: 44,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: t.accentMuted,
                   image: profilePicUrl != null
                       ? DecorationImage(image: NetworkImage(profilePicUrl), fit: BoxFit.cover)
                       : null,
+                  boxShadow: [
+                    BoxShadow(color: t.accent.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2)),
+                  ],
                 ),
                 alignment: Alignment.center,
                 child: profilePicUrl == null
-                    ? Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w800, fontSize: 15))
+                    ? Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 14))
                     : null,
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               // Info
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary),
+                Text(name, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w800, color: t.textPrimary),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 2),
-                Text(subtitle, style: TextStyle(fontSize: 12, color: t.textSecondary),
+                const SizedBox(height: 3),
+                Text(subtitle, style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
                     maxLines: 1, overflow: TextOverflow.ellipsis),
               ])),
-              // Arrow
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: t.accent.withOpacity(0.08), borderRadius: BorderRadius.circular(10)),
-                child: Icon(Icons.arrow_forward_ios_rounded, color: t.accent, size: 12),
-              ),
+              // Status Indicator or Arrow
+              Icon(Icons.chevron_right_rounded, color: t.accent.withValues(alpha: 0.4), size: 18),
             ]),
           ),
         ),
@@ -446,8 +482,8 @@ class _UsersScreenState extends State<UsersScreen>
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-                color: (isError ? Colors.red : t.accent).withOpacity(0.08), shape: BoxShape.circle),
-            child: Icon(icon, size: 40, color: isError ? Colors.red.shade400 : t.accent.withOpacity(0.5)),
+                color: (isError ? Colors.red : t.accent).withValues(alpha: 0.08), shape: BoxShape.circle),
+            child: Icon(icon, size: 40, color: isError ? Colors.red.shade400 : t.accent.withValues(alpha: 0.5)),
           ),
           const SizedBox(height: 16),
           Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.textPrimary)),
@@ -502,7 +538,7 @@ class _UsersScreenState extends State<UsersScreen>
       decoration: BoxDecoration(
         color: t.bgCard, borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -529,8 +565,8 @@ class _UsersScreenState extends State<UsersScreen>
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-          color: color.withOpacity(0.06), borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.15))),
+          color: color.withValues(alpha: 0.06), borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.15))),
       child: Row(children: [
         Icon(icon, color: color, size: 16),
         const SizedBox(width: 8),
@@ -543,7 +579,7 @@ class _UsersScreenState extends State<UsersScreen>
           onTap: () => _openDetail(data['id'], branchId),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
             child: Text('View', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
           ),
         ),
@@ -557,7 +593,7 @@ class _UsersScreenState extends State<UsersScreen>
       decoration: BoxDecoration(
         color: t.bgCard, borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),

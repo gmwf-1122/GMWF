@@ -4,13 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
-import '../../services/donations_local_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import 'donations_shared.dart';
 import 'donations_dashboard.dart';
-import 'credit_ledger.dart';
+import 'donors_registry.dart';
+import 'widgets/add_donation_wizard.dart';
+import '../../models/donation_models.dart';
+// Missing file
+
+const String kStatusPending = 'pending';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DESIGN TOKENS
@@ -31,53 +35,10 @@ class DonDS {
   static const onDarkMuted  = Color(0xFF4D7070);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// USER ROLE
-// ─────────────────────────────────────────────────────────────────────────────
-
-enum UserRole { chairman, manager, officeBoy, staff }
-
-extension UserRoleX on UserRole {
-  String get displayLabel {
-    switch (this) {
-      case UserRole.chairman:  return 'Chairman';
-      case UserRole.manager:   return 'Manager';
-      case UserRole.officeBoy: return 'Office Boy';
-      case UserRole.staff:     return 'Staff';
-    }
-  }
-  bool get isOfficeBoy       => this == UserRole.officeBoy;
-  bool get isManager         => this == UserRole.manager;
-  bool get isChairman        => this == UserRole.chairman;
-  bool get canApprove        => this == UserRole.manager || this == UserRole.chairman;
-  bool get canSeeAllBranches => this == UserRole.manager || this == UserRole.chairman;
-  bool get hasCreditsTab     => this != UserRole.staff;
-
-  Color get roleColor {
-    switch (this) {
-      case UserRole.chairman:  return const Color(0xFFF59E0B);
-      case UserRole.manager:   return const Color(0xFF10B981);
-      case UserRole.officeBoy: return const Color(0xFF60A5FA);
-      case UserRole.staff:     return const Color(0xFF94A3B8);
-    }
-  }
-
-  static UserRole fromString(String raw) {
-    final n = raw.toLowerCase().replaceAll(RegExp(r'[\s_\-\.]+'), '');
-    if (n == 'chairman')                                             return UserRole.chairman;
-    if (n == 'manager' || n == 'branchmanager' || n == 'hqmanager') return UserRole.manager;
-    if (n == 'officeboy' || n == 'ob')                              return UserRole.officeBoy;
-    if (n == 'staff')                                               return UserRole.staff;
-    if (n.contains('chairman'))                                     return UserRole.chairman;
-    if (n.contains('manager'))                                      return UserRole.manager;
-    if (n.contains('officeboy') || n.contains('office'))            return UserRole.officeBoy;
-    debugPrint('[UserRole] Unknown: "$raw" → staff');
-    return UserRole.staff;
-  }
-}
+// UserRole moved to donations_shared.dart
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DONATIONS SCREEN  — persistent tab bar, Credits is a tab (not a pill)
+// DONATIONS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 
 class DonationsScreen extends StatefulWidget {
@@ -129,27 +90,85 @@ class DonationsScreen extends StatefulWidget {
   State<DonationsScreen> createState() => _DonationsScreenState();
 }
 
-class _DonationsScreenState extends State<DonationsScreen>
-    with SingleTickerProviderStateMixin {
-  DonationCategory _selectedCategory = DonationCategory.jamia;
+class _DonationsScreenState extends State<DonationsScreen> with TickerProviderStateMixin {
+  late TabController _mobileTabController;
+  DonationCategory _selectedCategory = DonationCategory.all;
   late String _viewingBranchId;
   late String _viewingBranchName;
-  late TabController _tabController;
 
-  bool get _hasCreditsTab => widget.role.hasCreditsTab;
-  int  get _tabCount      => _hasCreditsTab ? 2 : 1;
+  // Auto-fetched branch list for HQ Manager / Chairman
+  List<({String id, String name})> _fetchedBranches = [];
+  bool _fetchingBranches = false;
 
   @override
   void initState() {
     super.initState();
-    _viewingBranchId   = widget.branchId;
-    _viewingBranchName = widget.branchName;
-    _tabController     = TabController(length: _tabCount, vsync: this);
+    _mobileTabController = TabController(length: 2, vsync: this);
+
+    final isGlobal = widget.branchId.isEmpty ||
+        widget.branchId == 'global';
+
+    // Handle global / consolidated view for high-level roles
+    if (widget.branchId == 'all' || (isGlobal && widget.role.canSeeAllBranches)) {
+      _viewingBranchId = 'all';
+      _viewingBranchName = 'All Branches (Consolidated)';
+    } else if (isGlobal && widget.allBranchIds.isNotEmpty) {
+      _viewingBranchId   = widget.allBranchIds.first;
+      _viewingBranchName = widget.allBranchNames.isNotEmpty
+          ? widget.allBranchNames.first
+          : _viewingBranchId;
+    } else if (!isGlobal) {
+      _viewingBranchId   = widget.branchId;
+      _viewingBranchName = widget.branchName;
+    } else {
+      // Global role with no pre-passed branches — we will fetch them below
+      _viewingBranchId   = '';
+      _viewingBranchName = 'Loading...';
+    }
+
+    // For global roles (HQ Manager, Chairman) fetch all branches from Firestore
+    if (widget.role.canSeeAllBranches) {
+      _loadAllBranches();
+    }
+  }
+
+  Future<void> _loadAllBranches() async {
+    if (_fetchingBranches) return;
+    setState(() => _fetchingBranches = true);
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      final branches = snap.docs.map((d) {
+        final name = (d.data()['name'] as String? ?? d.id);
+        return (id: d.id, name: name);
+      }).toList()
+        ..sort((a, b) => a.name.compareTo(b.name));
+
+      if (!mounted) return;
+      setState(() {
+        _fetchedBranches = branches;
+        // If we had no valid branch selected yet, pick the first one
+        if (_viewingBranchId.isEmpty || _viewingBranchId == 'global') {
+          if (widget.role.canSeeAllBranches) {
+            _viewingBranchId = 'all';
+            _viewingBranchName = 'All Branches (Consolidated)';
+          } else if (branches.isNotEmpty) {
+            _viewingBranchId   = branches.first.id;
+            _viewingBranchName = branches.first.name;
+          }
+        } else if (_viewingBranchId == 'all') {
+          _viewingBranchName = 'All Branches (Consolidated)';
+        }
+      });
+    } catch (e) {
+      debugPrint('DonationsScreen: Failed to load branches: $e');
+    } finally {
+      if (mounted) setState(() => _fetchingBranches = false);
+    }
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _mobileTabController.dispose();
     super.dispose();
   }
 
@@ -166,15 +185,27 @@ class _DonationsScreenState extends State<DonationsScreen>
   }
 
   List<({String id, String name})> get _branchOptions {
-    final own = (id: widget.branchId, name: widget.branchName);
     final extras = <({String id, String name})>[];
+    
+    if (widget.role.canSeeAllBranches) {
+      extras.add((id: 'all', name: 'All Branches (Consolidated)'));
+    }
+
     for (int i = 0; i < widget.allBranchIds.length; i++) {
       final bid   = widget.allBranchIds[i];
+      if (bid.isEmpty || bid == 'all') continue;
+      
       final bname = i < widget.allBranchNames.length
           ? widget.allBranchNames[i] : bid;
-      if (bid != widget.branchId) extras.add((id: bid, name: bname));
+      if (bid != widget.branchId && bid != 'all') extras.add((id: bid, name: bname));
     }
-    return [own, ...extras];
+    
+    // If own branch is valid, put it first. Otherwise just return extras.
+    if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+      final own = (id: widget.branchId, name: widget.branchName);
+      return [own, ...extras];
+    }
+    return extras;
   }
 
   bool get _canSwitchBranch =>
@@ -186,6 +217,7 @@ class _DonationsScreenState extends State<DonationsScreen>
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
+    final isMobile = MediaQuery.of(context).size.width < 600;
 
     if (widget.branchId.isEmpty) {
       return Scaffold(
@@ -199,11 +231,80 @@ class _DonationsScreenState extends State<DonationsScreen>
       );
     }
 
+    if (isMobile) {
+      return DefaultTabController(
+        length: 2,
+        child: Scaffold(
+          backgroundColor: t.bg,
+          appBar: AppBar(
+            backgroundColor: DonDS.headerTop,
+            elevation: 0,
+            title: Row(
+              children: [
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  padding: const EdgeInsets.all(3),
+                  child: Image.asset('assets/logo/gmwf.png', fit: BoxFit.contain),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_viewingBranchName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
+                      Text(widget.username, style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              if (_canSwitchBranch)
+                IconButton(
+                  icon: const Icon(Icons.swap_horiz_rounded, color: Colors.white),
+                  onPressed: () => _Header.showBranchPicker(context, _branchOptions, _viewingBranchId, _switchBranch, t),
+                ),
+            ],
+            bottom: TabBar(
+              controller: _mobileTabController,
+              labelColor: DonDS.tealLight,
+              unselectedLabelColor: Colors.white60,
+              indicatorColor: DonDS.tealLight,
+              indicatorWeight: 3,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
+              tabs: const [
+                Tab(text: "Donations"),
+                Tab(text: "Donors"),
+              ],
+            ),
+          ),
+          body: TabBarView(
+            controller: _mobileTabController,
+            children: [
+              _donationsTab(),
+              DonorRegistryWidget(
+                branchId: _viewingBranchId,
+                branchName: _viewingBranchName,
+              ),
+            ],
+          ),
+          floatingActionButton: FloatingActionButton(
+            backgroundColor: DonDS.teal,
+            onPressed: _onAddTap,
+            child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: t.bg,
       body: Column(children: [
-
-        // ── Lean header ──────────────────────────────────────────────────
+        // ── Primary Header ────────────────────────────────────────────────
         _Header(
           branchName:      _viewingBranchName,
           username:        widget.username,
@@ -214,27 +315,9 @@ class _DonationsScreenState extends State<DonationsScreen>
           onBranchSwitch:  _switchBranch,
         ),
 
-        // ── Persistent tab bar ───────────────────────────────────────────
-        if (_hasCreditsTab)
-          _TabBar(
-            controller:    _tabController,
-            branchId:      _viewingBranchId,
-            role:          widget.role,
-            userId:        widget.userId,
-          ),
-
-        // ── Tab content ──────────────────────────────────────────────────
+        // ── Main Content Area ───────────────────────────────────────────
         Expanded(
-          child: _hasCreditsTab
-              ? TabBarView(
-                  controller: _tabController,
-                  physics:    const NeverScrollableScrollPhysics(),
-                  children: [
-                    _donationsTab(),
-                    _creditsTab(),
-                  ],
-                )
-              : _donationsTab(),
+          child: _donationsTab(),
         ),
       ]),
     );
@@ -251,33 +334,36 @@ class _DonationsScreenState extends State<DonationsScreen>
     nextReceiptNumber: _nextReceiptNumber,
     selectedCategory:  _selectedCategory,
     onCatChanged:      (c) => setState(() => _selectedCategory = c),
+    onAddTap:          _onAddTap,
   );
 
-  Widget _creditsTab() {
-    if (widget.role.isChairman) {
-      return ChairmanCreditApprovalSection(
-          branchId: _viewingBranchId,
-          branchName: _viewingBranchName,
-          username: widget.username);
+  Future<void> _onAddTap() async {
+    final result = await showDialog<DonationRecord>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => AddDonationWizard(
+        branchId: widget.branchId,
+        branchName: widget.branchName,
+        currentUsername: widget.username,
+        userId: widget.userId,
+        currentUserRole: widget.role,
+      ),
+    );
+
+    if (result != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Donation recorded: ${result.receiptNo}'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
-    if (widget.role.isManager) {
-      return ManagerCreditsDashboard(
-          branchId: _viewingBranchId,
-          username: widget.username,
-          branchName: _viewingBranchName,
-          userId: widget.userId);
-    }
-    if (widget.role.isOfficeBoy) {
-      return OfficeBoyCreditsView(
-          branchId: _viewingBranchId,
-          userId: widget.userId);
-    }
-    return const SizedBox.shrink();
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HEADER  — compact, 52px, identity left-aligned and minimal
+// PREMIUM HEADER
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
@@ -285,116 +371,151 @@ class _Header extends StatelessWidget {
   final UserRole role;
   final bool     canSwitchBranch;
   final List<({String id, String name})> branchOptions;
-  final void Function(String, String) onBranchSwitch;
+  final void Function(String id, String name) onBranchSwitch;
 
   const _Header({
     required this.branchName,
     required this.username,
-    required this.currentBranchId,
     required this.role,
     required this.canSwitchBranch,
     required this.branchOptions,
+    required this.currentBranchId,
     required this.onBranchSwitch,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final rc  = role.roleColor;
-    final top = MediaQuery.of(context).padding.top;
-
-    return Container(
-      padding: EdgeInsets.only(top: top),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [DonDS.headerTop, DonDS.headerBot],
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-        ),
-        border: Border(bottom: BorderSide(color: DonDS.headerBorder)),
-      ),
-      child: SizedBox(
-        height: 52,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Row(children: [
-
-            // ── Minimal identity: avatar + username only ─────────────────
-            _Avatar(username: username, roleColor: rc),
-            const SizedBox(width: 8),
-            Text(
-              username.isNotEmpty ? username : '—',
-              style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  color: DonDS.onDark),
-            ),
-            const SizedBox(width: 6),
-            _RolePill(role: role),
-
-            const Spacer(),
-
-            // ── Branch picker centred on remaining space ─────────────────
-            GestureDetector(
-              onTap: canSwitchBranch ? () => _showBranchSheet(context) : null,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.domain_rounded,
-                    size: 13, color: DonDS.tealLight.withOpacity(0.75)),
-                const SizedBox(width: 5),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 160),
-                  child: Text(
-                    branchName.isNotEmpty ? branchName : 'All Branches',
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                        color: DonDS.onDark),
-                  ),
-                ),
-                if (canSwitchBranch) ...[
-                  const SizedBox(width: 2),
-                  const Icon(Icons.expand_more_rounded,
-                      size: 15, color: DonDS.onDarkSub),
-                ],
-              ]),
-            ),
-
-            const Spacer(),
-
-            // ── App label (right-aligned) ────────────────────────────────
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color:        DonDS.teal.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(6),
-                border:       Border.all(color: DonDS.teal.withOpacity(0.30)),
-              ),
-              child: const Text(
-                'GMWF',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: DonDS.tealLight,
-                    letterSpacing: 1.2),
-              ),
-            ),
-          ]),
-        ),
+  static void showBranchPicker(
+    BuildContext context,
+    List<({String id, String name})> options,
+    String currentBranchId,
+    void Function(String id, String name) onSelect,
+    RoleThemeData t,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _BranchPickerSheet(
+        options: options,
+        currentBranchId: currentBranchId,
+        onSelect: (id, name) {
+          onSelect(id, name);
+          Navigator.pop(context);
+        },
       ),
     );
   }
 
-  void _showBranchSheet(BuildContext context) {
-    showModalBottomSheet(
-      context:            context,
-      isScrollControlled: true,
-      backgroundColor:    Colors.transparent,
-      builder: (_) => _BranchPickerSheet(
-        options:         branchOptions,
-        currentBranchId: currentBranchId,
-        onSelect:        (id, name) {
-          Navigator.pop(context);
-          onBranchSwitch(id, name);
-        },
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    final rc = role.roleColor;
+
+    final bool showRolePill = username.toLowerCase().trim() != role.displayLabel.toLowerCase().trim();
+
+    return Container(
+      padding: EdgeInsets.fromLTRB(24, MediaQuery.of(context).padding.top + 16, 24, 16),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+              ],
+            ),
+            padding: const EdgeInsets.all(4),
+            child: Image.asset('assets/logo/gmwf.png', fit: BoxFit.contain),
+          ),
+          const SizedBox(width: 16),
+          _Avatar(username: username, roleColor: rc),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Welcome back,',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: t.textTertiary, letterSpacing: 0.2),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  username,
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: t.textPrimary, letterSpacing: -0.3),
+                ),
+              ],
+            ),
+          ),
+          if (showRolePill) ...[
+            const SizedBox(width: 12),
+            _RolePill(role: role),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BranchPicker extends StatelessWidget {
+  final String branchName;
+  final bool canSwitchBranch;
+  final VoidCallback onTap;
+  final RoleThemeData t;
+
+  const _BranchPicker({required this.branchName, required this.canSwitchBranch, required this.onTap, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: canSwitchBranch ? onTap : null,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: t.bgCardAlt.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: t.bgRule.withValues(alpha: 0.5)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.domain_rounded, size: 14, color: t.accent),
+              ),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('BRANCH', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: t.textTertiary, letterSpacing: 1)),
+                  Text(
+                    branchName.isNotEmpty ? branchName : 'Select...',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.textPrimary),
+                  ),
+                ],
+              ),
+              if (canSwitchBranch) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: t.textTertiary),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -407,18 +528,23 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 30, height: 30,
+    width: 44, height: 44,
     decoration: BoxDecoration(
-      color:  roleColor.withOpacity(0.22),
-      shape:  BoxShape.circle,
-      border: Border.all(color: roleColor.withOpacity(0.55), width: 1.5),
+      gradient: LinearGradient(
+        colors: [roleColor, roleColor.withValues(alpha: 0.7)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+      shape: BoxShape.circle,
+      boxShadow: [
+        BoxShadow(color: roleColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3)),
+      ],
+      border: Border.all(color: Colors.white, width: 2),
     ),
     child: Center(
       child: Text(
         username.isNotEmpty ? username[0].toUpperCase() : '?',
-        style: TextStyle(
-            fontSize: 13, fontWeight: FontWeight.w800,
-            color: roleColor),
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
       ),
     ),
   );
@@ -430,111 +556,27 @@ class _RolePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color:        role.roleColor.withOpacity(0.15),
-      borderRadius: BorderRadius.circular(99),
-      border:       Border.all(color: role.roleColor.withOpacity(0.35)),
+      color: role.roleColor.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: role.roleColor.withValues(alpha: 0.15)),
     ),
-    child: Text(
-      role.displayLabel.toUpperCase(),
-      style: TextStyle(
-          fontSize: 7.5, fontWeight: FontWeight.w800,
-          color: role.roleColor, letterSpacing: 0.8),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 5, height: 5,
+          decoration: BoxDecoration(color: role.roleColor, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          role.displayLabel.toUpperCase(),
+          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: role.roleColor, letterSpacing: 0.8),
+        ),
+      ],
     ),
   );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PERSISTENT TAB BAR  — Credits tab shows live pending badge count
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _TabBar extends StatelessWidget {
-  final TabController controller;
-  final String        branchId, userId;
-  final UserRole      role;
-
-  const _TabBar({
-    required this.controller,
-    required this.branchId,
-    required this.userId,
-    required this.role,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    return Container(
-      color:  t.bg,
-      height: 44,
-      child: TabBar(
-        controller:           controller,
-        labelColor:           DonDS.teal,
-        unselectedLabelColor: t.textTertiary,
-        indicatorColor:       DonDS.teal,
-        indicatorWeight:      2,
-        indicatorSize:        TabBarIndicatorSize.tab,
-        labelStyle:    const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-        unselectedLabelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
-        dividerColor: t.bgRule,
-        tabs: [
-          const Tab(text: 'Donations'),
-          Tab(
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              const Text('Credits'),
-              const SizedBox(width: 6),
-              _PendingBadge(branchId: branchId, role: role, userId: userId),
-            ]),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Live badge showing pending credit count — red pill, always visible.
-class _PendingBadge extends StatelessWidget {
-  final String   branchId, userId;
-  final UserRole role;
-  const _PendingBadge({
-    required this.branchId, required this.userId, required this.role,
-  });
-
-  String get _toRole =>
-      role.isChairman ? 'Chairman' : role.isManager ? 'Manager' : '';
-
-  @override
-  Widget build(BuildContext context) {
-    if (_toRole.isEmpty && !role.isOfficeBoy) return const SizedBox.shrink();
-    final stream = role.isOfficeBoy
-        ? LocalStorageService.streamCredits(branchId: branchId, fromUserId: userId)
-        : LocalStorageService.streamCredits(branchId: branchId, toRole: _toRole);
-
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: stream,
-      builder: (ctx, snap) {
-        final count = (snap.data ?? [])
-            .where((d) => (d['status'] as String? ?? '') == kStatusPending)
-            .length;
-        if (count == 0) return const SizedBox.shrink();
-        return Container(
-          constraints: const BoxConstraints(minWidth: 18),
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-          decoration: BoxDecoration(
-            color:        DS.statusRejected,
-            borderRadius: BorderRadius.circular(99),
-          ),
-          child: Text(
-            '$count',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                fontSize: 10, fontWeight: FontWeight.w800,
-                color: Colors.white),
-          ),
-        );
-      },
-    );
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -558,7 +600,7 @@ class _BranchPickerSheet extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color:        t.bgCard,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         const SizedBox(height: 12),
@@ -566,64 +608,67 @@ class _BranchPickerSheet extends StatelessWidget {
             width: 36, height: 4,
             decoration: BoxDecoration(
                 color: t.bgRule, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(height: 16),
+        const SizedBox(height: 24),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(children: [
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                  color: DonDS.tealMuted,
-                  borderRadius: BorderRadius.circular(10)),
-              child: const Icon(Icons.domain_rounded,
-                  size: 18, color: DonDS.teal),
+                  color: t.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.domain_rounded,
+                  size: 20, color: t.accent),
             ),
-            const SizedBox(width: 12),
-            Text('Switch Branch', style: DS.heading(color: t.textPrimary)),
+            const SizedBox(width: 16),
+            Text('Switch Branch', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: t.textPrimary, letterSpacing: -0.5)),
           ]),
         ),
-        const SizedBox(height: 12),
-        ...options.map((opt) {
-          final isSel = opt.id == currentBranchId;
-          return InkWell(
-            onTap: () => onSelect(opt.id, opt.name),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              decoration: BoxDecoration(
-                  color: isSel ? DonDS.tealMuted : null,
-                  border: Border(bottom: BorderSide(color: t.bgRule, width: 0.5))),
-              child: Row(children: [
-                Container(
-                  width: 38, height: 38,
+        const SizedBox(height: 16),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: options.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 4),
+            itemBuilder: (ctx, i) {
+              final opt = options[i];
+              final isSel = opt.id == currentBranchId;
+              return InkWell(
+                onTap: () => onSelect(opt.id, opt.name),
+                borderRadius: BorderRadius.circular(16),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: isSel ? DonDS.teal.withOpacity(0.15) : t.bgCardAlt,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                        color: isSel ? DonDS.teal.withOpacity(0.4) : t.bgRule),
+                    color: isSel ? t.accent.withValues(alpha: 0.08) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isSel ? t.accent.withValues(alpha: 0.3) : Colors.transparent),
                   ),
-                  child: Center(
-                    child: Text(
-                      opt.name.isNotEmpty ? opt.name[0].toUpperCase() : 'B',
-                      style: TextStyle(
-                          fontSize: 15, fontWeight: FontWeight.w800,
-                          color: isSel ? DonDS.teal : t.textSecondary),
+                  child: Row(children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: isSel ? t.accent.withValues(alpha: 0.12) : t.bgCardAlt,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(child: Icon(Icons.location_on_rounded, size: 20, color: isSel ? t.accent : t.textTertiary)),
                     ),
-                  ),
+                    const SizedBox(width: 16),
+                    Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(opt.name, style: TextStyle(fontSize: 15, fontWeight: isSel ? FontWeight.w800 : FontWeight.w700, color: isSel ? t.accent : t.textPrimary)),
+                      Text(opt.id, style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                    ])),
+                    if (isSel) Icon(Icons.check_circle_rounded, color: t.accent, size: 22),
+                  ]),
                 ),
-                const SizedBox(width: 14),
-                Expanded(child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(opt.name, style: DS.subheading(color: t.textPrimary)),
-                  Text(opt.id, style: DS.caption(color: t.textTertiary)
-                      .copyWith(fontSize: 10)),
-                ])),
-                if (isSel) const Icon(Icons.check_circle_rounded,
-                    color: DonDS.teal, size: 20),
-              ]),
-            ),
-          );
-        }),
-        SizedBox(height: MediaQuery.of(context).padding.bottom + 16),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
       ]),
     );
   }

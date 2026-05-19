@@ -57,7 +57,7 @@ Widget kSheetHandle(Color accentColor) => Center(
         height: 5,
         margin: const EdgeInsets.only(top: 10, bottom: 4),
         decoration: BoxDecoration(
-            color: accentColor.withOpacity(0.45),
+            color: accentColor.withValues(alpha: 0.45),
             borderRadius: BorderRadius.circular(3)),
       ),
     );
@@ -179,15 +179,15 @@ Widget _typeOption({
         width: double.infinity,
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.07),
+          color: color.withValues(alpha: 0.07),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+          border: Border.all(color: color.withValues(alpha: 0.3), width: 1.5),
         ),
         child: Row(children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
+                color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(14)),
             child: Icon(icon, color: color, size: 26),
           ),
@@ -310,7 +310,7 @@ void showSavedFoodDialog(
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                              color: kTeal.withOpacity(0.12),
+                              color: kTeal.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12)),
                           child: const Icon(Icons.recycling_rounded,
                               color: kTeal, size: 22),
@@ -342,10 +342,10 @@ void showSavedFoodDialog(
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: kTeal.withOpacity(0.07),
+                          color: kTeal.withValues(alpha: 0.07),
                           borderRadius: BorderRadius.circular(12),
                           border:
-                              Border.all(color: kTeal.withOpacity(0.25)),
+                              Border.all(color: kTeal.withValues(alpha: 0.25)),
                         ),
                         child: const Row(children: [
                           Icon(Icons.info_outline_rounded,
@@ -372,10 +372,10 @@ void showSavedFoodDialog(
                         Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: kAccent.withOpacity(0.07),
+                            color: kAccent.withValues(alpha: 0.07),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                                color: kAccent.withOpacity(0.3)),
+                                color: kAccent.withValues(alpha: 0.3)),
                           ),
                           child: const Row(children: [
                             Icon(Icons.warning_rounded,
@@ -408,7 +408,7 @@ void showSavedFoodDialog(
                                   horizontal: 14, vertical: 12),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? kTeal.withOpacity(0.08)
+                                    ? kTeal.withValues(alpha: 0.08)
                                     : kSurface,
                                 borderRadius:
                                     BorderRadius.circular(14),
@@ -424,7 +424,7 @@ void showSavedFoodDialog(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
                                     color: isSelected
-                                        ? kTeal.withOpacity(0.15)
+                                        ? kTeal.withValues(alpha: 0.15)
                                         : Colors.white,
                                     borderRadius:
                                         BorderRadius.circular(10),
@@ -487,10 +487,10 @@ void showSavedFoodDialog(
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: kTeal.withOpacity(0.04),
+                            color: kTeal.withValues(alpha: 0.04),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                                color: kTeal.withOpacity(0.2)),
+                                color: kTeal.withValues(alpha: 0.2)),
                           ),
                           child: Column(
                               crossAxisAlignment:
@@ -516,7 +516,7 @@ void showSavedFoodDialog(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: kTeal.withOpacity(0.08),
+                                  color: kTeal.withValues(alpha: 0.08),
                                   borderRadius:
                                       BorderRadius.circular(10),
                                 ),
@@ -541,12 +541,12 @@ void showSavedFoodDialog(
                                   const EdgeInsets.symmetric(vertical: 8),
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: kSuccess.withOpacity(0.08),
+                                color: kSuccess.withValues(alpha: 0.08),
                                 borderRadius:
                                     BorderRadius.circular(10),
                                 border: Border.all(
                                     color:
-                                        kSuccess.withOpacity(0.25)),
+                                        kSuccess.withValues(alpha: 0.25)),
                               ),
                               child: const Row(children: [
                                 Icon(
@@ -614,7 +614,7 @@ void showSavedFoodDialog(
                           style: ElevatedButton.styleFrom(
                             backgroundColor:
                                 (selectedItem == null && !isEdit)
-                                    ? kTeal.withOpacity(0.4)
+                                    ? kTeal.withValues(alpha: 0.4)
                                     : kTeal,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(
@@ -814,7 +814,7 @@ void showCookDialog(
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                            color: typeColor.withOpacity(0.12),
+                            color: typeColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12)),
                         child: Icon(typeIcon, color: typeColor, size: 22),
                       ),
@@ -840,9 +840,9 @@ void showCookDialog(
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: kPurple.withOpacity(0.07),
+                          color: kPurple.withValues(alpha: 0.07),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: kPurple.withOpacity(0.2)),
+                          border: Border.all(color: kPurple.withValues(alpha: 0.2)),
                         ),
                         child: const Row(children: [
                           Icon(Icons.info_outline_rounded,
@@ -895,10 +895,10 @@ void showCookDialog(
                           margin: const EdgeInsets.only(bottom: 12),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: kTeal.withOpacity(0.07),
+                            color: kTeal.withValues(alpha: 0.07),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                                color: kTeal.withOpacity(0.25)),
+                                color: kTeal.withValues(alpha: 0.25)),
                           ),
                           child: Row(children: [
                             const Icon(Icons.recycling_rounded,
@@ -974,9 +974,9 @@ void showCookDialog(
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: typeColor.withOpacity(0.04),
+                        color: typeColor.withValues(alpha: 0.04),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: typeColor.withOpacity(0.2)),
+                        border: Border.all(color: typeColor.withValues(alpha: 0.2)),
                       ),
                       child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1000,10 +1000,10 @@ void showCookDialog(
                             margin: const EdgeInsets.symmetric(vertical: 8),
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: typeColor.withOpacity(0.07),
+                              color: typeColor.withValues(alpha: 0.07),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                  color: typeColor.withOpacity(0.25)),
+                                  color: typeColor.withValues(alpha: 0.25)),
                             ),
                             child: Row(children: [
                               Icon(Icons.info_outline_rounded,
@@ -1025,10 +1025,10 @@ void showCookDialog(
                           margin: const EdgeInsets.symmetric(vertical: 8),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: kSuccess.withOpacity(0.08),
+                            color: kSuccess.withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                                color: kSuccess.withOpacity(0.25)),
+                                color: kSuccess.withValues(alpha: 0.25)),
                           ),
                           child: const Row(children: [
                             Icon(Icons.confirmation_number_rounded,
@@ -1081,10 +1081,10 @@ void showCookDialog(
                             margin: const EdgeInsets.only(top: 10),
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: kInfo.withOpacity(0.06),
+                              color: kInfo.withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                  color: kInfo.withOpacity(0.2)),
+                                  color: kInfo.withValues(alpha: 0.2)),
                             ),
                             child: const Row(children: [
                               Icon(Icons.schedule_rounded,
@@ -1486,7 +1486,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                                 dense: true,
                                 enabled: item.quantity > 0,
                                 tileColor: isSaved
-                                    ? kTeal.withOpacity(0.05)
+                                    ? kTeal.withValues(alpha: 0.05)
                                     : null,
                                 leading: isSaved
                                     ? const Icon(Icons.recycling_rounded,
@@ -1665,7 +1665,7 @@ Widget _numField(
         labelText: label,
         prefixIcon: Icon(icon, color: color, size: 18),
         filled: true,
-        fillColor: color.withOpacity(0.06),
+        fillColor: color.withValues(alpha: 0.06),
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide.none),

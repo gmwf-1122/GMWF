@@ -29,7 +29,7 @@ class AuthService {
   }
 
   // ── Sign Up ───────────────────────────────────────────────────────────────
-  Future<User?> signUp({
+  Future<String> signUp({
     required String email,
     required String password,
     required String username,
@@ -47,14 +47,19 @@ class AuthService {
     Uint8List? profileImageBytes,
     PlatformFile? identificationFile,
     PlatformFile? degreeFile,
+    String? studentId, 
+    List<String> studentIds = const [], // NEW — default empty
+    String name = '',        // NEW
+    String cnic = '',        // NEW
   }) async {
     try {
       final lowerUsername = username.trim().toLowerCase();
       final lowerEmail    = email.trim().toLowerCase();
 
+      // Duplicate check uses the lowercase version
       final query = await _firestore
           .collection('users')
-          .where('username', isEqualTo: lowerUsername)
+          .where('usernameLower', isEqualTo: lowerUsername)
           .get();
       if (query.docs.isNotEmpty) throw Exception('Username taken');
 
@@ -63,17 +68,21 @@ class AuthService {
         password: password,
       );
       final user = cred.user;
-      if (user == null) return null;
+      if (user == null) throw Exception('Sign up failed: User is null');
 
       final uid = user.uid;
 
       final userData = <String, dynamic>{
         'uid': uid,
-        'username': lowerUsername,
+        'username': username.trim(),        // original casing preserved
+        'usernameLower': lowerUsername,      // for case-insensitive lookup
         'email': lowerEmail,
-        'role': role.toLowerCase(),
+        'role': role.trim(),
         'branchId': branchId.trim(),
         'branchName': branchName.trim(),
+        'name': name,
+        'cnic': cnic,
+        'studentIds': studentIds,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -85,6 +94,7 @@ class AuthService {
       if (bankAccount?.isNotEmpty ?? false)    userData['bankAccount']     = bankAccount!.trim();
       if (degree?.isNotEmpty ?? false)         userData['degree']          = degree!.trim();
       if (salary != null)                      userData['baseSalary']      = salary;
+      if (studentId?.isNotEmpty ?? false)      userData['studentId']       = studentId!.trim();
 
       if (profileImageXFile != null || profileImageBytes != null) {
         final url = await _uploadFile(
@@ -116,7 +126,7 @@ class AuthService {
       }
 
       await _cacheUserDataLocally(userData);
-      return user;
+      return uid;
     } catch (e) {
       debugPrint('[AuthService] signUp failed: $e');
       rethrow;
@@ -241,6 +251,24 @@ class AuthService {
 
   User? getCurrentUser() => _auth.currentUser;
 
+  Future<Map<String, dynamic>?> getUserByUid(String uid) async {
+    try {
+      // 1. Check root collection (Legacy/Admin)
+      final doc = await _firestore.collection('users').doc(uid).get();
+      if (doc.exists) return doc.data();
+
+      // 2. Check all branches
+      final branches = await _firestore.collection('branches').get();
+      for (final branch in branches.docs) {
+        final bDoc = await branch.reference.collection('users').doc(uid).get();
+        if (bDoc.exists) return bDoc.data();
+      }
+    } catch (e) {
+      debugPrint('[AuthService] getUserByUid failed: $e');
+    }
+    return null;
+  }
+
   // ── Username → email lookup ───────────────────────────────────────────────
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
@@ -248,7 +276,7 @@ class AuthService {
     try {
       final q = await _firestore
           .collection('users')
-          .where('username', isEqualTo: lower)
+          .where('usernameLower', isEqualTo: lower)
           .limit(1)
           .get();
       if (q.docs.isNotEmpty) {
@@ -263,7 +291,7 @@ class AuthService {
       for (final branch in branches.docs) {
         final users = await branch.reference
             .collection('users')
-            .where('username', isEqualTo: lower)
+            .where('usernameLower', isEqualTo: lower)
             .limit(1)
             .get();
         if (users.docs.isNotEmpty) {

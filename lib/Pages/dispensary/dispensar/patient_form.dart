@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/dispensar/patient_form.dart
+// lib/pages/dispensary/dispensar/patient_form.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -9,11 +9,11 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
-import '../../../services/local_storage_service.dart';
-import '../../../services/sync_service.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
 import 'patient_form_helper.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 class PatientForm extends StatefulWidget {
   final String branchId;
   final Map<String, dynamic> queueEntry;
@@ -82,17 +82,34 @@ class _PatientFormState extends State<PatientForm> {
     if (fromData != null && fromData.isNotEmpty) return _normaliseQueueType(fromData);
     return 'zakat';
   }
-  // ─── Days of medicine ─────────────────────────────────────────────────────
   int get _daysOfMedicine {
     final fromData = _data['daysOfMedicine'];
-    if (fromData is int && fromData > 1) return fromData;
+    if (fromData is int && fromData >= 1) return fromData; // Allowed 1
     final embedded = widget.queueEntry['prescription'];
     if (embedded is Map) {
       final d = embedded['daysOfMedicine'];
-      if (d is int && d > 1) return d;
+      if (d is int && d >= 1) return d;
     }
     final topLevel = widget.queueEntry['daysOfMedicine'];
-    if (topLevel is int && topLevel > 1) return topLevel;
+    if (topLevel is int && topLevel >= 1) return topLevel;
+    return 1;
+  }
+
+  // ─── Suggested days (paid at token desk) ──────────────────────────────────
+  int get _suggestedDays {
+    final s = widget.queueEntry['suggestedDays'];
+    if (s is int && s >= 1) return s;
+    
+    // Fallback: Check the original entry in Hive if missing from queueEntry map
+    final serial = _resolvedSerial;
+    if (serial.isNotEmpty) {
+      final entryRaw = Hive.box(LocalStorageService.entriesBox).get('${widget.branchId}-$serial');
+      if (entryRaw != null) {
+        final entry = Map<String, dynamic>.from(entryRaw);
+        final sd = entry['suggestedDays'];
+        if (sd is int && sd >= 1) return sd;
+      }
+    }
     return 1;
   }
   @override
@@ -461,6 +478,7 @@ class _PatientFormState extends State<PatientForm> {
         'dateKey': dateKey,
         'date': dateKey,
         'queueType': queueType,
+        'tokenCreatedAt': widget.queueEntry['createdAt'] ?? _data['createdAt'] ?? _data['tokenCreatedAt'],
         'createdAt': nowIso,
         'dispenseStatus': 'dispensed',
         'status': 'completed', // ← FIX-SYNC-4
@@ -585,16 +603,16 @@ class _PatientFormState extends State<PatientForm> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: _teal.withOpacity(0.08),
+                          color: _teal.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                              color: _teal.withOpacity(0.25)),
+                              color: _teal.withValues(alpha: 0.25)),
                         ),
                         child: Text(
                           '$perDayQty/day · $days days · give $totalQty total',
                           style: TextStyle(
                               fontSize: isMobile ? 10 : 11,
-                              color: _teal.withOpacity(0.9),
+                              color: _teal.withValues(alpha: 0.9),
                               fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -640,32 +658,146 @@ class _PatientFormState extends State<PatientForm> {
   }
   // ─── "Medicines for X days" banner ────────────────────────────────────────
   Widget _buildDaysBanner({required bool isMobile}) {
-    final days = _daysOfMedicine;
-    if (days <= 1) return const SizedBox.shrink();
-    return Container(
-      margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
-      padding: EdgeInsets.symmetric(
-          horizontal: isMobile ? 12 : 16, vertical: isMobile ? 10 : 12),
-      decoration: BoxDecoration(
-        color: _teal,
-        borderRadius: BorderRadius.circular(isMobile ? 8 : 12),
-      ),
-      child: Row(children: [
-        Icon(Icons.calendar_month_rounded,
-            color: Colors.white, size: isMobile ? 18 : 22),
-        SizedBox(width: isMobile ? 8 : 12),
-        Expanded(
-          child: Text(
-            'Medicines for $days days\n'
-            'Dosage below is per day — give $days days\' supply of each tablet/capsule/syrup',
-            style: TextStyle(
-                color: Colors.white,
-                fontSize: isMobile ? 12 : 13,
-                fontWeight: FontWeight.w600,
-                height: 1.4),
+    final prescribed = _daysOfMedicine;
+    final suggested  = _suggestedDays;
+    final queueType  = _resolvedQueueType;
+
+    // Price mapping (matches DoctorRightPanel)
+    const prices = {'zakat': 20, 'non-zakat': 100, 'gmwf': 0};
+    final rate = prices[queueType] ?? 0;
+
+    final refundDays = suggested - prescribed;
+    final extraDays  = prescribed - suggested;
+    final refundAmt  = refundDays > 0 ? refundDays * rate : 0;
+    final extraAmt   = extraDays > 0 ? extraDays * rate : 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: EdgeInsets.only(bottom: isMobile ? 8 : 10),
+          padding: EdgeInsets.all(isMobile ? 12 : 16),
+          decoration: BoxDecoration(
+            color: _teal.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _teal.withValues(alpha: 0.15)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.calendar_today, color: _teal, size: isMobile ? 24 : 32),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Medicine Duration Summary',
+                      style: PatientFormHelper.robotoBold(size: isMobile ? 14 : 16, color: _teal),
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        _dayPill('Paid: $suggested day${suggested > 1 ? 's' : ''}', Colors.grey.shade600),
+                        const SizedBox(width: 8),
+                        _dayPill('Prescribed: $prescribed day${prescribed > 1 ? 's' : ''}', _teal),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
-      ]),
+
+        // Refund Alert
+        if (refundAmt > 0)
+          Container(
+            margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.orange.shade300, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.payments_rounded, color: Colors.orange.shade900, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'REFUND REQUIRED: Rs. $refundAmt',
+                        style: TextStyle(
+                          color: Colors.orange.shade900,
+                          fontWeight: FontWeight.bold,
+                          fontSize: isMobile ? 13 : 15,
+                        ),
+                      ),
+                      Text(
+                        'Patient paid for $suggested days but got $prescribed days. Please return the extra amount.',
+                        style: TextStyle(color: Colors.orange.shade800, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+        // Extra Payment Alert
+        if (extraAmt > 0)
+          Container(
+            margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red.shade300, width: 1.5),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Colors.red.shade900, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'EXTRA PAYMENT NEEDED: Rs. $extraAmt',
+                        style: TextStyle(
+                          color: Colors.red.shade900,
+                          fontWeight: FontWeight.bold,
+                          fontSize: isMobile ? 13 : 15,
+                        ),
+                      ),
+                      Text(
+                        'Patient paid for $suggested days but got $prescribed days. Please collect the remaining amount.',
+                        style: TextStyle(color: Colors.red.shade800, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _dayPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: color),
+      ),
     );
   }
   // ─── Header / footer ──────────────────────────────────────────────────────
@@ -895,7 +1027,7 @@ class _PatientFormState extends State<PatientForm> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(isMobile ? 12 : 20),
               boxShadow: [BoxShadow(
-                  color: Colors.grey.withOpacity(0.2), blurRadius: 15, offset: const Offset(0, 8))]),
+                  color: Colors.grey.withValues(alpha: 0.2), blurRadius: 15, offset: const Offset(0, 8))]),
             clipBehavior: Clip.antiAlias,
             child: Column(children: [
               _buildHeader(isMobile: isMobile),

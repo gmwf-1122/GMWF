@@ -64,6 +64,18 @@ class LanServer {
       print('╚════════════════════════════════════════════════════════════╝');
 
       _server!.listen((HttpRequest request) async {
+        // Handle preflight requests for Chrome/Edge Private Network Access (PNA)
+        if (request.method == 'OPTIONS') {
+          request.response
+            ..headers.add('Access-Control-Allow-Origin', '*')
+            ..headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            ..headers.add('Access-Control-Allow-Headers', 'Origin, Content-Type, Accept')
+            ..headers.add('Access-Control-Allow-Private-Network', 'true')
+            ..statusCode = HttpStatus.noContent
+            ..close();
+          return;
+        }
+
         if (WebSocketTransformer.isUpgradeRequest(request)) {
           try {
             final socket = await WebSocketTransformer.upgrade(request);
@@ -78,6 +90,8 @@ class LanServer {
         } else {
           // HTTP health-check — LanDiscovery._verify() looks for 'GMWF'.
           request.response
+            ..headers.add('Access-Control-Allow-Origin', '*')
+            ..headers.add('Access-Control-Allow-Private-Network', 'true')
             ..statusCode = HttpStatus.ok
             ..write('GMWF LAN Token Server — ws://$ipShown:$port')
             ..close();

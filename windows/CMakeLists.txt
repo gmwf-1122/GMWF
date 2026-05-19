@@ -1,8 +1,14 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
 
-# Allow Firebase SDK to use older CMake requirements
+# Allow Firebase SDK to use older CMake requirements without deprecation warnings.
+# Firebase's own CMakeLists.txt calls cmake_minimum_required(< 3.10), which triggers
+# a CMake deprecation warning. Since we cannot edit third-party SDK files, we
+# suppress the warning at the project level instead.
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "Suppress CMake deprecation warnings from third-party packages" FORCE)
+
+set(FIREBASE_CPP_SDK_VERSION 13.4.0 CACHE STRING "" FORCE)
 
 project(gmwf LANGUAGES CXX)
 

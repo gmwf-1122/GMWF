@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/doctor/doctor_screen.dart
+// lib/pages/dispensary/doctor/doctor_screen.dart
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -7,29 +7,31 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 
-import '../../../services/local_storage_service.dart';
-import '../../../services/sync_service.dart';
-import '../../../services/auth_service.dart';
-import '../../../realtime/connection_manager.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
-import '../../../widgets/connection_status_widget.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/auth_service.dart';
+import 'package:gmwf/realtime/connection_manager.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'patient_queue.dart';
 import 'patient_info.dart';
 import 'doctor_right_panel.dart';
 import 'patient_history.dart';
-import '../../inventory_doc.dart';
+import 'package:gmwf/pages/inventory_doc.dart';
 
 class DoctorScreen extends StatefulWidget {
   final String branchId;
   final String doctorId;
   final String doctorName;
+  final bool isEmbedded;
 
   const DoctorScreen({
     super.key,
     required this.branchId,
     required this.doctorId,
     required this.doctorName,
+    this.isEmbedded = false,
   });
 
   @override
@@ -396,7 +398,7 @@ class _DoctorScreenState extends State<DoctorScreen>
       return AppBar(
         backgroundColor: _teal,
         toolbarHeight: 56,
-        automaticallyImplyLeading: false,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           Image.asset('assets/logo/gmwf.png', height: 32),
           const SizedBox(width: 8),
@@ -464,7 +466,7 @@ class _DoctorScreenState extends State<DoctorScreen>
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
-      automaticallyImplyLeading: false,
+      iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
         Image.asset('assets/logo/gmwf.png', height: 60),
         const SizedBox(width: 16),
@@ -636,18 +638,22 @@ class _DoctorScreenState extends State<DoctorScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 900;
 
+    final body = Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+        ),
+      ),
+      child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+    );
+
+    if (widget.isEmbedded) return body;
+
     return Scaffold(
       appBar: _buildAppBar(isMobile),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
-          ),
-        ),
-        child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
-      ),
+      body: body,
     );
   }
 

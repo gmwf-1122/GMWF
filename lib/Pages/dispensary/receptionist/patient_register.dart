@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/receptionist/patient_register.dart
+// lib/pages/dispensary/receptionist/patient_register.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
-import '../../../services/firestore_service.dart';
-import '../../../services/local_storage_service.dart';
+import 'package:gmwf/services/firestore_service.dart';
+import 'package:gmwf/services/local_storage_service.dart';
 
 class PatientRegisterPage extends StatefulWidget {
   final String branchId;
@@ -256,263 +256,89 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   @override
   Widget build(BuildContext context) {
     final isMobile  = MediaQuery.of(context).size.width < 600;
-    final formWidth = isMobile ? double.infinity : 480.0;
+    final formWidth = isMobile ? double.infinity : 650.0;
     final fontSize  = isMobile ? 14.0 : 16.0;
 
-    return FocusScope(
-      node: _formScopeNode,
-      onKey: (node, event) {
-        if (event is RawKeyDownEvent) {
-          if (_genderNode.hasFocus) {
-            String? newValue;
-            if (event.logicalKey == LogicalKeyboardKey.keyM)      newValue = 'Male';
-            else if (event.logicalKey == LogicalKeyboardKey.keyF) newValue = 'Female';
-            else if (event.logicalKey == LogicalKeyboardKey.keyO) newValue = 'Other';
-            if (newValue != null) {
-              setState(() => _selectedGender = newValue);
-              _formScopeNode.requestFocus(_bloodGroupNode);
-              return KeyEventResult.handled;
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text('Patient Registration'),
+        backgroundColor: Colors.green[800],
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: FocusScope(
+        node: _formScopeNode,
+        onKey: (node, event) {
+          if (event is RawKeyDownEvent) {
+            if (_genderNode.hasFocus) {
+              String? newValue;
+              if (event.logicalKey == LogicalKeyboardKey.keyM)      newValue = 'Male';
+              else if (event.logicalKey == LogicalKeyboardKey.keyF) newValue = 'Female';
+              else if (event.logicalKey == LogicalKeyboardKey.keyO) newValue = 'Other';
+              if (newValue != null) {
+                setState(() => _selectedGender = newValue);
+                _formScopeNode.requestFocus(_bloodGroupNode);
+                return KeyEventResult.handled;
+              }
+            }
+            if (_visitNode.hasFocus) {
+              if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+                setState(() => _visitType = 'Zakat');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyN) {
+                setState(() => _visitType = 'Non-Zakat');
+                return KeyEventResult.handled;
+              } else if (event.logicalKey == LogicalKeyboardKey.keyG) {
+                setState(() => _visitType = 'GMWF');
+                return KeyEventResult.handled;
+              }
             }
           }
-          if (_visitNode.hasFocus) {
-            if (event.logicalKey == LogicalKeyboardKey.keyZ) {
-              setState(() => _visitType = 'Zakat');
-              return KeyEventResult.handled;
-            } else if (event.logicalKey == LogicalKeyboardKey.keyN) {
-              setState(() => _visitType = 'Non-Zakat');
-              return KeyEventResult.handled;
-            } else if (event.logicalKey == LogicalKeyboardKey.keyG) {
-              setState(() => _visitType = 'GMWF');
-              return KeyEventResult.handled;
-            }
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Container(
-        color: Colors.transparent,
-        child: Center(
-          child: SingleChildScrollView(
-            child: Container(
-              width: formWidth,
-              margin: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 0),
-              padding: EdgeInsets.all(isMobile ? 16 : 20),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.green[200]!, width: 1.5),
-              ),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Image.asset('assets/logo/gmwf.png',
-                        height: isMobile ? 80 : 100),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Patient Registration',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                          fontSize:   isMobile ? 20 : 24,
-                          fontWeight: FontWeight.bold,
-                          color:      Colors.green[900]),
+          return KeyEventResult.ignored;
+        },
+        child: Container(
+          color: Colors.transparent,
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Container(
+                width: formWidth,
+                margin: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 0),
+                padding: EdgeInsets.all(isMobile ? 16 : 20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
-                    const SizedBox(height: 24),
-
-                    // Registration type toggle
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.green[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.green[200]!),
+                  ],
+                  border: Border.all(color: Colors.green[200]!, width: 1.5),
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Image.asset('assets/logo/gmwf.png',
+                          height: isMobile ? 80 : 100),
+                      const SizedBox(height: 16),
+                      Text(
+                        'New Registration',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            fontSize:   isMobile ? 20 : 24,
+                            fontWeight: FontWeight.bold,
+                            color:      Colors.green[900]),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(children: [
-                            Icon(Icons.person_add,
-                                color: Colors.green[900],
-                                size: isMobile ? 18 : 20),
-                            SizedBox(width: isMobile ? 4 : 8),
-                            Text('Registration Type',
-                                style: TextStyle(
-                                    color:    Colors.green[700],
-                                    fontSize: isMobile ? 12 : 14)),
-                          ]),
-                          const SizedBox(height: 8),
-                          Row(children: [
-                            Expanded(child: RadioListTile<bool>(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text('Adult',
-                                  style: TextStyle(
-                                      color:    Colors.green[900],
-                                      fontSize: fontSize)),
-                              value:      false,
-                              groupValue: _isChild,
-                              activeColor: Colors.green,
-                              onChanged: (v) => setState(() => _isChild = v!),
-                            )),
-                            Expanded(child: RadioListTile<bool>(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              title: Text('Child',
-                                  style: TextStyle(
-                                      color:    Colors.green[900],
-                                      fontSize: fontSize)),
-                              value:      true,
-                              groupValue: _isChild,
-                              activeColor: Colors.green,
-                              onChanged: (v) {
-                                setState(() {
-                                  if (!_isChild && v == true) {
-                                    _nameController.clear();
-                                    _dobController.clear();
-                                  }
-                                  _isChild = v!;
-                                });
-                              },
-                            )),
-                          ]),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildTextField(
-                      controller: _cnicController,
-                      label: _isChild
-                          ? 'Guardian CNIC (XXXXX-XXXXXXX-X)'
-                          : 'CNIC (XXXXX-XXXXXXX-X)',
-                      icon:      Icons.credit_card,
-                      focusNode: _cnicNode,
-                      key:       _cnicKey,
-                      maxLength: 15,
-                      inputFormatters: [CNICInputFormatter()],
-                      validator: (v) {
-                        final r = RegExp(r'^\d{5}-\d{7}-\d{1}$');
-                        if (v?.isEmpty ?? true)
-                          return 'Enter ${_isChild ? 'Guardian ' : ''}CNIC';
-                        if (!r.hasMatch(v!)) return 'Format: 12345-1234567-1';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildTextField(
-                      controller: _phoneController,
-                      label:     'Phone Number (optional)',
-                      icon:      Icons.phone,
-                      focusNode: _phoneNode,
-                      key:       _phoneKey,
-                      maxLength: 11,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      validator: (v) {
-                        if (v != null && v.isNotEmpty && v.length != 11) {
-                          return 'Phone must be 11 digits';
-                        }
-                        return null;
-                      },
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildTextField(
-                      controller: _nameController,
-                      label:     'Full Name${_isChild ? ' (Child)' : ''}',
-                      icon:      Icons.person,
-                      focusNode: _nameNode,
-                      key:       _nameKey,
-                      validator: (v) =>
-                          v?.isEmpty ?? true ? 'Enter name' : null,
-                    ),
-                    const SizedBox(height: 12),
-
-                    // DOB field
-                    TextFormField(
-                      key:        _dobKey,
-                      controller: _dobController,
-                      focusNode:  _dobNode,
-                      cursorColor: Colors.green[900],
-                      style: TextStyle(
-                          color: Colors.green[900], fontSize: fontSize - 2),
-                      decoration: _inputDecoration(
-                          '${_isChild ? 'Child ' : ''}Date of Birth (dd-MM-yyyy)',
-                          Icons.cake),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
-                        LengthLimitingTextInputFormatter(10),
-                        _DobFormatter(),
-                      ],
-                      keyboardType: TextInputType.datetime,
-                      validator: (v) {
-                        if (v!.isEmpty) return 'Enter DOB';
-                        if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v))
-                          return 'Use dd-MM-yyyy';
-                        final p   = v.split('-');
-                        final day   = int.tryParse(p[0]) ?? 0;
-                        final month = int.tryParse(p[1]) ?? 0;
-                        final year  = int.tryParse(p[2]) ?? 0;
-                        if (day < 1 || day > 31)   return 'Day must be 01-31';
-                        if (month < 1 || month > 12) return 'Month must be 01-12';
-                        if (year < 1900 || year > DateTime.now().year + 1)
-                          return 'Year must be between 1900 and ${DateTime.now().year + 1}';
-                        try {
-                          final date = DateTime(year, month, day);
-                          if (date.day != day || date.month != month)
-                            return 'Invalid date (e.g., Feb 30 does not exist)';
-                          _calculateAge(v);
-                          return null;
-                        } catch (_) {
-                          return 'Invalid date';
-                        }
-                      },
-                      onChanged: _calculateAge,
-                      textInputAction: TextInputAction.next,
-                      onFieldSubmitted: (_) =>
-                          _formScopeNode.requestFocus(_genderNode),
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildDropdown(
-                      focusNode: _genderNode,
-                      value:     _selectedGender,
-                      label:     '${_isChild ? 'Child ' : ''}Gender',
-                      icon:      Icons.person_outline,
-                      key:       _genderKey,
-                      items:     const ['Male', 'Female', 'Other'],
-                      onChanged: (val) {
-                        setState(() => _selectedGender = val);
-                        _formScopeNode.requestFocus(_bloodGroupNode);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-
-                    _buildDropdown(
-                      focusNode: _bloodGroupNode,
-                      value:     _selectedBloodGroup,
-                      label:     '${_isChild ? 'Child ' : ''}Blood Group',
-                      icon:      Icons.bloodtype_outlined,
-                      key:       _bloodGroupKey,
-                      items: const [
-                        'N/A', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'
-                      ],
-                      onChanged: (val) {
-                        setState(() => _selectedBloodGroup = val);
-                        _formScopeNode.requestFocus(_visitNode);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Visit type
-                    Focus(
-                      focusNode: _visitNode,
-                      child: Container(
-                        key: _visitKey,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 8),
+                      const SizedBox(height: 24),
+  
+                      // Registration type toggle
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
                           color: Colors.green[50],
                           borderRadius: BorderRadius.circular(8),
@@ -522,81 +348,272 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(children: [
-                              Icon(Icons.mosque,
+                              Icon(Icons.person_add,
                                   color: Colors.green[900],
                                   size: isMobile ? 18 : 20),
                               SizedBox(width: isMobile ? 4 : 8),
-                              Text('Visit Type',
+                              Text('Registration Type',
                                   style: TextStyle(
                                       color:    Colors.green[700],
                                       fontSize: isMobile ? 12 : 14)),
                             ]),
                             const SizedBox(height: 8),
                             Row(children: [
-                              Expanded(child: RadioListTile<String>(
+                              Expanded(child: RadioListTile<bool>(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                title: Text('Zakat',
+                                title: Text('Adult',
                                     style: TextStyle(
-                                        color: Colors.green[900],
+                                        color:    Colors.green[900],
                                         fontSize: fontSize)),
-                                value:       'Zakat',
-                                groupValue:  _visitType,
+                                value:      false,
+                                groupValue: _isChild,
                                 activeColor: Colors.green,
-                                onChanged:   (v) => setState(() => _visitType = v!),
+                                onChanged: (v) => setState(() => _isChild = v!),
                               )),
-                              Expanded(child: RadioListTile<String>(
+                              Expanded(child: RadioListTile<bool>(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                title: Text('Non-Zakat',
+                                title: Text('Child',
                                     style: TextStyle(
-                                        color: Colors.green[900],
+                                        color:    Colors.green[900],
                                         fontSize: fontSize)),
-                                value:       'Non-Zakat',
-                                groupValue:  _visitType,
+                                value:      true,
+                                groupValue: _isChild,
                                 activeColor: Colors.green,
-                                onChanged:   (v) => setState(() => _visitType = v!),
-                              )),
-                              Expanded(child: RadioListTile<String>(
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                                title: Text('GMWF',
-                                    style: TextStyle(
-                                        color: Colors.green[900],
-                                        fontSize: fontSize)),
-                                value:       'GMWF',
-                                groupValue:  _visitType,
-                                activeColor: Colors.green,
-                                onChanged:   (v) => setState(() => _visitType = v!),
+                                onChanged: (v) {
+                                  setState(() {
+                                    if (!_isChild && v == true) {
+                                      _nameController.clear();
+                                      _dobController.clear();
+                                    }
+                                    _isChild = v!;
+                                  });
+                                },
                               )),
                             ]),
                           ],
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 24),
-
-                    Focus(
-                      focusNode: _registerButtonNode,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSaving ? null : _savePatient,
-                        icon: _isSaving
-                            ? const SizedBox(
-                                width: 18, height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.save, size: 18),
-                        label: Text(_isSaving ? 'Saving...' : 'Register Patient'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          backgroundColor: Colors.green[500],
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
+                      const SizedBox(height: 12),
+  
+                      _buildTextField(
+                        controller: _cnicController,
+                        label: _isChild
+                            ? 'Guardian CNIC (XXXXX-XXXXXXX-X)'
+                            : 'CNIC (XXXXX-XXXXXXX-X)',
+                        icon:      Icons.credit_card,
+                        focusNode: _cnicNode,
+                        key:       _cnicKey,
+                        maxLength: 15,
+                        inputFormatters: [CNICInputFormatter()],
+                        validator: (v) {
+                          final r = RegExp(r'^\d{5}-\d{7}-\d{1}$');
+                          if (v?.isEmpty ?? true)
+                            return 'Enter ${_isChild ? 'Guardian ' : ''}CNIC';
+                          if (!r.hasMatch(v!)) return 'Format: 12345-1234567-1';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+  
+                      _buildTextField(
+                        controller: _phoneController,
+                        label:     'Phone Number (optional)',
+                        icon:      Icons.phone,
+                        focusNode: _phoneNode,
+                        key:       _phoneKey,
+                        maxLength: 11,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        validator: (v) {
+                          if (v != null && v.isNotEmpty && v.length != 11) {
+                            return 'Phone must be 11 digits';
+                          }
+                          return null;
+                        },
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 12),
+  
+                      _buildTextField(
+                        controller: _nameController,
+                        label:     'Full Name${_isChild ? ' (Child)' : ''}',
+                        icon:      Icons.person,
+                        focusNode: _nameNode,
+                        key:       _nameKey,
+                        validator: (v) =>
+                            v?.isEmpty ?? true ? 'Enter name' : null,
+                      ),
+                      const SizedBox(height: 12),
+  
+                      // DOB field
+                      TextFormField(
+                        key:        _dobKey,
+                        controller: _dobController,
+                        focusNode:  _dobNode,
+                        cursorColor: Colors.green[900],
+                        style: TextStyle(
+                            color: Colors.green[900], fontSize: fontSize - 2),
+                        decoration: _inputDecoration(
+                            '${_isChild ? 'Child ' : ''}Date of Birth (dd-MM-yyyy)',
+                            Icons.cake),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
+                          LengthLimitingTextInputFormatter(10),
+                          _DobFormatter(),
+                        ],
+                        keyboardType: TextInputType.datetime,
+                        validator: (v) {
+                          if (v!.isEmpty) return 'Enter DOB';
+                          if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v))
+                            return 'Use dd-MM-yyyy';
+                          final p   = v.split('-');
+                          final day   = int.tryParse(p[0]) ?? 0;
+                          final month = int.tryParse(p[1]) ?? 0;
+                          final year  = int.tryParse(p[2]) ?? 0;
+                          if (day < 1 || day > 31)   return 'Day must be 01-31';
+                          if (month < 1 || month > 12) return 'Month must be 01-12';
+                          if (year < 1900 || year > DateTime.now().year + 1)
+                            return 'Year must be between 1900 and ${DateTime.now().year + 1}';
+                          try {
+                            final date = DateTime(year, month, day);
+                            if (date.day != day || date.month != month)
+                              return 'Invalid date (e.g., Feb 30 does not exist)';
+                            _calculateAge(v);
+                            return null;
+                          } catch (_) {
+                            return 'Invalid date';
+                          }
+                        },
+                        onChanged: _calculateAge,
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) =>
+                            _formScopeNode.requestFocus(_genderNode),
+                      ),
+                      const SizedBox(height: 12),
+  
+                      _buildDropdown(
+                        focusNode: _genderNode,
+                        value:     _selectedGender,
+                        label:     '${_isChild ? 'Child ' : ''}Gender',
+                        icon:      Icons.person_outline,
+                        key:       _genderKey,
+                        items:     const ['Male', 'Female', 'Other'],
+                        onChanged: (val) {
+                          setState(() => _selectedGender = val);
+                          _formScopeNode.requestFocus(_bloodGroupNode);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+  
+                      _buildDropdown(
+                        focusNode: _bloodGroupNode,
+                        value:     _selectedBloodGroup,
+                        label:     '${_isChild ? 'Child ' : ''}Blood Group',
+                        icon:      Icons.bloodtype_outlined,
+                        key:       _bloodGroupKey,
+                        items: const [
+                          'N/A', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'
+                        ],
+                        onChanged: (val) {
+                          setState(() => _selectedBloodGroup = val);
+                          _formScopeNode.requestFocus(_visitNode);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+  
+                      // Visit type
+                      Focus(
+                        focusNode: _visitNode,
+                        child: Container(
+                          key: _visitKey,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.green[50],
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.green[200]!),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Icon(Icons.mosque,
+                                    color: Colors.green[900],
+                                    size: isMobile ? 18 : 20),
+                                SizedBox(width: isMobile ? 4 : 8),
+                                Text('Visit Type',
+                                    style: TextStyle(
+                                        color:    Colors.green[700],
+                                        fontSize: isMobile ? 12 : 14)),
+                              ]),
+                              const SizedBox(height: 8),
+                              Row(children: [
+                                Expanded(child: RadioListTile<String>(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text('Zakat',
+                                      style: TextStyle(
+                                          color: Colors.green[900],
+                                          fontSize: fontSize)),
+                                  value:       'Zakat',
+                                  groupValue:  _visitType,
+                                  activeColor: Colors.green,
+                                  onChanged:   (v) => setState(() => _visitType = v!),
+                                )),
+                                Expanded(child: RadioListTile<String>(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text('Non-Zakat',
+                                      style: TextStyle(
+                                          color: Colors.green[900],
+                                          fontSize: fontSize)),
+                                  value:       'Non-Zakat',
+                                  groupValue:  _visitType,
+                                  activeColor: Colors.green,
+                                  onChanged:   (v) => setState(() => _visitType = v!),
+                                )),
+                                Expanded(child: RadioListTile<String>(
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text('GMWF',
+                                      style: TextStyle(
+                                          color: Colors.green[900],
+                                          fontSize: fontSize)),
+                                  value:       'GMWF',
+                                  groupValue:  _visitType,
+                                  activeColor: Colors.green,
+                                  onChanged:   (v) => setState(() => _visitType = v!),
+                                )),
+                              ]),
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 24),
+  
+                      Focus(
+                        focusNode: _registerButtonNode,
+                        child: ElevatedButton.icon(
+                          onPressed: _isSaving ? null : _savePatient,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 18, height: 18,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.save, size: 18),
+                          label: Text(_isSaving ? 'Saving...' : 'Register Patient'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            backgroundColor: Colors.green[500],
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/doctor/patient_queue.dart
+// lib/pages/dispensary/doctor/patient_queue.dart
 
 import 'dart:async';
 
@@ -9,9 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
-import '../../../services/local_storage_service.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 class PatientQueue extends StatefulWidget {
   final String branchId;
@@ -109,7 +109,6 @@ class _PatientQueueState extends State<PatientQueue>
           _tryAutoSelectSmallestWaiting();
         });
       } else if (type == RealtimeEvents.tokenExceptionRequest) {
-        // Cache the request locally so doctor sees it even offline
         final requestId = data?['requestId']?.toString() ??
             'local_${DateTime.now().millisecondsSinceEpoch}';
         final localReq = <String, dynamic>{
@@ -121,7 +120,6 @@ class _PatientQueueState extends State<PatientQueue>
           'restriction': data?['restriction'],
           'branchId':    widget.branchId,
         };
-        // Persist to Hive so it survives screen rebuild
         Hive.box('app_settings').put(
             'pending_exception_$requestId',
             LocalStorageService.sanitize(localReq));
@@ -231,7 +229,6 @@ class _PatientQueueState extends State<PatientQueue>
     }
 
     try {
-      // 1. Update Firestore if possible
       try {
         await FirebaseFirestore.instance
             .collection('branches')
@@ -248,7 +245,6 @@ class _PatientQueueState extends State<PatientQueue>
         debugPrint('[PatientQueue] Firestore offline update failed: $e');
       }
 
-      // 2. Enqueue sync op
       await LocalStorageService.enqueueSync({
         'type':      'approve_token_exception',
         'branchId':  widget.branchId,
@@ -261,11 +257,9 @@ class _PatientQueueState extends State<PatientQueue>
         },
       });
 
-      // 3. Clear local restriction & local request cache
       await LocalStorageService.clearMedicineRestriction(widget.branchId, patientId);
       Hive.box('app_settings').delete('pending_exception_$requestId');
 
-      // 4. Local broadcast to receptionist
       RealtimeManager().sendMessage({
         ...RealtimeEvents.payload(
           type: RealtimeEvents.tokenExceptionApproved,
@@ -297,7 +291,7 @@ class _PatientQueueState extends State<PatientQueue>
   Future<void> _rejectException(Map<String, dynamic> data) async {
     final requestId  = data['id'] as String;
     final reasonCtrl = TextEditingController();
-    
+
     final rejected = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -335,7 +329,6 @@ class _PatientQueueState extends State<PatientQueue>
         'rejectedAt': FieldValue.serverTimestamp(),
       });
 
-      // Clear local cache
       Hive.box('app_settings').delete('pending_exception_$requestId');
 
       if (mounted) {
@@ -428,6 +421,15 @@ class _PatientQueueState extends State<PatientQueue>
     } catch (e) {
       debugPrint('[PatientQueue] Firestore sync failed: $e');
     }
+  }
+
+  // ─── Injection / drip check ───────────────────────────────────────────────
+  bool _isInjectionOrDrip(Map<String, dynamic> med) {
+    final type = (med['type'] ?? '').toString().toLowerCase();
+    final name = (med['name'] ?? '').toString().toLowerCase();
+    return type.contains('injection') || type.contains('inj') ||
+        type.contains('drip') ||
+        name.contains('inj.') || name.contains('drip');
   }
 
   // ─── Medicine abbreviation helper ─────────────────────────────────────────
@@ -545,8 +547,15 @@ class _PatientQueueState extends State<PatientQueue>
           ]),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: _teal)),
+          ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _teal,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               final name = nameCtrl.text.trim();
               if (name.isEmpty) return;
@@ -586,12 +595,12 @@ class _PatientQueueState extends State<PatientQueue>
   }
 
   // ─── Days selector widget ──────────────────────────────────────────────────
-  /// Inline 1 / 2 / 3 day segmented button used inside the edit dialog.
-  /// [queueType] is used to compute the extra charge hint.
   Widget _buildDaysSelectorDialog({
     required int selectedDays,
     required String queueType,
     required void Function(int) onChanged,
+    bool hasInjection = false,
+    int? suggestedDays,
   }) {
     final pricePerDay = _baseDayPrice[queueType] ?? 0;
 
@@ -604,7 +613,7 @@ class _PatientQueueState extends State<PatientQueue>
           const Text('Days of Medicine',
               style: TextStyle(
                   fontWeight: FontWeight.bold, fontSize: 15, color: _teal)),
-          if (pricePerDay > 0 && selectedDays > 1) ...[
+          if (!hasInjection && pricePerDay > 0 && selectedDays > 1) ...[
             const Spacer(),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -627,59 +636,87 @@ class _PatientQueueState extends State<PatientQueue>
         Row(
           children: [1, 2, 3].map((day) {
             final isSelected = selectedDays == day;
+            final isDisabled = hasInjection && day > 1;
+            final effectiveColor = isDisabled
+                ? Colors.grey.shade200
+                : isSelected
+                    ? _teal
+                    : Colors.white;
             return Expanded(
               child: Padding(
                 padding: EdgeInsets.only(right: day < 3 ? 8 : 0),
-                child: GestureDetector(
-                  onTap: () => onChanged(day),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 160),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: isSelected ? _teal : Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: isSelected ? _teal : Colors.grey.shade300,
-                          width: isSelected ? 2 : 1),
-                      boxShadow: isSelected
-                          ? [BoxShadow(
-                              color: _teal.withOpacity(0.22),
-                              blurRadius: 6,
-                              offset: const Offset(0, 2))]
-                          : [],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          '$day',
-                          style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: isSelected
-                                  ? Colors.white
-                                  : Colors.grey.shade700),
-                        ),
-                        Text(
-                          day == 1 ? 'day' : 'days',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: isSelected
-                                  ? Colors.white70
-                                  : Colors.grey.shade500),
-                        ),
-                        // Hint: extra charge for paying types
-                        if (pricePerDay > 0 && day > 1)
+                child: Tooltip(
+                  message: isDisabled ? 'Injection prescribed — only 1 day allowed' : '',
+                  child: GestureDetector(
+                    onTap: isDisabled
+                        ? () {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text(
+                                  '💉 Injection prescribed — only 1 day of medicine is allowed'),
+                              backgroundColor: Colors.orange,
+                              duration: Duration(seconds: 2),
+                            ));
+                          }
+                        : () => onChanged(day),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: effectiveColor,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: isDisabled
+                                ? Colors.grey.shade300
+                                : isSelected
+                                    ? _teal
+                                    : Colors.grey.shade300,
+                            width: isSelected && !isDisabled ? 2 : 1),
+                        boxShadow: isSelected && !isDisabled
+                            ? [BoxShadow(
+                                color: _teal.withValues(alpha: 0.22),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2))]
+                            : [],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
                           Text(
-                            '+PKR ${(day - 1) * pricePerDay}',
+                            '$day',
                             style: TextStyle(
-                                fontSize: 10,
-                                color: isSelected
-                                    ? Colors.white70
-                                    : Colors.orange.shade600,
-                                fontWeight: FontWeight.w600),
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: isDisabled
+                                    ? Colors.grey.shade400
+                                    : isSelected
+                                        ? Colors.white
+                                        : Colors.grey.shade700),
                           ),
-                      ],
+                          Text(
+                            day == 1 ? 'day' : 'days',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: isDisabled
+                                    ? Colors.grey.shade400
+                                    : isSelected
+                                        ? Colors.white70
+                                        : Colors.grey.shade500),
+                          ),
+                          if (!isDisabled && pricePerDay > 0 && day > 1)
+                            Text(
+                              '+PKR ${(day - 1) * pricePerDay}',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: isSelected
+                                      ? Colors.white70
+                                      : Colors.orange.shade600,
+                                  fontWeight: FontWeight.w600),
+                            ),
+                          if (isDisabled)
+                            Icon(Icons.vaccines_rounded,
+                                size: 11, color: Colors.grey.shade400),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -688,16 +725,40 @@ class _PatientQueueState extends State<PatientQueue>
           }).toList(),
         ),
         const SizedBox(height: 4),
-        Text(
-          pricePerDay > 0
-              ? 'Day-1 fee (PKR $pricePerDay) collected at token desk.'
-                  '${selectedDays > 1 ? ' Extra PKR ${(selectedDays - 1) * pricePerDay} will be charged.' : ''}'
-              : 'No charge for $queueType patients.',
-          style: TextStyle(
-              fontSize: 11,
-              color: Colors.grey.shade600,
-              fontStyle: FontStyle.italic),
-        ),
+        if (hasInjection)
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.orange.shade300),
+            ),
+            child: Row(children: [
+              Icon(Icons.vaccines_rounded, size: 13, color: Colors.orange.shade700),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Injection prescribed — only 1 day of medicine is allowed. '
+                  'Multi-day selection is disabled.',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.orange.shade800,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+            ]),
+          )
+        else
+          Text(
+            pricePerDay > 0
+                ? 'Day-1 fee (PKR $pricePerDay) collected at token desk.'
+                    '${selectedDays > 1 ? ' Extra PKR ${(selectedDays - 1) * pricePerDay} will be charged.' : ''}'
+                : 'No charge for $queueType patients.',
+            style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade600,
+                fontStyle: FontStyle.italic),
+          ),
       ],
     );
   }
@@ -789,13 +850,14 @@ class _PatientQueueState extends State<PatientQueue>
 
     debugPrint('[PrescEdit] resolved queueType=$queueType for serial=$serial');
 
-    // ── Restore existing days (default 1) ──────────────────────────────────
     int editDays = (() {
       final d = prescData['daysOfMedicine'] ??
           entryData['daysOfMedicine'] ??
           (entryData['prescription'] is Map
               ? entryData['prescription']['daysOfMedicine']
-              : null);
+              : null) ??
+          entryData['suggestedDays'] ??
+          patient['suggestedDays'];
       if (d is int && d >= 1 && d <= 3) return d;
       return 1;
     })();
@@ -886,9 +948,11 @@ class _PatientQueueState extends State<PatientQueue>
 
                     // ── Days selector ───────────────────────────────────────
                     _buildDaysSelectorDialog(
-                      selectedDays: editDays,
-                      queueType:    queueType,
-                      onChanged:    (d) => setDialogState(() => editDays = d),
+                      selectedDays:  editDays,
+                      queueType:     queueType,
+                      hasInjection:  currentMeds.any(_isInjectionOrDrip),
+                      suggestedDays: (patient['suggestedDays'] as int?) ?? (entryData['suggestedDays'] as int?),
+                      onChanged:     (d) => setDialogState(() => editDays = d),
                     ),
                     const SizedBox(height: 20),
 
@@ -939,6 +1003,8 @@ class _PatientQueueState extends State<PatientQueue>
                                 if (newMed != null) {
                                   setDialogState(() {
                                     currentMeds.add(newMed);
+                                    final isInj = _isInjectionOrDrip(newMed);
+                                    if (isInj && editDays > 1) editDays = 1;
                                     searchCtrl.clear();
                                     searchResults = [];
                                   });
@@ -1031,10 +1097,13 @@ class _PatientQueueState extends State<PatientQueue>
                 onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Cancel'),
               ),
+              // FIX: confirmation dialog "Update" button — teal background so white text is readable
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _teal,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: _teal.withValues(alpha: 0.6),
+                  disabledForegroundColor: Colors.white70,
                 ),
                 icon: const Icon(Icons.save, color: Colors.white),
                 label: const Text('Update'),
@@ -1080,7 +1149,7 @@ class _PatientQueueState extends State<PatientQueue>
   }) async {
     final now         = DateTime.now().toIso8601String();
     final pricePerDay = _baseDayPrice[queueType] ?? 0;
-    final extraCharge = (daysOfMedicine - 1) * pricePerDay; // PKR beyond day-1
+    final extraCharge = (daysOfMedicine - 1) * pricePerDay;
 
     final updatedPresc = <String, dynamic>{
       ...originalPresc,
@@ -1111,7 +1180,7 @@ class _PatientQueueState extends State<PatientQueue>
       updated['prescriptionId'] = serial;
       updated['status']         = 'completed';
       updated['completedAt']    = updatedPresc['completedAt'] ?? now;
-      updated['daysOfMedicine'] = daysOfMedicine; // top-level for summary cards
+      updated['daysOfMedicine'] = daysOfMedicine;
       await entryBox.put(entryKey, updated);
       debugPrint('[PrescEdit] ✅ Updated entry in Hive: $entryKey');
     }
@@ -1138,7 +1207,7 @@ class _PatientQueueState extends State<PatientQueue>
     }
 
     if (mounted) {
-      final daysTxt = daysOfMedicine > 1 ? ' ($daysOfMedicine days)' : '';
+      final daysTxt   = daysOfMedicine > 1 ? ' ($daysOfMedicine days)' : '';
       final chargeTxt = extraCharge > 0 ? ' | Extra: PKR $extraCharge' : '';
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Row(children: [
@@ -1177,7 +1246,6 @@ class _PatientQueueState extends State<PatientQueue>
       debugPrint('[PrescEdit] ✅ Firestore prescriptions updated: $serial');
 
       // Path B: serials/{dateKey}/{queueType}/{serial}
-      // Patch daysOfMedicine so revenue reports compute base × days correctly.
       await db
           .collection('branches').doc(branchId)
           .collection('serials').doc(ddmmyy)
@@ -1298,8 +1366,7 @@ class _PatientQueueState extends State<PatientQueue>
             ),
           ),
 
-          // ── Patient list ─────────────────────────────────────────────────
-
+          // ── Exception requests ───────────────────────────────────────────
           if (finalExceptions.isNotEmpty) ...[
             Container(
               width: double.infinity,
@@ -1362,6 +1429,7 @@ class _PatientQueueState extends State<PatientQueue>
             ),
           ],
 
+          // ── Patient list ─────────────────────────────────────────────────
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
@@ -1377,7 +1445,13 @@ class _PatientQueueState extends State<PatientQueue>
                     widget.selectedPatient?['id']?.toString() == serial;
 
                 final status    = (patient['status'] ?? '').toString().toLowerCase();
+                final dispenseStatus = (patient['dispenseStatus'] ?? '').toString().toLowerCase();
                 final isWaiting = status == 'waiting';
+
+                // FIX: edit button must only appear for status == 'completed',
+                // and MUST hide immediately once status becomes 'dispensed'
+                // (or dispenseStatus is 'dispensed' even if status is 'completed' for sync reasons).
+                final isCompleted = status == 'completed' && dispenseStatus != 'dispensed';
 
                 final smallestWaitingSerial = waiting.isNotEmpty
                     ? (waiting.first['serial']?.toString() ??
@@ -1415,14 +1489,14 @@ class _PatientQueueState extends State<PatientQueue>
                   margin: const EdgeInsets.symmetric(vertical: 4),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: isSelected ? _amber.withOpacity(0.15) : Colors.white,
+                    color: isSelected ? _amber.withValues(alpha: 0.15) : Colors.white,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                        color: isSelected ? _amber : dotColor.withOpacity(0.4),
+                        color: isSelected ? _amber : dotColor.withValues(alpha: 0.4),
                         width: isSelected ? 2.0 : 1.2),
                     boxShadow: [
                       BoxShadow(
-                          color: Colors.black12.withOpacity(0.08),
+                          color: Colors.black12.withValues(alpha: 0.08),
                           blurRadius: 3,
                           offset: const Offset(0, 1))
                     ],
@@ -1478,7 +1552,10 @@ class _PatientQueueState extends State<PatientQueue>
                           ],
                         ),
                       ),
-                      if (!isWaiting && hasPrescription)
+                      // FIX: show edit button only when status is exactly 'completed'
+                      // (prescription written by doctor but not yet dispensed).
+                      // Hidden immediately once status becomes 'dispensed'.
+                      if (isCompleted && hasPrescription)
                         IconButton(
                           icon: const Icon(Icons.edit,
                               color: Colors.orange, size: 20),
@@ -1503,11 +1580,11 @@ class _PatientQueueState extends State<PatientQueue>
       duration: const Duration(milliseconds: 200),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isActive ? color : color.withOpacity(0.6),
+        color: isActive ? color : color.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(30),
         boxShadow: isActive
             ? [BoxShadow(
-                color: color.withOpacity(0.4),
+                color: color.withValues(alpha: 0.4),
                 blurRadius: 8,
                 offset: const Offset(0, 4))]
             : null,

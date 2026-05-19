@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/dispensar/inventory.dart
+// lib/pages/dispensary/dispensar/inventory.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,8 +12,10 @@ import 'dart:async';
 import 'dispensar_screen.dart';
 import 'inventory_update.dart';
 import 'inventory_adjustment.dart';
-import '../../request.dart';
-import '../../../services/local_storage_service.dart';
+import 'medicine_ledger.dart';
+import 'package:gmwf/pages/request.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/widgets/global_module_wrapper.dart';
 
 class InventoryPage extends StatefulWidget {
   final String branchId;
@@ -328,32 +330,106 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: _bg,
-        appBar: _buildAppBar(),
-        floatingActionButton: widget.isAdmin
-            ? null
-            : FloatingActionButton.extended(
-                backgroundColor: _teal,
-                onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            InventoryUpdatePage(
-                              branchId: widget.branchId,
-                              isAdmin: widget.isAdmin,
-                              isDispenser: widget.isDispenser,
-                            ))),
-                icon: const Icon(Icons.add_rounded, color: Colors.white),
-                label: const Text('Update Stock',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)),
+  Widget build(BuildContext context) {
+    final bool isWrapped = GlobalModuleWrapper.isWrapped(context);
+
+    return Scaffold(
+      backgroundColor: _bg,
+      appBar: isWrapped ? null : _buildAppBar(),
+      floatingActionButton: widget.isAdmin
+          ? null
+          : FloatingActionButton.extended(
+              backgroundColor: _teal,
+              onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => InventoryUpdatePage(
+                            branchId: widget.branchId,
+                            isAdmin: widget.isAdmin,
+                            isDispenser: widget.isDispenser,
+                          ))),
+              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              label: const Text('Update Stock',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+      body: Column(
+        children: [
+          if (isWrapped)
+            Container(
+              color: _teal,
+              child: TabBar(
+                controller: _tabCtrl,
+                indicatorColor: Colors.white,
+                indicatorWeight: 3,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white60,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                isScrollable: false,
+                tabs: const [
+                  Tab(icon: Icon(Icons.inventory_2_rounded, size: 17), text: 'Stock'),
+                  Tab(icon: Icon(Icons.pending_actions_rounded, size: 17), text: 'Pending'),
+                  Tab(icon: Icon(Icons.history_edu_rounded, size: 17), text: 'Log'),
+                  Tab(icon: Icon(Icons.history_rounded, size: 17), text: 'History'),
+                ],
               ),
-        body: TabBarView(
-          controller: _tabCtrl,
-          children: [_stockTab(), _pendingTab(), _logTab(), _historyTab()],
-        ),
-      );
+            ),
+          if (isWrapped && !widget.isDispenser)
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                   const Icon(Icons.admin_panel_settings_rounded, size: 18, color: _teal),
+                   const SizedBox(width: 8),
+                   const Text('Admin Controls:', style: TextStyle(fontWeight: FontWeight.bold, color: _tealDark, fontSize: 13)),
+                   const Spacer(),
+                   _buildInternalActionButton(
+                     label: 'Ledger', 
+                     icon: Icons.auto_graph_rounded, 
+                     color: _teal,
+                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MedicineLedgerPage(branchId: widget.branchId))),
+                   ),
+                   const SizedBox(width: 10),
+                   _buildInternalActionButton(
+                     label: 'Adjust', 
+                     icon: FontAwesomeIcons.sliders, 
+                     color: const Color(0xFFBF360C),
+                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryAdjustmentPage(branchId: widget.branchId))),
+                   ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [_stockTab(), _pendingTab(), _logTab(), _historyTab()],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInternalActionButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 12, color: Colors.white),
+      label: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color,
+        elevation: 1,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        minimumSize: const Size(0, 32),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+    );
+  }
 
   PreferredSizeWidget _buildAppBar() => AppBar(
         backgroundColor: _teal,
@@ -391,7 +467,7 @@ class _InventoryPageState extends State<InventoryPage>
               padding:
                   const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
+                color: Colors.white.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Row(mainAxisSize: MainAxisSize.min, children: [
@@ -406,6 +482,33 @@ class _InventoryPageState extends State<InventoryPage>
         actions: widget.isDispenser
             ? []
             : [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 4, vertical: 10),
+                  child: ElevatedButton.icon(
+                    onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => MedicineLedgerPage(
+                                branchId: widget.branchId))),
+                    icon: const Icon(Icons.auto_graph_rounded,
+                        size: 14, color: Colors.white),
+                    label: const Text('Ledger',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _teal,
+                      foregroundColor: Colors.white,
+                      elevation: 3,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 0),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22)),
+                    ),
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 10),
@@ -712,7 +815,7 @@ class _InventoryPageState extends State<InventoryPage>
               border: Border(
                   bottom: BorderSide(
                       color: isWarning
-                          ? _red.withOpacity(0.4)
+                          ? _red.withValues(alpha: 0.4)
                           : const Color(0xFFDCEDDE),
                       width: isWarning ? 1.2 : 0.8),
                   left: isWarning
@@ -761,7 +864,7 @@ class _InventoryPageState extends State<InventoryPage>
           if (_isManager) {
             return InkWell(
               onTap: () => _showEditSheet(b),
-              hoverColor: _teal.withOpacity(0.05),
+              hoverColor: _teal.withValues(alpha: 0.05),
               child: rowContent,
             );
           }
@@ -803,7 +906,7 @@ class _InventoryPageState extends State<InventoryPage>
               boxShadow: [
                 BoxShadow(
                     color: isWarning
-                        ? _red.withOpacity(0.18)
+                        ? _red.withValues(alpha: 0.18)
                         : _shadow,
                     blurRadius: isWarning ? 10 : 6,
                     offset: const Offset(0, 3))
@@ -817,7 +920,7 @@ class _InventoryPageState extends State<InventoryPage>
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                           color: isWarning
-                              ? _red.withOpacity(0.1)
+                              ? _red.withValues(alpha: 0.1)
                               : _green50,
                           borderRadius: BorderRadius.circular(8)),
                       child: _typeIconWidget(type,
@@ -840,7 +943,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: _teal.withOpacity(0.1),
+                          color: _teal.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: const Icon(Icons.edit_rounded,
@@ -1047,7 +1150,7 @@ class _InventoryPageState extends State<InventoryPage>
       decoration: BoxDecoration(
         color: _white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: accentColor.withOpacity(0.2)),
+        border: Border.all(color: accentColor.withValues(alpha: 0.2)),
         boxShadow: [
           BoxShadow(
               color: _shadow, blurRadius: 6, offset: const Offset(0, 2))
@@ -1059,7 +1162,7 @@ class _InventoryPageState extends State<InventoryPage>
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.1),
+              color: accentColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(actionIcon, color: accentColor, size: 18),
@@ -1087,9 +1190,9 @@ class _InventoryPageState extends State<InventoryPage>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
-                    color: _orange.withOpacity(0.12),
+                    color: _orange.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: _orange.withOpacity(0.3)),
+                    border: Border.all(color: _orange.withValues(alpha: 0.3)),
                   ),
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.bolt_rounded, size: 9, color: _orange),
@@ -1396,8 +1499,8 @@ class _InventoryPageState extends State<InventoryPage>
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: status == 'approved'
-                      ? _green600.withOpacity(0.35)
-                      : _red.withOpacity(0.35),
+                      ? _green600.withValues(alpha: 0.35)
+                      : _red.withValues(alpha: 0.35),
                 ),
               ),
               child: Column(
@@ -1482,9 +1585,9 @@ class _InventoryPageState extends State<InventoryPage>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: _orange.withOpacity(0.12),
+                  color: _orange.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _orange.withOpacity(0.45)),
+                  border: Border.all(color: _orange.withValues(alpha: 0.45)),
                 ),
                 child: const Text('PENDING APPROVAL',
                     style: TextStyle(
@@ -1503,10 +1606,10 @@ class _InventoryPageState extends State<InventoryPage>
                   padding: const EdgeInsets.symmetric(
                       horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: statusColor.withOpacity(0.1),
+                    color: statusColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                        color: statusColor.withOpacity(0.4)),
+                        color: statusColor.withValues(alpha: 0.4)),
                   ),
                   child: Text(status.toUpperCase(),
                       style: TextStyle(
@@ -1740,12 +1843,12 @@ class _InventoryPageState extends State<InventoryPage>
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _border.withOpacity(0.5)),
+          border: Border.all(color: _border.withValues(alpha: 0.5)),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: DataTable(
-            headingRowColor: WidgetStateProperty.all(_teal.withOpacity(0.05)),
+            headingRowColor: WidgetStateProperty.all(_teal.withValues(alpha: 0.05)),
             columnSpacing: 20,
             horizontalMargin: 16,
             columns: const [
@@ -1800,7 +1903,7 @@ class _InventoryPageState extends State<InventoryPage>
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _border.withOpacity(0.3)),
+              border: Border.all(color: _border.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
@@ -1849,7 +1952,7 @@ class _InventoryPageState extends State<InventoryPage>
       scrollDirection: Axis.horizontal,
       child: DataTable(
         headingRowColor:
-            WidgetStateProperty.all(_tealDark.withOpacity(0.07)),
+            WidgetStateProperty.all(_tealDark.withValues(alpha: 0.07)),
         dataRowMinHeight: 36,
         dataRowMaxHeight: 44,
         columnSpacing: 16,
@@ -1992,9 +2095,9 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.45), width: 1),
+        border: Border.all(color: color.withValues(alpha: 0.45), width: 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         _typeIconWidget(type, size: 11, color: color),
@@ -2017,7 +2120,7 @@ class _InventoryPageState extends State<InventoryPage>
           color: const Color(0xFFF3FCF4),
           borderRadius: BorderRadius.circular(7),
           border: Border.all(
-              color: const Color(0xFF81C784).withOpacity(0.6)),
+              color: const Color(0xFF81C784).withValues(alpha: 0.6)),
         ),
         child: Text('PKR ${_fmtPrice(price)}',
             style: const TextStyle(
@@ -2036,10 +2139,10 @@ class _InventoryPageState extends State<InventoryPage>
         padding:
             const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: (low ? _red : _green600).withOpacity(0.1),
+          color: (low ? _red : _green600).withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-              color: (low ? _red : _green600).withOpacity(0.3)),
+              color: (low ? _red : _green600).withValues(alpha: 0.3)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           if (low) ...[
@@ -2093,7 +2196,7 @@ class _InventoryPageState extends State<InventoryPage>
         borderRadius: BorderRadius.circular(4),
         boxShadow: [
           BoxShadow(
-            color: _red.withOpacity(0.35),
+            color: _red.withValues(alpha: 0.35),
             blurRadius: 5,
             offset: const Offset(0, 2),
           )
@@ -2122,9 +2225,9 @@ class _InventoryPageState extends State<InventoryPage>
         padding:
             const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Text(text,
             style: TextStyle(
@@ -2137,7 +2240,7 @@ class _InventoryPageState extends State<InventoryPage>
         padding:
             const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(text,
@@ -2334,7 +2437,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _teal.withOpacity(0.1),
+              color: _teal.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: const Icon(Icons.edit_rounded,
@@ -2479,7 +2582,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _teal,
                     disabledBackgroundColor:
-                        _teal.withOpacity(0.5),
+                        _teal.withValues(alpha: 0.5),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                     elevation: 3,

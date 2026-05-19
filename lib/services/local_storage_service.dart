@@ -1,39 +1,4 @@
 // lib/services/local_storage_service.dart
-//
-// CHANGES IN THIS VERSION:
-//   FIX 1: searchPatientsByCnicOrGuardian() now also matches by patient name
-//           (minimum 3 chars). This catches cases where the CNIC/phone search
-//           fails because the patient's own CNIC was not stored (child patients
-//           registered only with a guardian CNIC).
-//   FIX 2: saveLocalPatient() now calls flush() after put() so the write is
-//           durably committed before ValueListenableBuilder rebuilds the UI.
-//   FIX 3: saveAllLocalPatients() also calls flush() after putAll() for the
-//           same reason — bulk downloads now immediately reflect in the UI.
-//   FIX 4: downloadTodayTokens() now CLEARS today's Hive entries for the
-//           branch before re-downloading from Firestore. This is the critical
-//           fix for reversed tokens that were deleted from Firestore still
-//           showing in the UI — the old version only added/updated entries and
-//           never removed ones that no longer exist in Firestore.
-//
-// ─── BUG FIX (sync revert) ────────────────────────────────────────────────
-//   FIX-SYNC-3: downloadTodayTokens() Step 4 merge logic now protects ALL
-//               terminal local states, not just status == 'completed'.
-//
-// ─── NEW ──────────────────────────────────────────────────────────────────
-//   saveLocalInventoryItem(): Saves a single inventory item (keyed by
-//     medicineId) to the stock box.
-//
-// ─── MEDICINE RESTRICTION FIRESTORE FIX ──────────────────────────────────
-//   saveMedicineRestriction() now enqueues a 'save_medicine_restriction'
-//   sync op so the restriction is written to Firestore and available to
-//   internet-only terminals (not just LAN-connected ones).
-//
-//   downloadMedicineRestrictions() — new method that pulls active
-//   restrictions from Firestore into local Hive. Called on startup,
-//   after every upload cycle, and by the receptionist before the block
-//   check so internet-only devices always have current data.
-//
-//   fullDownloadOnce() now includes downloadMedicineRestrictions().
 
 import 'dart:convert';
 import 'dart:io';
@@ -55,7 +20,8 @@ class LocalStorageService {
   static const String dispensaryBox    = 'local_dispensary';
   static const String medicineRestrictionsBox = 'local_medicine_restrictions';
   static const String donationsBox     = 'local_donations';
-  static const String creditsBox       = 'local_credit_ledger';
+  static const String donorsBox        = 'local_donors';
+  static const String reportsCacheBox   = 'local_reports_cache';
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +29,10 @@ class LocalStorageService {
   /// an "unknown typeId" error occurs (legacy/corrupted data).
   static Future<Box<T>> openBoxSafe<T>(String name) async {
     try {
-      return await Hive.openBox<T>(name);
+      return await Hive.openBox<T>(name).timeout(const Duration(seconds: 10),
+          onTimeout: () {
+        throw Exception("Timeout opening Hive box: $name");
+      });
     } catch (e) {
       debugPrint('[LocalStorageService] openBoxSafe error for "$name": $e');
       final err = e.toString();
@@ -90,8 +59,9 @@ class LocalStorageService {
       branchesBox,
       dispensaryBox,
       donationsBox,
-      creditsBox,
+      donorsBox,
       medicineRestrictionsBox,
+      reportsCacheBox,
       'app_settings',
       'app_flags',
     ];
@@ -99,6 +69,15 @@ class LocalStorageService {
     for (final name in boxNames) {
       await openBoxSafe(name);
     }
+
+    // ── Generate Terminal ID (for collision-free receipting)
+    final settings = Hive.box('app_settings');
+    if (settings.get('terminal_id') == null) {
+      final now = DateTime.now().millisecondsSinceEpoch.toString();
+      final tid = now.substring(now.length - 2); // Last 2 digits of timestamp as simple terminal ID
+      await settings.put('terminal_id', tid);
+    }
+
     debugPrint('[LocalStorageService.init] All Hive boxes opened safely.');
   }
 
@@ -106,8 +85,8 @@ class LocalStorageService {
   static Future<void> clearAllData() async {
     final boxNames = [
       usersBox, patientsBox, entriesBox, syncBox, prescriptionsBox,
-      stockBox, branchesBox, dispensaryBox, donationsBox, creditsBox,
-      medicineRestrictionsBox, 'app_settings', 'app_flags',
+      stockBox, branchesBox, dispensaryBox, donationsBox, donorsBox,
+      medicineRestrictionsBox, reportsCacheBox, 'app_settings', 'app_flags',
       'local_submissions', 'server_sync_queue', 'local_edit_requests',
       'server_sync_failed'
     ];
@@ -219,69 +198,17 @@ class LocalStorageService {
     await Hive.box(syncBox).delete(key);
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // RECEIPT SEQUENCE
-  // ════════════════════════════════════════════════════════════════════════════
-
-  static Future<String> nextReceiptNumber(String branchId) async {
-    final dateKey = DateFormat('ddMMyy').format(DateTime.now());
-
-    try {
-      final ref = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('meta')
-          .doc('receipt_seq');
-
-      int seq = 1;
-
-      if (Platform.isWindows) {
-        debugPrint('[LS.nextReceiptNumber] Windows: Using stable get/set approach...');
-        final snap = await ref.get().timeout(const Duration(seconds: 3));
-        if (snap.exists) {
-          seq = ((snap.data()?[dateKey] as int?) ?? 0) + 1;
-        }
-        await ref.set({dateKey: seq}, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 3));
-      } else {
-        debugPrint('[LS.nextReceiptNumber] Attempting Firestore Transaction...');
-        await FirebaseFirestore.instance.runTransaction((tx) async {
-          final snap = await tx.get(ref);
-          seq = snap.exists ? ((snap.data()?[dateKey] as int?) ?? 0) + 1 : 1;
-          tx.set(ref, {dateKey: seq}, SetOptions(merge: true));
-        }).timeout(const Duration(seconds: 5));
-      }
-
-      debugPrint('[LS.nextReceiptNumber] Online sequence: $seq');
-      return buildReceiptNumber(branchId, seq);
-    } catch (e) {
-      debugPrint('[LS.nextReceiptNumber] Falling back to local: $e');
-      final box     = Hive.box('app_settings');
-      final seqKey  = 'local_seq_${branchId}_$dateKey';
-      final current = (box.get(seqKey) as int?) ?? 0;
-      final next    = current + 1;
-      await box.put(seqKey, next);
-      return '${buildReceiptNumber(branchId, next)}-L';
-    }
-  }
-
-  static String buildReceiptNumber(String branchId, int seq) {
-    final code    = _branchCode(branchId);
-    final dateStr = DateFormat('ddMMyy').format(DateTime.now());
-    final seqStr  = seq.toString().padLeft(3, '0');
-    return '$code-$dateStr-$seqStr';
-  }
 
   static String _branchCode(String branchId) {
     final id = branchId.toLowerCase().trim();
-    if (id.contains('gujrat'))                                    return 'grt';
-    if (id.contains('jalalpurjattan') || id.contains('jalalpur')) return 'jpt';
-    if (id.contains('karachi-1') || id == 'karachi1')             return 'khi1';
-    if (id.contains('karachi-2') || id == 'karachi2')             return 'khi2';
-    if (id.contains('rawalpindi'))                                return 'rwp';
-    if (id.contains('sialkot'))                                   return 'skt';
-    if (id.contains('lahore') || id == 'lhr')                     return 'lhr';
-    return id.length >= 3 ? id.substring(0, 3) : id;
+    if (id.contains('gujrat'))     return 'GRT';
+    if (id.contains('jalalpur'))   return 'JPT';
+    if (id.contains('karachi-1') || id == 'karachi1') return 'KHI1';
+    if (id.contains('karachi-2') || id == 'karachi2') return 'KHI2';
+    if (id.contains('rawalpindi')) return 'RWP';
+    if (id.contains('sialkot'))    return 'SKT';
+    if (id.contains('lahore') || id == 'lhr') return 'LHR';
+    return id.length >= 3 ? id.substring(0, 3).toUpperCase() : id.toUpperCase();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -295,25 +222,27 @@ class LocalStorageService {
     required String branchId,
     required Map<String, dynamic> data,
   }) async {
+    final branchIdNorm = branchId.toLowerCase().trim();
     final localId = _newLocalId();
     final date    = (data['date'] as String?) ??
         DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final key     = _donationKey(branchId, date, localId);
+    final key     = _donationKey(branchIdNorm, date, localId);
 
     final record = Map<String, dynamic>.from(data);
     record['localId']     = localId;
     record['hiveKey']     = key;
-    record['branchId']    = branchId;
+    record['branchId']    = branchIdNorm;
     record['syncStatus']  = 'pending';
     record['firestoreId'] = null;
 
     final sanitized = sanitize(record);
     await Hive.box(donationsBox).put(key, sanitized);
+    await Hive.box(donationsBox).flush();
     debugPrint('[LS] Donation saved locally → $key');
 
     await enqueueSync({
       'type':     'save_donation',
-      'branchId': branchId,
+      'branchId': branchIdNorm,
       'localId':  localId,
       'hiveKey':  key,
       'data':     sanitized,
@@ -334,7 +263,8 @@ class LocalStorageService {
     debugPrint('[LS] Donation synced → $hiveKey → fs:$firestoreId');
   }
 
-  static List<Map<String, dynamic>> getDonations(String branchId) {
+  static List<Map<String, dynamic>> getDonations(String branchIdRaw) {
+    final branchId = branchIdRaw.toLowerCase().trim();
     final prefix = '${branchId}__';
     final box    = Hive.box(donationsBox);
     return box.keys
@@ -349,7 +279,8 @@ class LocalStorageService {
   }
 
   static Stream<List<Map<String, dynamic>>> streamDonations(
-      String branchId) async* {
+      String branchIdRaw) async* {
+    final branchId = branchIdRaw.toLowerCase().trim();
     yield getDonations(branchId);
     await for (final _ in Hive.box(donationsBox).watch()) {
       yield getDonations(branchId);
@@ -415,181 +346,9 @@ class LocalStorageService {
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // CREDIT LEDGER — local read/write
-  // ════════════════════════════════════════════════════════════════════════════
 
-  static String _creditKey(String branchId, String localId) =>
-      '${branchId}__credit__$localId';
+  // ── Sync Queue ─────────────────────────────────────────────────────────────
 
-  static Future<String> saveCreditEntry({
-    required String branchId,
-    required Map<String, dynamic> data,
-  }) async {
-    final localId = _newLocalId();
-    final key     = _creditKey(branchId, localId);
-
-    final record = Map<String, dynamic>.from(data);
-    record['localId']     = localId;
-    record['hiveKey']     = key;
-    record['branchId']    = branchId;
-    record['syncStatus']  = 'pending';
-    record['firestoreId'] = null;
-
-    final sanitized = sanitize(record);
-    await Hive.box(creditsBox).put(key, sanitized);
-    debugPrint('[LS] Credit saved locally → $key | '
-        '${data['fromRole']} → ${data['toRole']} | PKR ${data['amount']}');
-
-    await enqueueSync({
-      'type':     'save_credit_entry',
-      'branchId': branchId,
-      'localId':  localId,
-      'hiveKey':  key,
-      'data':     sanitized,
-    });
-
-    return key;
-  }
-
-  static Future<void> markCreditSynced(
-      String hiveKey, String firestoreId) async {
-    final box = Hive.box(creditsBox);
-    final raw = box.get(hiveKey);
-    if (raw == null) return;
-    final updated = Map<String, dynamic>.from(raw as Map)
-      ..['firestoreId'] = firestoreId
-      ..['syncStatus']  = 'synced';
-    await box.put(hiveKey, updated);
-    debugPrint('[LS] Credit synced → $hiveKey → fs:$firestoreId');
-  }
-
-  static Future<void> updateCreditStatus(
-    String hiveKey, {
-    required String status,
-    required String actorUsername,
-    required String branchId,
-    String? rejectionReason,
-  }) async {
-    final box = Hive.box(creditsBox);
-    final raw = box.get(hiveKey);
-    if (raw == null) {
-      debugPrint('[LS] updateCreditStatus: key not found → $hiveKey');
-      return;
-    }
-
-    final isApproval = status == 'approved';
-    final fields = <String, dynamic>{
-      'status': status,
-      if (isApproval)  'approvedBy': actorUsername,
-      if (isApproval)  'approvedAt': _nowIso(),
-      if (!isApproval) 'rejectedBy': actorUsername,
-      if (!isApproval) 'rejectedAt': _nowIso(),
-      if (rejectionReason != null) 'rejectionReason': rejectionReason,
-    };
-
-    final updated = Map<String, dynamic>.from(raw as Map)..addAll(fields);
-    await box.put(hiveKey, updated);
-    debugPrint('[LS] Credit status updated → $hiveKey → $status');
-
-    final fsId = (raw as Map)['firestoreId']?.toString();
-    if (fsId != null && fsId.isNotEmpty) {
-      await enqueueSync({
-        'type':        'update_credit_status',
-        'branchId':    branchId,
-        'firestoreId': fsId,
-        'fields':      fields,
-      });
-    } else {
-      await enqueueSync({
-        'type':     'save_credit_entry',
-        'branchId': branchId,
-        'localId':  (updated['localId'] as String?) ?? hiveKey,
-        'hiveKey':  hiveKey,
-        'data':     updated,
-      });
-    }
-  }
-
-  static List<Map<String, dynamic>> getCredits({
-    required String branchId,
-    String? toRole,
-    String? fromUserId,
-    String? status,
-  }) {
-    final prefix = '${branchId}__credit__';
-    final box    = Hive.box(creditsBox);
-
-    var list = box.keys
-        .where((k) => k.toString().startsWith(prefix))
-        .map((k) => Map<String, dynamic>.from(box.get(k) as Map))
-        .toList();
-
-    if (toRole     != null) list = list.where((e) => e['toRole']     == toRole).toList();
-    if (fromUserId != null) list = list.where((e) => e['fromUserId'] == fromUserId).toList();
-    if (status     != null) list = list.where((e) => e['status']     == status).toList();
-
-    list.sort((a, b) {
-      final at = (a['timestamp'] as String?) ?? '';
-      final bt = (b['timestamp'] as String?) ?? '';
-      return bt.compareTo(at);
-    });
-    return list;
-  }
-
-  static Stream<List<Map<String, dynamic>>> streamCredits({
-    required String branchId,
-    String? toRole,
-    String? fromUserId,
-    String? status,
-  }) async* {
-    yield getCredits(
-        branchId: branchId, toRole: toRole,
-        fromUserId: fromUserId, status: status);
-    await for (final _ in Hive.box(creditsBox).watch()) {
-      yield getCredits(
-          branchId: branchId, toRole: toRole,
-          fromUserId: fromUserId, status: status);
-    }
-  }
-
-  static Future<void> downloadCredits(String branchId) async {
-    try {
-      final snap = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('creditLedger')
-          .get();
-
-      final box = Hive.box(creditsBox);
-      for (final doc in snap.docs) {
-        final d       = doc.data();
-        final localId = (d['localId'] as String?) ?? doc.id;
-        final key     = _creditKey(branchId, localId);
-
-        final existing = box.get(key);
-        if (existing == null) {
-          await box.put(key, sanitize({
-            ...d,
-            'firestoreId': doc.id,
-            'localId':     localId,
-            'hiveKey':     key,
-            'syncStatus':  'synced',
-          }));
-        } else {
-          final ex = Map<String, dynamic>.from(existing as Map);
-          if (ex['syncStatus'] != 'pending') {
-            ex['firestoreId'] = doc.id;
-            ex['syncStatus']  = 'synced';
-            await box.put(key, ex);
-          }
-        }
-      }
-      debugPrint('[LS] Downloaded ${snap.docs.length} credit entries');
-    } catch (e) {
-      debugPrint('[LS] downloadCredits error: $e');
-    }
-  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // FULL DOWNLOAD HELPERS
@@ -601,7 +360,6 @@ class LocalStorageService {
     await refreshPrescriptions(branchId);
     await downloadTodayTokens(branchId);
     await downloadDonations(branchId);
-    await downloadCredits(branchId);
     await downloadMedicineRestrictions(branchId); // ← ADDED: Firestore restriction sync
     debugPrint('[LS] fullDownloadOnce completed for branch: $branchId');
   }
@@ -657,8 +415,9 @@ class LocalStorageService {
       }
     }
 
-    await seedOne('admin@gmd.com',  'Admin@123',  'admin',  'all');
-    await seedOne('server@gmd.com', 'Server@123', 'server', 'sialkot');
+    await seedOne('admin@gmd.com',   'Admin@123',   'admin',   'all');
+    await seedOne('manager@gmd.com', 'Manager@123', 'manager', 'all');
+    await seedOne('server@gmd.com',  'Server@123',  'server',  'sialkot');
   }
 
   static Future<void> forceDeduplicatePatients() async {
@@ -687,6 +446,16 @@ class LocalStorageService {
     }
 
     final eBox = Hive.box(entriesBox);
+    // Optimization: Build a map of patientId -> tokenKeys so we don't loop entries for every patient
+    final Map<String, List<String>> patientToTokenKeys = {};
+    for (final tokenKey in eBox.keys.toList()) {
+      final tokenVal = eBox.get(tokenKey);
+      if (tokenVal is Map && tokenVal['patientId'] != null) {
+        final pId = tokenVal['patientId'].toString();
+        patientToTokenKeys.putIfAbsent(pId, () => []).add(tokenKey.toString());
+      }
+    }
+
     for (final entry in uniquePatients.entries) {
       final newKey = entry.key;
       var patient  = sanitize(entry.value);
@@ -694,17 +463,22 @@ class LocalStorageService {
       await box.put(newKey, patient);
 
       final oldKeys = keyToOldKeys[newKey]!;
-      for (final tokenKey in eBox.keys.toList()) {
-        final tokenVal = eBox.get(tokenKey);
-        if (tokenVal is Map && oldKeys.contains(tokenVal['patientId'])) {
-          final upd = Map<String, dynamic>.from(tokenVal);
-          upd['patientId'] = newKey;
-          await eBox.put(tokenKey, upd);
-        }
-      }
-
       for (final oldKey in oldKeys) {
-        if (oldKey != newKey) await box.delete(oldKey);
+        if (oldKey == newKey) continue;
+        
+        // Update all tokens that were using this old key
+        final tokenKeysToUpdate = patientToTokenKeys[oldKey] ?? [];
+        for (final tKey in tokenKeysToUpdate) {
+          final tokenVal = eBox.get(tKey);
+          if (tokenVal is Map) {
+            final upd = Map<String, dynamic>.from(tokenVal);
+            upd['patientId'] = newKey;
+            await eBox.put(tKey, upd);
+          }
+        }
+        
+        // Delete the old patient record
+        await box.delete(oldKey);
       }
     }
 
@@ -1455,5 +1229,70 @@ class LocalStorageService {
     }
     final remaining = expireDay.difference(today).inDays + 1;
     return {...restriction, 'remainingDays': remaining};
+  }
+  // ════════════════════════════════════════════════════════════════════════════
+  // DONATION RECEIPT NUMBERING
+  // ════════════════════════════════════════════════════════════════════════════
+
+  static String getBranchCode(String branchId) {
+    final b = branchId.toLowerCase().trim();
+    if (b.contains('gujrat')) return 'grt';
+    if (b.contains('sialkot')) return 'skt';
+    if (b.contains('lahore')) return 'lhr';
+    if (b.contains('karachi 1')) return 'krh1';
+    if (b.contains('karachi')) return 'khi';
+    if (b.contains('rawalpindi')) return 'rwp';
+    if (b.contains('peshawar')) return 'psh';
+    if (b.contains('multan')) return 'mul';
+    if (b.contains('faisalabad')) return 'fsd';
+    if (b.contains('islamabad')) return 'isb';
+    if (b.contains('quetta')) return 'qta';
+    if (b.length <= 3) return b;
+    return b.substring(0, 3);
+  }
+
+  static Future<String> nextReceiptNumber([String branchId = '']) async {
+    final box = Hive.box('app_settings');
+    final code = getBranchCode(branchId);
+    
+    // Branch-specific counter
+    final key = 'receipt_seq_$code';
+    final current = box.get(key, defaultValue: 0) as int;
+    final next = current + 1;
+    await box.put(key, next);
+    
+    // Also update global for backward compatibility or cross-branch tracking if needed
+    final globalKey = 'receipt_seq_global';
+    final globalCurrent = box.get(globalKey, defaultValue: 0) as int;
+    if (next > globalCurrent) await box.put(globalKey, next);
+
+    return formatReceiptNumber(next, code);
+  }
+
+  static String formatReceiptNumber(int seq, [String branchCode = '']) {
+    final padded = seq.toString().padLeft(3, '0');
+    final tid = Hive.box('app_settings').get('terminal_id', defaultValue: '');
+    
+    String res = 'GMWF';
+    if (branchCode.isNotEmpty) res += '-$branchCode';
+    res += '-$padded';
+    if (tid.isNotEmpty) res += '-$tid';
+    
+    return res;
+  }
+
+  static Future<String> nextDonorNumber() async {
+    final box = Hive.box('app_settings');
+    const key = 'donor_global_seq';
+    final current = box.get(key, defaultValue: 0) as int;
+    final next = current + 1;
+    await box.put(key, next);
+    
+    return formatDonorId(next);
+  }
+
+  static String formatDonorId(int seq) {
+    final padded = seq.toString().padLeft(8, '0');
+    return 'DNR-$padded';
   }
 }

@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/doctor/patient_info.dart
+// lib/pages/dispensary/doctor/patient_info.dart
 
 import 'package:flutter/material.dart';
 
@@ -133,7 +133,7 @@ class PatientInfo extends StatelessWidget {
                     vertical: isNarrow ? 4 : 7,
                   ),
                   decoration: BoxDecoration(
-                    color: _amber.withOpacity(0.15),
+                    color: _amber.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(30),
                     border: Border.all(color: _amber, width: 2),
                   ),
@@ -153,6 +153,57 @@ class PatientInfo extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (patient['suggestedDays'] != null) ...[
+                  const SizedBox(width: 8),
+                  (() {
+                    final suggested = (patient['suggestedDays'] as int?) ?? 1;
+                    int prescribed = 1;
+                    final existingPresc = patient['prescription'];
+                    if (existingPresc is Map) {
+                      prescribed = (existingPresc['daysOfMedicine'] as int?) ?? 1;
+                    } else if (patient['daysOfMedicine'] is int) {
+                      prescribed = patient['daysOfMedicine'];
+                    }
+
+                    final hasMismatch = suggested != prescribed && existingPresc != null;
+
+                    return Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isNarrow ? 8 : 12,
+                        vertical: isNarrow ? 4 : 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: hasMismatch ? Colors.orange.shade50 : Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: hasMismatch ? Colors.orange.shade300 : Colors.green.shade300,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            hasMismatch ? Icons.warning_amber_rounded : Icons.info_outline,
+                            color: hasMismatch ? Colors.orange.shade800 : Colors.green.shade800,
+                            size: isNarrow ? 14 : 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            hasMismatch
+                                ? 'Mismatched: $suggested Paid vs $prescribed Prescribed'
+                                : 'Asked for $suggested day${suggested > 1 ? 's' : ''} medicine',
+                            style: TextStyle(
+                              color: hasMismatch ? Colors.orange.shade900 : Colors.green.shade900,
+                              fontSize: isNarrow ? 11 : 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  })(),
+                ],
               ],
             ),
 

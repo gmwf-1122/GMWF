@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/dispensar/inventory_adjustment.dart
+// lib/pages/dispensary/dispensar/inventory_adjustment.dart
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -202,6 +202,24 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
           .collection('inventory')
           .doc(itemId)
           .update(updatedData);
+
+      final oldQty = selectedItem!['quantity'] ?? 0;
+      final diff = newQty - oldQty;
+
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory_log')
+          .add({
+        'action': 'edit_stock',
+        'medicineName': newName,
+        'medicineId': itemId,
+        'oldQuantity': oldQty,
+        'newQuantity': newQty,
+        'quantityAdded': diff, // Can be negative or positive
+        'performedBy': user.uid,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
 
       _snack('Inventory updated successfully!');
       await _loadInventory();
@@ -489,7 +507,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
                     decoration: BoxDecoration(
                       color: _white,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: lowStk ? _red.withOpacity(0.3) : _green100),
+                      border: Border.all(color: lowStk ? _red.withValues(alpha: 0.3) : _green100),
                       boxShadow: [BoxShadow(color: _shadow, blurRadius: 6, offset: const Offset(0, 2))],
                     ),
                     child: InkWell(
@@ -652,7 +670,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: _teal,
-              disabledBackgroundColor: _teal.withOpacity(0.6),
+              disabledBackgroundColor: _teal.withValues(alpha: 0.6),
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               elevation: 2,
@@ -670,7 +688,7 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
             label: const Text('Delete from Inventory',
                 style: TextStyle(color: _red, fontWeight: FontWeight.bold, fontSize: 15)),
             style: OutlinedButton.styleFrom(
-              side: BorderSide(color: _red.withOpacity(0.6), width: 1.5),
+              side: BorderSide(color: _red.withValues(alpha: 0.6), width: 1.5),
               padding: const EdgeInsets.symmetric(vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -709,9 +727,9 @@ class _InventoryAdjustmentPageState extends State<InventoryAdjustmentPage>
   Widget _chip(String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     decoration: BoxDecoration(
-      color: color.withOpacity(0.1),
+      color: color.withValues(alpha: 0.1),
       borderRadius: BorderRadius.circular(6),
-      border: Border.all(color: color.withOpacity(0.3)),
+      border: Border.all(color: color.withValues(alpha: 0.3)),
     ),
     child: Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
   );

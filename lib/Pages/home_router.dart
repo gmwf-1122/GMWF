@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/firestore_service.dart';
@@ -13,23 +14,22 @@ import '../models/token.dart';
 
 import 'dispensary/receptionist/receptionist_screen.dart';
 import 'dispensary/doctor/doctor_screen.dart';
-import 'admin_screen.dart';
-import 'ceo_screen.dart';
-import 'chairman_screen.dart';
-import 'supervisor.dart';
+import 'overview.dart';
 import 'dispensary/dispensar/inventory.dart';
 import 'dispensary/dispensar/dispensar_screen.dart';
 import 'login_page.dart';
-import 'manager_screen.dart';
-import 'branch_manager_screen.dart';
-import 'server_dashboard_with_sync.dart';
+import 'server.dart';
 
 import 'dasterkhwaan/office_boy.dart';
 import 'dasterkhwaan/kitchen.dart';
 import 'donations/donations_screen.dart';
+import 'donations/donations_shared.dart';
 import '../widgets/gmwf_loading_view.dart';
+import 'global_modular_dashboard.dart'; // Unified modular entry point
+import 'madrassa/madrassa_dashboard.dart';
+import 'madrassa/madrassa_guardian_screen.dart';
 
-import '../main.dart';
+import '../constants/navigator_key.dart';
 
 class HomeRouter extends StatelessWidget {
   final User? user;
@@ -43,7 +43,12 @@ class HomeRouter extends StatelessWidget {
 
   Future<bool> _checkConnectivity() async {
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
+      final connectivityResult = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(seconds: 5), onTimeout: () {
+        debugPrint("HomeRouter: Connectivity check timed out");
+        return [ConnectivityResult.none];
+      });
       if (connectivityResult is List<ConnectivityResult>) {
         return connectivityResult
             .any((result) => result != ConnectivityResult.none);
@@ -263,22 +268,14 @@ class HomeRouter extends StatelessWidget {
     String branchId,
     String uid,
     String userName,
+    Map<String, dynamic> userData,
   ) {
     final r = role.toLowerCase().trim();
 
     switch (r) {
-      case 'ceo':
-        return const CeoScreen();
-
-      case 'chairman':
-        return const ChairmanScreen();
-
-      case 'admin':
-        return AdminScreen(branchId: branchId);
-
-      case 'manager':
-      case 'hq manager':
-        return ManagerScreen(branchId: branchId, username: userName);
+      // Case blocks for executive roles (ceo, chairman, admin, manager) 
+      // are now handled by the globalRoles logic in the build method.
+      // These cases in switch are now legacy/fallback.
 
       case 'server':
         return ServerDashboardWithSync(branchId: branchId);
@@ -318,10 +315,15 @@ class HomeRouter extends StatelessWidget {
         return InventoryPage(branchId: branchId);
 
       case 'supervisor':
-        return SupervisorScreen(branchId: branchId, supervisorId: uid);
-
       case 'branch manager':
-        return BranchManagerScreen(branchId: branchId, userId: uid);
+        // These are now handled by globalRoles above but kept here for safety
+        // until we ensure they are always caught by the globalRoles check.
+        return GlobalModularDashboard(userData: {
+          'role': r,
+          'branchId': branchId,
+          'uid': uid,
+          'name': userName,
+        });
 
       case 'office boy':
       case 'dasterkhwaan office boy':
@@ -329,7 +331,7 @@ class HomeRouter extends StatelessWidget {
       case 'dasterkhwaan token generator':
       case 'token generator':
       case 'dasterkhwaan':
-        return DasterkhwaanOfficeBoy(branchId: branchId, userName: userName);
+        return DasterkhwaanOfficeBoy(branchId: branchId, userName: userName, role: r);
 
       case 'kitchen':
       case 'dasterkhwaan kitchen':
@@ -342,6 +344,19 @@ class HomeRouter extends StatelessWidget {
           username:   userName,
           role:       UserRole.staff,
         );
+
+      case 'madrassa admin':
+      case 'madrassa teacher':
+        return MadrassaDashboard(
+          branchId: branchId,
+          username: userName,
+          role: role,
+          isAdmin: r == 'madrassa admin',
+        );
+
+      case 'madrassa parent':
+      case 'madrassa guardian':
+        return MadrassaGuardianScreen(userData: userData);
 
       default:
         debugPrint("Unknown role: $role");
@@ -412,17 +427,35 @@ class HomeRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 💡 FIX: We use a multi-stage loading to prevent the "Double Login" flicker.
+    // We only redirect to login if we are CERTAIN there is no user.
     return FutureBuilder<Map<String, dynamic>?>(
-      future: Future.delayed(const Duration(milliseconds: 500), _fetchUserData),
+      future: _fetchUserData(),
       builder: (context, snapshot) {
+        // While we are fetching, show the loading view.
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const GmwfLoadingView(
-            message: 'Loading your dashboard...',
-            subMessage: 'Fetching user data from Firestore',
+            message: 'Initializing...',
+            subMessage: 'Securely verifying your credentials',
           );
         }
 
-        if (!snapshot.hasData || snapshot.data == null) {
+        // Only redirect if snapshot is done AND we definitely have no data.
+        if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
+          debugPrint("HomeRouter: No user data - checking for late arrival...");
+          
+          // Final fallback check to prevent race condition
+          if (user == null && localUser == null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LoginPage()),
+                  (route) => false,
+                );
+              }
+            });
+          }
           debugPrint(
               "HomeRouter: No user data found - redirecting to login");
 
@@ -459,7 +492,45 @@ class HomeRouter extends StatelessWidget {
         debugPrint(
             "HomeRouter -> Role: $role | Branch: $branchId | UID: $uid | Name: $userName");
 
-        return _getScreenByRole(role, branchId, uid, userName);
+        // ✅ DevOps: Tag the Sentry session for remote debugging
+        try {
+          Sentry.configureScope((scope) {
+            scope.setTag("branch", branchId);
+            scope.setTag("role", role);
+            scope.setUser(SentryUser(
+              id: uid,
+              username: userName,
+              email: data['email'],
+            ));
+            scope.setContexts("user_data", data);
+          });
+        } catch (e) {
+          debugPrint("Sentry tagging error: $e");
+        }
+
+        // Hybrid Routing Logic:
+        // 1. High-level "Global" users get the Modular Dashboard hub.
+        // 2. Operational users (Doctor, Dispenser, etc.) go directly to their legacy screens.
+        
+        const globalRoles = [
+          'chairman',
+          'admin',
+          'ceo',
+          'manager',
+          'hq manager',
+          'global',
+          'global admin',
+          'supervisor',
+          'branch manager',
+        ];
+        
+        if (globalRoles.contains(role)) {
+          debugPrint("HomeRouter -> Routing Global User to Modular Dashboard");
+          return GlobalModularDashboard(userData: data);
+        } else {
+          debugPrint("HomeRouter -> Routing Operational User directly to $role screen");
+          return _getScreenByRole(role, branchId, uid, userName, data);
+        }
       },
     );
   }

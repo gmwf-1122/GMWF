@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/receptionist/receptionist_screen.dart
+// lib/pages/dispensary/receptionist/receptionist_screen.dart
 
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -8,14 +8,14 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 import 'package:flutter/foundation.dart';
-import '../../../config/constants.dart';
-import '../../../services/auth_service.dart';
-import '../../../services/local_storage_service.dart' as lss;
-import '../../../services/sync_service.dart';
-import '../../../realtime/connection_manager.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
-import '../../../widgets/connection_status_widget.dart';
+import 'package:gmwf/config/constants.dart';
+import 'package:gmwf/services/auth_service.dart';
+import 'package:gmwf/services/local_storage_service.dart' as lss;
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/realtime/connection_manager.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
 
@@ -23,12 +23,14 @@ class ReceptionistScreen extends StatefulWidget {
   final String branchId;
   final String receptionistId;
   final String receptionistName;
+  final bool isEmbedded;
 
   const ReceptionistScreen({
     super.key,
     required this.branchId,
     required this.receptionistId,
     required this.receptionistName,
+    this.isEmbedded = false,
   });
 
   @override
@@ -216,13 +218,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     //    Receptionist name is usually reliable from widget props / local cache,
     //    but if it differs from Firestore we update in the background.
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.receptionistId)
-          .get();
+      final userData = await AuthService().getUserByUid(widget.receptionistId);
       final firestoreName =
-          (doc.data()?['username'] as String?)?.trim() ??
-          (doc.data()?['name']     as String?)?.trim();
+          (userData?['username'] as String?)?.trim() ??
+          (userData?['name']     as String?)?.trim();
       if (firestoreName != null && firestoreName.isNotEmpty &&
           firestoreName != resolvedName) {
         if (mounted) setState(() => _username = firestoreName);
@@ -341,9 +340,32 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     }
   }
 
+  bool _isLoggingOut = false;
+
   Future<void> _logout() async {
-    await ConnectionManager().stop();
-    await AuthService().signOut();
+    if (_isLoggingOut) return;
+    if (mounted) setState(() => _isLoggingOut = true);
+
+    try {
+      await ConnectionManager().stop().timeout(const Duration(seconds: 3),
+          onTimeout: () => debugPrint('[Receptionist] ConnectionManager.stop() timed out'));
+    } catch (e) {
+      debugPrint('[Receptionist] ConnectionManager.stop() error: $e');
+    }
+
+    try {
+      _connectionSub?.cancel();
+      _connSub?.cancel();
+      _realtimeSub?.cancel();
+    } catch (_) {}
+
+    try {
+      await AuthService().signOut().timeout(const Duration(seconds: 5),
+          onTimeout: () => debugPrint('[Receptionist] AuthService.signOut() timed out'));
+    } catch (e) {
+      debugPrint('[Receptionist] AuthService.signOut() error: $e');
+    }
+
     if (mounted) {
       Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
     }
@@ -478,8 +500,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     if (isMobile) {
       return AppBar(
         backgroundColor: _teal,
+        elevation: 4,
         toolbarHeight: 56,
-        automaticallyImplyLeading: false,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           Image.asset('assets/logo/gmwf.png', height: 32),
           const SizedBox(width: 8),
@@ -529,10 +552,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               icon: const Icon(Icons.sync, color: Colors.white, size: 20),
               onPressed: _forceSync,
             ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white, size: 20),
-            onPressed: _logout,
-          ),
+          _isLoggingOut
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2)),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.logout, color: Colors.white, size: 20),
+                  onPressed: _logout,
+                ),
         ],
         bottom: TabBar(
           controller: _mobileTabController,
@@ -556,7 +588,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
-      automaticallyImplyLeading: false,
+      iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
         Image.asset('assets/logo/gmwf.png', height: 60),
         const SizedBox(width: 16),
@@ -612,10 +644,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               : const Icon(Icons.sync, size: 32, color: Colors.white),
           onPressed: _isSyncing ? null : _forceSync,
         ),
-        IconButton(
-          icon: const Icon(Icons.logout, size: 32, color: Colors.white),
-          onPressed: _logout,
-        ),
+        _isLoggingOut
+            ? const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2.5)),
+              )
+            : IconButton(
+                icon: const Icon(Icons.logout, size: 32, color: Colors.white),
+                onPressed: _logout,
+              ),
         const SizedBox(width: 12),
       ],
     );
@@ -983,18 +1024,22 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 800;
 
+    final body = Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+        ),
+      ),
+      child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+    );
+
+    if (widget.isEmbedded) return body;
+
     return Scaffold(
       appBar: _buildAppBar(isMobile),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
-          ),
-        ),
-        child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
-      ),
+      body: body,
     );
   }
 

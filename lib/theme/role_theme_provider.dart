@@ -18,9 +18,11 @@ class RoleThemeScope extends InheritedWidget {
     return scope?.role ?? RoleTheme.admin;
   }
 
+  static RoleTheme roleOf(BuildContext context) => of(context);
 
-  static RoleThemeData dataOf(BuildContext context) {
-    return RoleThemeData.of(of(context));
+
+  static RoleThemeData dataOf(BuildContext context, [Color? customColor]) {
+    return RoleThemeData.of(of(context), customColor);
   }
 
   @override
@@ -90,29 +92,37 @@ class RoleCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final double radius;
+  final bool showGlow;
 
   const RoleCard({
     super.key,
     required this.child,
     this.padding,
-    this.radius = 14,
+    this.radius = 16,
+    this.showGlow = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     return Container(
-      padding: padding ?? const EdgeInsets.all(18),
+      padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: t.bgCard,
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: t.bgRule, width: 0.8),
+        border: Border.all(color: t.bgRule, width: 1.0),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
+          if (showGlow)
+            BoxShadow(
+              color: t.accent.withValues(alpha: 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
         ],
       ),
       child: child,

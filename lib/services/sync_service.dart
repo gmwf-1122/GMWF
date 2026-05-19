@@ -1,45 +1,10 @@
-// lib/services/sync_service.dart
-//
-// CHANGES IN THIS VERSION:
-//   NEW: 'save_patient' sync op — uploads patient registrations to Firestore under:
-//          branches/{branchId}/patients/{patientId}
-//   NEW: _enqueueMissingPatients() — on every start(), scans local Hive for
-//        patients never confirmed synced to Firestore and re-queues them.
-//        Uses SetOptions(merge:true) so re-uploading an existing patient is safe.
-//   NEW: syncUnsyncedPatients() — public helper for force-sync from admin panel.
-//   FIX: initialFullDownload now marks every downloaded patient as synced so
-//        backfill never re-uploads patients that came FROM Firestore.
-//   FIX: 'update_inventory' op is now handled in _uploadPending() so offline
-//        medicine deductions are correctly applied to Firestore when connectivity
-//        is restored.
-//
-// ─── BUG FIX (sync revert) ────────────────────────────────────────────────
-//   FIX-SYNC-1: triggerUpload() now only calls downloadTodayTokens (and the
-//               other refresh helpers) AFTER the upload queue is confirmed
-//               fully empty.
-//
-// ─── P1 FIX ───────────────────────────────────────────────────────────────
-//   FIX-P1: 'save_prescription' op now also patches the corresponding serial
-//           document status to 'completed' in Firestore immediately after the
-//           prescription document is written.
-//
-// ─── MEDICINE RESTRICTION FIRESTORE FIX ──────────────────────────────────
-//   NEW: 'save_medicine_restriction' op handler — writes the restriction to
-//        branches/{branchId}/medicine_restrictions/{patientId} in Firestore
-//        so internet-only terminals can download and enforce the ban.
-//        Previously restrictions were LAN-only (Hive + LAN broadcast).
-//
-//   triggerUpload() post-upload refresh now calls
-//   downloadMedicineRestrictions() so every terminal stays current after
-//   each sync cycle.
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-
-import 'local_storage_service.dart';
-import 'donations_local_storage.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/donations_local_storage.dart';
 
 class SyncService {
   static final SyncService _instance = SyncService._internal();
@@ -47,101 +12,80 @@ class SyncService {
   SyncService._internal();
 
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+  bool _isUploading = false;
+  String? _currentBranchId;
+  List<String> _authorizedBranches = [];
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   Timer? _dailyTokenTimer;
   Timer? _periodicSyncTimer;
-  bool _isUploading = false;
-  String? _currentBranchId;
 
-  // ── Queue-type resolver ───────────────────────────────────────────────────
-
-  static String resolveQueueType(String? raw) {
-    if (raw == null || raw.trim().isEmpty) return 'zakat';
-    final s = raw.toLowerCase().trim();
-    if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
-    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
-    if (s == 'zakat') return 'zakat';
-    print('[SyncService] ⚠️ resolveQueueType: unrecognised value "$raw" → defaulting to zakat');
-    return 'zakat';
-  }
-
-  // ── Lifecycle ─────────────────────────────────────────────────────────────
-
-  void start(String branchId) {
-    print("SyncService started for branch: $branchId");
+  void start(String branchId, {List<String>? authorizedBranches}) {
     _currentBranchId = branchId;
-
-    LocalStorageService.forceDeduplicatePatients();
-
-    // Backfill any patients saved locally but never confirmed uploaded
-    _enqueueMissingPatients(branchId);
-
-    triggerUpload();
-
+    _authorizedBranches = authorizedBranches ?? [];
+    
+    _connectivitySub?.cancel();
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
-      final isOnline = results.any((r) => r != ConnectivityResult.none);
-      print("Connectivity changed → online: $isOnline");
-      if (isOnline) triggerUpload();
-    });
-
-    _periodicSyncTimer?.cancel();
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 60), (_) {
-      print("Periodic sync timer fired (every 60s)");
-      triggerUpload();
+      if (results.any((r) => r != ConnectivityResult.none)) {
+        triggerUpload();
+      }
     });
 
     _setupDailyTokenRefresh(branchId);
+    
+    _periodicSyncTimer?.cancel();
+    _periodicSyncTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+      triggerUpload();
+    });
+
+    triggerUpload();
+    print("SyncService started for branch: $branchId");
   }
 
-  // ── Backfill unsynced patients ────────────────────────────────────────────
+  void updateAuthorizedBranches(List<String> branchIds) {
+    _authorizedBranches = branchIds;
+    print("SyncService: Updated authorized branches: $branchIds");
+    triggerUpload();
+  }
 
-  Future<void> _enqueueMissingPatients(String branchId) async {
+  Future<void> _enqueueMissingDonations(String branchId) async {
     try {
-      final patients = LocalStorageService.getAllLocalPatients(branchId: branchId);
-      if (patients.isEmpty) {
-        print('[SyncService] Backfill: no local patients found');
-        return;
-      }
+      final donationsBox = Hive.box(DonationsLocalStorage.donationsBox);
+      final syncBox      = Hive.box(LocalStorageService.syncBox);
+      
+      final alreadyQueued = syncBox.values
+          .where((v) => v['type'] == 'save_donation')
+          .map((v) => v['localId']?.toString())
+          .toSet();
 
-      final queueBox      = Hive.box(LocalStorageService.syncBox);
-      final alreadyQueued = <String>{};
-      for (final key in queueBox.keys) {
-        final raw = queueBox.get(key);
-        if (raw is Map) {
-          final type = raw['type']?.toString();
-          final pid  = raw['patientId']?.toString();
-          if (type == 'save_patient' && pid != null) alreadyQueued.add(pid);
-        }
-      }
-
-      final flagsBox = Hive.box('app_flags');
       int queued = 0;
+      for (final key in donationsBox.keys) {
+        final keyStr = key.toString();
+        final raw = donationsBox.get(key);
+        if (raw == null || raw is! Map) continue;
 
-      for (final patient in patients) {
-        final patientId = patient['patientId']?.toString();
-        if (patientId == null || patientId.isEmpty)            continue;
-        if (alreadyQueued.contains(patientId))                 continue;
-        if (flagsBox.get('patient_synced_$patientId') == true) continue;
+        final data = Map<String, dynamic>.from(raw);
+        if (data['syncStatus'] != 'pending') continue;
 
-        final sanitized = LocalStorageService.sanitize(patient);
+        final localId = data['localId']?.toString();
+        if (localId == null || localId.isEmpty) continue;
+        if (alreadyQueued.contains(localId)) continue;
+
         await LocalStorageService.enqueueSync({
-          'type':      'save_patient',
-          'branchId':  branchId,
-          'patientId': patientId,
-          'data':      sanitized,
+          'type': 'save_donation',
+          'branchId': branchId,
+          'localId': localId,
+          'hiveKey': keyStr,
+          'data': data,
         });
         queued++;
       }
-
+      
       if (queued > 0) {
-        print('[SyncService] 📥 Backfill: queued $queued unsynced patients for upload');
-      } else {
-        print('[SyncService] ✅ Backfill: all local patients already synced or queued');
+        print('[SyncService] 📥 Backfill: queued $queued pending donations for upload');
       }
     } catch (e) {
-      print('[SyncService] _enqueueMissingPatients error: $e');
+      print('[SyncService] _enqueueMissingDonations error: $e');
     }
   }
 
@@ -153,91 +97,68 @@ class SyncService {
 
     _dailyTokenTimer?.cancel();
     _dailyTokenTimer = Timer(duration, () async {
-      print("Daily token refresh timer fired");
       await LocalStorageService.downloadTodayTokens(branchId);
       _setupDailyTokenRefresh(branchId);
     });
   }
 
-  // ── FIX-SYNC-1: Only download after the queue is confirmed empty ──────────
   Future<void> triggerUpload() async {
-    if (_currentBranchId == null) {
-      print("triggerUpload SKIPPED → no currentBranchId set");
-      return;
-    }
+    if (_currentBranchId == null) return;
 
     final connectivity = await Connectivity().checkConnectivity();
     final isOnline     = connectivity.any((r) => r != ConnectivityResult.none);
 
-    print("triggerUpload() called | branch: $_currentBranchId | online: $isOnline"
-        " | _isUploading: $_isUploading"
-        " | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
-
     if (isOnline && !_isUploading) {
-      print("→ starting _uploadPending()");
       await _uploadPending();
 
-      // FIX-SYNC-1: Only refresh from Firestore once the queue is fully flushed.
       final remainingQueue = Hive.box(LocalStorageService.syncBox).length;
       if (remainingQueue == 0) {
         try {
-          print("Post-upload refresh started (queue empty — safe to download)...");
-          await LocalStorageService.downloadTodayTokens(_currentBranchId!);
-          await LocalStorageService.downloadInventory(_currentBranchId!);
-          await LocalStorageService.refreshPrescriptions(_currentBranchId!);
-          await LocalStorageService.downloadMedicineRestrictions(_currentBranchId!); // ← ADDED
-          await DonationsLocalStorage.downloadTodayDonations(_currentBranchId!);
-          await DonationsLocalStorage.downloadCreditLedger(_currentBranchId!);
-          print("Post-sync refresh completed "
-              "(tokens + inventory + prescriptions + restrictions + donations + credits)");
+          final branchesToSync = <String>{};
+          if (_currentBranchId != null) branchesToSync.add(_currentBranchId!);
+          if (_authorizedBranches.isNotEmpty) branchesToSync.addAll(_authorizedBranches);
+
+          for (final bId in branchesToSync) {
+            await _refreshDataForBranch(bId);
+          }
         } catch (e) {
           print("Refresh after upload failed: $e");
         }
-      } else {
-        print("Skipping post-upload download — "
-            "$remainingQueue item(s) still pending in queue. "
-            "Will retry on next triggerUpload().");
       }
-    } else {
-      print("triggerUpload SKIPPED → ${!isOnline ? 'offline' : 'already uploading'}");
     }
   }
 
-  // ── Upload loop ───────────────────────────────────────────────────────────
+  Future<void> _refreshDataForBranch(String branchId) async {
+    try {
+      await LocalStorageService.downloadTodayTokens(branchId);
+      await LocalStorageService.downloadInventory(branchId);
+      await LocalStorageService.refreshPrescriptions(branchId);
+      await LocalStorageService.downloadMedicineRestrictions(branchId);
+      await DonationsLocalStorage.downloadAllDonations(branchId);
+      await DonationsLocalStorage.downloadDonors(branchId);
+    } catch (e) {
+      print("[SyncService] Error refreshing branch $branchId: $e");
+    }
+  }
 
   Future<void> _uploadPending() async {
-    if (_isUploading || _currentBranchId == null) {
-      print("_uploadPending SKIPPED → already uploading or no branchId");
-      return;
-    }
-
+    if (_isUploading || _currentBranchId == null) return;
     _isUploading = true;
-    print("=== Starting sync loop ===");
 
     try {
       final queueBox = Hive.box(LocalStorageService.syncBox);
-      if (queueBox.isEmpty) {
-        print("Sync queue empty - nothing to upload");
-        return;
-      }
-
-      print("Processing ${queueBox.length} queued items");
+      if (queueBox.isEmpty) return;
 
       final sortedKeys = queueBox.keys.toList()
         ..sort((a, b) {
-          final ta = DateTime.tryParse(
-                  queueBox.get(a)?['createdAt'] ?? '2000-01-01T00:00:00Z') ??
-              DateTime(2000);
-          final tb = DateTime.tryParse(
-                  queueBox.get(b)?['createdAt'] ?? '2000-01-01T00:00:00Z') ??
-              DateTime(2000);
+          final ta = DateTime.tryParse(queueBox.get(a)?['createdAt'] ?? '2000-01-01T00:00:00Z') ?? DateTime(2000);
+          final tb = DateTime.tryParse(queueBox.get(b)?['createdAt'] ?? '2000-01-01T00:00:00Z') ?? DateTime(2000);
           return ta.compareTo(tb);
         });
 
       for (final key in sortedKeys) {
         final raw = queueBox.get(key);
         if (raw == null || raw is! Map) {
-          print("Invalid queue item $key → deleting");
           await queueBox.delete(key);
           continue;
         }
@@ -246,785 +167,258 @@ class SyncService {
         final type     = action['type'] as String? ?? 'unknown';
         final attempts = (action['attempts'] as int?) ?? 0;
 
-        print("Processing $key | type: $type | attempts: $attempts");
-
         if (attempts >= 5) {
-          print("Giving up on $key ($type) after $attempts attempts → deleting");
-          await queueBox.delete(key);
-          continue;
+          if (type == 'save_donation' || type == 'update_donation' || type == 'delete_donation' || type == 'save_bank_slip') {
+            action['attempts'] = 0;
+            await queueBox.put(key, action);
+            continue;
+          } else {
+            await queueBox.delete(key);
+            continue;
+          }
         }
 
         try {
           final branchId = (action['branchId'] as String?) ?? _currentBranchId!;
 
-          // ── RECEPTIONIST: new patient registered ────────────────────────
           if (type == 'save_patient') {
             final data      = Map<String, dynamic>.from(action['data'] ?? {});
             final patientId = (action['patientId'] ?? data['patientId'])?.toString();
             final bId       = (action['branchId'] ?? data['branchId'] ?? branchId).toString();
-
-            if (patientId == null || patientId.isEmpty) {
-              throw Exception('Missing patientId in save_patient');
-            }
+            if (patientId == null || patientId.isEmpty) throw Exception('Missing patientId');
 
             if (data['dob'] is String) {
               try {
                 data['dob'] = Timestamp.fromDate(DateTime.parse(data['dob'] as String));
               } catch (_) {}
             }
-
-            final fsData = Map<String, dynamic>.from(data)
-              ..remove('syncStatus')
-              ..remove('hiveKey');
-
-            print('Uploading patient: $patientId to branch $bId');
-
-            await _db
-                .collection('branches')
-                .doc(bId)
-                .collection('patients')
-                .doc(patientId)
-                .set(fsData, SetOptions(merge: true));
-
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus')..remove('hiveKey');
+            await _db.collection('branches').doc(bId).collection('patients').doc(patientId).set(fsData, SetOptions(merge: true));
             await Hive.box('app_flags').put('patient_synced_$patientId', true);
-
-            print('SUCCESS: Uploaded patient → $patientId');
           }
-
-          // ── RECEPTIONIST: token issued ──────────────────────────────────
           else if (type == 'save_entry') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
-            final dateKey = (action['dateKey'] ?? action['datePart'] ?? data['dateKey'])
-                ?.toString();
+            final dateKey = (action['dateKey'] ?? action['datePart'] ?? data['dateKey'])?.toString();
             final serial  = (action['serial'] ?? data['serial'])?.toString();
-
-            if (dateKey == null || serial == null) {
-              throw Exception('Missing dateKey or serial in save_entry');
-            }
-
-            final rawQueueType = (action['queueType'] ?? data['queueType'])?.toString();
-            final queueType    = resolveQueueType(rawQueueType);
-
-            print("Uploading token: $serial ($dateKey/$queueType)");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('serials')
-                .doc(dateKey)
-                .collection(queueType)
-                .doc(serial)
-                .set(data, SetOptions(merge: true));
-
-            final serialNumber = int.tryParse(serial.split('-').last);
-            if (serialNumber != null) {
-              await _db
-                  .collection('branches')
-                  .doc(branchId)
-                  .collection('serials')
-                  .doc(dateKey)
-                  .set({'lastSerialNumber': serialNumber}, SetOptions(merge: true));
-            }
-
-            print("SUCCESS: Uploaded token → $serial ($dateKey/$queueType)");
+            if (dateKey == null || serial == null) throw Exception('Missing dateKey/serial');
+            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
+            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
           }
-
-          // ── DOCTOR: prescription saved ──────────────────────────────────
           else if (type == 'save_prescription') {
             final serial = action['serial'] as String?;
             final data   = Map<String, dynamic>.from(action['data'] ?? {});
-
-            if (serial == null) {
-              throw Exception('Missing serial in save_prescription');
-            }
-
-            String? patientCnic = data['patientCnic']?.toString() ??
-                data['cnic']?.toString() ??
-                data['patientCNIC']?.toString();
-
-            if (patientCnic == null || patientCnic.trim().isEmpty) {
-              print("WARNING: No CNIC in prescription data - using fallback");
-              patientCnic = 'unknown_$serial';
-            }
-
-            final cleanCnic =
-                patientCnic.trim().replaceAll('-', '').replaceAll(' ', '');
-
-            print("Uploading prescription: serial=$serial, cnic=$cleanCnic");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('prescriptions')
-                .doc(cleanCnic)
-                .collection('prescriptions')
-                .doc(serial)
-                .set(data, SetOptions(merge: true));
-
-            print("SUCCESS: Uploaded prescription → $serial (CNIC: $cleanCnic)");
-
-            // ── FIX-P1: patch serial doc status to 'completed' ────────────
-            String? rawQT   = action['queueType']?.toString();
-            String? dateKey = action['dateKey']?.toString();
-
-            if (rawQT == null || rawQT.isEmpty || dateKey == null) {
-              final entryKey   = '$branchId-$serial';
-              final localEntry =
-                  Hive.box(LocalStorageService.entriesBox).get(entryKey);
-              rawQT   ??= localEntry?['queueType']?.toString();
-              dateKey ??= localEntry?['dateKey']?.toString() ??
-                  LocalStorageService.getTodayDateKey();
-            }
-
-            final queueType = resolveQueueType(rawQT);
-
-            print("Patching serial status → completed: $serial ($dateKey/$queueType)");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('serials')
-                .doc(dateKey)
-                .collection(queueType)
-                .doc(serial)
-                .set(
-              {
-                'status':      'completed',
-                'completedAt': data['completedAt'] ??
-                    DateTime.now().toUtc().toIso8601String(),
-              },
-              SetOptions(merge: true),
-            );
-
-            print("SUCCESS: Patched serial status → completed "
-                "($serial / $dateKey / $queueType)");
+            if (serial == null) throw Exception('Missing serial');
+            final patientCnic = (data['patientCnic'] ?? data['cnic'] ?? data['patientCNIC'] ?? 'unknown_$serial').toString().trim().replaceAll('-', '').replaceAll(' ', '');
+            await _db.collection('branches').doc(branchId).collection('prescriptions').doc(patientCnic).collection('prescriptions').doc(serial).set(data, SetOptions(merge: true));
+            
+            final queueType = resolveQueueType(action['queueType']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['queueType']?.toString());
+            final dateKey   = action['dateKey']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey();
+            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set({'status': 'completed', 'completedAt': data['completedAt'] ?? DateTime.now().toUtc().toIso8601String()}, SetOptions(merge: true));
           }
-
-          // ── DISPENSER / DOCTOR: status patch on serial doc ──────────────
           else if (type == 'update_serial_status') {
             final serial = action['serial'] as String?;
             final data   = Map<String, dynamic>.from(action['data'] ?? {});
-
-            if (serial == null) {
-              throw Exception('Missing serial in update_serial_status');
-            }
-
-            String? rawQT = action['queueType']?.toString();
-            if (rawQT == null || rawQT.isEmpty) {
-              rawQT = data['queueType']?.toString();
-            }
-
-            String? dateKey;
-            if (rawQT == null || rawQT.isEmpty) {
-              final entryKey   = '$branchId-$serial';
-              final localEntry =
-                  Hive.box(LocalStorageService.entriesBox).get(entryKey);
-              dateKey = localEntry?['dateKey']?.toString();
-              rawQT   = localEntry?['queueType']?.toString();
-
-              if (rawQT == null || rawQT.isEmpty) {
-                print('[SyncService] ⚠️ update_serial_status: queueType MISSING '
-                    'for serial=$serial — defaulting to zakat. '
-                    'action keys: ${action.keys.toList()}');
-              } else {
-                print('[SyncService] update_serial_status: '
-                    'queueType resolved from Hive for $serial → $rawQT');
-              }
-            }
-
-            dateKey ??= (action['dateKey'] ?? data['dateKey'])?.toString() ??
-                LocalStorageService.getTodayDateKey();
-
-            final queueType = resolveQueueType(rawQT);
-
-            print("Updating serial status: $serial ($dateKey/$queueType)");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('serials')
-                .doc(dateKey)
-                .collection(queueType)
-                .doc(serial)
-                .set(data, SetOptions(merge: true));
-
-            print("SUCCESS: Updated serial status → $serial ($dateKey/$queueType)");
+            if (serial == null) throw Exception('Missing serial');
+            final entryKey = '$branchId-$serial';
+            final localEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+            final queueType = resolveQueueType(action['queueType']?.toString() ?? localEntry?['queueType']?.toString());
+            final dateKey   = action['dateKey']?.toString() ?? localEntry?['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey();
+            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
           }
-
-          // ── DISPENSER: full dispensary record ───────────────────────────
           else if (type == 'save_dispensary_record') {
             final dateKey = action['dateKey'] as String?;
             final serial  = action['serial'] as String?;
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
-
-            if (dateKey == null || serial == null) {
-              throw Exception(
-                  'Missing dateKey or serial in save_dispensary_record');
-            }
-
-            final rawQT     = (action['queueType'] ?? data['queueType'])?.toString();
-            final queueType = resolveQueueType(rawQT);
-            final enriched  = {...data, 'queueType': queueType};
-
-            print(
-                "Uploading dispensary record: $serial ($dateKey) queueType=$queueType");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('dispensary')
-                .doc(dateKey)
-                .collection(dateKey)
-                .doc(serial)
-                .set(enriched, SetOptions(merge: true));
-
-            print("SUCCESS: Uploaded dispensary record → $serial ($dateKey)");
+            if (dateKey == null || serial == null) throw Exception('Missing dateKey/serial');
+            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
+            await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).set({...data, 'queueType': queueType}, SetOptions(merge: true));
           }
-
-          // ── DOCTOR: extra-day medicine charge ───────────────────────────
           else if (type == 'save_dispensary_charge') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
             final serial  = (action['serial'] ?? data['serial'])?.toString();
-            final dateKey = (action['dateKey'] ?? data['dateKey'])?.toString() ??
-                LocalStorageService.getTodayDateKey();
-
-            if (serial == null || serial.isEmpty) {
-              throw Exception('Missing serial in save_dispensary_charge');
-            }
-
-            final rawQT     = (action['queueType'] ?? data['queueType'])?.toString();
-            final queueType = resolveQueueType(rawQT);
-            final days      = (data['daysOfMedicine'] as num?)?.toInt() ?? 1;
-
-            print("Uploading dispensary charge: serial=$serial "
-                "days=$days queueType=$queueType");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('dispensary_charges')
-                .doc(dateKey)
-                .collection('charges')
-                .doc(serial)
-                .set({...data, 'queueType': queueType}, SetOptions(merge: true));
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('serials')
-                .doc(dateKey)
-                .collection(queueType)
-                .doc(serial)
-                .set({'daysOfMedicine': days}, SetOptions(merge: true));
-
-            print("SUCCESS: Uploaded dispensary charge → "
-                "charges/$dateKey/$serial | serials/$dateKey/$queueType/$serial patched");
+            final dateKey = (action['dateKey'] ?? data['dateKey'])?.toString() ?? LocalStorageService.getTodayDateKey();
+            if (serial == null || serial.isEmpty) throw Exception('Missing serial');
+            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
+            await _db.collection('branches').doc(branchId).collection('dispensary_charges').doc(dateKey).collection('charges').doc(serial).set({...data, 'queueType': queueType}, SetOptions(merge: true));
+            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set({'daysOfMedicine': (data['daysOfMedicine'] as num?)?.toInt() ?? 1}, SetOptions(merge: true));
           }
-
-          // ── DISPENSER: inventory deduction ──────────────────────────────
           else if (type == 'update_inventory') {
-            final medicineId = (action['medicineId'] ??
-                    (action['data'] as Map?)?['medicineId'])
-                ?.toString()
-                .trim();
-
-            if (medicineId == null || medicineId.isEmpty) {
-              throw Exception('Missing medicineId in update_inventory');
-            }
-
-            final rawDelta = action['delta'] ??
-                (action['data'] as Map?)?['delta'];
-            final delta = rawDelta is num
-                ? rawDelta.toDouble()
-                : double.tryParse(rawDelta?.toString() ?? '') ?? 0.0;
-
-            if (delta == 0) {
-              print('update_inventory: delta is 0 for $medicineId — skipping');
-            } else {
-              print('Applying inventory deduction: $medicineId delta=$delta');
-
-              await _db
-                  .collection('branches')
-                  .doc(branchId)
-                  .collection('inventory')
-                  .doc(medicineId)
-                  .update({'quantity': FieldValue.increment(delta)});
-
-              print('SUCCESS: Inventory updated → $medicineId delta=$delta');
+            final medicineId = (action['medicineId'] ?? (action['data'] as Map?)?['medicineId'])?.toString().trim();
+            final delta = (action['delta'] ?? (action['data'] as Map?)?['delta'] as num?)?.toDouble() ?? 0.0;
+            if (medicineId != null && delta != 0) {
+              await _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId).update({'quantity': FieldValue.increment(delta)});
             }
           }
-
-          // ── DISPENSER: add stock (offline queued) ───────────────────────
           else if (type == 'add_inventory_stock') {
             final medicineId = action['medicineId']?.toString().trim();
-            if (medicineId == null || medicineId.isEmpty) {
-              throw Exception('Missing medicineId in add_inventory_stock');
-            }
-
-            final qty = action['quantity'];
-            final qtyInt = qty is int
-                ? qty
-                : (qty is double ? qty.toInt() : int.tryParse(qty?.toString() ?? '') ?? 0);
-
-            if (qtyInt <= 0) {
-              print('add_inventory_stock: qty is 0 for $medicineId — skipping');
-            } else {
-              print('Applying stock addition: $medicineId qty=+$qtyInt');
-
-              await _db
-                  .collection('branches')
-                  .doc(branchId)
-                  .collection('inventory')
-                  .doc(medicineId)
-                  .update({'quantity': FieldValue.increment(qtyInt)});
-
-              // Log the addition
-              await _db
-                  .collection('branches')
-                  .doc(branchId)
-                  .collection('inventory_log')
-                  .add({
-                'action': 'add_stock',
-                'medicineId': medicineId,
-                'quantityAdded': qtyInt,
-                'performedBy': action['performedBy'] ?? '',
-                'performedByName': action['performedByName'] ?? '',
+            final qty = (action['quantity'] as num?)?.toInt() ?? 0;
+            if (medicineId != null && qty > 0) {
+              await _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId).update({'quantity': FieldValue.increment(qty)});
+              await _db.collection('branches').doc(branchId).collection('inventory_log').add({
+                'action': 'add_stock', 'medicineId': medicineId, 'quantityAdded': qty,
+                'performedBy': action['performedBy'] ?? '', 'performedByName': action['performedByName'] ?? '',
                 'timestamp': FieldValue.serverTimestamp(),
               });
-
-              print('SUCCESS: Stock addition synced → $medicineId +$qtyInt');
             }
           }
-
-          // ── DISPENSER: register new medicine (offline queued) ────────────
           else if (type == 'register_medicine') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final name = data['name']?.toString() ?? '';
-            final medType = data['type']?.toString() ?? '';
-            final dose = data['dose']?.toString() ?? '';
-            final exp = data['expiryDate']?.toString() ?? '';
-
-            if (name.isEmpty || medType.isEmpty) {
-              throw Exception('Missing name or type in register_medicine');
-            }
-
-            // Use same ID generation as the client
-            String clean(String s) => s
-                .trim()
-                .toLowerCase()
-                .replaceAll(RegExp(r'\s+'), '-')
-                .replaceAll(RegExp(r'[^a-z0-9-]'), '');
-            final docId = data['id']?.toString() ??
-                '${clean(name)}--${clean(medType)}--${clean(dose)}--${clean(exp)}';
-
-            print('Registering medicine: $name (id: $docId)');
-
-            // Remove local-only fields before writing to Firestore
-            final fsData = Map<String, dynamic>.from(data)
-              ..remove('id')
-              ..remove('syncStatus');
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('inventory')
-                .doc(docId)
-                .set(fsData, SetOptions(merge: true));
-
-            // Log the registration
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('inventory_log')
-                .add({
-              'action': 'medicine_registered_directly',
-              'medicineName': name,
-              'medicineType': medType,
-              'dose': dose,
-              'expiryDate': exp,
-              'quantityAdded': data['quantity'] ?? 0,
-              'price': data['price'] ?? '',
-              'performedBy': data['createdBy'] ?? '',
-              'performedByName': data['createdByName'] ?? '',
+            final docId = data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final fsData = Map<String, dynamic>.from(data)..remove('id')..remove('syncStatus');
+            await _db.collection('branches').doc(branchId).collection('inventory').doc(docId).set(fsData, SetOptions(merge: true));
+            await _db.collection('branches').doc(branchId).collection('inventory_log').add({
+              'action': 'medicine_registered_directly', 'medicineName': data['name'], 'docId': docId,
               'timestamp': FieldValue.serverTimestamp(),
-              'docId': docId,
             });
-
-            print('SUCCESS: Medicine registered → $docId');
           }
-
-          // ── DONATIONS ───────────────────────────────────────────────────
           else if (type == 'save_donation') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
             final hiveKey = action['hiveKey'] as String?;
-            final localId = action['localId'] as String?;
+            final stableId = (data['firestoreId'] as String?)?.isNotEmpty == true ? data['firestoreId'] as String : (action['localId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString());
+            final docRef = _db.collection('branches').doc(branchId).collection('donations').doc(stableId);
 
-            if (data.isEmpty) throw Exception('Empty data in save_donation');
-
-            final fsData = Map<String, dynamic>.from(data)
-              ..remove('hiveKey')
-              ..remove('syncStatus')
-              ..remove('firestoreId');
-
-            final stableId =
-                (data['firestoreId'] as String?)?.isNotEmpty == true
-                    ? data['firestoreId'] as String
-                    : (localId ??
-                        DateTime.now().millisecondsSinceEpoch.toString());
-
-            print("Uploading donation: localId=$localId → fsId=$stableId");
-
-            final docRef = _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('donations')
-                .doc(stableId);
-
-            await docRef.set(fsData, SetOptions(merge: true));
-
-            if (hiveKey != null) {
-              await DonationsLocalStorage.markDonationSynced(hiveKey, docRef.id);
+            final remoteDoc = await docRef.get();
+            if (remoteDoc.exists) {
+              final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
+              final localUpdate  = data['lastUpdatedAt'] as String?;
+              if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                if (hiveKey != null) await DonationsLocalStorage.markDonationSynced(hiveKey, stableId);
+                await queueBox.delete(key);
+                continue;
+              }
             }
-
-            print("SUCCESS: Uploaded donation → fs:${docRef.id}");
+            final fsData = Map<String, dynamic>.from(data)..remove('hiveKey')..remove('syncStatus')..remove('firestoreId');
+            await docRef.set(fsData, SetOptions(merge: true));
+            if (hiveKey != null) await DonationsLocalStorage.markDonationSynced(hiveKey, docRef.id);
           }
-
+          else if (type == 'save_audit_log') {
+            final data      = Map<String, dynamic>.from(action['data'] ?? {});
+            final logId     = data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final logBranch = action['branchId'] as String? ?? branchId;
+            data['branchId'] ??= logBranch;
+            final batch = _db.batch();
+            batch.set(_db.collection('branches').doc(logBranch).collection('audit_logs').doc(logId), data, SetOptions(merge: true));
+            batch.set(_db.collection('global_audit_logs').doc(logId), data, SetOptions(merge: true));
+            await batch.commit();
+          }
+          else if (type == 'save_donor') {
+            final data    = Map<String, dynamic>.from(action['data'] ?? {});
+            final donorId = action['donorId'] as String?;
+            if (donorId == null || data.isEmpty) throw Exception('Missing donorId');
+            final docRef = _db.collection('donors').doc(donorId);
+            final remoteDoc = await docRef.get();
+            if (remoteDoc.exists) {
+              final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
+              final localUpdate  = data['lastUpdatedAt'] as String?;
+              if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                await queueBox.delete(key);
+                continue;
+              }
+            }
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus')..remove('isEdited');
+            await docRef.set(fsData, SetOptions(merge: true));
+          }
+          else if (type == 'save_donor_branch') {
+            final data    = Map<String, dynamic>.from(action['data'] ?? {});
+            final donorId = action['donorId'] as String?;
+            final bId     = (action['branchId'] as String?) ?? branchId;
+            if (donorId == null || data.isEmpty) throw Exception('Missing donorId');
+            final docRef = _db.collection('branches').doc(bId).collection('donors').doc(donorId);
+            final remoteDoc = await docRef.get();
+            if (remoteDoc.exists) {
+              final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
+              final localUpdate  = data['lastUpdatedAt'] as String?;
+              if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                await queueBox.delete(key);
+                continue;
+              }
+            }
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus')..remove('isEdited');
+            await docRef.set(fsData, SetOptions(merge: true));
+          }
           else if (type == 'update_donation') {
             final firestoreId = action['firestoreId'] as String?;
             final fields      = Map<String, dynamic>.from(action['fields'] ?? {});
-
-            if (firestoreId == null || firestoreId.isEmpty) {
-              throw Exception('Missing firestoreId in update_donation');
-            }
-
-            print(
-                "Updating donation fields: fsId=$firestoreId | ${fields.keys.join(', ')}");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('donations')
-                .doc(firestoreId)
-                .update(fields);
-
-            print("SUCCESS: Updated donation → fs:$firestoreId");
-          }
-
-          // ── CREDIT LEDGER ───────────────────────────────────────────────
-          else if (type == 'save_credit_entry') {
-            final data    = Map<String, dynamic>.from(action['data'] ?? {});
-            final hiveKey = action['hiveKey'] as String?;
-            final localId = action['localId'] as String?;
-
-            if (data.isEmpty) throw Exception('Empty data in save_credit_entry');
-
-            final fsData = Map<String, dynamic>.from(data)
-              ..remove('hiveKey')
-              ..remove('syncStatus')
-              ..remove('firestoreId');
-
-            final stableId =
-                (data['firestoreId'] as String?)?.isNotEmpty == true
-                    ? data['firestoreId'] as String
-                    : (localId ??
-                        DateTime.now().millisecondsSinceEpoch.toString());
-
-            print("Uploading credit entry: ${data['fromRole']} → ${data['toRole']}"
-                " | PKR ${data['amount']} | fsId=$stableId");
-
-            final docRef = _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('creditLedger')
-                .doc(stableId);
-
-            await docRef.set(fsData, SetOptions(merge: true));
-
-            if (hiveKey != null) {
-              await DonationsLocalStorage.markCreditSynced(hiveKey, docRef.id);
-            }
-
-            print("SUCCESS: Uploaded credit entry → fs:${docRef.id}");
-          }
-
-          else if (type == 'update_credit_status') {
-            final firestoreId = action['firestoreId'] as String?;
-            final fields      = Map<String, dynamic>.from(action['fields'] ?? {});
-
-            if (firestoreId == null || firestoreId.isEmpty) {
-              throw Exception('Missing firestoreId in update_credit_status');
-            }
-
-            print(
-                "Updating credit status: fsId=$firestoreId | status=${fields['status']}");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('creditLedger')
-                .doc(firestoreId)
-                .update(fields);
-
-            print(
-                "SUCCESS: Updated credit status → fs:$firestoreId | ${fields['status']}");
-          }
-
-          // ── DOCTOR: approves token restriction exception ────────────────
-          else if (type == 'approve_token_exception') {
-            final patientId = action['patientId'] as String?;
-            final requestId = action['requestId'] as String?;
-            final data      = Map<String, dynamic>.from(action['data'] ?? {});
-
-            if (requestId == null || requestId.isEmpty) {
-              throw Exception('Missing requestId in approve_token_exception');
-            }
-
-            print("Uploading exception approval: req=$requestId "
-                "patient=$patientId");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('edit_requests')
-                .doc(requestId)
-                .update({
-              'status':         'approved',
-              'doctorReason':   data['doctorReason'],
-              'approvedBy':     data['approvedBy'],
-              'approvedByName': data['approvedByName'],
-              'approvedAt':     FieldValue.serverTimestamp(),
-            });
-
-            // ── FIRESTORE FIX: Clear the actual restriction so it doesn't return
-            if (patientId != null && patientId.isNotEmpty) {
-              try {
-                await _db
-                    .collection('branches')
-                    .doc(branchId)
-                    .collection('medicine_restrictions')
-                    .doc(patientId)
-                    .delete();
-                print("SUCCESS: Deleted medicine restriction in Firestore → $patientId");
-              } catch (e) {
-                print("Failed to delete Firestore restriction (optional): $e");
+            if (firestoreId == null) throw Exception('Missing firestoreId');
+            final docRef = _db.collection('branches').doc(branchId).collection('donations').doc(firestoreId);
+            final remoteDoc = await docRef.get();
+            if (remoteDoc.exists) {
+              final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
+              final localUpdate  = fields['lastUpdatedAt'] as String?;
+              if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                await queueBox.delete(key);
+                continue;
               }
             }
-
-            print("SUCCESS: Uploaded exception approval → $requestId");
+            final fsFields = Map<String, dynamic>.from(fields)..remove('hiveKey')..remove('syncStatus')..remove('firestoreId');
+            await docRef.update(fsFields);
           }
-
-          // ── RECEPTIONIST: requests token restriction exception ──────────
-          else if (type == 'save_token_exception_request') {
-            final requestId = action['requestId'] as String?;
-            final data      = Map<String, dynamic>.from(action['data'] ?? {});
-
-            if (requestId == null || requestId.isEmpty) {
-              throw Exception('Missing requestId in save_token_exception_request');
-            }
-
-            print("Uploading exception request: req=$requestId "
-                "patient=${data['patientName']}");
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('edit_requests')
-                .doc(requestId)
-                .set({
-              ...data,
-              'requestedAt': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
-
-            print("SUCCESS: Uploaded exception request → $requestId");
+          else if (type == 'delete_donation') {
+            final firestoreId = action['firestoreId'] as String?;
+            if (firestoreId != null) await _db.collection('branches').doc(branchId).collection('donations').doc(firestoreId).delete();
           }
-
-          // ── DOCTOR: multi-day prescription restriction ───────────────────
-          // Writes to branches/{branchId}/medicine_restrictions/{patientId}
-          // so internet-only terminals can download and enforce the ban.
-          else if (type == 'save_medicine_restriction') {
-            final data      = Map<String, dynamic>.from(action['data'] ?? {});
-            final patientId = (action['patientId'] ?? data['patientId'])
-                ?.toString()
-                .trim();
-
-            if (patientId == null || patientId.isEmpty) {
-              throw Exception('Missing patientId in save_medicine_restriction');
-            }
-
-            print('Uploading medicine restriction: '
-                'patient=$patientId branch=$branchId');
-
-            await _db
-                .collection('branches')
-                .doc(branchId)
-                .collection('medicine_restrictions')
-                .doc(patientId)
-                .set(data, SetOptions(merge: true));
-
-            print('SUCCESS: Uploaded medicine restriction → $patientId');
+          else if (type == 'delete_donor') {
+            final donorId = action['donorId'] as String?;
+            if (donorId != null) await _db.collection('donors').doc(donorId).delete();
           }
-
-          else {
-            print("Unknown sync type '$type' → skipping");
+          else if (type == 'delete_donor_branch') {
+            final donorId = action['donorId'] as String?;
+            final bId     = action['branchId'] as String?;
+            if (donorId != null && bId != null) await _db.collection('branches').doc(bId).collection('donors').doc(donorId).delete();
+          }
+          else if (type == 'save_bank_slip') {
+            final data   = Map<String, dynamic>.from(action['data'] ?? {});
+            final slipId = action['slipId'] as String?;
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            final docRef = _db.collection('branches').doc(branchId).collection('bank_slips').doc(slipId);
+            await docRef.set(fsData, SetOptions(merge: true));
+            if (slipId != null) await DonationsLocalStorage.markBankSlipSynced(slipId, docRef.id);
           }
 
           await queueBox.delete(key);
-          print("✅ Sync item $key completed and removed from queue");
-        } catch (e, stack) {
-          print('UPLOAD FAILED for $type (key: $key)');
-          print('attempt ${attempts + 1}/5');
-          print('error: $e');
-
-          action['attempts']    = attempts + 1;
-          action['lastAttempt'] = DateTime.now().toUtc().toIso8601String();
-          action['lastError']   =
-              e.toString().substring(0, e.toString().length.clamp(0, 400));
-
+        } catch (e) {
+          action['attempts'] = attempts + 1;
           await queueBox.put(key, action);
-          await Future.delayed(Duration(seconds: 2 * (attempts + 1)));
         }
-
         await Future.delayed(const Duration(milliseconds: 600));
       }
     } catch (fatal) {
-      print("FATAL sync loop error: $fatal");
+      print("FATAL sync: $fatal");
     } finally {
       _isUploading = false;
-      print("=== Sync loop finished |"
-          " Remaining in queue: ${Hive.box(LocalStorageService.syncBox).length} ===");
     }
   }
 
-  // ── Public helpers ────────────────────────────────────────────────────────
-
   Future<void> syncUnsyncedPatients(String branchId) async {
-    await _enqueueMissingPatients(branchId);
     await triggerUpload();
   }
 
   Future<void> syncTodayOnly(String branchId) async {
     await LocalStorageService.downloadTodayTokens(branchId);
-    await LocalStorageService.refreshPrescriptions(branchId);
-    await LocalStorageService.downloadMedicineRestrictions(branchId); // ← ADDED
-    await DonationsLocalStorage.downloadTodayDonations(branchId);
-    await DonationsLocalStorage.downloadCreditLedger(branchId);
-    print('Today-only sync completed for branch $branchId');
+    await DonationsLocalStorage.downloadAllDonations(branchId);
   }
 
   Future<void> initialFullDownload(String branchId) async {
     final settings = Hive.box('app_settings');
     final key      = 'initial_download_done_$branchId';
-
     if (settings.get(key, defaultValue: false)) {
-      await LocalStorageService.downloadTodayTokens(branchId);
-      await LocalStorageService.refreshPrescriptions(branchId);
-      await LocalStorageService.downloadMedicineRestrictions(branchId); // ← ADDED
-      await DonationsLocalStorage.downloadTodayDonations(branchId);
-      await DonationsLocalStorage.downloadCreditLedger(branchId);
+      await syncTodayOnly(branchId);
       return;
     }
-
     try {
-      print('Starting initial full download for branch: $branchId');
-
-      final patientsSnap = await _db
-          .collection('branches')
-          .doc(branchId)
-          .collection('patients')
-          .get();
-
+      final patientsSnap = await _db.collection('branches').doc(branchId).collection('patients').get();
       for (final doc in patientsSnap.docs) {
         final d = doc.data();
-        d['patientId'] = doc.id;
-        d['branchId']  = branchId;
+        d['patientId'] = doc.id; d['branchId'] = branchId;
         await LocalStorageService.saveLocalPatient(d);
-        await Hive.box('app_flags').put('patient_synced_${doc.id}', true);
       }
-      print('Downloaded ${patientsSnap.docs.length} patients');
-
       await LocalStorageService.downloadTodayTokens(branchId);
-      print('Downloaded today tokens only');
-
-      print("Downloading ALL historical prescriptions...");
-      int totalPrescriptions = 0;
-
-      final cnicDocsSnap = await _db
-          .collection('branches')
-          .doc(branchId)
-          .collection('prescriptions')
-          .get();
-
-      print(
-          "Found ${cnicDocsSnap.docs.length} CNIC/patientId documents under prescriptions");
-
-      for (final cnicDoc in cnicDocsSnap.docs) {
-        final cnicOrPatientId = cnicDoc.id;
-
-        final presSnap = await _db
-            .collection('branches')
-            .doc(branchId)
-            .collection('prescriptions')
-            .doc(cnicOrPatientId)
-            .collection('prescriptions')
-            .get();
-
-        for (final presDoc in presSnap.docs) {
-          final data = presDoc.data();
-          data['id']          = presDoc.id;
-          data['patientCnic'] = cnicOrPatientId;
-          await LocalStorageService.saveLocalPrescription(data);
-          totalPrescriptions++;
-        }
-
-        print('Downloaded ${presSnap.docs.length} prescriptions'
-            ' for CNIC/patientId: $cnicOrPatientId');
-      }
-
-      print('Total prescriptions downloaded: $totalPrescriptions');
-
       await LocalStorageService.downloadInventory(branchId);
-      await LocalStorageService.downloadMedicineRestrictions(branchId); // ← ADDED
-      await DonationsLocalStorage.downloadTodayDonations(branchId);
-      await DonationsLocalStorage.downloadCreditLedger(branchId);
-
+      await DonationsLocalStorage.downloadAllDonations(branchId);
+      await DonationsLocalStorage.downloadDonors(branchId);
       await settings.put(key, true);
-      print('Initial full download completed for branch $branchId');
-    } catch (e, stack) {
-      print('Initial download failed: $e');
-      print('Stack trace: $stack');
-    }
-  }
-
-  Future<void> downloadAllHistoricalTokens(String branchId) async {
-    try {
-      final entriesSnap = await _db
-          .collection('branches')
-          .doc(branchId)
-          .collection('serials')
-          .get();
-
-      for (final dateDoc in entriesSnap.docs) {
-        final dateKey = dateDoc.id;
-        for (final queueType in ['zakat', 'non-zakat', 'gmwf']) {
-          final queueSnap = await _db
-              .collection('branches')
-              .doc(branchId)
-              .collection('serials')
-              .doc(dateKey)
-              .collection(queueType)
-              .get();
-
-          for (final entryDoc in queueSnap.docs) {
-            final data        = entryDoc.data();
-            data['queueType'] = queueType;
-            data['dateKey']   = dateKey;
-            await LocalStorageService.saveEntryLocal(branchId, entryDoc.id, data);
-          }
-        }
-      }
-      print('Downloaded all historical tokens for branch $branchId');
     } catch (e) {
-      print('Error downloading historical tokens: $e');
+      print('Initial download failed: $e');
     }
   }
 
@@ -1039,6 +433,13 @@ class SyncService {
     _connectivitySub?.cancel();
     _dailyTokenTimer?.cancel();
     _periodicSyncTimer?.cancel();
-    print("SyncService disposed");
+  }
+
+  String resolveQueueType(String? raw) {
+    if (raw == null) return 'zakat';
+    final r = raw.toLowerCase().trim();
+    if (r.contains('non') || r.contains('general')) return 'non-zakat';
+    if (r.contains('gmwf')) return 'gmwf';
+    return 'zakat';
   }
 }

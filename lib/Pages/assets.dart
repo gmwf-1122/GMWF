@@ -594,7 +594,7 @@ class _AssetsPageState extends State<AssetsPage>
           Text(
             widget.isAdmin ? 'Admin View' : 'Supervisor View',
             style:
-                TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7)),
+                TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.7)),
           ),
         ],
       ),
@@ -606,7 +606,7 @@ class _AssetsPageState extends State<AssetsPage>
                   children: [
                     Text('Supervisor Edit',
                         style: TextStyle(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                             fontSize: 13)),
                     Switch(
                       value: _allowEditing,
@@ -624,7 +624,7 @@ class _AssetsPageState extends State<AssetsPage>
                   child: Chip(
                     label: const Text('Read-only',
                         style: TextStyle(fontSize: 11)),
-                    backgroundColor: Colors.white.withOpacity(0.15),
+                    backgroundColor: Colors.white.withValues(alpha: 0.15),
                     labelStyle: const TextStyle(color: Colors.white),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -742,8 +742,8 @@ class _AssetsPageState extends State<AssetsPage>
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: highlight
-                  ? p.accent.withOpacity(0.25)
-                  : Colors.white.withOpacity(0.1),
+                  ? p.accent.withValues(alpha: 0.25)
+                  : Colors.white.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon,
@@ -755,7 +755,7 @@ class _AssetsPageState extends State<AssetsPage>
             children: [
               Text(label,
                   style: TextStyle(
-                      color: Colors.white.withOpacity(0.65), fontSize: 11)),
+                      color: Colors.white.withValues(alpha: 0.65), fontSize: 11)),
               Text(value,
                   style: TextStyle(
                       color: highlight ? p.accent : Colors.white,
@@ -772,7 +772,7 @@ class _AssetsPageState extends State<AssetsPage>
       height: 36,
       width: 1,
       margin: const EdgeInsets.symmetric(horizontal: 4),
-      color: Colors.white.withOpacity(0.2));
+      color: Colors.white.withValues(alpha: 0.2));
 
   Widget _buildTabBar() {
     return Container(
@@ -782,7 +782,7 @@ class _AssetsPageState extends State<AssetsPage>
         indicatorColor: p.accent,
         indicatorWeight: 3,
         labelColor: p.accent,
-        unselectedLabelColor: Colors.white.withOpacity(0.6),
+        unselectedLabelColor: Colors.white.withValues(alpha: 0.6),
         labelStyle:
             const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
         isScrollable: true,
@@ -903,9 +903,9 @@ class _AssetsPageState extends State<AssetsPage>
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: p.accent.withOpacity(0.06),
+                    color: p.accent.withValues(alpha: 0.06),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: p.accent.withOpacity(0.2)),
+                    border: Border.all(color: p.accent.withValues(alpha: 0.2)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1076,12 +1076,12 @@ class _AssetsPageState extends State<AssetsPage>
                       horizontal: 14, vertical: 12),
                   decoration: BoxDecoration(
                     color: _empNoIncrement
-                        ? p.danger.withOpacity(0.07)
+                        ? p.danger.withValues(alpha: 0.07)
                         : Colors.grey.shade50,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _empNoIncrement
-                          ? p.danger.withOpacity(0.4)
+                          ? p.danger.withValues(alpha: 0.4)
                           : Colors.grey.shade300,
                       width: 1.5,
                     ),
@@ -1157,11 +1157,11 @@ class _AssetsPageState extends State<AssetsPage>
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF43A047).withOpacity(0.06),
+                      color: const Color(0xFF43A047).withValues(alpha: 0.06),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                           color:
-                              const Color(0xFF43A047).withOpacity(0.25)),
+                              const Color(0xFF43A047).withValues(alpha: 0.25)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1234,9 +1234,9 @@ class _AssetsPageState extends State<AssetsPage>
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: p.accent.withOpacity(0.08),
+          color: p.accent.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: p.accent.withOpacity(0.3)),
+          border: Border.all(color: p.accent.withValues(alpha: 0.3)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1325,14 +1325,14 @@ class _AssetsPageState extends State<AssetsPage>
               padding: const EdgeInsets.all(12),
               margin: const EdgeInsets.only(bottom: 16),
               decoration: BoxDecoration(
-                color: p.primary.withOpacity(0.06),
+                color: p.primary.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   CircleAvatar(
                     radius: 18,
-                    backgroundColor: p.primary.withOpacity(0.15),
+                    backgroundColor: p.primary.withValues(alpha: 0.15),
                     child: Text(
                       employee.name.isNotEmpty
                           ? employee.name[0].toUpperCase()
@@ -1367,10 +1367,10 @@ class _AssetsPageState extends State<AssetsPage>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: p.danger.withOpacity(0.1),
+                        color: p.danger.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                            color: p.danger.withOpacity(0.3)),
+                            color: p.danger.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1391,10 +1391,10 @@ class _AssetsPageState extends State<AssetsPage>
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF43A047).withOpacity(0.1),
+                        color: const Color(0xFF43A047).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                            color: const Color(0xFF43A047).withOpacity(0.3)),
+                            color: const Color(0xFF43A047).withValues(alpha: 0.3)),
                       ),
                       child: Text(
                         '${employee.defaultIncrementRate.toStringAsFixed(1)}%/yr',
@@ -1442,7 +1442,7 @@ class _AssetsPageState extends State<AssetsPage>
                           horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
                         color: selected
-                            ? color.withOpacity(0.12)
+                            ? color.withValues(alpha: 0.12)
                             : Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
@@ -1488,10 +1488,10 @@ class _AssetsPageState extends State<AssetsPage>
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: p.danger.withOpacity(0.06),
+                  color: p.danger.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(10),
                   border:
-                      Border.all(color: p.danger.withOpacity(0.3)),
+                      Border.all(color: p.danger.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
@@ -1559,11 +1559,11 @@ class _AssetsPageState extends State<AssetsPage>
                   margin: const EdgeInsets.only(bottom: 12, right: 8),
                   decoration: BoxDecoration(
                     color: _changeTypeColor(_salaryChangeType)
-                        .withOpacity(0.07),
+                        .withValues(alpha: 0.07),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _changeTypeColor(_salaryChangeType)
-                          .withOpacity(0.25),
+                          .withValues(alpha: 0.25),
                     ),
                   ),
                   child: Column(
@@ -1647,11 +1647,11 @@ class _AssetsPageState extends State<AssetsPage>
                 margin: const EdgeInsets.only(top: 4, bottom: 12),
                 decoration: BoxDecoration(
                   color:
-                      _changeTypeColor(_salaryChangeType).withOpacity(0.06),
+                      _changeTypeColor(_salaryChangeType).withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
                     color: _changeTypeColor(_salaryChangeType)
-                        .withOpacity(0.3),
+                        .withValues(alpha: 0.3),
                   ),
                 ),
                 child: Column(
@@ -1687,7 +1687,7 @@ class _AssetsPageState extends State<AssetsPage>
                         decoration: BoxDecoration(
                           color:
                               _changeTypeColor(_salaryChangeType)
-                                  .withOpacity(0.1),
+                                  .withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
@@ -1780,10 +1780,10 @@ class _AssetsPageState extends State<AssetsPage>
         padding:
             const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.09),
+          color: color.withValues(alpha: 0.09),
           borderRadius: BorderRadius.circular(16),
           border:
-              Border.all(color: color.withOpacity(0.35), width: 1),
+              Border.all(color: color.withValues(alpha: 0.35), width: 1),
         ),
         child: Text(
           label,
@@ -1849,7 +1849,7 @@ class _AssetsPageState extends State<AssetsPage>
                         horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: selected
-                          ? _categoryColor(label, p).withOpacity(0.15)
+                          ? _categoryColor(label, p).withValues(alpha: 0.15)
                           : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
@@ -2118,7 +2118,7 @@ class _StyledDialog extends StatelessWidget {
       title: Container(
         padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
         decoration: BoxDecoration(
-          color: palette.primary.withOpacity(0.05),
+          color: palette.primary.withValues(alpha: 0.05),
           borderRadius:
               const BorderRadius.vertical(top: Radius.circular(20)),
         ),
@@ -2127,7 +2127,7 @@ class _StyledDialog extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: palette.primary.withOpacity(0.1),
+                color: palette.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: palette.primary, size: 22),
@@ -2253,10 +2253,10 @@ class _AssetsTab extends StatelessWidget {
                   isWide ? 24 : 12, isWide ? 16 : 10, isWide ? 24 : 12, 0),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: palette.accent.withOpacity(0.07),
+                color: palette.accent.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                    color: palette.accent.withOpacity(0.25), width: 1),
+                    color: palette.accent.withValues(alpha: 0.25), width: 1),
               ),
               child: Row(
                 children: [
@@ -2350,7 +2350,7 @@ class _AssetCard extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: palette.primary.withOpacity(0.1),
+            color: palette.primary.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(12),
           ),
           child:
@@ -2371,7 +2371,7 @@ class _AssetCard extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: palette.accent.withOpacity(0.1),
+                  color: palette.accent.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -2387,7 +2387,7 @@ class _AssetCard extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: palette.danger.withOpacity(0.1),
+                  color: palette.danger.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text('Repaired',
@@ -2601,10 +2601,10 @@ class _SalaryTab extends StatelessWidget {
                   isWide ? 24 : 12, isWide ? 16 : 10, isWide ? 24 : 12, 0),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: palette.accent.withOpacity(0.08),
+                color: palette.accent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                    color: palette.accent.withOpacity(0.3), width: 1),
+                    color: palette.accent.withValues(alpha: 0.3), width: 1),
               ),
               child: Row(
                 children: [
@@ -2750,7 +2750,7 @@ class _EmployeeCard extends StatelessWidget {
                           children: [
                             Icon(Icons.history_toggle_off,
                                 size: 48,
-                                color: palette.sub.withOpacity(0.4)),
+                                color: palette.sub.withValues(alpha: 0.4)),
                             const SizedBox(height: 12),
                             Text('No changes recorded yet',
                                 style: TextStyle(
@@ -2772,10 +2772,10 @@ class _EmployeeCard extends StatelessWidget {
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: color.withOpacity(0.05),
+                            color: color.withValues(alpha: 0.05),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
-                                color: color.withOpacity(0.2),
+                                color: color.withValues(alpha: 0.2),
                                 width: 1),
                           ),
                           child: Row(
@@ -2783,7 +2783,7 @@ class _EmployeeCard extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: color.withOpacity(0.12),
+                                  color: color.withValues(alpha: 0.12),
                                   borderRadius:
                                       BorderRadius.circular(10),
                                 ),
@@ -2835,7 +2835,7 @@ class _EmployeeCard extends StatelessWidget {
                                                       vertical: 3),
                                               decoration: BoxDecoration(
                                                 color:
-                                                    color.withOpacity(0.12),
+                                                    color.withValues(alpha: 0.12),
                                                 borderRadius:
                                                     BorderRadius.circular(12),
                                               ),
@@ -2904,7 +2904,7 @@ class _EmployeeCard extends StatelessWidget {
         tilePadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: CircleAvatar(
-          backgroundColor: palette.primary.withOpacity(0.1),
+          backgroundColor: palette.primary.withValues(alpha: 0.1),
           child: Text(
             employee.name.isNotEmpty
                 ? employee.name[0].toUpperCase()
@@ -2929,7 +2929,7 @@ class _EmployeeCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: palette.danger.withOpacity(0.1),
+                  color: palette.danger.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(5),
                 ),
                 child: Text('No Increment',
@@ -2943,7 +2943,7 @@ class _EmployeeCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 5, vertical: 1),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF43A047).withOpacity(0.1),
+                  color: const Color(0xFF43A047).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(5),
                 ),
                 child: Text(
@@ -3144,10 +3144,10 @@ class _ExpensesTab extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: palette.accent.withOpacity(0.08),
+                color: palette.accent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                    color: palette.accent.withOpacity(0.3), width: 1),
+                    color: palette.accent.withValues(alpha: 0.3), width: 1),
               ),
               child: Row(
                 children: [
@@ -3185,7 +3185,7 @@ class _ExpensesTab extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: catColor.withOpacity(0.12),
+                            color: catColor.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(_categoryIcon(cat),
@@ -3211,11 +3211,11 @@ class _ExpensesTab extends StatelessWidget {
                   ...items.map((exp) => Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         elevation: 0,
-                        color: catColor.withOpacity(0.04),
+                        color: catColor.withValues(alpha: 0.04),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
-                              color: catColor.withOpacity(0.15),
+                              color: catColor.withValues(alpha: 0.15),
                               width: 1),
                         ),
                         child: ListTile(
@@ -3417,7 +3417,7 @@ class _PayablesTabState extends State<_PayablesTab> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: _categoryColor(exp.category, p).withOpacity(0.12),
+                color: _categoryColor(exp.category, p).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(_categoryIcon(exp.category),
@@ -3508,7 +3508,7 @@ class _PayablesTabState extends State<_PayablesTab> {
       children: [
         // ── Month navigation header ──
         Container(
-          color: p.primary.withOpacity(0.04),
+          color: p.primary.withValues(alpha: 0.04),
           padding:
               const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           child: Row(
@@ -3534,7 +3534,7 @@ class _PayablesTabState extends State<_PayablesTab> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 2),
                         decoration: BoxDecoration(
-                          color: p.accent.withOpacity(0.12),
+                          color: p.accent.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text('Current Month',
@@ -3760,14 +3760,14 @@ class _GrandTotalBar extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [p.primary, p.primary.withOpacity(0.8)],
+          colors: [p.primary, p.primary.withValues(alpha: 0.8)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: p.primary.withOpacity(0.25),
+            color: p.primary.withValues(alpha: 0.25),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -3783,7 +3783,7 @@ class _GrandTotalBar extends StatelessWidget {
                   children: [
                     Text('Total Outflow',
                         style: TextStyle(
-                            color: Colors.white.withOpacity(0.7),
+                            color: Colors.white.withValues(alpha: 0.7),
                             fontSize: 11)),
                     Text(
                       'Rs. ${NumberFormat('#,##0').format(grandTotal)}',
@@ -3807,7 +3807,7 @@ class _GrandTotalBar extends StatelessWidget {
             child: LinearProgressIndicator(
               value: paidPct,
               minHeight: 6,
-              backgroundColor: Colors.white.withOpacity(0.2),
+              backgroundColor: Colors.white.withValues(alpha: 0.2),
               valueColor:
                   const AlwaysStoppedAnimation(Colors.greenAccent),
             ),
@@ -3819,7 +3819,7 @@ class _GrandTotalBar extends StatelessWidget {
               Text(
                 '${(paidPct * 100).toStringAsFixed(0)}% paid',
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.7),
+                    color: Colors.white.withValues(alpha: 0.7),
                     fontSize: 11),
               ),
             ],
@@ -3835,7 +3835,7 @@ class _GrandTotalBar extends StatelessWidget {
       children: [
         Text(label,
             style: TextStyle(
-                color: Colors.white.withOpacity(0.65), fontSize: 10)),
+                color: Colors.white.withValues(alpha: 0.65), fontSize: 10)),
         Text(
           'Rs. ${NumberFormat('#,##0').format(value)}',
           style: TextStyle(
@@ -3876,13 +3876,13 @@ class _PayableSectionHeader extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: allPaid
-            ? const Color(0xFF43A047).withOpacity(0.06)
-            : p.danger.withOpacity(0.06),
+            ? const Color(0xFF43A047).withValues(alpha: 0.06)
+            : p.danger.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: allPaid
-              ? const Color(0xFF43A047).withOpacity(0.25)
-              : p.danger.withOpacity(0.25),
+              ? const Color(0xFF43A047).withValues(alpha: 0.25)
+              : p.danger.withValues(alpha: 0.25),
         ),
       ),
       child: Row(
@@ -3891,8 +3891,8 @@ class _PayableSectionHeader extends StatelessWidget {
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: allPaid
-                  ? const Color(0xFF43A047).withOpacity(0.12)
-                  : p.danger.withOpacity(0.12),
+                  ? const Color(0xFF43A047).withValues(alpha: 0.12)
+                  : p.danger.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon,
@@ -3985,13 +3985,13 @@ class _SalaryPayableCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: isPaid
-            ? const Color(0xFF43A047).withOpacity(0.05)
-            : p.danger.withOpacity(0.04),
+            ? const Color(0xFF43A047).withValues(alpha: 0.05)
+            : p.danger.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isPaid
-              ? const Color(0xFF43A047).withOpacity(0.3)
-              : p.danger.withOpacity(0.3),
+              ? const Color(0xFF43A047).withValues(alpha: 0.3)
+              : p.danger.withValues(alpha: 0.3),
           width: 1.5,
         ),
       ),
@@ -4013,7 +4013,7 @@ class _SalaryPayableCard extends StatelessWidget {
                     color: (isPaid
                             ? const Color(0xFF43A047)
                             : p.danger)
-                        .withOpacity(0.4),
+                        .withValues(alpha: 0.4),
                     blurRadius: 6,
                     spreadRadius: 1,
                   ),
@@ -4023,7 +4023,7 @@ class _SalaryPayableCard extends StatelessWidget {
             // Avatar
             CircleAvatar(
               radius: 22,
-              backgroundColor: p.primary.withOpacity(0.1),
+              backgroundColor: p.primary.withValues(alpha: 0.1),
               child: Text(
                 employee.name.isNotEmpty
                     ? employee.name[0].toUpperCase()
@@ -4133,7 +4133,7 @@ class _SalaryPayableCard extends StatelessWidget {
                               boxShadow: [
                                 BoxShadow(
                                   color: const Color(0xFF43A047)
-                                      .withOpacity(0.3),
+                                      .withValues(alpha: 0.3),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -4198,13 +4198,13 @@ class _ExpensePayableCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: isPaid
-            ? const Color(0xFF43A047).withOpacity(0.05)
-            : p.danger.withOpacity(0.04),
+            ? const Color(0xFF43A047).withValues(alpha: 0.05)
+            : p.danger.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isPaid
-              ? const Color(0xFF43A047).withOpacity(0.3)
-              : p.danger.withOpacity(0.3),
+              ? const Color(0xFF43A047).withValues(alpha: 0.3)
+              : p.danger.withValues(alpha: 0.3),
           width: 1.5,
         ),
       ),
@@ -4226,7 +4226,7 @@ class _ExpensePayableCard extends StatelessWidget {
                     color: (isPaid
                             ? const Color(0xFF43A047)
                             : p.danger)
-                        .withOpacity(0.4),
+                        .withValues(alpha: 0.4),
                     blurRadius: 6,
                     spreadRadius: 1,
                   ),
@@ -4237,7 +4237,7 @@ class _ExpensePayableCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: catColor.withOpacity(0.1),
+                color: catColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(_categoryIcon(expense.category),
@@ -4340,7 +4340,7 @@ class _ExpensePayableCard extends StatelessWidget {
                                   BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
-                                  color: catColor.withOpacity(0.3),
+                                  color: catColor.withValues(alpha: 0.3),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -4397,7 +4397,7 @@ class _EmptyState extends StatelessWidget {
         children: [
           Icon(icon,
               size: 72,
-              color: palette.primary.withOpacity(0.2)),
+              color: palette.primary.withValues(alpha: 0.2)),
           const SizedBox(height: 16),
           Text(label,
               style: TextStyle(
@@ -4532,7 +4532,7 @@ class _SpeedDialFABState extends State<_SpeedDialFAB>
                               boxShadow: [
                                 BoxShadow(
                                   color:
-                                      Colors.black.withOpacity(0.12),
+                                      Colors.black.withValues(alpha: 0.12),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -4560,7 +4560,7 @@ class _SpeedDialFABState extends State<_SpeedDialFAB>
                               boxShadow: [
                                 BoxShadow(
                                   color:
-                                      item.color.withOpacity(0.4),
+                                      item.color.withValues(alpha: 0.4),
                                   blurRadius: 10,
                                   offset: const Offset(0, 4),
                                 ),
@@ -4599,7 +4599,7 @@ class _SpeedDialFABState extends State<_SpeedDialFAB>
                     color: (_open
                             ? Colors.grey.shade700
                             : p.accent)
-                        .withOpacity(0.4),
+                        .withValues(alpha: 0.4),
                     blurRadius: 14,
                     offset: const Offset(0, 5),
                   ),

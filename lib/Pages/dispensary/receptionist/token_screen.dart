@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/receptionist/token_screen.dart
+// lib/pages/dispensary/receptionist/token_screen.dart
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,9 +9,9 @@ import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
-import '../../../services/local_storage_service.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 class TokenScreen extends StatefulWidget {
   final String branchId;
@@ -316,6 +316,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     required String temp,
     required String sugar,
     required String weight,
+    int suggestedDays = 1,
   }) async {
     if (_patientData == null || _nextSerial == null) return;
     if (mounted) setState(() => _isLoading = true);
@@ -399,6 +400,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         'branchId':      widget.branchId,
         'createdBy':     widget.receptionistId,
         'createdByName': widget.receptionistName,
+        'suggestedDays': suggestedDays,
         if (_patientData!['cnic']?.toString().trim().isNotEmpty == true)
           'cnic': _patientData!['cnic'].toString().trim(),
         if (_patientData!['guardianCnic']?.toString().trim().isNotEmpty == true)
@@ -768,6 +770,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     final tempCtrl      = TextEditingController();
     final sugarCtrl     = TextEditingController();
     final weightCtrl    = TextEditingController();
+    int suggestedDays   = 1;
 
     showDialog(
       context: context,
@@ -861,6 +864,49 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                   decoration:
                       _vitalsDecoration('Weight (kg)', Icons.monitor_weight),
                 ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Days Suggestion (asked by patient):',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [1, 2, 3].map((d) {
+                    final isSelected = suggestedDays == d;
+                    return Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(right: d < 3 ? 8 : 0),
+                        child: InkWell(
+                          onTap: () => setStateDialog(() => suggestedDays = d),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: isSelected ? _teal : Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected ? _teal : Colors.green.shade200,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$d Day${d > 1 ? 's' : ''}',
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : _teal,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
               ],
             ),
           ),
@@ -920,7 +966,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                           bp:     '$systolic/$diastolic',
                           temp:   temp,
                           sugar:  sugar,
-                          weight: weight);
+                          weight: weight,
+                          suggestedDays: suggestedDays);
                     },
                     icon: const Icon(Icons.local_hospital, size: 18),
                     label: const Text('Issue Token',
@@ -1090,7 +1137,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
               border: Border.all(color: Colors.green.shade200, width: 1.5),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.green.withOpacity(0.07),
+                    color: Colors.green.withValues(alpha: 0.07),
                     blurRadius: 20,
                     offset: const Offset(0, 6)),
               ],
@@ -1103,9 +1150,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       horizontal: isMobile ? 16 : 24,
                       vertical:   isMobile ? 8  : 10),
                   decoration: BoxDecoration(
-                    color: _teal.withOpacity(0.08),
+                    color: _teal.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: _teal.withOpacity(0.3)),
+                    border: Border.all(color: _teal.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     'Next Token: ${_nextSerial ?? 'Loading...'}',
@@ -1385,7 +1432,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.85),
+                        color: Colors.green.withValues(alpha: 0.85),
                         borderRadius: BorderRadius.circular(20)),
                     child: const Row(mainAxisSize: MainAxisSize.min, children: [
                       SizedBox(width: 13, height: 13,

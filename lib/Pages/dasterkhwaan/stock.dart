@@ -102,7 +102,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                          color: _primary.withOpacity(0.1),
+                          color: _primary.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12)),
                       child: Icon(Icons.add_box_rounded,
                           color: _primary, size: 22),
@@ -233,8 +233,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: isIncrement
-                          ? const Color(0xFF1565C0).withOpacity(0.1)
-                          : Colors.red.withOpacity(0.1),
+                          ? const Color(0xFF1565C0).withValues(alpha: 0.1)
+                          : Colors.red.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
@@ -458,7 +458,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                           Text(
                             "${_allStockItems.length} items",
                             style: TextStyle(
-                                color: Colors.white.withOpacity(0.7),
+                                color: Colors.white.withValues(alpha: 0.7),
                                 fontSize: 13),
                           ),
                           if (lowStock > 0) ...[
@@ -467,10 +467,10 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.red.withOpacity(0.2),
+                                color: Colors.red.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(8),
                                 border: Border.all(
-                                    color: Colors.red.withOpacity(0.5)),
+                                    color: Colors.red.withValues(alpha: 0.5)),
                               ),
                               child: Text(
                                 "$lowStock low stock",
@@ -536,7 +536,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   children: [
                     Icon(Icons.inventory_2_outlined,
                         size: 72,
-                        color: _primary.withOpacity(0.2)),
+                        color: _primary.withValues(alpha: 0.2)),
                     const SizedBox(height: 12),
                     Text("No items found",
                         style: TextStyle(
@@ -561,12 +561,12 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                         borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: isLow
-                              ? Colors.red.withOpacity(0.3)
+                              ? Colors.red.withValues(alpha: 0.3)
                               : Colors.transparent,
                         ),
                         boxShadow: [
                           BoxShadow(
-                              color: Colors.black.withOpacity(0.04),
+                              color: Colors.black.withValues(alpha: 0.04),
                               blurRadius: 8,
                               offset: const Offset(0, 2))
                         ],
@@ -581,8 +581,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               height: 48,
                               decoration: BoxDecoration(
                                 color: isLow
-                                    ? Colors.red.withOpacity(0.08)
-                                    : _primary.withOpacity(0.08),
+                                    ? Colors.red.withValues(alpha: 0.08)
+                                    : _primary.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(14),
                               ),
                               child: Icon(
@@ -622,13 +622,13 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                   horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
                                 color: isLow
-                                    ? Colors.red.withOpacity(0.1)
+                                    ? Colors.red.withValues(alpha: 0.1)
                                     : const Color(0xFFE8F5E9),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: isLow
-                                      ? Colors.red.withOpacity(0.3)
-                                      : _primary.withOpacity(0.2),
+                                      ? Colors.red.withValues(alpha: 0.3)
+                                      : _primary.withValues(alpha: 0.2),
                                 ),
                               ),
                               child: Text(
@@ -700,7 +700,7 @@ class _ActionBtn extends StatelessWidget {
         width: 30,
         height: 30,
         decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8)),
         child: Icon(icon, color: color, size: 18),
       ),

@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/doctor/patient_history.dart
+// lib/pages/dispensary/doctor/patient_history.dart
 
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
-import '../../../services/local_storage_service.dart';
+import 'package:gmwf/services/local_storage_service.dart';
 
 // Alias kept for backwards compatibility with existing call sites
 typedef PatientHistory = PatientHistoryPanel;
@@ -508,9 +508,9 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: _teal.withOpacity(0.1),
+                  color: _teal.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _teal.withOpacity(0.3)),
+                  border: Border.all(color: _teal.withValues(alpha: 0.3)),
                 ),
                 child: Text(
                   '${_entries.length} visit${_entries.length == 1 ? '' : 's'}',
@@ -799,8 +799,8 @@ class _CompactLatestCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _teal.withOpacity(0.25), width: 1.2),
-        boxShadow: [BoxShadow(color: _teal.withOpacity(0.07), blurRadius: 10, offset: const Offset(0, 3))],
+        border: Border.all(color: _teal.withValues(alpha: 0.25), width: 1.2),
+        boxShadow: [BoxShadow(color: _teal.withValues(alpha: 0.07), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
@@ -820,6 +820,12 @@ class _CompactLatestCard extends StatelessWidget {
                 const SizedBox(width: 4),
                 Text(e.doctorName, style: const TextStyle(color: Colors.white70, fontSize: 11)),
               ]),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
+              child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+            ),
           ]),
         ),
         Padding(
@@ -894,11 +900,11 @@ class _CompactLatestCard extends StatelessWidget {
   Widget _vitalChip(String label, String value, Color color) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08), borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: RichText(text: TextSpan(children: [
-        TextSpan(text: '$label  ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color.withOpacity(0.75))),
+        TextSpan(text: '$label  ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color.withValues(alpha: 0.75))),
         TextSpan(text: value,     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,  color: color)),
       ])));
 
@@ -926,9 +932,9 @@ class _CompactLatestCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 5),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: isInj ? const Color(0xFFE3F2FD) : _teal.withOpacity(0.04),
+        color: isInj ? const Color(0xFFE3F2FD) : _teal.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: isInj ? const Color(0xFF90CAF9) : _teal.withOpacity(0.15)),
+        border: Border.all(color: isInj ? const Color(0xFF90CAF9) : _teal.withValues(alpha: 0.15)),
       ),
       child: Row(children: [
         Container(
@@ -994,6 +1000,12 @@ class _HistoryCard extends StatelessWidget {
                   const Icon(Icons.access_time, color: Colors.white70, size: 14),
                   const SizedBox(width: 4),
                   Text(timeStr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(6)),
+                    child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
                 ]),
                 const SizedBox(height: 4),
                 Text('Serial: ${e.serial}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
@@ -1009,7 +1021,7 @@ class _HistoryCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: e.sourceColor.withOpacity(0.3),
+                color: e.sourceColor.withValues(alpha: 0.3),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.white54),
               ),
@@ -1111,8 +1123,8 @@ class _HistoryCard extends StatelessWidget {
   Widget _buildVitalChip(String label, String value, Color color) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text('$label: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
@@ -1129,8 +1141,8 @@ class _HistoryCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _teal.withOpacity(0.05), borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _teal.withOpacity(0.2)),
+        color: _teal.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _teal.withValues(alpha: 0.2)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
@@ -1185,12 +1197,13 @@ class _HistoryEntry {
   final List<_MedEntry> medicines;
   final List<String> labTests;
   final Map<String, dynamic> vitals, raw;
+  final int days;
 
   const _HistoryEntry({
     required this.serial, required this.date, required this.diagnosis,
     required this.complaint, required this.doctorName, required this.medicines,
     required this.labTests, required this.vitals, required this.raw,
-    required this.source,
+    required this.source, required this.days,
   });
 
   static _HistoryEntry? fromMap(Map<String, dynamic> data, {required String source}) {
@@ -1261,6 +1274,7 @@ class _HistoryEntry {
       vitals:    (data['vitals'] as Map?)?.cast<String, dynamic>() ?? {},
       raw:       data,
       source:    source,
+      days:      (data['daysOfMedicine'] as num?)?.toInt() ?? 1,
     );
   }
 

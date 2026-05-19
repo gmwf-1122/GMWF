@@ -1,4 +1,4 @@
-// lib/Pages/dispensary/dispensar/patient_list.dart
+// lib/pages/dispensary/dispensar/patient_list.dart
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -6,9 +6,9 @@ import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
 
-import '../../../services/local_storage_service.dart';
-import '../../../realtime/realtime_manager.dart';
-import '../../../realtime/realtime_events.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 class PatientList extends StatefulWidget {
   final String branchId;
@@ -166,7 +166,7 @@ class _PatientListState extends State<PatientList>
             borderRadius: BorderRadius.circular(isMobile ? 20 : 36),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.08),
+                color: Colors.black.withValues(alpha: 0.08),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
@@ -457,10 +457,10 @@ class _PatientListState extends State<PatientList>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(isMobile ? 14 : 20),
-        border: Border.all(color: color.withOpacity(0.8), width: 1.5),
+        border: Border.all(color: color.withValues(alpha: 0.8), width: 1.5),
         boxShadow: [
           BoxShadow(
-              color: Colors.grey.withOpacity(0.1),
+              color: Colors.grey.withValues(alpha: 0.1),
               blurRadius: 6,
               offset: const Offset(0, 3)),
         ],

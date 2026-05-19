@@ -58,7 +58,7 @@ void showAddStockDialog(
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                      color: kInfo.withOpacity(0.12),
+                      color: kInfo.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12)),
                   child: Icon(
                     isEdit ? Icons.edit_rounded : Icons.add_box_rounded,
@@ -282,7 +282,7 @@ void showAdjustStockDialog(
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                    color: actionColor.withOpacity(0.12),
+                    color: actionColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12)),
                 child: Icon(
                   isAdd
