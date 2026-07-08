@@ -1,6 +1,5 @@
 // lib/pages/dispensary/dispensar/patient_form_helper.dart
 
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -30,7 +29,9 @@ class PatientFormHelper {
     if (timing.isEmpty) return [0, 0, 0];
     final parts =
         timing.split('+').map((s) => int.tryParse(s.trim()) ?? 0).toList();
-    while (parts.length < 3) parts.add(0);
+    while (parts.length < 3) {
+      parts.add(0);
+    }
     return parts.sublist(0, 3);
   }
 
@@ -56,7 +57,9 @@ class PatientFormHelper {
         type.contains('syp') ||
         name.contains('syrup') ||
         name.contains('syp') ||
-        dosage.contains('spoon')) return 'چمچ';
+        dosage.contains('spoon')) {
+      return 'چمچ';
+    }
     if (type.contains('capsule') || type.contains('cap')) return 'کیپسول';
     return 'گولی';
   }
@@ -75,12 +78,15 @@ class PatientFormHelper {
     final unitUrdu = getUnitUrdu(med);
     final parts = parseTiming(timing);
     List<String> periods = [];
-    if (parts[0] > 0)
+    if (parts[0] > 0) {
       periods.add('${(parts[0] * dosePerTime).toInt()} $unitUrdu صبح');
-    if (parts[1] > 0)
+    }
+    if (parts[1] > 0) {
       periods.add('${(parts[1] * dosePerTime).toInt()} $unitUrdu دوپہر');
-    if (parts[2] > 0)
+    }
+    if (parts[2] > 0) {
       periods.add('${(parts[2] * dosePerTime).toInt()} $unitUrdu شام');
+    }
     if (periods.isNotEmpty) return periods.join(' - ');
     final doseStr = dosePerTime == dosePerTime.floor()
         ? dosePerTime.toInt().toString()
@@ -188,7 +194,7 @@ class PatientFormHelper {
 
     final pdf = pw.Document();
 
-    pw.Widget _label(String text, {double size = 9, PdfColor? color}) =>
+    pw.Widget label(String text, {double size = 9, PdfColor? color}) =>
         pw.Text(text,
             style: pw.TextStyle(
                 font: english,
@@ -196,12 +202,12 @@ class PatientFormHelper {
                 color: color ?? black,
                 fontWeight: pw.FontWeight.bold));
 
-    pw.Widget _value(String text, {double size = 9}) =>
+    pw.Widget value(String text, {double size = 9}) =>
         pw.Text(text,
             style: pw.TextStyle(font: english, fontSize: size, color: black));
 
     // Build medicine rows — name left, dosage right — no bullets
-    pw.Widget _medRow(Map<String, dynamic> med) {
+    pw.Widget medRow(Map<String, dynamic> med) {
       final abbrev = _getMedAbbrevStatic(med['type']);
       final name = '$abbrev ${med['name'] ?? ''}'.trim();
       final dosage = buildEnglishDosageLine(med);
@@ -277,7 +283,7 @@ class PatientFormHelper {
 
               // ── Lab Tests ────────────────────────────────────────────────
               if (labTests.isNotEmpty) ...[
-                _label(isPhysio ? 'Physiotherapies' : 'Lab Tests', size: 9, color: teal),
+                label(isPhysio ? 'Physiotherapies' : 'Lab Tests', size: 9, color: teal),
                 pw.SizedBox(height: 3),
                 ...labTests.map((lab) => pw.Padding(
                       padding: const pw.EdgeInsets.symmetric(vertical: 1),
@@ -289,17 +295,17 @@ class PatientFormHelper {
               // ── Custom Medicines ─────────────────────────────────────────
               if (customMeds.isNotEmpty) ...[
                 pw.Divider(thickness: 0.4, color: grey),
-                _label('Medicines', size: 9, color: teal),
+                label('Medicines', size: 9, color: teal),
                 pw.SizedBox(height: 3),
-                ...customMeds.map((m) => _medRow(m)),
+                ...customMeds.map((m) => medRow(m)),
               ],
 
               // ── Custom Injectables ───────────────────────────────────────
               if (customInjectables.isNotEmpty) ...[
                 pw.Divider(thickness: 0.4, color: grey),
-                _label('Injectables', size: 9, color: teal),
+                label('Injectables', size: 9, color: teal),
                 pw.SizedBox(height: 3),
-                ...customInjectables.map((m) => _medRow(m)),
+                ...customInjectables.map((m) => medRow(m)),
               ],
 
               // ── Footer ───────────────────────────────────────────────────

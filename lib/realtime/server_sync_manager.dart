@@ -107,7 +107,9 @@ class ServerSyncManager {
     if (raw == null || raw.trim().isEmpty) return 'zakat';
     final s = raw.toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     if (s == 'zakat') return 'zakat';
     debugPrint('[SSM] ⚠️ Unknown queueType "$raw" — defaulting to zakat');
@@ -936,10 +938,17 @@ class ServerSyncManager {
             : double.tryParse(op['delta']?.toString() ?? '') ?? 0.0;
         if (delta == 0) return;
 
-        await _db
+        final docRef = _db
             .collection('branches').doc(branchId)
-            .collection('inventory').doc(medicineId)
-            .update({'quantity': FieldValue.increment(delta)});
+            .collection('inventory').doc(medicineId);
+        await _db.runTransaction((transaction) async {
+          final snapshot = await transaction.get(docRef);
+          if (snapshot.exists) {
+            final current = (snapshot.data()?['quantity'] as num?)?.toDouble() ?? 0.0;
+            final updated = (current + delta).clamp(0.0, double.infinity);
+            transaction.update(docRef, {'quantity': updated});
+          }
+        });
         break;
 
       case 'approve_token_exception':
@@ -1023,6 +1032,18 @@ class ServerSyncManager {
     final conn = await Connectivity().checkConnectivity();
     if (conn.every((r) => r == ConnectivityResult.none)) return;
 
+    // ── 30-minute cooldown guard (matches SyncService) ─────────────────────────
+    final settings = Hive.box('app_settings');
+    final ttlKey = 'ssm_last_download_$_branchId';
+    final lastStr = settings.get(ttlKey) as String?;
+    final last = lastStr != null ? DateTime.tryParse(lastStr) : null;
+    final now = DateTime.now();
+    if (last != null && now.difference(last) < const Duration(minutes: 30)) {
+      debugPrint('[SSM] Download cooldown active for $_branchId — skipping');
+      return;
+    }
+    await settings.put(ttlKey, now.toIso8601String());
+
     await Future.wait([
       _downloadPatients(),
       _downloadInventory(),
@@ -1074,14 +1095,16 @@ class ServerSyncManager {
           .collection('patients')
           .get();
 
+      final List<Map<String, dynamic>> patientsList = [];
       for (final doc in snap.docs) {
         final d = doc.data();
         d['patientId'] = doc.id;
         d['branchId']  = _branchId;
-        await LocalStorageService.saveLocalPatient(d);
+        patientsList.add(d);
         // Mark synced so backfill never re-uploads patients from Firestore
         await Hive.box('app_flags').put('patient_synced_${doc.id}', true);
       }
+      await LocalStorageService.saveAllLocalPatients(patientsList);
       debugPrint('[SSM] Downloaded ${snap.docs.length} patients for $_branchId');
     } catch (e) {
       debugPrint('[SSM] _downloadPatients error: $e');

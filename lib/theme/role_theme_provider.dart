@@ -1,6 +1,7 @@
 // lib/theme/role_theme_provider.dart
 
 import 'package:flutter/material.dart';
+import 'package:hive/hive.dart';
 import 'app_theme.dart';
 
 
@@ -22,7 +23,17 @@ class RoleThemeScope extends InheritedWidget {
 
 
   static RoleThemeData dataOf(BuildContext context, [Color? customColor]) {
-    return RoleThemeData.of(of(context), customColor);
+    Color? resolvedColor = customColor;
+    if (resolvedColor == null && Hive.isBoxOpen('app_settings')) {
+      final prefColorStr = Hive.box('app_settings').get('custom_accent_color') as String?;
+      if (prefColorStr != null && prefColorStr.isNotEmpty) {
+        try {
+          final hex = prefColorStr.replaceAll('#', '');
+          resolvedColor = Color(int.parse('FF$hex', radix: 16));
+        } catch (_) {}
+      }
+    }
+    return RoleThemeData.of(of(context), resolvedColor);
   }
 
   @override
@@ -105,11 +116,15 @@ class RoleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
+    double resolvedRadius = radius;
+    if (radius == 16 && Hive.isBoxOpen('app_settings')) {
+      resolvedRadius = Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as double;
+    }
     return Container(
       padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: BorderRadius.circular(resolvedRadius),
         border: Border.all(color: t.bgRule, width: 1.0),
         boxShadow: [
           BoxShadow(
@@ -141,6 +156,10 @@ InputDecoration roleInputDecoration(
   bool required = false,
 }) {
   final t = RoleThemeScope.dataOf(context);
+  final radius = Hive.isBoxOpen('app_settings')
+      ? Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as double
+      : 12.0;
+
   return InputDecoration(
     labelText: required ? '$label *' : label,
     labelStyle: TextStyle(fontSize: 13.5, color: t.textTertiary),
@@ -150,23 +169,23 @@ InputDecoration roleInputDecoration(
     fillColor: t.bgCardAlt,
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: t.bgRule, width: 1),
     ),
     enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: t.bgRule, width: 1),
     ),
     focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: t.accent, width: 2),
     ),
     errorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: t.danger, width: 1.5),
     ),
     focusedErrorBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(radius),
       borderSide: BorderSide(color: t.danger, width: 2),
     ),
     errorStyle: const TextStyle(fontSize: 11.5),

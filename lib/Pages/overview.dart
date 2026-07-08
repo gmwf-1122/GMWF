@@ -2,6 +2,7 @@
 // Unified sidebar-less dashboard for executive roles.
 
 import 'package:flutter/material.dart';
+import 'package:collection/collection.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -34,6 +35,9 @@ class _OverviewScreenState extends State<OverviewScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
+  String _activeTab = 'overall';
+  int _refreshKey = 0; // incremented to force FutureBuilder re-fetch after cache clear
+  bool _isRefreshing = false;
 
   @override
   void initState() {
@@ -65,10 +69,100 @@ class _OverviewScreenState extends State<OverviewScreen>
     if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
 
+  Future<void> _forceRefresh() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    invalidateDashboardCache();
+    await Future.delayed(const Duration(milliseconds: 50)); // let setState flush
+    if (mounted) setState(() { _refreshKey++; _isRefreshing = false; });
+  }
+
+  Widget _buildTabSwitcher(RoleThemeData t, bool showDonationsTab) {
+    final tabs = [
+      {'id': 'overall', 'label': 'Overall Metrics', 'icon': Icons.grid_view_rounded},
+      {'id': 'dispensary', 'label': 'Dispensary', 'icon': Icons.local_pharmacy_rounded},
+      {'id': 'tokens', 'label': 'Tokens / Food', 'icon': Icons.restaurant_rounded},
+      if (showDonationsTab)
+        {'id': 'donations', 'label': 'Donations', 'icon': Icons.volunteer_activism_rounded},
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4.0),
+        child: Row(
+          children: tabs.map((tab) {
+            final active = _activeTab == tab['id'];
+            return GestureDetector(
+              onTap: () {
+                setState(() {
+                  _activeTab = tab['id'] as String;
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                margin: const EdgeInsets.only(right: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  gradient: active ? t.accentGradient : null,
+                  color: active ? null : t.bgCard,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: active ? t.accent.withValues(alpha: 0.3) : t.bgRule,
+                    width: 1.2,
+                  ),
+                  boxShadow: active
+                      ? [
+                          BoxShadow(
+                            color: t.accent.withValues(alpha: 0.2),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          )
+                        ]
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.02),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          )
+                        ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      tab['icon'] as IconData,
+                      size: 15,
+                      color: active ? Colors.white : t.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      tab['label'] as String,
+                      style: TextStyle(
+                        color: active ? Colors.white : t.textSecondary,
+                        fontSize: 12,
+                        fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final role = RoleThemeScope.roleOf(context);
+
+    final showDonationsTab = role.name.toLowerCase().contains('chairman') || 
+                             role.name.toLowerCase().contains('hq') || 
+                             role.name.toLowerCase().contains('admin');
 
     final content = ValueListenableBuilder<DashboardFilter>(
       valueListenable: dashboardController,
@@ -86,87 +180,102 @@ class _OverviewScreenState extends State<OverviewScreen>
                   }).toList()
                 : <Map<String, dynamic>>[];
 
-            return Column(
-              children: [
-                GlobalFilterBar(controller: dashboardController, branches: branches),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: DS.s3, vertical: DS.s3),
-                      child: FadeTransition(
-                        opacity: _fadeAnim,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _OverviewHeader(
-                                t: t,
-                                username: widget.username,
-                                roleName: role.name.toUpperCase()),
-                            const SizedBox(height: DS.s3),
+            return SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: DS.s3, vertical: DS.s3),
+                child: FadeTransition(
+                  opacity: _fadeAnim,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _OverviewHeader(
+                          t: t,
+                          username: widget.username,
+                          roleName: role.name.toUpperCase()),
+                      const SizedBox(height: DS.s3),
 
-                            // -- High Authority Donation Intelligence --
-                            if (role.name.toLowerCase().contains('chairman') || 
-                                role.name.toLowerCase().contains('hq') || 
-                                role.name.toLowerCase().contains('admin'))
-                              _DonationIntelligenceSection(t: t, branches: branches, filter: filter),
+                      // Filter card integrated beautifully inside the scroll view
+                      GlobalFilterBar(controller: dashboardController, branches: branches),
+                      const SizedBox(height: DS.s3),
 
-                            const SizedBox(height: DS.s3),
+                      // Tabs switcher for Clinical, Food, Donations, and Overall separation
+                      _buildTabSwitcher(t, showDonationsTab),
+                      const SizedBox(height: DS.s3),
 
-                            ExecutiveTopBranchFetcher(
-                              t: t,
-                              branches: branches,
-                              onGoToBranch: (id) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => Branches(
-                                      initialBranchId: id,
-                                      isManager: false,
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                            const SizedBox(height: DS.s4),
-
-                            // -- KPIs --
-                            _buildKPIOverview(branches, filter),
-                            const SizedBox(height: DS.s4),
-
-                            // ── Branch Performance Breakdown ─────────────────────────
-                            DashSectionHeader(
-                              title: 'Branch Performance Breakdown',
-                              subtitle:
-                                  'Detailed operational and financial metrics per branch',
-                            ),
-                            const SizedBox(height: DS.s2),
-                            ScrollReveal(
-                                delay: const Duration(milliseconds: 280),
-                                child: BranchPerformanceTable(
-                                  t: t,
-                                  branches: branches,
-                                  onGoToBranch: (id) {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => Branches(
-                                          initialBranchId: id,
-                                          isManager: false,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                )),
-                            const SizedBox(height: DS.s4),
-                          ],
+                      // -- Dynamic Tab Contents --
+                      if (_activeTab == 'overall') ...[
+                        ExecutiveTopBranchFetcher(
+                          t: t,
+                          branches: branches,
+                          onGoToBranch: (id) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => Branches(
+                                  initialBranchId: id,
+                                  isManager: false,
+                                ),
+                              ),
+                            );
+                          },
                         ),
+                        const SizedBox(height: DS.s3),
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'dispensary') ...[
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'tokens') ...[
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'donations' && showDonationsTab) ...[
+                        _DonationIntelligenceSection(t: t, branches: branches, filter: filter),
+                        const SizedBox(height: DS.s2),
+                        _buildKPIOverview(branches, filter),
+                      ],
+
+                      const SizedBox(height: DS.s4),
+
+                      // ── Dynamic Branch Performance Breakdown ─────────────────────────
+                      DashSectionHeader(
+                        title: _activeTab == 'overall'
+                            ? 'Branch Performance Breakdown'
+                            : _activeTab == 'dispensary'
+                                ? 'Clinical Performance'
+                                : _activeTab == 'tokens'
+                                    ? 'Food Service Performance'
+                                    : 'Donations Branch Breakdown',
+                        subtitle: _activeTab == 'overall'
+                            ? 'Detailed operational and financial metrics per branch'
+                            : _activeTab == 'dispensary'
+                                ? 'Branch-wise patient traffic and dispensary revenues'
+                                : _activeTab == 'tokens'
+                                    ? 'Dasterkhwaan meals issued vs served counts'
+                                    : 'Masjid and general donations share by branch',
                       ),
-                    ),
+                      const SizedBox(height: DS.s2),
+                      ScrollReveal(
+                          delay: const Duration(milliseconds: 280),
+                          child: BranchPerformanceTable(
+                            t: t,
+                            branches: branches,
+                            selectedTab: _activeTab,
+                            onGoToBranch: (id) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => Branches(
+                                    initialBranchId: id,
+                                    isManager: false,
+                                  ),
+                                ),
+                              );
+                            },
+                          )),
+                      const SizedBox(height: DS.s4),
+                    ],
                   ),
                 ),
-              ],
+              ),
             );
           },
         );
@@ -174,6 +283,7 @@ class _OverviewScreenState extends State<OverviewScreen>
     );
 
     if (widget.isEmbedded) return content;
+
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -201,6 +311,20 @@ class _OverviewScreenState extends State<OverviewScreen>
           ),
         ]),
         actions: [
+          // Refresh button: clears the 5-minute stats cache and re-fetches
+          _isRefreshing
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 14),
+                  child: SizedBox(
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+                  tooltip: 'Refresh dashboard',
+                  onPressed: _forceRefresh,
+                ),
           IconButton(
             icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 22),
             onPressed: _logout,
@@ -216,7 +340,10 @@ class _OverviewScreenState extends State<OverviewScreen>
 
   Widget _buildKPIOverview(
       List<Map<String, dynamic>> branches, DashboardFilter filter) {
-    final ids = branches.map((b) => b['id'] as String).toList();
+    final allIds = branches.map((b) => b['id'] as String).toList();
+    final ids = (filter.branchId == 'all' || filter.branchId.isEmpty)
+        ? allIds
+        : allIds.where((id) => id == filter.branchId).toList();
     if (filter.timeRange == TimeRange.today) {
       return StreamBuilder<BranchStats>(
         stream: streamAllBranchesStats(ids, filter: filter),
@@ -229,7 +356,12 @@ class _OverviewScreenState extends State<OverviewScreen>
         },
       );
     } else {
+      // Use _refreshKey so tapping the refresh button forces a new Future despite cache.
+      // Include filter.customRange bounds so switching between custom date ranges
+      // (which share the same timeRange.name == 'custom') also triggers a refetch.
       return FutureBuilder<BranchStats>(
+        key: ValueKey(
+            '$_refreshKey|${filter.timeRange.name}|${filter.branchId}|${filter.customRange?.start}|${filter.customRange?.end}'),
         future: fetchAllBranchesStats(ids, filter: filter),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
@@ -243,66 +375,184 @@ class _OverviewScreenState extends State<OverviewScreen>
   }
 
   Widget _buildInnerKPI(BuildContext context, BranchStats s, int branchCount) {
-        return Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: ActionableKPICard(
-                    label: 'Total Revenue',
-                    value: fmtNum(s.totalRevenue),
-                    prefix: 'PKR ',
-                    icon: Icons.payments_rounded,
-                    color: DS.green,
-                    isPrimary: true,
-                    insight: s.totalRevenue > 0
-                        ? 'Peak performance reached'
-                        : '⚠️ No revenue today',
-                  ),
+    if (_activeTab == 'overall') {
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Total Revenue',
+                  value: fmtNum(s.totalRevenue),
+                  prefix: 'PKR ',
+                  icon: Icons.payments_rounded,
+                  color: DS.green,
+                  isPrimary: true,
+                  insight: s.totalRevenue > 0
+                      ? 'Peak performance reached'
+                      : '⚠️ No revenue today',
                 ),
-                const SizedBox(width: DS.s2),
-                Expanded(
-                  child: ActionableKPICard(
-                    label: 'Total Patients',
-                    value: fmtNum(s.tokens),
-                    icon: Icons.people_alt_rounded,
-                    color: DS.blue,
-                    isPrimary: true,
-                    insight: '${branchCount} active branches',
-                  ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Total Patients',
+                  value: fmtNum(s.tokens),
+                  icon: Icons.people_alt_rounded,
+                  color: DS.blue,
+                  isPrimary: true,
+                  insight: '$branchCount active branches',
                 ),
-              ],
-            ),
-            const SizedBox(height: DS.s2),
-            Row(
-              children: [
-                Expanded(
-                  child: ActionableKPICard(
-                    label: 'Tokens Served',
-                    value: fmtNum(s.dasterkhwaanServed),
-                    icon: Icons.restaurant_rounded,
-                    color: DS.orange,
-                    insight: '${s.dasterkhwaan} tokens issued',
-                  ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DS.s2),
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Tokens Served',
+                  value: fmtNum(s.dasterkhwaanServed),
+                  icon: Icons.restaurant_rounded,
+                  color: DS.orange,
+                  insight: '${s.dasterkhwaan} tokens issued',
                 ),
-                const SizedBox(width: DS.s2),
-                Expanded(
-                  child: ActionableKPICard(
-                    label: 'Donations',
-                    value: fmtNum(s.donations),
-                    prefix: 'PKR ',
-                    icon: Icons.volunteer_activism_rounded,
-                    color: DS.purple,
-                    insight: 'Today\'s contributions',
-                  ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Donations',
+                  value: fmtNum(s.donations),
+                  prefix: 'PKR ',
+                  icon: Icons.volunteer_activism_rounded,
+                  color: DS.purple,
+                  insight: 'Today\'s contributions',
                 ),
-              ],
-            ),
-            const SizedBox(height: DS.s2),
-            // Common chart for all executive roles
-            PatientDistributionCard(t: RoleThemeScope.dataOf(context), s: s),
-          ],
-        );
+              ),
+            ],
+          ),
+          const SizedBox(height: DS.s2),
+          PatientDistributionCard(t: RoleThemeScope.dataOf(context), s: s),
+        ],
+      );
+    } else if (_activeTab == 'dispensary') {
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Dispensary Revenue',
+                  value: fmtNum(s.dispensaryRevenue),
+                  prefix: 'PKR ',
+                  icon: Icons.payments_rounded,
+                  color: DS.green,
+                  insight: 'From medicine fee contributions',
+                ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Patients Treated',
+                  value: fmtNum(s.tokens),
+                  icon: Icons.people_alt_rounded,
+                  color: DS.blue,
+                  insight: 'Total clinical visits',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DS.s2),
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Zakat Patients',
+                  value: fmtNum(s.zakat),
+                  icon: Icons.assignment_ind_rounded,
+                  color: DS.green,
+                  insight: 'Received free/subsidized care',
+                ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Non-Zakat Patients',
+                  value: fmtNum(s.nonZakat),
+                  icon: Icons.badge_rounded,
+                  color: DS.blue,
+                  insight: 'Received standard operations',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DS.s2),
+          PatientDistributionCard(t: RoleThemeScope.dataOf(context), s: s),
+        ],
+      );
+    } else if (_activeTab == 'tokens') {
+      return Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Tokens Issued',
+                  value: fmtNum(s.dasterkhwaan),
+                  icon: Icons.tag_rounded,
+                  color: DS.orange,
+                  insight: 'Total issued today',
+                ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Tokens Served',
+                  value: fmtNum(s.dasterkhwaanServed),
+                  icon: Icons.restaurant_rounded,
+                  color: DS.green,
+                  insight: 'Dasterkhwaan meals served',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: DS.s2),
+          Row(
+            children: [
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Pending Meals',
+                  value: fmtNum(s.dasterkhwaanPending),
+                  icon: Icons.hourglass_empty_rounded,
+                  color: DS.orange,
+                  insight: 'Awaiting food service',
+                ),
+              ),
+              const SizedBox(width: DS.s2),
+              Expanded(
+                child: ActionableKPICard(
+                  label: 'Food Service Revenue',
+                  value: fmtNum(s.dasterkhwaanRevenue),
+                  prefix: 'PKR ',
+                  icon: Icons.monetization_on_rounded,
+                  color: DS.green,
+                  insight: 'Token fee contributions',
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    } else {
+      return ActionableKPICard(
+        label: 'Total Donations',
+        value: fmtNum(s.donations),
+        prefix: 'PKR ',
+        icon: Icons.volunteer_activism_rounded,
+        color: DS.purple,
+        insight: 'Global donation portfolio',
+      );
+    }
   }
 }
 
@@ -314,65 +564,217 @@ class _OverviewHeader extends StatelessWidget {
       {required this.t, required this.username, required this.roleName});
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.all(DS.s2 + 4),
-        decoration: BoxDecoration(
-          color: t.bgCard,
-          borderRadius: BorderRadius.circular(DS.r3),
-          border: Border.all(color: const Color(0xFFEDD88A), width: 1.5),
-          boxShadow: [
-            BoxShadow(
-                color: t.accent.withValues(alpha: 0.10),
-                blurRadius: 24,
-                offset: const Offset(0, 6))
+  Widget build(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFF0F172A), // Deep Slate Base
+            t.accent.withValues(alpha: 0.85), // Dynamic Role Accent
           ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(DS.s1 + 2),
-            decoration: BoxDecoration(
-              color: t.accentMuted,
-              borderRadius: BorderRadius.circular(DS.r1 + 4),
-              border: Border.all(color: const Color(0xFFEDD88A), width: 1.5),
-            ),
-            child: Image.asset('assets/logo/gmwf-1.png', height: 36, width: 36),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: t.accent.withValues(alpha: 0.15),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
-          const SizedBox(width: DS.s2),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          // Translucent glass decorative shapes
+          Positioned(
+            right: -30,
+            top: -30,
+            child: Container(
+              width: 150,
+              height: 150,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.04),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 80,
+            bottom: -40,
+            child: Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.02),
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 20 : 28,
+              vertical: isMobile ? 20 : 24,
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Glowing Circle Avatar
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 3),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                      color: t.accentMuted,
-                      borderRadius: BorderRadius.circular(DS.r2),
-                      border: Border.all(color: const Color(0xFFEDD88A))),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.workspace_premium_rounded,
-                        color: t.accent, size: 11),
-                    const SizedBox(width: 5),
-                    Text(roleName,
-                        style: TextStyle(
-                            color: t.accent,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.5)),
-                  ]),
+                    color: Colors.white.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.25),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Image.asset(
+                    'assets/logo/gmwf-1.png',
+                    height: isMobile ? 36 : 42,
+                    width: isMobile ? 36 : 42,
+                    fit: BoxFit.contain,
+                  ),
                 ),
-                const SizedBox(height: 6),
-                Text(username,
-                    style: TextStyle(
-                        color: t.textPrimary,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        height: 1.0)),
-                Text(DateFormat('EEEE, d MMMM yyyy').format(DateTime.now()),
-                    style: TextStyle(color: t.textTertiary, fontSize: 12)),
-              ])),
-        ]),
-      );
+                SizedBox(width: isMobile ? 16 : 20),
+                // Text details
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                width: 1,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.workspace_premium_rounded,
+                                  color: Colors.white,
+                                  size: 12,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  roleName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Welcome Back,',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.65),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        username,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isMobile ? 20 : 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                // Calendar Widget on Desktop
+                if (!isMobile) ...[
+                  const SizedBox(width: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.calendar_today_rounded,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              DateFormat('EEEE').format(DateTime.now()),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              DateFormat('d MMMM yyyy').format(DateTime.now()),
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.7),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ── Donation Intelligence Section for HQ/Chairman ─────────────────────────────
@@ -411,10 +813,21 @@ class _DonationIntelligenceSection extends StatelessWidget {
     final Map<String, double> donorTotals = {};
     final Map<String, String> donorNames = {};
 
+    final seenReceipts = <String>{};
     for (var d in filtered) {
+      if (d.syncStatus == 'deleted') continue;
+      if (d.paymentMethod.toLowerCase().trim() == 'bank_deposit') continue;
+      
+      final cleanRcpt = don.cleanReceiptNumber(d.receiptNo);
+      if (seenReceipts.contains(cleanRcpt)) {
+        continue;
+      }
+      seenReceipts.add(cleanRcpt);
+
       final amt = (d.amount > 0 ? d.amount : d.probableAmount) ?? 0.0;
-      if (d.categoryId == 'jamia') totalJamia += amt;
-      else if (d.categoryId == 'gmwf') totalGmwf += amt;
+      if (d.categoryId == 'jamia') {
+        totalJamia += amt;
+      } else if (d.categoryId == 'gmwf') totalGmwf += amt;
 
       if (d.gmwfSubCategoryId != null) {
         subCatTotals[d.gmwfSubCategoryId!] = (subCatTotals[d.gmwfSubCategoryId!] ?? 0) + amt;
@@ -530,11 +943,13 @@ class _DonationIntelligenceSection extends StatelessWidget {
             ),
           ];
           
-          if (isWide) return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (isWide) {
+            return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Expanded(child: content[0]),
             content[1],
             Expanded(child: content[2]),
           ]);
+          }
           return Column(children: [content[0], content[1], content[2]]);
         }),
         
@@ -575,32 +990,103 @@ class _DonationStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cleanLabel = label.toLowerCase();
+    final LinearGradient gradient;
+    final Color glowColor;
+    final Color labelColor = Colors.white.withValues(alpha: 0.75);
+    final Color valueColor = Colors.white;
+    final Color prefixColor = Colors.white.withValues(alpha: 0.7);
+    final Color iconBgColor = Colors.white.withValues(alpha: 0.15);
+    final Color iconColor = Colors.white;
+
+    if (cleanLabel.contains('jamia') || cleanLabel.contains('masjid')) {
+      gradient = const LinearGradient(
+        colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)], // Sapphire
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFF1D4ED8).withValues(alpha: 0.35);
+    } else {
+      gradient = const LinearGradient(
+        colors: [Color(0xFF0D9488), Color(0xFF0F766E)], // Emerald / Teal
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFF0F766E).withValues(alpha: 0.35);
+    }
+
     return Container(
-      padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(DS.r3),
-        border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: color.withValues(alpha: 0.05), blurRadius: 12, offset: const Offset(0, 4))],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(DS.r1 + 4)),
-            child: Icon(icon, color: color, size: 24),
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: glowColor,
+            blurRadius: 18,
+            offset: const Offset(0, 6),
           ),
-          const SizedBox(width: DS.s2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            right: -20,
+            top: -20,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            child: Row(
               children: [
-                Text(label, style: TextStyle(color: t.textTertiary, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-                const SizedBox(height: 4),
-                AnimatedCount(
-                  value: value,
-                  prefix: 'PKR ',
-                  style: TextStyle(color: t.textPrimary, fontSize: 20, fontWeight: FontWeight.w900),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: iconBgColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: labelColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      AnimatedCount(
+                        value: value,
+                        prefix: 'PKR ',
+                        style: TextStyle(
+                          color: valueColor,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          fontFamily: 'DMMono',
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -715,7 +1201,7 @@ class _TopDonorsCard extends StatelessWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: topDonors.length,
-              separatorBuilder: (_, __) => Divider(color: t.bgRule, height: 24),
+              separatorBuilder: (_, _) => Divider(color: t.bgRule, height: 24),
               itemBuilder: (context, i) {
                 final entry = topDonors[i];
                 final name = names[entry.key] ?? 'Unknown Donor';

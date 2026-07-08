@@ -8,7 +8,6 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 import 'package:flutter/foundation.dart';
-import 'package:gmwf/config/constants.dart';
 import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/services/local_storage_service.dart' as lss;
 import 'package:gmwf/services/sync_service.dart';
@@ -760,14 +759,23 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       ),
       child: Stack(
         children: [
+          // ── Background watermark (bottom-right) ──────────────────────────
           Positioned(
             right: -10,
             bottom: -10,
-            child: Icon(
-              icon ?? Icons.spa_rounded,
-              size: isMobile ? 40 : 54,
-              color: Colors.white.withValues(alpha: 0.12),
-            ),
+            child: isImage
+                ? Opacity(
+                    opacity: 0.12,
+                    child: Image.asset(
+                      'assets/logo/gmwf-1.png',
+                      height: isMobile ? 40 : 54,
+                    ),
+                  )
+                : Icon(
+                    icon ?? Icons.spa_rounded,
+                    size: isMobile ? 40 : 54,
+                    color: Colors.white.withValues(alpha: 0.12),
+                  ),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -787,10 +795,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         letterSpacing: 0.5,
                       ),
                     ),
+                    // ── Top-right icon/logo ───────────────────────────────
                     if (isImage)
-                      Image.asset('assets/logo/gmwf.png', height: isMobile ? 14 : 18)
+                      Image.asset('assets/logo/gmwf-1.png',
+                          height: isMobile ? 14 : 18)
                     else if (icon != null)
-                      Icon(icon, size: isMobile ? 12 : 16, color: Colors.white.withValues(alpha: 0.9)),
+                      Icon(icon,
+                          size: isMobile ? 12 : 16,
+                          color: Colors.white.withValues(alpha: 0.9)),
                   ],
                 ),
                 Column(
@@ -846,7 +858,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     return ListView.separated(
       itemCount: entries.length,
-      separatorBuilder: (_, __) =>
+      separatorBuilder: (_, _) =>
           Divider(height: 1, color: Colors.grey[200]),
       itemBuilder: (context, i) {
         final e = entries[i];
@@ -1097,7 +1109,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
         child: ValueListenableBuilder<Box>(
           valueListenable: _entriesListenable,
-          builder: (context, _, __) => _buildSummaryCards(true),
+          builder: (context, _, _) => _buildSummaryCards(true),
         ),
       ),
       Expanded(
@@ -1155,9 +1167,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 Expanded(
                   child: ValueListenableBuilder<int>(
                     valueListenable: _refreshNotifier,
-                    builder: (context, _, __) => ValueListenableBuilder<Box>(
+                    builder: (context, _, _) => ValueListenableBuilder<Box>(
                       valueListenable: _entriesListenable,
-                      builder: (context, _, __) => _buildTokenLog(true),
+                      builder: (context, _, _) => _buildTokenLog(true),
                     ),
                   ),
                 ),
@@ -1245,10 +1257,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                       flex: 2,
                       child: ValueListenableBuilder<int>(
                         valueListenable: _refreshNotifier,
-                        builder: (context, _, __) =>
+                        builder: (context, _, _) =>
                             ValueListenableBuilder<Box>(
                           valueListenable: _entriesListenable,
-                          builder: (context, _, __) =>
+                          builder: (context, _, _) =>
                               ValueListenableBuilder<Box>(
                             valueListenable: _patientsListenable,
                             builder: (context, box, _) {
@@ -1385,6 +1397,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   void dispose() {
     _refreshNotifier.dispose();
     _mobileTabController.dispose();
+    ConnectionManager().stop();
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

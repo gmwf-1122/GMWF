@@ -47,14 +47,16 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
 
   // Step 2: Category
   DonationCategory _category = DonationCategory.gmwf;
-  GmwfSubCategory? _gmwfSub = GmwfSubCategory.general;
-  DonationSubtype? _subtype;
+  GmwfSubCategory? _gmwfSub = GmwfSubCategory.dasterkhwaan;
+  DonationSubtype? _subtype = DonationSubtype.sadqaAtyaat;
 
   // Step 3: Contribution
   final _amountCtrl = TextEditingController();
   final _goodsItemCtrl = TextEditingController();
   final _unitCtrl = TextEditingController();
   final _probableAmountCtrl = TextEditingController();
+  final _bookReceiptNoCtrl = TextEditingController();
+  DateTime _selectedDate = DateTime.now();
   String _entryType = 'cash'; // 'cash' or 'goods'
   String _paymentMethod = 'Cash';
   final _notesCtrl = TextEditingController();
@@ -73,6 +75,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
     _goodsItemCtrl.dispose();
     _unitCtrl.dispose();
     _probableAmountCtrl.dispose();
+    _bookReceiptNoCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -173,6 +176,25 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   }
 
   Future<void> _submit() async {
+    final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
+    if (_entryType == 'cash' && amount <= 0) {
+      _setError('Amount must be greater than 0.');
+      return;
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (_selectedDate.isAfter(today)) {
+      _setError('Donation date cannot be in the future.');
+      return;
+    }
+
+    final manualReceipt = _bookReceiptNoCtrl.text.trim();
+    if (manualReceipt.isNotEmpty && DonationsLocalStorage.isReceiptNoDuplicate(manualReceipt)) {
+      _setError('Duplicate receipt number not allowed.');
+      return;
+    }
+
     setState(() { _saving = true; _error = null; });
 
     try {
@@ -194,11 +216,10 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
         'recordedBy': widget.currentUsername,
         'collectorId': widget.userId,
         'recordedByRole': widget.currentUserRole.name,
-        // If HQ Manager or Chairman is adding, it defaults to received.
-        // Otherwise (Manager, OB, Staff) it defaults to pending.
         'status': widget.currentUserRole.canMarkReceived ? DonationStatus.received : DonationStatus.pending,
-        'date': DateFormat('yyyy-MM-dd').format(DateTime.now()),
-        'timestamp': DateTime.now().toIso8601String(),
+        'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
+        'timestamp': DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, DateTime.now().hour, DateTime.now().minute, DateTime.now().second).toIso8601String(),
+        if (_bookReceiptNoCtrl.text.trim().isNotEmpty) 'bookReceiptNo': _bookReceiptNoCtrl.text.trim(),
         'branchName': widget.branchName,
       };
 
@@ -651,6 +672,61 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                 keyboardType: TextInputType.number,
               ),
             ],
+
+            const SizedBox(height: 32),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Donation Date', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.gray700)),
+                      const SizedBox(height: 10),
+                      InkWell(
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _selectedDate,
+                            firstDate: DateTime(2000),
+                            lastDate: DateTime.now(),
+                          );
+                          if (picked != null) {
+                            setState(() => _selectedDate = picked);
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                          decoration: BoxDecoration(
+                            color: AppColors.gray50,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.calendar_today_rounded, size: 20, color: AppColors.gray400),
+                              const SizedBox(width: 12),
+                              Text(
+                                DateFormat('dd MMM yyyy').format(_selectedDate),
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _buildTextField(
+                    label: 'Book Receipt # (Manual)',
+                    controller: _bookReceiptNoCtrl,
+                    icon: Icons.confirmation_number_outlined,
+                    hint: 'e.g. B-12345',
+                  ),
+                ),
+              ],
+            ),
 
             const SizedBox(height: 32),
             _buildTextField(

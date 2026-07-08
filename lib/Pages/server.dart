@@ -1053,8 +1053,9 @@ class _ServerDashboardWithSyncState
                             itemBuilder: (context, index) {
                               final log = _activityLog[index];
                               Color textColor = Colors.white70;
-                              if (log.contains('❌') || log.contains('🔴')) textColor = Colors.redAccent;
-                              else if (log.contains('✅') || log.contains('🟢')) textColor = Colors.greenAccent;
+                              if (log.contains('❌') || log.contains('🔴')) {
+                                textColor = Colors.redAccent;
+                              } else if (log.contains('✅') || log.contains('🟢')) textColor = Colors.greenAccent;
                               else if (log.contains('⚠️')) textColor = Colors.amberAccent;
                               
                               return Padding(
@@ -1137,7 +1138,9 @@ class ServerSyncManager {
     final s = raw.toString().toLowerCase().trim();
     if (s.isEmpty) return 'zakat';
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     if (s == 'zakat') return 'zakat';
     debugPrint('[ServerSyncManager] ⚠️  Unknown queueType "$raw" — defaulting to zakat');
@@ -1182,7 +1185,9 @@ class ServerSyncManager {
         eventType == 'pong' ||
         eventType == 'identify' ||
         eventType == 'identified' ||
-        eventType == 'client_count_update') return;
+        eventType == 'client_count_update') {
+      return;
+    }
 
     try {
       final box = Hive.box(LocalStorageService.syncBox);

@@ -12,6 +12,8 @@ import 'package:gmwf/theme/role_theme_provider.dart';
 import 'package:gmwf/pages/donations/donations_screen.dart' show DonDS;
 import 'package:gmwf/services/donations_local_storage.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:gmwf/providers/donors_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ENTRY POINT
@@ -95,7 +97,7 @@ class DonorRegistryDialog extends StatelessWidget {
   }
 }
 
-class DonorRegistryWidget extends StatefulWidget {
+class DonorRegistryWidget extends ConsumerStatefulWidget {
   final String branchId;
   final String branchName;
   const DonorRegistryWidget({
@@ -105,10 +107,10 @@ class DonorRegistryWidget extends StatefulWidget {
   });
 
   @override
-  State<DonorRegistryWidget> createState() => _DonorRegistryWidgetState();
+  ConsumerState<DonorRegistryWidget> createState() => _DonorRegistryWidgetState();
 }
 
-class _DonorRegistryWidgetState extends State<DonorRegistryWidget> {
+class _DonorRegistryWidgetState extends ConsumerState<DonorRegistryWidget> {
   final _search = TextEditingController();
   String _query = '';
 
@@ -185,35 +187,8 @@ class _DonorRegistryWidgetState extends State<DonorRegistryWidget> {
 
         // ── Donor List ───────────────────────────────────────────────────
         Expanded(
-          child: StreamBuilder<List<DonorRecord>>(
-            stream: DonationsLocalStorage.streamAllDonors(widget.branchId),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final all = snap.data ?? [];
-              
-              final Map<String, List<DonorRecord>> grouped = {};
-              for (var d in all) {
-                final String key;
-                if (d.householdId != null && d.householdId!.isNotEmpty) {
-                  key = 'hh-${d.householdId}';
-                } else {
-                  final pNorm = d.phones.isNotEmpty
-                      ? d.phones.first.replaceAll(RegExp(r'\D'), '')
-                      : '';
-                  key = pNorm.isEmpty ? 'individual-${d.id}' : 'ph-$pNorm';
-                }
-                grouped.putIfAbsent(key, () => []).add(d);
-              }
-
-              for (var key in grouped.keys) {
-                grouped[key]!.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-              }
-
-              final households = grouped.values.toList();
-              households.sort((a, b) => a.first.name.toLowerCase().compareTo(b.first.name.toLowerCase()));
-              
+          child: ref.watch(donorGroupsProvider(widget.branchId)).when(
+            data: (households) {
               final filtered = _query.isEmpty
                   ? households
                   : households.where((group) =>
@@ -240,6 +215,8 @@ class _DonorRegistryWidgetState extends State<DonorRegistryWidget> {
                 ),
               );
             },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Error: $e'),
           ),
         ),
       ],
@@ -390,9 +367,11 @@ class _HouseholdCard extends StatefulWidget {
 class _HouseholdCardState extends State<_HouseholdCard> {
   bool _expanded = false;
   double _totalAmount = 0;
+  double _cashAmount = 0;
+  double _goodsAmount = 0;
   double _historicalTotal = 0;
   List<Map<String, dynamic>>? _allDonations;
-  Map<String, double> _memberTotals = {};
+  Map<String, ({double cash, double goods, double total})> _memberTotals = {};
 
   Future<void> _loadDonations() async {
     if (_allDonations != null) return;
@@ -406,13 +385,14 @@ class _HouseholdCardState extends State<_HouseholdCard> {
     
     final all = DonationsLocalStorage.getAllDonations('all');
     final collectedDocs = <Map<String, dynamic>>[];
-    final totals = <String, double>{};
+    final totals = <String, ({double cash, double goods, double total})>{};
     for (var m in widget.members) {
-      totals[m.id] = m.openingBalance;
+      totals[m.id] = (cash: m.openingBalance, goods: 0.0, total: m.openingBalance);
     }
 
     final historical = widget.members.fold(0.0, (sum, m) => sum + m.openingBalance);
-    double collectiveTotal = historical;
+    double collectiveCash = historical;
+    double collectiveGoods = 0.0;
 
     for (var r in all) {
       final d = r.toMap();
@@ -426,11 +406,29 @@ class _HouseholdCardState extends State<_HouseholdCard> {
         collectedDocs.add(d);
         final amt = (d['amount'] as num?)?.toDouble() ?? 0.0;
         final prob = (d['probableAmount'] as num?)?.toDouble() ?? 0.0;
-        final finalAmt = amt > 0 ? amt : prob;
+        final isGoods = (d['entryType'] as String? ?? 'cash') == 'goods';
         
-        collectiveTotal += finalAmt;
+        if (isGoods) {
+          collectiveGoods += prob;
+        } else {
+          collectiveCash += amt;
+        }
+        
         if (matchesId) {
-          totals[dId] = (totals[dId] ?? 0) + finalAmt;
+          final existing = totals[dId] ?? (cash: 0.0, goods: 0.0, total: 0.0);
+          if (isGoods) {
+            totals[dId] = (
+              cash: existing.cash,
+              goods: existing.goods + prob,
+              total: existing.total + prob,
+            );
+          } else {
+            totals[dId] = (
+              cash: existing.cash + amt,
+              goods: existing.goods,
+              total: existing.total + amt,
+            );
+          }
         }
       }
     }
@@ -440,7 +438,9 @@ class _HouseholdCardState extends State<_HouseholdCard> {
     if (mounted) {
       setState(() {
         _allDonations = collectedDocs;
-        _totalAmount = collectiveTotal;
+        _totalAmount = collectiveCash + collectiveGoods;
+        _cashAmount = collectiveCash;
+        _goodsAmount = collectiveGoods;
         _historicalTotal = historical;
         _memberTotals = totals;
       });
@@ -577,12 +577,20 @@ class _HouseholdCardState extends State<_HouseholdCard> {
                   children: [
                     Row(
                       children: [
-                        _StatPill(label: 'Total Household', value: 'PKR ${NumberFormat('#,###').format(_totalAmount)}', color: DonDS.teal),
-                        if (_historicalTotal > 0) ...[
-                          const SizedBox(width: 8),
-                          _StatPill(label: 'Opening Bal', value: 'PKR ${NumberFormat('#,###').format(_historicalTotal)}', color: DonDS.amber),
-                        ],
+                        _StatPill(label: 'Cash Contrib.', value: 'PKR ${NumberFormat('#,###').format(_cashAmount)}', color: Colors.green),
                         const SizedBox(width: 8),
+                        _StatPill(label: 'Goods Contrib.', value: 'PKR ${NumberFormat('#,###').format(_goodsAmount)}', color: Colors.purple),
+                        const SizedBox(width: 8),
+                        _StatPill(label: 'Total Household', value: 'PKR ${NumberFormat('#,###').format(_totalAmount)}', color: DonDS.teal),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        if (_historicalTotal > 0) ...[
+                          _StatPill(label: 'Opening Bal', value: 'PKR ${NumberFormat('#,###').format(_historicalTotal)}', color: DonDS.amber),
+                          const SizedBox(width: 8),
+                        ],
                         _StatPill(label: 'Records', value: '${_allDonations!.length}', color: color),
                         const SizedBox(width: 8),
                         _StatPill(
@@ -626,7 +634,16 @@ class _HouseholdCardState extends State<_HouseholdCard> {
                               ],
                             ),
                           ),
-                          Text('PKR ${NumberFormat('#,###').format(_memberTotals[m.id] ?? 0)}', style: DS.heading(color: t.textSecondary).copyWith(fontSize: 12)),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text('PKR ${NumberFormat('#,###').format(_memberTotals[m.id]?.total ?? 0)}', style: DS.heading(color: t.textSecondary).copyWith(fontSize: 12)),
+                              Text(
+                                'Cash: ${NumberFormat('#,###').format(_memberTotals[m.id]?.cash ?? 0)} · Goods: ${NumberFormat('#,###').format(_memberTotals[m.id]?.goods ?? 0)}',
+                                style: DS.caption(color: t.textTertiary).copyWith(fontSize: 9),
+                              ),
+                            ],
+                          ),
                           const SizedBox(width: 4),
                           IconButton(
                             icon: Icon(Icons.edit_rounded, size: 15, color: t.textTertiary),

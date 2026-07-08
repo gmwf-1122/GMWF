@@ -8,6 +8,11 @@ cmake_minimum_required(VERSION 3.14)
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "Suppress CMake deprecation warnings from third-party packages" FORCE)
 
+# Suppress CMP194 warning about MSVC assembler for ASM language
+if(POLICY CMP194)
+  cmake_policy(SET CMP194 NEW)
+endif()
+
 set(FIREBASE_CPP_SDK_VERSION 13.4.0 CACHE STRING "" FORCE)
 
 project(gmwf LANGUAGES CXX)

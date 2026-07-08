@@ -73,9 +73,12 @@ class _PatientQueueState extends State<PatientQueue>
   static String _normaliseQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
-    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf')
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
+    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') {
       return 'gmwf';
+    }
     return 'zakat';
   }
 
@@ -365,8 +368,11 @@ class _PatientQueueState extends State<PatientQueue>
 
     for (final e in all) {
       final status = (e['status'] ?? '').toString().toLowerCase();
-      if (status == 'waiting') waiting.add(e);
-      else others.add(e);
+      if (status == 'waiting') {
+        waiting.add(e);
+      } else {
+        others.add(e);
+      }
     }
 
     waiting.sort((a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
@@ -455,8 +461,82 @@ class _PatientQueueState extends State<PatientQueue>
     return abbrev;
   }
 
+  int _getAvailableStock(
+    Map<String, dynamic>? inventoryMed, {
+    required String branchId,
+    required List<Map<String, dynamic>> currentMeds,
+    String? excludeSerial,
+  }) {
+    if (inventoryMed == null) return 999999;
+
+    final invQty = inventoryMed['quantity'];
+    final totalStock = (invQty is num ? invQty.toInt() : int.tryParse(invQty?.toString() ?? '') ?? 0);
+    final inventoryId = inventoryMed['id']?.toString() ?? '';
+
+    // Quantity reserved by OTHER pending patients (from Hive scan)
+    final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
+    final entriesBox = Hive.box(LocalStorageService.entriesBox);
+    final mySerial   = excludeSerial?.trim().toLowerCase();
+
+    int reservedByOthers = 0;
+    for (final key in prescBox.keys) {
+      final raw = prescBox.get(key);
+      if (raw is! Map) continue;
+      final presc = Map<String, dynamic>.from(raw);
+
+      final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
+          .toString().trim().toLowerCase();
+      if (prescSerial == mySerial) continue;
+
+      final entryKey = '$branchId-$prescSerial';
+      final entry    = entriesBox.get(entryKey);
+      if (entry is Map) {
+        final dispenseStatus =
+            (entry['dispenseStatus'] ?? '').toString().toLowerCase();
+        if (dispenseStatus == 'dispensed') continue;
+      }
+
+      final dispenseStatusOnPresc =
+          (presc['dispenseStatus'] ?? '').toString().toLowerCase();
+      if (dispenseStatusOnPresc == 'dispensed') continue;
+
+      final meds = presc['prescriptions'];
+      if (meds is! List) continue;
+
+      for (final med in meds) {
+        if (med is! Map) continue;
+        if (med['inventoryId']?.toString() == inventoryId) {
+          final medQty = med['quantity'];
+          final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+          final days = (presc['daysOfMedicine'] as int?) ?? 1;
+          final type = (med['type'] ?? '').toString().toLowerCase();
+          final isInj = type.contains('injection') || type.contains('inj') ||
+              type.contains('drip') || type.contains('syringe') ||
+              type.contains('nebulization');
+          reservedByOthers += isInj ? qty : qty * days;
+        }
+      }
+    }
+
+    // Quantity already added in THIS dialog/edit session for this patient
+    int sessionQty = 0;
+    for (final med in currentMeds) {
+      if (med['inventoryId']?.toString() == inventoryId) {
+        final medQty = med['quantity'];
+        sessionQty += (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+      }
+    }
+
+    final available = totalStock - reservedByOthers - sessionQty;
+    return available < 0 ? 0 : available;
+  }
+
   // ─── Add medicine sub-dialog ───────────────────────────────────────────────
   Future<Map<String, dynamic>?> _showAddMedicineSubDialog({
+    required String branchId,
+    required List<Map<String, dynamic>> currentMeds,
+    required int daysOfMedicine,
+    String? excludeSerial,
     Map<String, dynamic>? inventoryMed,
   }) async {
     final isInventory = inventoryMed != null;
@@ -520,7 +600,7 @@ class _PatientQueueState extends State<PatientQueue>
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: mealTiming,
+                initialValue: mealTiming,
                 decoration: const InputDecoration(
                     labelText: 'Timing Instruction', border: OutlineInputBorder()),
                 items: ['Empty Stomach', 'Before Meal', 'During Meal', 'After Meal', 'Before Sleep']
@@ -530,7 +610,7 @@ class _PatientQueueState extends State<PatientQueue>
               if (isSyrup) ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value: dosage,
+                  initialValue: dosage,
                   decoration: const InputDecoration(
                       labelText: 'Dosage', border: OutlineInputBorder()),
                   items: ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon']
@@ -563,6 +643,20 @@ class _PatientQueueState extends State<PatientQueue>
               if (isInjection) {
                 final qty = int.tryParse(qtyCtrl.text) ?? 1;
                 if (qty <= 0) return;
+                if (isInventory) {
+                  final availableStock = _getAvailableStock(
+                    inventoryMed,
+                    branchId: branchId,
+                    currentMeds: currentMeds,
+                    excludeSerial: excludeSerial,
+                  );
+                  if (qty > availableStock) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('⚠️ Stock Limit Exceeded! Available: $availableStock'),
+                        backgroundColor: Colors.red));
+                    return;
+                  }
+                }
                 newMed = {
                   'name': name, 'quantity': qty, 'type': 'Injection',
                   'inventoryId': inventoryMed?['id'],
@@ -575,6 +669,21 @@ class _PatientQueueState extends State<PatientQueue>
                 final sum    = m + e + n;
                 final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : sum;
                 if (qty == 0) return;
+                if (isInventory) {
+                  final availableStock = _getAvailableStock(
+                    inventoryMed,
+                    branchId: branchId,
+                    currentMeds: currentMeds,
+                    excludeSerial: excludeSerial,
+                  );
+                  final totalRequired = qty * daysOfMedicine;
+                  if (totalRequired > availableStock) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('⚠️ Stock Limit Exceeded! Need $totalRequired but only $availableStock available.'),
+                        backgroundColor: Colors.red));
+                    return;
+                  }
+                }
                 newMed = {
                   'name': name, 'quantity': qty, 'timing': '$m+$e+$n',
                   'meal': mealTiming, 'dosage': isSyrup ? dosage : '',
@@ -820,9 +929,11 @@ class _PatientQueueState extends State<PatientQueue>
     }
 
     if (prescData.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('No prescription found for $serial'),
           backgroundColor: Colors.orange));
+      }
       return;
     }
 
@@ -999,7 +1110,13 @@ class _PatientQueueState extends State<PatientQueue>
                               subtitle: Text('Stock: ${med['quantity'] ?? 0}'),
                               onTap: () async {
                                 final newMed =
-                                    await _showAddMedicineSubDialog(inventoryMed: med);
+                                    await _showAddMedicineSubDialog(
+                                  branchId: branchId,
+                                  currentMeds: currentMeds,
+                                  daysOfMedicine: editDays,
+                                  excludeSerial: serial,
+                                  inventoryMed: med,
+                                );
                                 if (newMed != null) {
                                   setDialogState(() {
                                     currentMeds.add(newMed);
@@ -1147,6 +1264,97 @@ class _PatientQueueState extends State<PatientQueue>
     required List<Map<String, dynamic>> labTests,
     required int daysOfMedicine,
   }) async {
+    // --- Stock Check Validation at Save Time ---
+    try {
+      final allStock   = LocalStorageService.getAllLocalStockItems(branchId: branchId);
+      final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      final mySerial   = serial.trim().toLowerCase();
+
+      // 1. Build reserved quantities from other pending patients
+      final Map<String, int> reserved = {};
+      for (final key in prescBox.keys) {
+        final raw = prescBox.get(key);
+        if (raw is! Map) continue;
+        final presc = Map<String, dynamic>.from(raw);
+
+        final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
+            .toString().trim().toLowerCase();
+        if (prescSerial == mySerial) continue;
+
+        final entryKey = '$branchId-$prescSerial';
+        final entry    = entriesBox.get(entryKey);
+        if (entry is Map) {
+          final dispenseStatus =
+              (entry['dispenseStatus'] ?? '').toString().toLowerCase();
+          if (dispenseStatus == 'dispensed') continue;
+        }
+
+        final dispenseStatusOnPresc =
+            (presc['dispenseStatus'] ?? '').toString().toLowerCase();
+        if (dispenseStatusOnPresc == 'dispensed') continue;
+
+        final meds = presc['prescriptions'];
+        if (meds is! List) continue;
+
+        for (final med in meds) {
+          if (med is! Map) continue;
+          final inventoryId = (med['inventoryId'] ?? '').toString().trim();
+          if (inventoryId.isEmpty) continue;
+
+          final medQty = med['quantity'];
+          final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+          final days = (presc['daysOfMedicine'] as int?) ?? 1;
+          final type = (med['type'] ?? '').toString().toLowerCase();
+          final isInj = type.contains('injection') || type.contains('inj') ||
+              type.contains('drip') || type.contains('syringe') ||
+              type.contains('nebulization');
+          final effectiveQty = isInj ? qty : qty * days;
+
+          reserved[inventoryId] = (reserved[inventoryId] ?? 0) + effectiveQty;
+        }
+      }
+
+      // 2. Validate each medicine in the updated prescription
+      for (final med in medicines) {
+        final inventoryId = (med['inventoryId'] ?? '').toString().trim();
+        if (inventoryId.isEmpty) continue;
+
+        final inventoryMed = allStock.firstWhere(
+          (m) => m['id']?.toString() == inventoryId,
+          orElse: () => {},
+        );
+        if (inventoryMed.isEmpty) continue;
+
+        final invQty = inventoryMed['quantity'];
+        final totalStock = (invQty is num ? invQty.toInt() : int.tryParse(invQty?.toString() ?? '') ?? 0);
+        final reservedByOthers = reserved[inventoryId] ?? 0;
+        final available = totalStock - reservedByOthers;
+        final availableClamped = available < 0 ? 0 : available;
+
+        final medQty = med['quantity'];
+        final perDayQty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+        final isInj = _isInjectionOrDrip(med);
+        final required = isInj ? perDayQty : perDayQty * daysOfMedicine;
+
+        if (required > availableClamped) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                '⚠️ "${med['name']}" stock insufficient! '
+                'Need $required but only $availableClamped available after reservations.',
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ));
+          }
+          return;
+        }
+      }
+    } catch (e) {
+      debugPrint('[PrescEdit] Stock validation error: $e');
+    }
+
     final now         = DateTime.now().toIso8601String();
     final pricePerDay = _baseDayPrice[queueType] ?? 0;
     final extraCharge = (daysOfMedicine - 1) * pricePerDay;

@@ -87,7 +87,7 @@ class LanClient {
           }
 
           print('LanClient: Received message: '
-              '${trimmed.length > 100 ? trimmed.substring(0, 100) + '...' : trimmed}');
+              '${trimmed.length > 100 ? '${trimmed.substring(0, 100)}...' : trimmed}');
           _messageController.add(message);
         },
         onDone: () {

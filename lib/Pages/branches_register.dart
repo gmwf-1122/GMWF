@@ -1,10 +1,7 @@
 // lib/pages/branches_register.dart
-import 'dart:typed_data';
-import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -164,8 +161,9 @@ class _BranchesRegisterState extends State<BranchesRegister>
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png']);
     if (result != null && result.files.isNotEmpty) {
       setState(() {
-        if (type == 'identification') _identificationFile = result.files.first;
-        else if (type == 'degree')    _degreeFile          = result.files.first;
+        if (type == 'identification') {
+          _identificationFile = result.files.first;
+        } else if (type == 'degree')    _degreeFile          = result.files.first;
       });
     }
   }
@@ -226,8 +224,6 @@ class _BranchesRegisterState extends State<BranchesRegister>
         identificationFile: _identificationFile,
         degreeFile:         _degreeFile,
       );
-
-      if (user == null) throw Exception("Failed to create account");
 
       await FirebaseFirestore.instance.collection('branches').doc(branchId).set({'name': branchName});
 
@@ -797,7 +793,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
 
   Widget _buildRoleDropdown(RoleThemeData t) {
     return DropdownButtonFormField<String>(
-      value: _selectedRole,
+      initialValue: _selectedRole,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
@@ -955,7 +951,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
     required String? Function(String?) validator,
   }) {
     return DropdownButtonFormField<String>(
-      value: value,
+      initialValue: value,
       hint: Text(hint, style: TextStyle(color: t.textTertiary, fontSize: 13)),
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),

@@ -14,12 +14,16 @@ class InventoryUpdatePage extends StatefulWidget {
   final String branchId;
   final bool isAdmin;
   final bool isDispenser;
+  final bool isEmbedded;
+  final int showMode; // 0: both, 1: Add Stock, 2: Register New
 
   const InventoryUpdatePage({
     super.key,
     required this.branchId,
     this.isAdmin = false,
     this.isDispenser = false,
+    this.isEmbedded = false,
+    this.showMode = 0,
   });
 
   @override
@@ -114,15 +118,17 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       _regType != 'Drip Set' &&
       _regType != 'Syringe';
 
+  // ── INIT & LIFECYCLE ────────────────────────────────═══════════════════════
   @override
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
     _fadeCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 400));
-    _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
+        vsync: this, duration: const Duration(milliseconds: 300));
+    _fadeAnim =
+        CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
     _fadeCtrl.forward();
-    // Load all medicines on init
+
     _loadAllMedicines();
   }
 
@@ -140,7 +146,126 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     super.dispose();
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helper methods ────────────────────────────────────────────────────────
+  void _snack(String msg, {bool err = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(children: [
+          Icon(err ? Icons.error_rounded : Icons.check_circle_rounded,
+              color: Colors.white, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(msg,
+                  style: const TextStyle(color: Colors.white, fontSize: 13))),
+        ]),
+        backgroundColor: err ? _red : _green600,
+        behavior: SnackBarBehavior.floating,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+  }
+
+  // ── Submit: Edit Request (needs approval or direct update for admin) ─────
+  Future<void> _submitEditRequest(
+      Map<String, dynamic> originalMed, Map<String, dynamic> updatedFields) async {
+    try {
+      final userInfo = await _getUserInfo();
+      final db = FirebaseFirestore.instance;
+
+      if (widget.isAdmin) {
+        final docId = originalMed['_docId'] ?? originalMed['id'] ?? originalMed['medicineId'];
+        if (docId != null) {
+          await db
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory')
+              .doc(docId)
+              .update(Map<String, dynamic>.from(updatedFields)..addAll({
+                'updatedAt': FieldValue.serverTimestamp(),
+              }));
+
+          // Log the direct edit
+          await db
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .add({
+            'action': 'edit_medicine_directly',
+            'medicineName': originalMed['name'],
+            'medicineId': docId,
+            'updatedFields': updatedFields,
+            'performedBy': userInfo['uid'],
+            'performedByName': userInfo['username'],
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+
+          _snack('Medicine updated successfully!');
+          _loadAllMedicines();
+          return;
+        }
+      }
+
+      await db
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('edit_requests')
+          .add({
+        'requestType': 'edit_medicine',
+        'requestedBy': userInfo['uid'],
+        'requestedByName': userInfo['username'],
+        'requesterName': userInfo['username'],
+        'requestedAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+        'reason': updatedFields['reason'] ?? '',
+        'docId': originalMed['_docId'] ?? originalMed['id'],
+        'originalData': {
+          'name': originalMed['name'],
+          'type': originalMed['type'],
+          'dose': originalMed['dose'],
+          'price': originalMed['price'],
+          'expiryDate': originalMed['expiryDate'],
+          'quantity': originalMed['quantity'],
+        },
+        'draftItems': [{
+          ...updatedFields,
+          'oldId': originalMed['_docId'] ?? originalMed['id'],
+        }],
+        'items': [{
+          ...updatedFields,
+          'oldId': originalMed['_docId'] ?? originalMed['id'],
+        }],
+      });
+
+      _snack('Edit request submitted for supervisor approval');
+    } catch (e) {
+      _snack('Error submitting request: $e', err: true);
+    }
+  }
+
+  // ── BUILD ──────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    if (widget.isEmbedded) {
+      return Container(
+        color: _bg,
+        child: widget.showMode == 1 ? _addStockTab() : _registerTab(),
+      );
+    }
+    return Scaffold(
+      backgroundColor: _bg,
+      appBar: _buildAppBar(),
+      body: FadeTransition(
+        opacity: _fadeAnim,
+        child: TabBarView(
+          controller: _tabCtrl,
+          children: [_addStockTab(), _registerTab()],
+        ),
+      ),
+    );
+  }
+
   IconData _typeIcon(String t) => switch (t) {
         'Tablet' => FontAwesomeIcons.tablets,
         'Capsule' => FontAwesomeIcons.capsules,
@@ -245,17 +370,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     );
   }
 
-  void _snack(String msg, {bool err = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content:
-          Text(msg, style: const TextStyle(fontWeight: FontWeight.w600)),
-      backgroundColor: err ? _red : _teal,
-      behavior: SnackBarBehavior.floating,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      margin: const EdgeInsets.all(16),
-    ));
-  }
+
 
   Future<Map<String, String>> _getUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -466,6 +581,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           'type': 'add_inventory_stock',
           'branchId': widget.branchId,
           'medicineId': medId,
+          'medicineName': _selectedMed!['name'],
           'quantity': qty,
           'performedBy': userInfo['uid'],
           'performedByName': userInfo['username'],
@@ -482,48 +598,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     }
   }
 
-  // ── Submit: Edit Request (needs approval) ─────────────────────────────────
-  Future<void> _submitEditRequest(
-      Map<String, dynamic> originalMed, Map<String, dynamic> updatedFields) async {
-    try {
-      final userInfo = await _getUserInfo();
-      final db = FirebaseFirestore.instance;
 
-      await db
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('edit_requests')
-          .add({
-        'requestType': 'edit_medicine',
-        'requestedBy': userInfo['uid'],
-        'requesterName': userInfo['username'],
-        'requestedAt': FieldValue.serverTimestamp(),
-        'status': 'pending',
-        'reason': updatedFields['reason'] ?? '',
-        'docId': originalMed['_docId'],
-        'originalData': {
-          'name': originalMed['name'],
-          'type': originalMed['type'],
-          'dose': originalMed['dose'],
-          'price': originalMed['price'],
-          'expiryDate': originalMed['expiryDate'],
-          'quantity': originalMed['quantity'],
-        },
-        'draftItems': [{
-          ...updatedFields,
-          'oldId': originalMed['_docId'], // CRITICAL: required by request.dart
-        }],
-        'items': [{
-          ...updatedFields,
-          'oldId': originalMed['_docId'],
-        }],
-      });
-
-      _snack('Edit request submitted for supervisor approval');
-    } catch (e) {
-      _snack('Error submitting request: $e', err: true);
-    }
-  }
 
   // ── Submit: Register New Medicine ─────────────────────────────────────────
   Future<void> _submitRegister() async {
@@ -628,19 +703,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     });
   }
 
-  // ── BUILD ──────────────────────────────────────────────────────────────────
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: _bg,
-        appBar: _buildAppBar(),
-        body: FadeTransition(
-          opacity: _fadeAnim,
-          child: TabBarView(
-            controller: _tabCtrl,
-            children: [_addStockTab(), _registerTab()],
-          ),
-        ),
-      );
+
 
   PreferredSizeWidget _buildAppBar() => AppBar(
         backgroundColor: _teal,
@@ -1117,7 +1180,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 Row(children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _regType,
+                      initialValue: _regType,
                       dropdownColor: _white,
                       style: const TextStyle(
                           color: _textDark, fontSize: 14),
@@ -1169,12 +1232,14 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                                     fontSize: 12)),
                           )),
                       validator: (v) {
-                        if (v?.trim().isEmpty ?? true)
+                        if (v?.trim().isEmpty ?? true) {
                           return 'Required';
+                        }
                         final t = v!.trim().toLowerCase();
                         if (t == 'free') return null;
-                        if (double.tryParse(t) == null)
+                        if (double.tryParse(t) == null) {
                           return 'Invalid';
+                        }
                         return null;
                       },
                     ),
@@ -1185,7 +1250,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                 // Dose dropdown
                 if (_hasDoseDropdown) ...[
                   DropdownButtonFormField<String>(
-                    value: _regSelectedDose,
+                    initialValue: _regSelectedDose,
                     dropdownColor: _white,
                     style: const TextStyle(
                         color: _textDark, fontSize: 14),
@@ -1729,10 +1794,12 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
                         const TextInputType.numberWithOptions(
                             decimal: true),
                     validator: (v) {
-                      if (v == null || v.trim().isEmpty)
+                      if (v == null || v.trim().isEmpty) {
                         return 'Required';
-                      if (double.tryParse(v.trim()) == null)
+                      }
+                      if (double.tryParse(v.trim()) == null) {
                         return 'Invalid';
+                      }
                       return null;
                     },
                   )),

@@ -11,7 +11,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../widgets/gmwf_loading_view.dart';
-import '../../widgets/global_module_wrapper.dart';
 import '../donations/donations_screen.dart';
 import '../donations/donations_shared.dart';
 import '../../services/donations_local_storage.dart';
@@ -606,7 +605,7 @@ class _HeroHeader extends StatelessWidget {
     required this.userName,
     required this.onLogout,
     required this.badgeLabel,
-    this.gradientColors = const [Color(0xFF1A3530), Color(0xFF243D38)],
+    this.gradientColors = const [_DS.sage, _DS.sage2],
   });
 
   @override
@@ -670,7 +669,7 @@ class _HeroHeader extends StatelessWidget {
                             'assets/logo/gmwf.png',
                             width: 42, height: 42,
                             fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => const Icon(
+                            errorBuilder: (_, _, _) => const Icon(
                                 Icons.restaurant_rounded,
                                 color: Colors.white70, size: 24),
                           ),

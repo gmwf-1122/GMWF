@@ -11,9 +11,11 @@
 //   dropped because SyncService had no 'save_patient' handler.
 
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:logger/logger.dart';
 
 import '../models/patient.dart';
 import '../models/token.dart';
@@ -25,6 +27,11 @@ import '../realtime/realtime_events.dart';
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
 
+  // ── Availability ping cache (60s TTL) — avoids a Firestore read per call ──
+  bool? _availabilityCache;
+  DateTime? _availabilityCachedAt;
+  static const _availabilityTtl = Duration(seconds: 60);
+
   static DateTime _toDateTime(dynamic value) {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime)  return value;
@@ -35,13 +42,24 @@ class FirestoreService {
   }
 
   Future<bool> _isFirestoreAvailable() async {
-    if (!Platform.isWindows) return true;
+    if (kIsWeb || !Platform.isWindows) return true;
+
+    // Return cached result if it's still fresh
+    final cached = _availabilityCache;
+    final cachedAt = _availabilityCachedAt;
+    if (cached != null && cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _availabilityTtl) {
+      return cached;
+    }
+
     try {
       await _db.collection('_ping').limit(1).get();
-      return true;
+      _availabilityCache = true;
     } catch (_) {
-      return false;
+      _availabilityCache = false;
     }
+    _availabilityCachedAt = DateTime.now();
+    return _availabilityCache!;
   }
 
   // ── Save patient ──────────────────────────────────────────────────────────
@@ -52,7 +70,7 @@ class FirestoreService {
     required Map<String, dynamic> patientData,
   }) async {
     if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
-      print("ERROR: savePatient → branchId or patientId empty");
+      Logger().d("ERROR: savePatient → branchId or patientId empty");
       return;
     }
 
@@ -69,11 +87,11 @@ class FirestoreService {
       data['dob'] = (data['dob'] as Timestamp).toDate().toIso8601String();
     }
 
-    print('[FirestoreService] savePatient → $patientId | ${data['name'] ?? 'unknown'}');
+    Logger().d('[FirestoreService] savePatient → $patientId | ${data['name'] ?? 'unknown'}');
 
     // STEP 1 — Hive: always save locally first (works offline, instant)
     await LocalStorageService.saveLocalPatient(data);
-    print('[FirestoreService] ✅ Hive write: $patientId');
+    Logger().d('[FirestoreService] ✅ Hive write: $patientId');
 
     // STEP 2 — Try direct Firestore write (fast path when online)
     bool wroteDirectly = false;
@@ -101,7 +119,7 @@ class FirestoreService {
       wroteDirectly = true;
       print('[FirestoreService] ✅ Direct Firestore write: $patientId');
     } catch (e) {
-      print('[FirestoreService] Direct write failed ($e) → queuing for retry');
+      Logger().d('[FirestoreService] Direct write failed ($e) → queuing for retry');
     }
 
     // STEP 3 — Queue for retry if direct write failed (offline / timeout)
@@ -113,8 +131,8 @@ class FirestoreService {
         'patientId': patientId,
         'data':      sanitized,
       });
-      print('[FirestoreService] 📥 Queued for sync: $patientId'
-          ' | queue: ${Hive.box(LocalStorageService.syncBox).length}');
+      Logger().d('[FirestoreService] 📥 Queued for sync: $patientId' ' | queue: ${Hive.box(LocalStorageService.syncBox).length}');
+
     }
 
     // STEP 4 — LAN broadcast so same-network devices get it instantly
@@ -130,12 +148,12 @@ class FirestoreService {
         ),
       );
     } catch (e) {
-      print('[FirestoreService] LAN broadcast failed: $e');
+      Logger().d('[FirestoreService] LAN broadcast failed: $e');
     }
 
     // STEP 5 — Flush queue in background (no-op if already running / offline)
     SyncService().triggerUpload();
-    print('[FirestoreService] triggerUpload called after savePatient');
+    Logger().d('[FirestoreService] triggerUpload called after savePatient');
   }
 
   // ── Save entry ────────────────────────────────────────────────────────────
@@ -146,7 +164,7 @@ class FirestoreService {
     required Map<String, dynamic> vitals,
   }) async {
     if (branchId.trim().isEmpty || patientId.trim().isEmpty) {
-      print('ERROR: Cannot save entry — branchId or patientId empty');
+      Logger().d('ERROR: Cannot save entry — branchId or patientId empty');
       return;
     }
 
@@ -215,8 +233,7 @@ class FirestoreService {
       'status':       'waiting',
     };
 
-    print('Saving entry locally → Serial: $serial | Patient: $patientName'
-        ' | CNIC: $patientCnic | Guardian CNIC: $guardianCnic');
+    Logger().d('Saving entry locally → Serial: $serial | Patient: $patientName | CNIC: $patientCnic | Guardian CNIC: $guardianCnic');
 
     await LocalStorageService.saveEntryLocal(branchId, serial, data);
 
@@ -242,11 +259,10 @@ class FirestoreService {
       'data':      data,
     });
 
-    print("Entry enqueued → serial: $serial"
-        " | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
+    Logger().d("Entry enqueued → serial: $serial | queue size: ${Hive.box(LocalStorageService.syncBox).length}");
 
     SyncService().triggerUpload();
-    print("triggerUpload called after entry enqueue");
+    Logger().d("triggerUpload called after entry enqueue");
   }
 
   Future<String> _generateNextSerial(String branchId, String dateKey) async {
@@ -382,13 +398,13 @@ class FirestoreService {
   }) async {
     final id = prescriptionData['id']?.toString().trim();
     if (id == null || id.isEmpty) {
-      print('ERROR: Cannot save prescription — missing or empty ID');
+      Logger().d('ERROR: Cannot save prescription — missing or empty ID');
       return;
     }
 
     final sanitized = LocalStorageService.sanitize(prescriptionData);
 
-    print('Saving prescription locally → ID: $id');
+    Logger().d('Saving prescription locally → ID: $id');
 
     await LocalStorageService.saveLocalPrescription(sanitized);
 
@@ -410,7 +426,7 @@ class FirestoreService {
       'data':     sanitized,
     });
 
-    print('Prescription enqueued → ID: $id');
+    Logger().d('Prescription enqueued ⇒ ID: $id');
 
     SyncService().triggerUpload();
   }

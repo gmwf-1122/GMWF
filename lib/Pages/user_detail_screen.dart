@@ -96,9 +96,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           .collection('branches')
           .doc(widget.branchId)
           .get();
-      if (doc.exists)
+      if (doc.exists) {
         setState(() =>
             branchName = doc.data()!['name'] as String? ?? widget.branchId);
+      }
     } catch (_) {}
   }
 
@@ -480,14 +481,17 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       return ref.getDownloadURL();
     }
 
-    if (_profileFile != null)
+    if (_profileFile != null) {
       updates['profilePictureUrl'] =
           await upload(_profileFile!, 'profile');
-    if (_idFile != null)
+    }
+    if (_idFile != null) {
       updates['identificationUrl'] =
           await upload(_idFile!, 'identification');
-    if (isDoctor && _degreeFile != null)
+    }
+    if (isDoctor && _degreeFile != null) {
       updates['degreeUrl'] = await upload(_degreeFile!, 'degree');
+    }
 
     try {
       await _firestore
@@ -716,9 +720,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 size: 18, color: Colors.white),
           ),
           onPressed: () => _userStream().first.then((s) {
-            if (s.exists)
+            if (s.exists) {
               _showEditDialog(
                   s.data() as Map<String, dynamic>, t);
+            }
           }),
         ),
         IconButton(
@@ -1003,7 +1008,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   height: 160,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  errorBuilder: (_, _, _) => Container(
                         height: 80,
                         color: t.bg,
                         alignment: Alignment.center,
@@ -1107,7 +1112,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
-        value: value,
+        initialValue: value,
         hint: Text(label,
             style:
                 TextStyle(color: t.textTertiary, fontSize: 13)),

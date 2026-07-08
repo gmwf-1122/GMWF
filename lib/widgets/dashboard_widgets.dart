@@ -8,11 +8,16 @@ import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:rxdart/rxdart.dart';
 import '../theme/app_theme.dart';
+import '../services/donations_local_storage.dart';
+import '../services/local_storage_service.dart';
+import '../pages/donations/donations_shared.dart' as don;
 import '../theme/role_theme_provider.dart';
+
 
 // ── Design System Tokens ──────────────────────────────────────────────────────
 class DS {
@@ -155,8 +160,51 @@ DateTimeRange _resolveFilter(DashboardFilter? filter) {
   }
 }
 
-Future<BranchStats> fetchBranchStats(String branchId, {DashboardFilter? filter}) async {
+// ── In-memory stats cache (5-minute TTL) ─────────────────────────────────────
+// Prevents repeated Firestore reads when the overview rebuilds due to filter
+// changes, tab switches, or ValueListenableBuilder refreshes.
+_StatsCacheEntry? _statsCacheGet(String key) {
+  final entry = _statsCache[key];
+  if (entry == null) return null;
+  if (DateTime.now().difference(entry.cachedAt) > const Duration(minutes: 5)) {
+    _statsCache.remove(key);
+    return null;
+  }
+  return entry;
+}
+
+void _statsCachePut(String key, BranchStats stats) {
+  _statsCache[key] = _StatsCacheEntry(stats, DateTime.now());
+}
+
+void invalidateDashboardCache() => _statsCache.clear();
+
+final Map<String, _StatsCacheEntry> _statsCache = {};
+
+class _StatsCacheEntry {
+  final BranchStats stats;
+  final DateTime cachedAt;
+  const _StatsCacheEntry(this.stats, this.cachedAt);
+}
+
+String _statsCacheKey(String branchId, DashboardFilter? filter) {
+  final range = filter == null ? 'today' : filter.timeRange.name;
+  final branch = branchId;
+  final custom = filter?.customRange != null
+      ? '_${filter!.customRange!.start.toIso8601String()}_${filter.customRange!.end.toIso8601String()}'
+      : '';
+  return '$branch|$range$custom';
+}
+
+Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? filter}) async {
+  final cacheKey = _statsCacheKey(originalBranchId, filter);
+  final cached = _statsCacheGet(cacheKey);
+  if (cached != null) {
+    debugPrint('[DashCache] HIT for $cacheKey');
+    return cached.stats;
+  }
   try {
+    final branchId = originalBranchId.toLowerCase().trim();
     final range = _resolveFilter(filter);
     DateTime start = range.start;
     DateTime end = range.end;
@@ -185,19 +233,45 @@ Future<BranchStats> fetchBranchStats(String branchId, {DashboardFilter? filter})
         .where('date', isLessThanOrEqualTo: dashEnd)
         .get();
 
+    final seenReceipts = <String>{};
     for (final doc in donSnap.docs) {
-      final amt = (doc.data())['amount'];
+      final data = doc.data();
+      final syncStatus = data['syncStatus']?.toString().toLowerCase().trim();
+      final status = data['status']?.toString().toLowerCase().trim();
+      if (syncStatus == 'deleted' || status == 'deleted') continue;
+
+      final payMethod = data['paymentMethod']?.toString().toLowerCase().trim() ?? '';
+      if (payMethod == 'bank_deposit') continue;
+
+      final receiptNo = data['receiptNo']?.toString() ?? '';
+      final clean = don.cleanReceiptNumber(receiptNo);
+      if (seenReceipts.contains(clean)) continue;
+      seenReceipts.add(clean);
+
+      final amt = data['amount'];
       donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
     }
 
-    // 2. Fetch daily serials
+    // 2. Fetch daily serials — PARALLELIZED across all days in the range.
+    //
+    // PREVIOUSLY: this was a `for (final day in days) { await Future.wait([...6
+    // queries...]); }` loop. The 6 queries within a single day ran in parallel,
+    // but each day was awaited before starting the next day — meaning a
+    // "Month" range (~30 days) triggered ~30 SEQUENTIAL network round-trips
+    // per branch. On a slow/mobile connection that easily takes 15-30+
+    // seconds per branch, which is what made Week/Month filters look like
+    // they were "stuck searching" and never resolving.
+    //
+    // NOW: every day's query batch is fired at once via Future.wait over the
+    // whole `days` list, so total latency is roughly one round-trip instead
+    // of one round-trip per day.
     final df = DateFormat('ddMMyy');
-    for (final day in days) {
+
+    Future<Map<String, int>> fetchDay(DateTime day) async {
       final dsLegacy = df.format(day);
       final dsDash   = DateFormat('yyyy-MM-dd').format(day);
       final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(dsLegacy);
 
-      // We explicitly capture the Future results to parse them safely based on index
       final results = await Future.wait([
         base.collection('zakat').get(),
         base.collection('non-zakat').get(),
@@ -207,41 +281,57 @@ Future<BranchStats> fetchBranchStats(String branchId, {DashboardFilter? filter})
         FirebaseFirestore.instance.collection('branches').doc(branchId).collection('dasterkhwaan').doc(dsDash).get(),
       ]);
 
-      z  += (results[0] as QuerySnapshot).size;
-      nz += (results[1] as QuerySnapshot).size;
-      gm += (results[2] as QuerySnapshot).size;
+      final dayZ  = (results[0] as QuerySnapshot).size;
+      final dayNz = (results[1] as QuerySnapshot).size;
+      final dayGm = (results[2] as QuerySnapshot).size;
+
+      int dayDispRev = 0, dayZRev = 0, dayNzRev = 0, dayGmRev = 0;
 
       // Calculate actual revenue by summing up daysOfMedicine (Multiple tokens)
       for (final doc in (results[0] as QuerySnapshot).docs) {
         final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
         final rev = 20 * d.toInt();
-        dispRev += rev;
-        zRev += rev;
+        dayDispRev += rev;
+        dayZRev += rev;
       }
       for (final doc in (results[1] as QuerySnapshot).docs) {
         final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
         final rev = 100 * d.toInt();
-        dispRev += rev;
-        nzRev += rev;
+        dayDispRev += rev;
+        dayNzRev += rev;
       }
       for (final doc in (results[2] as QuerySnapshot).docs) {
         final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
         final rev = 0 * d.toInt();
-        dispRev += rev;
-        gmRev += rev;
+        dayDispRev += rev;
+        dayGmRev += rev;
       }
 
-      das += (results[3] as QuerySnapshot).size;
-      dispensed += (results[4] as QuerySnapshot).size;
+      final dayDas = (results[3] as QuerySnapshot).size;
+      final dayDispensed = (results[4] as QuerySnapshot).size;
 
+      int dayServed = 0;
       final dayDoc = results[5] as DocumentSnapshot;
       if (dayDoc.exists) {
         final dayData = dayDoc.data() as Map<String, dynamic>?;
-        served += (dayData?['servedTokens'] as num?)?.toInt() ?? 0;
+        dayServed = (dayData?['servedTokens'] as num?)?.toInt() ?? 0;
       }
+
+      return {
+        'z': dayZ, 'nz': dayNz, 'gm': dayGm,
+        'das': dayDas, 'served': dayServed, 'dispensed': dayDispensed,
+        'dispRev': dayDispRev, 'zRev': dayZRev, 'nzRev': dayNzRev, 'gmRev': dayGmRev,
+      };
     }
 
-    return BranchStats(
+    final dayResults = await Future.wait(days.map(fetchDay));
+    for (final r in dayResults) {
+      z += r['z']!; nz += r['nz']!; gm += r['gm']!;
+      das += r['das']!; served += r['served']!; dispensed += r['dispensed']!;
+      dispRev += r['dispRev']!; zRev += r['zRev']!; nzRev += r['nzRev']!; gmRev += r['gmRev']!;
+    }
+
+    final result = BranchStats(
       zakat: z, nonZakat: nz, gmwf: gm,
       dispensed: dispensed, prescribed: 0,
       dasterkhwaan: das, dasterkhwaanServed: served, 
@@ -249,125 +339,123 @@ Future<BranchStats> fetchBranchStats(String branchId, {DashboardFilter? filter})
       dispensaryRevenue: dispRev,
       zakatRevenue: zRev, nonZakatRevenue: nzRev, gmwfRevenue: gmRev,
     );
+    _statsCachePut(cacheKey, result);
+    return result;
   } catch (e) {
     debugPrint('[fetchBranchStats] Error: $e');
     return const BranchStats();
   }
 }
 
-Stream<BranchStats> streamBranchStats(String branchId, {DashboardFilter? filter}) {
+
+
+Stream<BranchStats> streamBranchStats(String originalBranchId, {DashboardFilter? filter}) {
   final range = _resolveFilter(filter);
-  DateTime start = range.start;
-  DateTime end = range.end;
+  final start = range.start;
+  final end   = range.end;
+  final isOnlyToday = !end.difference(start).isNegative &&
+      end.difference(start).inDays == 0 &&
+      start.day == DateTime.now().day &&
+      start.month == DateTime.now().month &&
+      start.year == DateTime.now().year;
 
-  // Safety limit for streams to prevent excessive listeners
-  if (end.difference(start).inDays > 14) {
-    start = end.subtract(const Duration(days: 14));
+  // ── TODAY-ONLY: read entirely from Hive, zero Firestore reads ─────────────
+  // The Hive boxes are kept fresh by SyncService + ServerSyncManager (30-min
+  // downloads + real-time LAN push). We watch for changes and recompute.
+  if (isOnlyToday) {
+    return _streamTodayStatsFromHive(originalBranchId);
   }
 
-  final List<DateTime> days = [];
-  for (int i = 0; i <= end.difference(start).inDays; i++) {
-    days.add(start.add(Duration(days: i)));
-  }
-
-  final df = DateFormat('ddMMyy');
-  final dashDF = DateFormat('yyyy-MM-dd');
-  final streams = <Stream<dynamic>>[];
-
-  // 1. Donation stream
-  final dashStart = dashDF.format(start);
-  final dashEnd   = dashDF.format(end);
-  streams.add(FirebaseFirestore.instance
-      .collection('branches').doc(branchId).collection('donations')
-      .where('date', isGreaterThanOrEqualTo: dashStart)
-      .where('date', isLessThanOrEqualTo: dashEnd)
-      .snapshots());
-
-  // 2. Daily collection streams
-  for (final day in days) {
-    final dsLegacy = df.format(day);
-    final dsDash   = dashDF.format(day);
-    final base = FirebaseFirestore.instance.collection('branches').doc(branchId).collection('serials').doc(dsLegacy);
-
-    streams.add(base.collection('zakat').snapshots());
-    streams.add(base.collection('non-zakat').snapshots());
-    streams.add(base.collection('gmwf').snapshots());
-    streams.add(base.collection('dasterkhwan').snapshots());
-    streams.add(FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$dsLegacy/$dsLegacy').snapshots());
-    streams.add(FirebaseFirestore.instance.collection('branches').doc(branchId).collection('dasterkhwaan').doc(dsDash).snapshots());
-  }
-
-  return Rx.combineLatestList(streams).map((results) {
-    int z = 0, nz = 0, gm = 0, das = 0, served = 0, dispensed = 0, dispRev = 0;
-    double donTotal = 0;
-
-    // First result is donations
-    final donSnap = results[0] as QuerySnapshot;
-    for (final doc in donSnap.docs) {
-      final amt = (doc.data() as Map<String, dynamic>?)?['amount'];
-      donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-    }
-
-    // Following results are chunks of 6 streams per day
-    int idx = 1;
-    while (idx < results.length) {
-      final zSnap    = results[idx++] as QuerySnapshot;
-      final nzSnap   = results[idx++] as QuerySnapshot;
-      final gmSnap   = results[idx++] as QuerySnapshot;
-      final daskSnap = results[idx++] as QuerySnapshot;
-      final dispSnap = results[idx++] as QuerySnapshot;
-      final dayDoc   = results[idx++] as DocumentSnapshot;
-
-      z  += zSnap.size;
-      nz += nzSnap.size;
-      gm += gmSnap.size;
-      das += daskSnap.size;
-      dispensed += dispSnap.size;
-
-      if (dayDoc.exists) {
-        final dayData = dayDoc.data() as Map<String, dynamic>?;
-        served += (dayData?['servedTokens'] as num?)?.toInt() ?? 0;
-      }
-
-      // Sum up revenue
-      for (final doc in zSnap.docs) {
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        dispRev += 20 * d.toInt();
-      }
-      for (final doc in nzSnap.docs) {
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        dispRev += 100 * d.toInt();
-      }
-    }
-
-    int zRev = 0, nzRev = 0;
-    for (int i = 1; i < results.length; i += 6) {
-      final zSnap  = results[i]     as QuerySnapshot;
-      final nzSnap = results[i + 1] as QuerySnapshot;
-      for (final doc in zSnap.docs) {
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        zRev += 20 * d.toInt();
-      }
-      for (final doc in nzSnap.docs) {
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        nzRev += 100 * d.toInt();
-      }
-    }
-    return BranchStats(
-      zakat: z, nonZakat: nz, gmwf: gm,
-      dispensed: dispensed, prescribed: 0,
-      dasterkhwaan: das, dasterkhwaanServed: served,
-      donations: donTotal.toInt(),
-      dispensaryRevenue: dispRev,
-      zakatRevenue: zRev,
-      nonZakatRevenue: nzRev,
-      gmwfRevenue: 0,
-    );
-  }).handleError((e) {
+  // ── HISTORICAL / MULTI-DAY: use cached Firestore fetch ────────────────────
+  // fetchBranchStats() has an in-memory 5-minute cache so rapid rebuilds are
+  // free; only the first call per TTL window hits Firestore.
+  return Stream.fromFuture(fetchBranchStats(originalBranchId, filter: filter))
+      .handleError((e) {
     debugPrint('[streamBranchStats] Error: $e');
     return const BranchStats();
   });
 }
+
+/// Builds today's [BranchStats] purely from Hive, reacting to any box change.
+Stream<BranchStats> _streamTodayStatsFromHive(String branchId) async* {
+  BranchStats _compute() {
+    final today     = LocalStorageService.getTodayDateKey();          // ddMMyy
+    final todayDash = DateFormat('yyyy-MM-dd').format(DateTime.now()); // yyyy-MM-dd
+
+    int z = 0, nz = 0, gm = 0, dispensed = 0, dispRev = 0;
+    int zRev = 0, nzRev = 0;
+    double donTotal = 0;
+
+    // ── Tokens (entries box) ────────────────────────────────────────────────
+    final entries = LocalStorageService.getLocalEntries(branchId)
+        .where((e) => (e['dateKey'] ?? '') == today)
+        .toList();
+
+    for (final e in entries) {
+      final qt   = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'zakat';
+      final days = (e['daysOfMedicine'] as num?)?.toInt() ?? 1;
+      if (qt == 'non-zakat') {
+        nz++;
+        dispRev += 100 * days;
+        nzRev   += 100 * days;
+      } else if (qt == 'gmwf') {
+        gm++;
+      } else {
+        z++;
+        dispRev += 20 * days;
+        zRev    += 20 * days;
+      }
+    }
+
+    // ── Dispensed (dispensary box) ──────────────────────────────────────────
+    dispensed = LocalStorageService.getLocalDispensaryRecords(branchId, dateKey: today).length;
+
+    // ── Donations (donations box) ───────────────────────────────────────────
+    final seenReceipts = <String>{};
+    final donBox = Hive.box(LocalStorageService.donationsBox);
+    for (final raw in donBox.values) {
+      if (raw is! Map) continue;
+      final data = Map<String, dynamic>.from(raw);
+      final recBranch = data['branchId']?.toString().toLowerCase().trim() ?? '';
+      if (recBranch != branchId.toLowerCase().trim()) continue;
+      final date = data['date']?.toString() ?? '';
+      if (date != todayDash) continue;
+      final syncStatus = data['syncStatus']?.toString().toLowerCase() ?? '';
+      final status = data['status']?.toString().toLowerCase() ?? '';
+      if (syncStatus == 'deleted' || status == 'deleted') continue;
+      final payMethod = data['paymentMethod']?.toString().toLowerCase() ?? '';
+      if (payMethod == 'bank_deposit') continue;
+      final receiptNo = data['receiptNo']?.toString() ?? '';
+      final clean = don.cleanReceiptNumber(receiptNo);
+      if (seenReceipts.contains(clean)) continue;
+      seenReceipts.add(clean);
+      final amt = data['amount'];
+      donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+    }
+
+    return BranchStats(
+      zakat: z, nonZakat: nz, gmwf: gm,
+      dispensed: dispensed, prescribed: 0,
+      dasterkhwaan: 0, dasterkhwaanServed: 0,
+      donations: donTotal.toInt(),
+      dispensaryRevenue: dispRev,
+      zakatRevenue: zRev, nonZakatRevenue: nzRev, gmwfRevenue: 0,
+    );
+  }
+
+  // Emit an initial value immediately
+  yield _compute();
+
+  // Merge watch streams from the three relevant boxes and recompute on any change
+  final entriesStream    = Hive.box(LocalStorageService.entriesBox).watch();
+  final dispensaryStream = Hive.box(LocalStorageService.dispensaryBox).watch();
+  final donationsStream  = Hive.box(LocalStorageService.donationsBox).watch();
+
+  await for (final _ in Rx.merge([entriesStream, dispensaryStream, donationsStream])) {
+    yield _compute();
+  }
+}
+
 
 Future<BranchStats> fetchAllBranchesStats(List<String> ids, {DashboardFilter? filter}) async {
   if (ids.isEmpty) return const BranchStats();
@@ -401,7 +489,7 @@ Stream<BranchStats> streamAllBranchesStats(List<String> ids, {DashboardFilter? f
     int z = 0, nz = 0, gm = 0, das = 0, dasServed = 0, don = 0, disp = 0, presc = 0, dispRev = 0;
     int zRev = 0, nzRev = 0, gmRev = 0;
     for (final r in results) {
-      final s = r as BranchStats;
+      final s = r;
       z += s.zakat; nz += s.nonZakat; gm += s.gmwf;
       das += s.dasterkhwaan; dasServed += s.dasterkhwaanServed;
       don += s.donations; disp += s.dispensed; presc += s.prescribed;
@@ -447,8 +535,12 @@ class _AnimatedCount extends StatefulWidget {
   final int value;
   final TextStyle style;
   final String prefix, suffix;
-  const _AnimatedCount({required this.value, required this.style,
-      this.prefix = '', this.suffix = ''});
+  const _AnimatedCount({
+    required this.value,
+    required this.style,
+    this.prefix = '',
+    this.suffix = '',
+  });
   @override State<_AnimatedCount> createState() => _AnimatedCountState();
 }
 
@@ -467,11 +559,12 @@ class _AnimatedCountState extends State<_AnimatedCount>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
-    builder: (_, __) {
+    builder: (_, _) {
       final v = (widget.value * _anim.value).toInt();
       String s;
-      if (widget.value >= 10000000) s = '${(v / 10000000).toStringAsFixed(1)}Cr';
-      else if (widget.value >= 100000) s = '${(v / 100000).toStringAsFixed(1)}L';
+      if (widget.value >= 10000000) {
+        s = '${(v / 10000000).toStringAsFixed(1)}Cr';
+      } else if (widget.value >= 100000) s = '${(v / 100000).toStringAsFixed(1)}L';
       else if (widget.value >= 1000) s = '${(v / 1000).toStringAsFixed(1)}K';
       else s = NumberFormat('#,##0', 'en_US').format(v);
       return Text('${widget.prefix}$s${widget.suffix}', style: widget.style);
@@ -487,8 +580,10 @@ class _AnimatedProgressBar extends StatefulWidget {
   final Color? backgroundColor;
   final double height;
   const _AnimatedProgressBar({
-    required this.value, required this.color,
-    this.backgroundColor, this.height = 6,
+    required this.value,
+    required this.color,
+    this.height = 6,
+    this.backgroundColor,
   });
   @override State<_AnimatedProgressBar> createState() => _AnimatedProgressBarState();
 }
@@ -508,7 +603,7 @@ class _AnimatedProgressBarState extends State<_AnimatedProgressBar>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
-    builder: (_, __) => ClipRRect(
+    builder: (_, _) => ClipRRect(
       borderRadius: BorderRadius.circular(widget.height),
       child: LinearProgressIndicator(
         value: (widget.value * _anim.value).clamp(0.0, 1.0),
@@ -591,7 +686,7 @@ class _AnimatedDonutState extends State<_AnimatedDonut>
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: _anim,
-    builder: (_, __) => SizedBox(
+    builder: (_, _) => SizedBox(
       width: widget.size, height: widget.size,
       child: Stack(alignment: Alignment.center, children: [
         CustomPaint(size: Size(widget.size, widget.size),
@@ -629,7 +724,7 @@ class _AnimatedDistBarState extends State<_AnimatedDistBar>
     if (total == 0) return const SizedBox.shrink();
     return AnimatedBuilder(
       animation: _anim,
-      builder: (_, __) => ClipRRect(
+      builder: (_, _) => ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: Row(children: [
           if (widget.zakat > 0)    Expanded(flex: widget.zakat,    child: Container(height: 6, color: widget.colorZ)),
@@ -1078,7 +1173,7 @@ class _EmptyOpsState extends StatelessWidget {
     required this.message,
     this.hint,
     this.onPrimary,
-    this.primaryLabel = 'Refresh',
+    this.primaryLabel = '',
   });
 
   @override
@@ -1225,22 +1320,57 @@ class BranchPerformanceTable extends StatefulWidget {
   final RoleThemeData t;
   final List<Map<String, dynamic>> branches; // [{'id', 'name', 'location?'}]
   final void Function(String)? onGoToBranch;
+  final String selectedTab; // NEW parameter: 'overall', 'dispensary', 'tokens', 'donations'
+
   const BranchPerformanceTable({
-    super.key, required this.t, required this.branches, this.onGoToBranch,
+    super.key,
+    required this.t,
+    required this.branches,
+    this.onGoToBranch,
+    required this.selectedTab,
   });
-  @override State<BranchPerformanceTable> createState() => _BranchPerformanceTableState();
+
+  @override
+  State<BranchPerformanceTable> createState() => _BranchPerformanceTableState();
 }
 
 class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
   final Map<String, BranchStats> _latestStats = {}; // Local cache for sorting
   final Set<String> _expanded = {};
-  String _sortBy = 'tokens'; // 'tokens', 'revenue', 'donations'
+  String _sortBy = 'tokens'; 
   bool _ascending = false;
 
   @override
   void initState() {
     super.initState();
     dashboardController.addListener(_onFilterChanged);
+    _resetSortKey();
+  }
+
+  @override
+  void didUpdateWidget(BranchPerformanceTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedTab != widget.selectedTab) {
+      _resetSortKey();
+    }
+  }
+
+  void _resetSortKey() {
+    switch (widget.selectedTab) {
+      case 'overall':
+        _sortBy = 'tokens';
+        break;
+      case 'dispensary':
+        _sortBy = 'tokens';
+        break;
+      case 'tokens':
+        _sortBy = 'dasterkhwaan';
+        break;
+      case 'donations':
+        _sortBy = 'donations';
+        break;
+    }
+    _ascending = false;
   }
 
   @override
@@ -1251,6 +1381,23 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
 
   void _onFilterChanged() {
     if (mounted) setState(() {});
+  }
+
+  Map<String, double> _getDonationSplit(String branchId) {
+    double jamia = 0;
+    double gmwf = 0;
+    try {
+      final list = DonationsLocalStorage.getAllDonations(branchId);
+      for (var d in list) {
+        final amt = (d.amount > 0 ? d.amount : d.probableAmount) ?? 0.0;
+        if (d.categoryId == 'jamia') {
+          jamia += amt;
+        } else if (d.categoryId == 'gmwf') {
+          gmwf += amt;
+        }
+      }
+    } catch (_) {}
+    return {'jamia': jamia, 'gmwf': gmwf};
   }
 
   List<Map<String, dynamic>> get _sortedBranches {
@@ -1266,6 +1413,26 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
         case 'tokens': compare = sa.tokens.compareTo(sb.tokens); break;
         case 'revenue': compare = sa.totalRevenue.compareTo(sb.totalRevenue); break;
         case 'donations': compare = sa.donations.compareTo(sb.donations); break;
+        case 'zkat':
+        case 'zakat': compare = sa.zakat.compareTo(sb.zakat); break;
+        case 'nonZakat': compare = sa.nonZakat.compareTo(sb.nonZakat); break;
+        case 'gmwf': compare = sa.gmwf.compareTo(sb.gmwf); break;
+        case 'dispensaryRevenue': compare = sa.dispensaryRevenue.compareTo(sb.dispensaryRevenue); break;
+        case 'dasterkhwaan': compare = sa.dasterkhwaan.compareTo(sb.dasterkhwaan); break;
+        case 'dasterkhwaanServed': compare = sa.dasterkhwaanServed.compareTo(sb.dasterkhwaanServed); break;
+        case 'dasterkhwaanRevenue': compare = sa.dasterkhwaanRevenue.compareTo(sb.dasterkhwaanRevenue); break;
+        case 'jamia': {
+          final ja = _getDonationSplit(idA)['jamia'] ?? 0.0;
+          final jb = _getDonationSplit(idB)['jamia'] ?? 0.0;
+          compare = ja.compareTo(jb);
+          break;
+        }
+        case 'gmwf_general': {
+          final ga = _getDonationSplit(idA)['gmwf'] ?? 0.0;
+          final gb = _getDonationSplit(idB)['gmwf'] ?? 0.0;
+          compare = ga.compareTo(gb);
+          break;
+        }
       }
       return _ascending ? compare : -compare;
     });
@@ -1274,8 +1441,9 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
 
   void _toggleSort(String key) {
     setState(() {
-      if (_sortBy == key) _ascending = !_ascending;
-      else { _sortBy = key; _ascending = false; }
+      if (_sortBy == key) {
+        _ascending = !_ascending;
+      } else { _sortBy = key; _ascending = false; }
     });
   }
 
@@ -1304,10 +1472,27 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
           child: Row(children: [
             const Expanded(flex: 3, child: Text('Branch', style: TextStyle(
                 color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
-            _headerCell('Patients', 'tokens', flex: 2),
-            _headerCell('Donations', 'donations', flex: 2),
-            _headerCell('Food', 'food', flex: 2, sortable: false),
-            _headerCell('Revenue', 'revenue', flex: 2),
+            if (widget.selectedTab == 'overall') ...[
+              _headerCell('Patients', 'tokens', flex: 2),
+              _headerCell('Disp. Rev', 'dispensaryRevenue', flex: 2),
+              _headerCell('Donations', 'donations', flex: 2),
+              _headerCell('Food Rev', 'dasterkhwaanRevenue', flex: 2, sortable: false),
+              _headerCell('Total Rev', 'revenue', flex: 2),
+            ] else if (widget.selectedTab == 'dispensary') ...[
+              _headerCell('Zakat P.', 'zakat', flex: 2),
+              _headerCell('Non-Zakat', 'nonZakat', flex: 2),
+              _headerCell('GMWF P.', 'gmwf', flex: 2),
+              _headerCell('Revenue', 'dispensaryRevenue', flex: 2),
+            ] else if (widget.selectedTab == 'tokens') ...[
+              _headerCell('Issued', 'dasterkhwaan', flex: 2),
+              _headerCell('Served', 'dasterkhwaanServed', flex: 2),
+              _headerCell('Rate', 'rate', flex: 2, sortable: false),
+              _headerCell('Revenue', 'dasterkhwaanRevenue', flex: 2),
+            ] else if (widget.selectedTab == 'donations') ...[
+              _headerCell('Total Don.', 'donations', flex: 2),
+              _headerCell('Jamia Share', 'jamia', flex: 2),
+              _headerCell('GMWF Gen.', 'gmwf_general', flex: 2),
+            ],
             const SizedBox(width: 24), // expand chevron space
           ]),
         ),
@@ -1333,13 +1518,17 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
               final isTop = id == topId && s.tokens > 0;
 
               return _BranchTableRow(
-                t: t, name: name, stats: s,
+                t: t, name: name, branchId: id, stats: s,
                 isExpanded: isExpanded,
                 isLast: isLast,
                 isTop: isTop,
+                selectedTab: widget.selectedTab,
                 onTap: () => setState(() {
-                  if (isExpanded) _expanded.remove(id);
-                  else _expanded.add(id);
+                  if (isExpanded) {
+                    _expanded.remove(id);
+                  } else {
+                    _expanded.add(id);
+                  }
                 }),
               );
             }
@@ -1387,17 +1576,37 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
 class _BranchTableRow extends StatelessWidget {
   final RoleThemeData t;
   final String name;
+  final String branchId;
   final BranchStats? stats;
   final bool isExpanded, isLast, isTop;
   final VoidCallback onTap;
+  final String selectedTab;
+
   const _BranchTableRow({
-    required this.t, required this.name, required this.stats,
+    required this.t, required this.name, required this.branchId, required this.stats,
     required this.isExpanded, required this.isLast, required this.isTop, required this.onTap,
+    required this.selectedTab,
   });
 
   @override
   Widget build(BuildContext context) {
     final s = stats ?? const BranchStats();
+
+    double branchJamia = 0;
+    double branchGmwf = 0;
+    if (selectedTab == 'donations') {
+      try {
+        final list = DonationsLocalStorage.getAllDonations(branchId);
+        for (var d in list) {
+          final amt = (d.amount > 0 ? d.amount : d.probableAmount) ?? 0.0;
+          if (d.categoryId == 'jamia') {
+            branchJamia += amt;
+          } else if (d.categoryId == 'gmwf') {
+            branchGmwf += amt;
+          }
+        }
+      } catch (_) {}
+    }
 
     return Column(children: [
       InkWell(
@@ -1424,23 +1633,77 @@ class _BranchTableRow extends StatelessWidget {
                       fontWeight: isExpanded || isTop ? FontWeight.w700 : FontWeight.w600),
                   overflow: TextOverflow.ellipsis)),
             ])),
-            // Patients
-            Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.tokens,
-                style: const TextStyle(color: DS.blue, fontSize: 13,
-                    fontWeight: FontWeight.w800, letterSpacing: -0.3),
-            ))),
-            // Donations
-            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.donations),
-                style: const TextStyle(color: DS.purple, fontSize: 12,
-                    fontWeight: FontWeight.w700)))),
-            // Food Tokens
-            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dasterkhwaan),
-                style: const TextStyle(color: DS.orange, fontSize: 12,
-                    fontWeight: FontWeight.w700)))),
-            // Revenue
-            Expanded(flex: 2, child: Center(child: Text(fmtNum(s.totalRevenue),
-                style: const TextStyle(color: DS.green, fontSize: 12,
-                    fontWeight: FontWeight.w700)))),
+            if (selectedTab == 'overall') ...[
+              // Patients
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.tokens,
+                  style: const TextStyle(color: DS.blue, fontSize: 13,
+                      fontWeight: FontWeight.w800, letterSpacing: -0.3),
+              ))),
+              // Dispensary Revenue
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dispensaryRevenue),
+                  style: const TextStyle(color: DS.blue, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+              // Donations
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.donations),
+                  style: const TextStyle(color: DS.purple, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+              // Food Revenue
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dasterkhwaanRevenue),
+                  style: const TextStyle(color: DS.orange, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+              // Total Revenue
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.totalRevenue),
+                  style: const TextStyle(color: DS.green, fontSize: 12,
+                      fontWeight: FontWeight.w800)))),
+            ] else if (selectedTab == 'dispensary') ...[
+              // Zakat
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.zakat,
+                  style: const TextStyle(color: DS.green, fontSize: 13,
+                      fontWeight: FontWeight.w700)))),
+              // Non-Zakat
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.nonZakat,
+                  style: const TextStyle(color: DS.blue, fontSize: 13,
+                      fontWeight: FontWeight.w700)))),
+              // GMWF
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.gmwf,
+                  style: const TextStyle(color: DS.orange, fontSize: 13,
+                      fontWeight: FontWeight.w700)))),
+              // Revenue
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dispensaryRevenue),
+                  style: const TextStyle(color: DS.green, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+            ] else if (selectedTab == 'tokens') ...[
+              // Issued
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.dasterkhwaan,
+                  style: const TextStyle(color: DS.orange, fontSize: 13,
+                      fontWeight: FontWeight.w700)))),
+              // Served
+              Expanded(flex: 2, child: Center(child: _AnimatedCount(value: s.dasterkhwaanServed,
+                  style: const TextStyle(color: DS.green, fontSize: 13,
+                      fontWeight: FontWeight.w700)))),
+              // Rate
+              Expanded(flex: 2, child: Center(child: Text(
+                  '${s.dasterkhwaan > 0 ? (s.dasterkhwaanServed * 100 ~/ s.dasterkhwaan) : 0}%',
+                  style: const TextStyle(color: DS.neutral, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+              // Food Revenue
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dasterkhwaanRevenue),
+                  style: const TextStyle(color: DS.green, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+            ] else if (selectedTab == 'donations') ...[
+              // Total donations
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(s.donations),
+                  style: const TextStyle(color: DS.purple, fontSize: 12,
+                      fontWeight: FontWeight.w800)))),
+              // Jamia
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(branchJamia.toInt()),
+                  style: const TextStyle(color: DS.blue, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+              // GMWF
+              Expanded(flex: 2, child: Center(child: Text(fmtNum(branchGmwf.toInt()),
+                  style: const TextStyle(color: DS.green, fontSize: 12,
+                      fontWeight: FontWeight.w700)))),
+            ],
             // Chevron
             AnimatedRotation(
               turns: isExpanded ? 0.25 : 0,
@@ -1454,7 +1717,7 @@ class _BranchTableRow extends StatelessWidget {
       // Expanded detail panel
       AnimatedCrossFade(
         firstChild: const SizedBox.shrink(),
-        secondChild: _BranchDetailPanel(t: t, s: s),
+        secondChild: _BranchDetailPanel(t: t, s: s, branchId: branchId, selectedTab: selectedTab),
         crossFadeState: isExpanded ? CrossFadeState.showSecond : CrossFadeState.showFirst,
         duration: const Duration(milliseconds: 280),
       ),
@@ -1468,15 +1731,102 @@ class _BranchTableRow extends StatelessWidget {
 class _BranchDetailPanel extends StatelessWidget {
   final RoleThemeData t;
   final BranchStats s;
-  const _BranchDetailPanel({required this.t, required this.s});
+  final String branchId;
+  final String selectedTab;
+
+  const _BranchDetailPanel({required this.t, required this.s, required this.branchId, required this.selectedTab});
 
   @override
   Widget build(BuildContext context) {
+    if (selectedTab == 'dispensary') {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
+        color: DS.blueMuted.withValues(alpha: 0.25),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Clinical Breakdown:', style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Row(children: [
+            _detailChip(t.zakat, 'Zakat Patients', s.zakat, 'PKR ${fmtNum(s.zakat * 20)}'),
+            const SizedBox(width: DS.s1),
+            _detailChip(t.nonZakat, 'Non-Zakat', s.nonZakat, 'PKR ${fmtNum(s.nonZakat * 100)}'),
+            const SizedBox(width: DS.s1),
+            _detailChip(t.gmwf, 'GMWF', s.gmwf, 'Free'),
+          ]),
+          if (s.tokens > 0) ...[
+            const SizedBox(height: DS.s2),
+            _AnimatedDistBar(zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
+                colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf),
+          ],
+        ]),
+      );
+    } else if (selectedTab == 'tokens') {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
+        color: DS.orangeMuted.withValues(alpha: 0.25),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Icon(Icons.restaurant_rounded, size: 13, color: DS.orange),
+            const SizedBox(width: 6),
+            const Text('Food Service Progress:', style: TextStyle(color: DS.neutral, fontSize: 12)),
+            const Spacer(),
+            Text('${s.dasterkhwaanServed} / ${s.dasterkhwaan} served',
+                style: const TextStyle(color: DS.orange, fontSize: 12, fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 6),
+          _AnimatedProgressBar(
+              value: s.dasterkhwaan > 0 ? s.dasterkhwaanServed / s.dasterkhwaan : 0,
+              color: DS.orange, height: 6),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Pending Tokens: ${s.dasterkhwaanPending}', style: const TextStyle(color: DS.neutral, fontSize: 11)),
+              Text('Total Food Revenue: PKR ${fmtNum(s.dasterkhwaanRevenue)}', style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+            ],
+          )
+        ]),
+      );
+    } else if (selectedTab == 'donations') {
+      final branchDonations = DonationsLocalStorage.getAllDonations(branchId).take(5).toList();
+      return Container(
+        padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
+        color: DS.purpleMuted.withValues(alpha: 0.25),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Recent Branch Contributions:', style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            if (branchDonations.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: Text('No donations recorded recently', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
+              )
+            else
+              ...branchDonations.map((d) => Padding(
+                padding: const EdgeInsets.only(bottom: 6.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text('${d.donorName} (${d.categoryId.toUpperCase()})',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        overflow: TextOverflow.ellipsis),
+                    ),
+                    Text('PKR ${NumberFormat('#,###').format(d.amount)}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: DS.purple, fontFamily: 'DMMono')),
+                  ],
+                ),
+              )),
+          ],
+        ),
+      );
+    }
+
+    // Default/Overall
     return Container(
       padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
       color: DS.blueMuted.withValues(alpha: 0.25),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        // Patient type breakdown
         Row(children: [
           _detailChip(t.zakat, 'Zakat', s.zakat, 'PKR ${fmtNum(s.zakat * 20)}'),
           const SizedBox(width: DS.s1),
@@ -1484,10 +1834,7 @@ class _BranchDetailPanel extends StatelessWidget {
           const SizedBox(width: DS.s1),
           _detailChip(t.gmwf, 'GMWF', s.gmwf, 'Free'),
         ]),
-
         const SizedBox(height: DS.s2),
-
-        // Food service progress
         Row(children: [
           const Icon(Icons.restaurant_rounded, size: 13, color: DS.orange),
           const SizedBox(width: 6),
@@ -1500,13 +1847,6 @@ class _BranchDetailPanel extends StatelessWidget {
         _AnimatedProgressBar(
             value: s.dasterkhwaan > 0 ? s.dasterkhwaanServed / s.dasterkhwaan : 0,
             color: DS.orange, height: 5),
-
-        // Distribution bar
-        if (s.tokens > 0) ...[
-          const SizedBox(height: DS.s2),
-          _AnimatedDistBar(zakat: s.zakat, nonZakat: s.nonZakat, gmwf: s.gmwf,
-              colorZ: t.zakat, colorNZ: t.nonZakat, colorG: t.gmwf),
-        ],
       ]),
     );
   }
@@ -2279,36 +2619,142 @@ class GlobalFilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    final isMobile = MediaQuery.of(context).size.width < 750;
+
     return ValueListenableBuilder<DashboardFilter>(
       valueListenable: controller,
       builder: (context, filter, child) {
         return Container(
-          padding: const EdgeInsets.symmetric(vertical: DS.s1, horizontal: DS.s2),
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border(bottom: BorderSide(color: DS.border)),
+            color: t.bgCard,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: t.bgRule, width: 1.2),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(children: [
-              _buildTimeChips(filter),
-              const SizedBox(width: DS.s3),
-              _buildBranchSelector(context, filter),
-              const SizedBox(width: DS.s3),
-              _buildTypeChips(filter),
-            ]),
+          clipBehavior: Clip.antiAlias,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: isMobile
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildFilterSection(
+                        icon: Icons.calendar_today_rounded,
+                        title: 'Time Range',
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: _buildTimeChips(context, filter),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildFilterSection(
+                        icon: Icons.location_on_rounded,
+                        title: 'Selected Branch',
+                        child: _buildBranchSelector(context, filter),
+                      ),
+                      const SizedBox(height: 16),
+                      _buildFilterSection(
+                        icon: Icons.category_rounded,
+                        title: 'Patient Classification',
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: _buildTypeChips(filter),
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        flex: 5,
+                        child: _buildFilterSection(
+                          icon: Icons.calendar_today_rounded,
+                          title: 'Time Range',
+                          child: _buildTimeChips(context, filter),
+                        ),
+                      ),
+                      Container(
+                        width: 1,
+                        height: 48,
+                        color: t.bgRule,
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                      ),
+                      Expanded(
+                        flex: 4,
+                        child: _buildFilterSection(
+                          icon: Icons.location_on_rounded,
+                          title: 'Selected Branch',
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: _buildBranchSelector(context, filter),
+                          ),
+                        ),
+                      ),
+                      Container(
+                        width: 1,
+                        height: 48,
+                        color: t.bgRule,
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                      ),
+                      Expanded(
+                        flex: 5,
+                        child: _buildFilterSection(
+                          icon: Icons.category_rounded,
+                          title: 'Patient Classification',
+                          child: _buildTypeChips(filter),
+                        ),
+                      ),
+                    ],
+                  ),
           ),
         );
       },
     );
   }
 
-  Widget _buildTimeChips(DashboardFilter filter) {
+  Widget _buildFilterSection({
+    required IconData icon,
+    required String title,
+    required Widget child,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 13, color: DS.neutral),
+            const SizedBox(width: 6),
+            Text(
+              title,
+              style: const TextStyle(
+                color: DS.neutral,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        child,
+      ],
+    );
+  }
+
+  Widget _buildTimeChips(BuildContext context, DashboardFilter filter) {
     return Row(children: [
       _chip('Today', TimeRange.today, filter.timeRange, (v) => controller.setTimeRange(v)),
       _chip('Week', TimeRange.week, filter.timeRange, (v) => controller.setTimeRange(v)),
       _chip('Month', TimeRange.month, filter.timeRange, (v) => controller.setTimeRange(v)),
-      _chip('Custom', TimeRange.custom, filter.timeRange, (v) => _pickDateRange(v)),
+      _chip('Custom', TimeRange.custom, filter.timeRange, (v) => _pickDateRange(context, v)),
     ]);
   }
 
@@ -2323,16 +2769,19 @@ class GlobalFilterBar extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: 8),
         decoration: BoxDecoration(
-          color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1),
+          color: DS.blueMuted, borderRadius: BorderRadius.circular(12),
           border: Border.all(color: DS.blue.withValues(alpha: 0.2)),
         ),
-        child: Row(children: [
-          const Icon(Icons.location_on_rounded, size: 14, color: DS.blue),
-          const SizedBox(width: 8),
-          Text(activeBranch['name'] ?? 'Unknown', style: const TextStyle(color: DS.blue, fontSize: 12, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 4),
-          const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: DS.blue),
-        ]),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.location_on_rounded, size: 14, color: DS.blue),
+            const SizedBox(width: 8),
+            Text(activeBranch['name'] ?? 'Unknown', style: const TextStyle(color: DS.blue, fontSize: 12, fontWeight: FontWeight.w700)),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: DS.blue),
+          ],
+        ),
       ),
     );
   }
@@ -2358,6 +2807,7 @@ class GlobalFilterBar extends StatelessWidget {
         labelStyle: TextStyle(color: active ? Colors.white : DS.neutral),
         backgroundColor: DS.neutralBg,
         showCheckmark: false,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         padding: const EdgeInsets.symmetric(horizontal: 4),
         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
@@ -2374,7 +2824,7 @@ class GlobalFilterBar extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: active ? color : Colors.transparent,
-            borderRadius: BorderRadius.circular(DS.r1),
+            borderRadius: BorderRadius.circular(10),
             border: Border.all(color: active ? color : DS.border),
           ),
           child: Text(label, style: TextStyle(
@@ -2386,9 +2836,18 @@ class GlobalFilterBar extends StatelessWidget {
     );
   }
 
-  void _pickDateRange(TimeRange v) {
-    // Standard picker placeholder
-    controller.setTimeRange(v);
+  void _pickDateRange(BuildContext context, TimeRange v) async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: controller.value.customRange,
+    );
+    if (range != null) {
+      controller.setCustomRange(range);
+    } else {
+      controller.setTimeRange(v);
+    }
   }
 }
 
@@ -2420,48 +2879,168 @@ class ActionableKPICard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Color mainColor = color;
+    final LinearGradient gradient;
+    final Color glowColor;
+    final Color labelColor = Colors.white.withValues(alpha: 0.75);
+    final Color valueColor = Colors.white;
+    final Color prefixColor = Colors.white.withValues(alpha: 0.7);
+    final Color iconBgColor = Colors.white.withValues(alpha: 0.15);
+    final Color iconColor = Colors.white;
+    final Color insightBgColor = Colors.white.withValues(alpha: 0.15);
+    final Color insightTextColor = Colors.white;
+
+    final cleanLabel = label.toLowerCase();
+    if (cleanLabel.contains('revenue') || mainColor.toARGB32() == 0xFF10B981 || mainColor.toARGB32() == 0xFF1A7A4A) {
+      gradient = const LinearGradient(
+        colors: [Color(0xFF0D9488), Color(0xFF0F766E)], // Teal/Emerald
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFF0F766E).withValues(alpha: 0.35);
+    } else if (cleanLabel.contains('patients') || mainColor.toARGB32() == 0xFF2196F3 || mainColor.toARGB32() == 0xFF1976D2 || mainColor.toARGB32() == 0xFF2563EB) {
+      gradient = const LinearGradient(
+        colors: [Color(0xFF6366F1), Color(0xFF4338CA)], // Indigo
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFF4338CA).withValues(alpha: 0.35);
+    } else if (cleanLabel.contains('served') || cleanLabel.contains('food') || mainColor.toARGB32() == 0xFFFF9800 || mainColor.toARGB32() == 0xFFF57C00 || mainColor.toARGB32() == 0xFFD97706) {
+      gradient = const LinearGradient(
+        colors: [Color(0xFFF97316), Color(0xFFC2410C)], // Orange
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFFC2410C).withValues(alpha: 0.35);
+    } else if (cleanLabel.contains('donations') || mainColor.toARGB32() == 0xFF9C27B0 || mainColor.toARGB32() == 0xFF7B1FA2 || mainColor.toARGB32() == 0xFF8B5CF6) {
+      gradient = const LinearGradient(
+        colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)], // Purple
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = const Color(0xFF6D28D9).withValues(alpha: 0.35);
+    } else {
+      gradient = LinearGradient(
+        colors: [mainColor, mainColor.withValues(alpha: 0.85)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
+      glowColor = mainColor.withValues(alpha: 0.35);
+    }
+
     return Container(
-      padding: EdgeInsets.all(isPrimary ? DS.s3 : DS.s2),
+      padding: EdgeInsets.all(isPrimary ? 20 : 16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: color.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 8)),
+          BoxShadow(
+            color: glowColor,
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(DS.r1)),
-            child: Icon(icon, color: color, size: isPrimary ? 24 : 18),
-          ),
-          const Spacer(),
-          if (trend != null)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: DS.greenMuted, borderRadius: BorderRadius.circular(DS.r1)),
-              child: Text(trend!, style: const TextStyle(color: DS.green, fontSize: 10, fontWeight: FontWeight.w700)),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Positioned(
+            right: -20,
+            top: -20,
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
             ),
-        ]),
-        SizedBox(height: isPrimary ? DS.s2 : DS.s1),
-        Text(label, style: const TextStyle(color: DS.neutral, fontSize: 12, fontWeight: FontWeight.w600)),
-        const SizedBox(height: 4),
-        Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          if (prefix != null) Text(prefix!, style: TextStyle(color: color.withValues(alpha: 0.6), fontSize: isPrimary ? 20 : 14, fontWeight: FontWeight.w700)),
-          const SizedBox(width: 4),
-          Text(value, style: TextStyle(color: const Color(0xFF111827), fontSize: isPrimary ? 32 : 24, fontWeight: FontWeight.w900, height: 1.1)),
-        ]),
-        if (insight != null) ...[
-          const SizedBox(height: DS.s1),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(color: DS.neutralBg, borderRadius: BorderRadius.circular(DS.r1)),
-            child: Text(insight!, style: const TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w600)),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: iconBgColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: iconColor, size: isPrimary ? 24 : 18),
+                  ),
+                  const Spacer(),
+                  if (trend != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        trend!,
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                label,
+                style: TextStyle(color: labelColor, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.2),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (prefix != null)
+                    Text(
+                      prefix!,
+                      style: TextStyle(color: prefixColor, fontSize: isPrimary ? 20 : 14, fontWeight: FontWeight.w700),
+                    ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        style: TextStyle(
+                          color: valueColor,
+                          fontSize: isPrimary ? 32 : 24,
+                          fontWeight: FontWeight.w900,
+                          height: 1.1,
+                          fontFamily: 'DMMono',
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (insight != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: insightBgColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    insight!,
+                    style: TextStyle(color: insightTextColor, fontSize: 10, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
-      ]),
+      ),
     );
   }
 }

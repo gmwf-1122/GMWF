@@ -402,7 +402,7 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
             padding: const EdgeInsets.all(12),
             child: ListView.separated(
               itemCount: cards.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 14),
+              separatorBuilder: (_, _) => const SizedBox(height: 14),
               itemBuilder: (_, i) => cards[i],
             ),
           );
@@ -637,7 +637,7 @@ class _InventoryDocPageState extends State<InventoryDocPage> {
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: items.length,
-              separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade100),
+              separatorBuilder: (_, _) => Divider(height: 1, color: Colors.grey.shade100),
               itemBuilder: (_, i) => _buildItemRow(items[i]),
             ),
           ),

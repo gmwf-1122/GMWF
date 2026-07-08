@@ -17,6 +17,7 @@ class DashboardPremiumOverview extends StatelessWidget {
   final VoidCallback onExportTap;
   final VoidCallback onSummaryTap;
   final bool isAnalyticsActive;
+  final VoidCallback? onImportTap;
 
   const DashboardPremiumOverview({
     super.key,
@@ -28,6 +29,7 @@ class DashboardPremiumOverview extends StatelessWidget {
     required this.onExportTap,
     required this.onSummaryTap,
     required this.isAnalyticsActive,
+    this.onImportTap,
   });
 
   @override
@@ -78,34 +80,7 @@ class DashboardPremiumOverview extends StatelessWidget {
               ),
               if (!isMobile) ...[
                 const SizedBox(width: 16),
-                ScaleButton(
-                  onTap: onAddTap,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.gray200),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.04),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3)),
-                      ],
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.add_rounded, size: 18, color: AppColors.gray800),
-                        SizedBox(width: 8),
-                        Text('Add New Donation',
-                            style: TextStyle(
-                                color: AppColors.gray800,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 14)),
-                      ],
-                    ),
-                  ),
-                ),
+                _AddDonationButton(onTap: onAddTap),
               ],
             ],
           ),
@@ -164,6 +139,13 @@ class DashboardPremiumOverview extends StatelessWidget {
                       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => GlobalAuditTrailScreen(role: role))),
                     )),
                   ],
+                  if (onImportTap != null) ...[
+                    const SizedBox(width: 10),
+                    SizedBox(width: 130, child: DashboardActionTile(
+                      icon: Icons.file_upload_rounded, label: 'Import Excel', color: Colors.teal.shade700,
+                      onTap: onImportTap!,
+                    )),
+                  ],
                 ],
               ),
             )
@@ -191,10 +173,95 @@ class DashboardPremiumOverview extends StatelessWidget {
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => GlobalAuditTrailScreen(role: role))),
                   )),
                 ],
+                if (onImportTap != null) ...[
+                  const SizedBox(width: 12),
+                  Expanded(child: DashboardActionTile(
+                    icon: Icons.file_upload_rounded, label: 'Import Excel', color: Colors.teal.shade700,
+                    onTap: onImportTap!,
+                  )),
+                ],
               ],
             ),
         ],
       );
     });
+  }
+}
+
+class _AddDonationButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _AddDonationButton({required this.onTap});
+
+  @override
+  State<_AddDonationButton> createState() => _AddDonationButtonState();
+}
+
+class _AddDonationButtonState extends State<_AddDonationButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: ScaleButton(
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _isHovered ? 1.03 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _isHovered
+                    ? [AppColors.primaryMid, AppColors.primary]
+                    : [AppColors.primary, AppColors.primaryMid],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: _isHovered
+                      ? AppColors.primary.withValues(alpha: 0.35)
+                      : AppColors.primary.withValues(alpha: 0.15),
+                  blurRadius: _isHovered ? 16 : 8,
+                  offset: _isHovered ? const Offset(0, 6) : const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AnimatedRotation(
+                  turns: _isHovered ? 0.25 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeOutBack,
+                  child: AnimatedScale(
+                    scale: _isHovered ? 1.2 : 1.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Add New Donation',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                    letterSpacing: 0.1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

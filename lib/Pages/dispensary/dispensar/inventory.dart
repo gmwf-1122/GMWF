@@ -9,9 +9,7 @@ import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:rxdart/rxdart.dart';
 import 'dart:async';
-import 'dispensar_screen.dart';
 import 'inventory_update.dart';
-import 'inventory_adjustment.dart';
 import 'medicine_ledger.dart';
 import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/services/local_storage_service.dart';
@@ -80,8 +78,16 @@ class _InventoryPageState extends State<InventoryPage>
   String _sortField = 'name';
   bool _isAscending = true;
   int _page = 0;
-  final int _perPage = 15;
+  final int _perPage = 25;
   List<String> _batchKeys = ['All Batches'];
+  final ScrollController _scrollController = ScrollController();
+  int _displayLimit = 50;
+
+  // Cached state for performance/lazy loading
+  List<Map<String, dynamic>> _rawItems = [];
+  List<Map<String, dynamic>> _groupedBatches = [];
+  List<Map<String, dynamic>> _filteredBatches = [];
+  List<Map<String, dynamic>> _displayItems = [];
 
   // ── Sync & Stream Management ─────────────────────────────────────────────
   StreamSubscription? _fireInvSub;
@@ -96,8 +102,18 @@ class _InventoryPageState extends State<InventoryPage>
   @override
   void initState() {
     super.initState();
-    _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl = TabController(length: 7, vsync: this);
+    _tabCtrl.addListener(() {
+      if (mounted && !_tabCtrl.indexIsChanging) {
+        setState(() {});
+      }
+    });
+    _scrollController.addListener(_onScroll);
     _initSync();
+
+    // Cache database loading
+    Hive.box(LocalStorageService.stockBox).listenable().addListener(_loadDataFromHive);
+    _loadDataFromHive();
   }
 
   void _initSync() {
@@ -126,7 +142,7 @@ class _InventoryPageState extends State<InventoryPage>
         .orderBy('timestamp', descending: true)
         .limit(50)
         .snapshots()
-        .map((snap) => snap.docs.map((d) => d.data() as Map<String, dynamic>).toList());
+        .map((snap) => snap.docs.map((d) => d.data()).toList());
 
     final localSyncStream = Hive.box(LocalStorageService.syncBox)
         .watch()
@@ -164,12 +180,130 @@ class _InventoryPageState extends State<InventoryPage>
 
   @override
   void dispose() {
+    Hive.box(LocalStorageService.stockBox).listenable().removeListener(_loadDataFromHive);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _fireInvSub?.cancel();
     _logCombinedSub?.cancel();
     _logState.close();
     _tabCtrl.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      if (_displayLimit < _filteredBatches.length) {
+        if (mounted) {
+          setState(() {
+            _displayLimit += 25;
+            _processData();
+          });
+        }
+      }
+    }
+  }
+
+  void _loadDataFromHive() {
+    final box = Hive.box(LocalStorageService.stockBox);
+    final raw = box.values
+        .whereType<Map>()
+        .map((v) => Map<String, dynamic>.from(v))
+        .where((v) => v['branchId'] == widget.branchId)
+        .toList();
+    if (mounted) {
+      setState(() {
+        _rawItems = raw;
+        _processData();
+      });
+    }
+  }
+
+  void _processData() {
+    if (_rawItems.isEmpty) {
+      _groupedBatches = [];
+      _filteredBatches = [];
+      _displayItems = [];
+      return;
+    }
+    final batches = _groupByBatch(_rawItems);
+    _groupedBatches = batches;
+
+    var preFiltered = batches.where((b) {
+      final name = b['name'].toString().toLowerCase();
+      final formula = (b['formula'] ?? '').toString().toLowerCase();
+      final type = b['type'];
+      final query = _searchCtrl.text.toLowerCase();
+      return (name.contains(query) || formula.contains(query)) &&
+          (_filterType == 'All' || type == _filterType);
+    }).toList();
+
+    _updateBatchKeys(preFiltered);
+
+    var filtered = _filterBatch == 'All Batches'
+        ? preFiltered
+        : preFiltered.where((b) => b['expiryDate'] == _filterBatch).toList();
+
+    filtered.sort((a, b) {
+      int cmp = switch (_sortField) {
+        'name' => a['name']
+            .toString()
+            .toLowerCase()
+            .compareTo(b['name'].toString().toLowerCase()),
+        'formula' => (a['formula'] ?? '')
+            .toString()
+            .toLowerCase()
+            .compareTo((b['formula'] ?? '').toString().toLowerCase()),
+        'dose' => (a['dose'] ?? '')
+            .toString()
+            .compareTo((b['dose'] ?? '').toString()),
+        'quantity' => (a['quantity'] as int).compareTo(b['quantity'] as int),
+        'price' => (a['price'] as double).compareTo(b['price'] as double),
+        'expiry' => _parseExpiry(a['expiryDate'])
+            .compareTo(_parseExpiry(b['expiryDate'])),
+        _ => 0,
+      };
+      return _isAscending ? cmp : -cmp;
+    });
+
+    _filteredBatches = filtered;
+    
+    final end = _displayLimit.clamp(0, filtered.length);
+    _displayItems = filtered.sublist(0, end);
+  }
+
+  void _resetFilters() {
+    setState(() {
+      _searchCtrl.clear();
+      _filterType = 'All';
+      _filterBatch = 'All Batches';
+      _sortField = 'name';
+      _isAscending = true;
+      _displayLimit = 50;
+      _page = 0;
+      _processData();
+    });
+  }
+
+  void _applyLowStockSort() {
+    setState(() {
+      _sortField = 'quantity';
+      _isAscending = true;
+      _displayLimit = 50;
+      _page = 0;
+      _processData();
+    });
+  }
+
+  void _applyExpirySort() {
+    setState(() {
+      _sortField = 'expiry';
+      _isAscending = true;
+      _displayLimit = 50;
+      _page = 0;
+      _processData();
+    });
   }
 
   int _asInt(dynamic v) => v is int
@@ -253,8 +387,9 @@ class _InventoryPageState extends State<InventoryPage>
     try {
       final p = s.split('-');
       if (p.length == 2) return DateTime(int.parse(p[1]), int.parse(p[0]), 15);
-      if (p.length == 3)
+      if (p.length == 3) {
         return DateTime(int.parse(p[2]), int.parse(p[1]), int.parse(p[0]));
+      }
     } catch (_) {}
     return DateTime(3000);
   }
@@ -329,14 +464,208 @@ class _InventoryPageState extends State<InventoryPage>
     }
   }
 
+  Widget _buildDesktopHeader() {
+    return Container(
+      height: 55,
+      color: _teal,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          const Icon(FontAwesomeIcons.pills, color: Colors.white70, size: 14),
+          const SizedBox(width: 8),
+          const Text(
+            'Inventory Management',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  String _getBranchName() {
+    final cached = Hive.box(LocalStorageService.branchesBox).get('branch:${widget.branchId}');
+    if (cached is Map) {
+      return (cached['name'] as String?) ?? 'Branch';
+    }
+    return 'Branch';
+  }
+
+  Widget _buildSidebarContent(BuildContext context) {
+    final List<Map<String, dynamic>> menuItems = [
+      {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
+      {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
+      {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
+      {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
+      {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
+      {'label': 'Log', 'icon': Icons.history_edu_rounded},
+      {'label': 'History', 'icon': Icons.history_rounded},
+    ];
+
+    return Container(
+      color: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+            child: Row(
+              children: [
+                Image.asset(
+                  'assets/logo/gmwf-1.png',
+                  width: 42,
+                  height: 42,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: _teal,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(FontAwesomeIcons.pills, color: Colors.white, size: 16),
+                    );
+                  },
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Gulzar Madina',
+                        style: TextStyle(
+                          color: _tealDark,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      Text(
+                        '${_getBranchName()} Inventory',
+                        style: const TextStyle(
+                          color: _textLight,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: menuItems.length,
+              itemBuilder: (context, index) {
+                final item = menuItems[index];
+                final isActive = _tabCtrl.index == index;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  decoration: BoxDecoration(
+                    color: isActive ? _teal : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: InkWell(
+                    onTap: () {
+                      _tabCtrl.animateTo(index);
+                      setState(() {});
+                      if (MediaQuery.of(context).size.width < 800) {
+                        Navigator.pop(context);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            item['icon'] as IconData,
+                            color: isActive ? Colors.white : _textMid,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            item['label'] as String,
+                            style: TextStyle(
+                              color: isActive ? Colors.white : _textDark,
+                              fontSize: 13,
+                              fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const Divider(height: 1),
+          Container(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: _teal.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.store_rounded, color: _teal, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _getBranchName(),
+                        style: const TextStyle(
+                          color: _textDark,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const Text(
+                        'v2.6.1',
+                        style: TextStyle(
+                          color: _textLight,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isWrapped = GlobalModuleWrapper.isWrapped(context);
+    final double screenWidth = MediaQuery.of(context).size.width;
+    final bool isMobile = screenWidth < 800;
 
     return Scaffold(
       backgroundColor: _bg,
-      appBar: isWrapped ? null : _buildAppBar(),
-      floatingActionButton: widget.isAdmin
+      appBar: isMobile ? _buildAppBar(isMobile: true) : null,
+      drawer: isMobile ? Drawer(child: _buildSidebarContent(context)) : null,
+      floatingActionButton: widget.isAdmin || screenWidth > 800
           ? null
           : FloatingActionButton.extended(
               backgroundColor: _teal,
@@ -353,57 +682,52 @@ class _InventoryPageState extends State<InventoryPage>
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold)),
             ),
-      body: Column(
+      body: Row(
         children: [
-          if (isWrapped)
+          if (!isMobile)
             Container(
-              color: _teal,
-              child: TabBar(
-                controller: _tabCtrl,
-                indicatorColor: Colors.white,
-                indicatorWeight: 3,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white60,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                isScrollable: false,
-                tabs: const [
-                  Tab(icon: Icon(Icons.inventory_2_rounded, size: 17), text: 'Stock'),
-                  Tab(icon: Icon(Icons.pending_actions_rounded, size: 17), text: 'Pending'),
-                  Tab(icon: Icon(Icons.history_edu_rounded, size: 17), text: 'Log'),
-                  Tab(icon: Icon(Icons.history_rounded, size: 17), text: 'History'),
-                ],
+              width: 220,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border(right: BorderSide(color: Colors.grey.shade200, width: 1)),
               ),
-            ),
-          if (isWrapped && !widget.isDispenser)
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                   const Icon(Icons.admin_panel_settings_rounded, size: 18, color: _teal),
-                   const SizedBox(width: 8),
-                   const Text('Admin Controls:', style: TextStyle(fontWeight: FontWeight.bold, color: _tealDark, fontSize: 13)),
-                   const Spacer(),
-                   _buildInternalActionButton(
-                     label: 'Ledger', 
-                     icon: Icons.auto_graph_rounded, 
-                     color: _teal,
-                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MedicineLedgerPage(branchId: widget.branchId))),
-                   ),
-                   const SizedBox(width: 10),
-                   _buildInternalActionButton(
-                     label: 'Adjust', 
-                     icon: FontAwesomeIcons.sliders, 
-                     color: const Color(0xFFBF360C),
-                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryAdjustmentPage(branchId: widget.branchId))),
-                   ),
-                ],
-              ),
+              child: _buildSidebarContent(context),
             ),
           Expanded(
-            child: TabBarView(
-              controller: _tabCtrl,
-              children: [_stockTab(), _pendingTab(), _logTab(), _historyTab()],
+            child: Column(
+              children: [
+                if (!isMobile)
+                  _buildDesktopHeader(),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabCtrl,
+                    children: [
+                      _stockTab(),
+                      InventoryUpdatePage(
+                        branchId: widget.branchId,
+                        isAdmin: widget.isAdmin,
+                        isDispenser: widget.isDispenser,
+                        isEmbedded: true,
+                        showMode: 1,
+                      ),
+                      InventoryUpdatePage(
+                        branchId: widget.branchId,
+                        isAdmin: widget.isAdmin,
+                        isDispenser: widget.isDispenser,
+                        isEmbedded: true,
+                        showMode: 2,
+                      ),
+                      MedicineLedgerPage(
+                        branchId: widget.branchId,
+                        isEmbedded: true,
+                      ),
+                      _pendingTab(),
+                      _logTab(),
+                      _historyTab(),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -431,337 +755,206 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
-  PreferredSizeWidget _buildAppBar() => AppBar(
+  PreferredSizeWidget _buildAppBar({bool isMobile = false}) => AppBar(
         backgroundColor: _teal,
-        elevation: 4,
-        shadowColor: _shadow,
+        elevation: 1,
+        toolbarHeight: 55,
         automaticallyImplyLeading: false,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: Colors.white, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: isMobile
+            ? Builder(
+                builder: (context) => IconButton(
+                  icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 22),
+                  onPressed: () => Scaffold.of(context).openDrawer(),
+                ),
+              )
+            : IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded,
+                    color: Colors.white, size: 18),
+                onPressed: () => Navigator.pop(context),
+              ),
         title: Row(children: [
           const Icon(FontAwesomeIcons.pills,
-              color: Colors.white70, size: 16),
-          const SizedBox(width: 10),
+              color: Colors.white70, size: 14),
+          const SizedBox(width: 8),
           const Text('Inventory',
               style: TextStyle(
                   color: Colors.white,
-                  fontSize: 17,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold)),
-          if (_isManager) ...[
-            const SizedBox(width: 8),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.edit_rounded, size: 10, color: Colors.white70),
-                SizedBox(width: 3),
-                Text('editable',
-                    style: TextStyle(color: Colors.white70, fontSize: 10)),
-              ]),
-            ),
-          ],
         ]),
-        actions: widget.isDispenser
-            ? []
-            : [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 4, vertical: 10),
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => MedicineLedgerPage(
-                                branchId: widget.branchId))),
-                    icon: const Icon(Icons.auto_graph_rounded,
-                        size: 14, color: Colors.white),
-                    label: const Text('Ledger',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _teal,
-                      foregroundColor: Colors.white,
-                      elevation: 3,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 0),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(22)),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  child: ElevatedButton.icon(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (_) => InventoryAdjustmentPage(
-                                branchId: widget.branchId))),
-                    icon: const Icon(FontAwesomeIcons.sliders,
-                        size: 14, color: Colors.white),
-                    label: const Text('Adjust',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFBF360C),
-                      foregroundColor: Colors.white,
-                      elevation: 3,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 0),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(22)),
-                    ),
-                  ),
-                ),
-              ],
-        // Full-width tab bar with equal spacing
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(72),
-          child: TabBar(
-            controller: _tabCtrl,
-            indicatorColor: Colors.white,
-            indicatorWeight: 3,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white60,
-            labelStyle:
-                const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-            // Use non-scrollable so tabs fill full width
-            isScrollable: false,
-            tabs: const [
-              Tab(icon: Icon(Icons.inventory_2_rounded, size: 17), text: 'Stock'),
-              Tab(
-                  icon: Icon(Icons.pending_actions_rounded, size: 17),
-                  text: 'Pending'),
-              Tab(icon: Icon(Icons.history_edu_rounded, size: 17), text: 'Log'),
-              Tab(icon: Icon(Icons.history_rounded, size: 17), text: 'History'),
-            ],
-          ),
-        ),
+        actions: const [],
       );
 
   // ── Stock Tab ─────────────────────────────────────────────────────────────
-  Widget _stockTab() => Column(
-        children: [
-          _buildFilterSection(),
-          Expanded(
-            child: ValueListenableBuilder<Box>(
-              valueListenable: Hive.box(LocalStorageService.stockBox).listenable(),
-              builder: (context, box, _) {
-                final rawItems = box.values
-                    .whereType<Map>()
-                    .map((v) => Map<String, dynamic>.from(v))
-                    .where((v) => v['branchId'] == widget.branchId)
-                    .toList();
+  Widget _stockTab() {
+    if (_rawItems.isEmpty) {
+      return Center(
+          child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+            Icon(Icons.inventory_2_outlined,
+                size: 72, color: Colors.grey[300]),
+            const SizedBox(height: 14),
+            Text(
+                widget.isAdmin
+                    ? 'No medicines in local stock.'
+                    : 'No medicines in local stock.\nChecking cloud...',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: _textLight, fontSize: 15)),
+          ]));
+    }
 
-                if (rawItems.isEmpty) {
-                  return Center(
-                      child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                        Icon(Icons.inventory_2_outlined,
-                            size: 72, color: Colors.grey[300]),
-                        const SizedBox(height: 14),
-                        Text(
-                            widget.isAdmin
-                                ? 'No medicines in local stock.'
-                                : 'No medicines in local stock.\nChecking cloud...',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                                color: _textLight, fontSize: 15)),
-                      ]));
-                }
+    final screenWidth = MediaQuery.of(context).size.width;
 
-                final batches = _groupByBatch(rawItems);
-                var preFiltered = batches.where((b) {
-                  final name = b['name'].toString().toLowerCase();
-                  final formula =
-                      (b['formula'] ?? '').toString().toLowerCase();
-                  final type = b['type'];
-                  final query = _searchCtrl.text.toLowerCase();
-                  return (name.contains(query) ||
-                          formula.contains(query)) &&
-                      (_filterType == 'All' || type == _filterType);
-                }).toList();
-
-                _updateBatchKeys(preFiltered);
-
-                var filtered = _filterBatch == 'All Batches'
-                    ? preFiltered
-                    : preFiltered
-                        .where((b) => b['expiryDate'] == _filterBatch)
-                        .toList();
-
-                filtered.sort((a, b) {
-                  int cmp = switch (_sortField) {
-                    'name' => a['name']
-                        .toString()
-                        .toLowerCase()
-                        .compareTo(b['name'].toString().toLowerCase()),
-                    'formula' => (a['formula'] ?? '')
-                        .toString()
-                        .toLowerCase()
-                        .compareTo(
-                            (b['formula'] ?? '').toString().toLowerCase()),
-                    'dose' => (a['dose'] ?? '')
-                        .toString()
-                        .compareTo((b['dose'] ?? '').toString()),
-                    'quantity' =>
-                      (a['quantity'] as int).compareTo(b['quantity'] as int),
-                    'price' =>
-                      (a['price'] as double).compareTo(b['price'] as double),
-                    'expiry' => _parseExpiry(a['expiryDate'])
-                        .compareTo(_parseExpiry(b['expiryDate'])),
-                    _ => 0,
-                  };
-                  return _isAscending ? cmp : -cmp;
-                });
-
-                final totalPages =
-                    (filtered.length / _perPage).ceil().clamp(1, 9999);
-                final safePage = _page.clamp(0, totalPages - 1);
-                final start = safePage * _perPage;
-                final end = (start + _perPage).clamp(0, filtered.length);
-                final pageData = start < end
-                    ? filtered.sublist(start, end)
-                    : <Map<String, dynamic>>[];
-
-                final screenWidth = MediaQuery.of(context).size.width;
-                final isMobile = screenWidth < 640;
-
-                return Column(children: [
-                  _buildMetricsRow(batches, isMobile),
-                  Expanded(
-                      child: LayoutBuilder(builder: (ctx, constraints) {
-                    return constraints.maxWidth > 640
-                        ? _stockTable(pageData, start, constraints.maxWidth)
-                        : _stockCards(pageData, start);
-                  })),
-                  _pagination(safePage, totalPages),
-                ]);
-              },
-            ),
-          ),
-        ],
-      );
+    return Column(
+      children: [
+        _buildMetricsRow(_groupedBatches, screenWidth < 800),
+        _buildFilterSection(),
+        Expanded(
+          child: LayoutBuilder(builder: (ctx, constraints) {
+            return constraints.maxWidth > 640
+                ? _stockTable(_displayItems, constraints.maxWidth, _filteredBatches.length)
+                : _stockCards(_displayItems, _filteredBatches.length);
+          }),
+        ),
+      ],
+    );
+  }
 
   Widget _buildFilterSection() {
-    return Container(
-      color: _bg, // Seamless integration with background
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Column(
-        children: [
-          if (_isManager)
-            Container(
-              margin: const EdgeInsets.only(bottom: 16),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE3F2FD),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFF90CAF9).withValues(alpha: 0.5)),
-              ),
-              child: const Row(children: [
-                Icon(Icons.touch_app_rounded, size: 18, color: Color(0xFF1565C0)),
-                SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Tap any medicine row to edit it directly.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Color(0xFF1565C0),
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ]),
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isCompact = screenWidth < 768;
+
+    final widgets = [
+      Expanded(
+        flex: isCompact ? 1 : 2,
+        child: Container(
+          height: 38,
+          decoration: BoxDecoration(
+            color: _white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey.shade200, width: 1),
+          ),
+          child: TextField(
+            controller: _searchCtrl,
+            cursorColor: _teal,
+            onChanged: (_) => setState(() {
+              _displayLimit = 50;
+              _processData();
+            }),
+            style: const TextStyle(fontSize: 13, color: _textDark),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded, color: _textLight, size: 18),
+              hintText: 'Search formula or name (Tap row to edit)...',
+              hintStyle: TextStyle(color: _textLight, fontSize: 11.5),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 10),
             ),
-          LayoutBuilder(builder: (context, constraints) {
-            final isWide = constraints.maxWidth > 800;
-            if (isWide) {
-              return Row(
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: _searchField(),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 2,
-                    child: _filterDropdown(
-                      _filterType,
-                      _types,
-                      (v) => setState(() {
-                        _filterType = v ?? 'All';
-                        _page = 0;
-                      }),
-                      icon: Icons.category_rounded,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 2,
-                    child: _filterDropdown(
-                      _filterBatch,
-                      _batchKeys,
-                      (v) => setState(() {
-                        _filterBatch = v ?? 'All Batches';
-                        _page = 0;
-                      }),
-                      display: (k) => k == 'All Batches' ? k : 'Batch: $k',
-                      icon: Icons.calendar_today_rounded,
-                    ),
-                  ),
-                ],
-              );
-            } else {
-              return Column(
-                children: [
-                  _searchField(),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _filterDropdown(
-                          _filterType,
-                          _types,
-                          (v) => setState(() {
-                            _filterType = v ?? 'All';
-                            _page = 0;
-                          }),
-                          icon: Icons.category_rounded,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _filterDropdown(
-                          _filterBatch,
-                          _batchKeys,
-                          (v) => setState(() {
-                            _filterBatch = v ?? 'All Batches';
-                            _page = 0;
-                          }),
-                          display: (k) => k == 'All Batches' ? k : 'Batch: $k',
-                          icon: Icons.calendar_today_rounded,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              );
-            }
-          }),
-        ],
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade200, width: 1),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _filterType,
+            icon: const Icon(Icons.arrow_drop_down, color: _textLight),
+            onChanged: (val) {
+              if (val != null) {
+                setState(() {
+                  _filterType = val;
+                  _displayLimit = 50;
+                  _processData();
+                });
+              }
+            },
+            items: _types
+                .map((t) => DropdownMenuItem(
+                      value: t,
+                      child: Text(t, style: const TextStyle(fontSize: 12.5, color: _textDark)),
+                    ))
+                .toList(),
+          ),
+        ),
+      ),
+      const SizedBox(width: 8),
+      Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: _white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade200, width: 1),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _filterBatch,
+            icon: const Icon(Icons.arrow_drop_down, color: _textLight),
+            onChanged: (val) {
+              if (val != null) {
+                setState(() {
+                  _filterBatch = val;
+                  _displayLimit = 50;
+                  _processData();
+                });
+              }
+            },
+            items: _batchKeys
+                .map((b) => DropdownMenuItem(
+                      value: b,
+                      child: Text(b, style: const TextStyle(fontSize: 12.5, color: _textDark)),
+                    ))
+                .toList(),
+          ),
+        ),
+      ),
+    ];
+
+    return Container(
+      color: _bg,
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Row(children: widgets),
+    );
+  }
+
+  Widget _buildUpdateStockButton() {
+    return ElevatedButton.icon(
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InventoryUpdatePage(
+            branchId: widget.branchId,
+            isAdmin: widget.isAdmin,
+            isDispenser: widget.isDispenser,
+          ),
+        ),
+      ),
+      icon: const Icon(Icons.add_rounded, color: Colors.white, size: 18),
+      label: const Text(
+        'Update Stock',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 13,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _teal,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        minimumSize: const Size(0, 48),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        elevation: 1,
       ),
     );
   }
@@ -785,8 +978,8 @@ class _InventoryPageState extends State<InventoryPage>
         style: const TextStyle(color: _textDark, fontSize: 14),
         decoration: InputDecoration(
           prefixIcon: const Icon(Icons.search_rounded, color: _teal, size: 20),
-          hintText: 'Search by formula or name...',
-          hintStyle: const TextStyle(color: _textLight, fontSize: 14),
+          hintText: 'Search formula or name (Tap row to edit)...',
+          hintStyle: const TextStyle(color: _textLight, fontSize: 13),
           filled: true,
           fillColor: Colors.transparent,
           border: OutlineInputBorder(
@@ -814,101 +1007,104 @@ class _InventoryPageState extends State<InventoryPage>
     final expiringSoonCount = batches.where((b) => _isExpiringSoon(b['expiryDate'] as String?)).length;
     final totalStockQty = batches.fold<int>(0, (sum, b) => sum + (b['quantity'] as int));
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth < 600) {
-            // Horizontal scroll for mobile
-            return SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              child: Row(
-                children: [
-                  _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal),
-                  const SizedBox(width: 12),
-                  _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, _blue),
-                  const SizedBox(width: 12),
-                  _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _red),
-                  const SizedBox(width: 12),
-                  _buildMetricCard('NEAR EXPIRY', '$expiringSoonCount', Icons.access_time_rounded, _amber),
-                ],
-              ),
-            );
-          } else {
-            // Even distribution for tablet/desktop
-            return Row(
-              children: [
-                Expanded(child: _buildMetricCard('TOTAL FORMULAS', '$totalMedicines', FontAwesomeIcons.pills, _teal)),
-                const SizedBox(width: 16),
-                Expanded(child: _buildMetricCard('TOTAL QTY', '$totalStockQty', Icons.inventory_2_rounded, _blue)),
-                const SizedBox(width: 16),
-                Expanded(child: _buildMetricCard('LOW STOCK', '$lowStockCount', Icons.warning_amber_rounded, _red)),
-                const SizedBox(width: 16),
-                Expanded(child: _buildMetricCard('NEAR EXPIRY', '$expiringSoonCount', Icons.access_time_rounded, _amber)),
-              ],
-            );
-          }
-        }
-      ),
-    );
-  }
+    final numberFormat = NumberFormat('#,###');
 
-  Widget _buildMetricCard(String title, String value, IconData icon, Color color) {
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [
+              _buildMetricItem(FontAwesomeIcons.boxOpen, _teal, '$totalMedicines', 'Formulas', onTap: _resetFilters),
+              _buildVerticalDivider(),
+              _buildMetricItem(Icons.inventory_2_outlined, _teal, numberFormat.format(totalStockQty), 'Units', onTap: _resetFilters),
+              _buildVerticalDivider(),
+              _buildMetricItem(Icons.warning_amber_rounded, _red, '$lowStockCount', 'Low Stock', onTap: _applyLowStockSort),
+              _buildVerticalDivider(),
+              _buildMetricItem(Icons.calendar_today_rounded, _blue, '$expiringSoonCount', 'Expiring', onTap: _applyExpirySort),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
         color: _white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200, width: 1),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.08),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: color, size: 22),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
+          Expanded(child: _buildMetricItem(FontAwesomeIcons.boxOpen, _teal, '$totalMedicines', 'Formulas', onTap: _resetFilters)),
+          _buildVerticalDivider(),
+          Expanded(child: _buildMetricItem(Icons.inventory_2_outlined, _teal, numberFormat.format(totalStockQty), 'Units', onTap: _resetFilters)),
+          _buildVerticalDivider(),
+          Expanded(child: _buildMetricItem(Icons.warning_amber_rounded, _red, '$lowStockCount', 'Low Stock', onTap: _applyLowStockSort)),
+          _buildVerticalDivider(),
+          Expanded(child: _buildMetricItem(Icons.calendar_today_rounded, _blue, '$expiringSoonCount', 'Expiring', onTap: _applyExpirySort)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricItem(IconData icon, Color color, String value, String label, {VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 12),
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  title,
-                  style: TextStyle(
-                    color: _textLight,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.8,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 4),
-                Text(
                   value,
                   style: TextStyle(
-                    color: _textDark,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+                    color: color,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    color: _textLight,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildVerticalDivider() {
+    return Container(
+      height: 24,
+      width: 1,
+      color: Colors.grey.shade200,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
     );
   }
 
@@ -960,42 +1156,49 @@ class _InventoryPageState extends State<InventoryPage>
 
   // ── Stock Table (wide screens) ─────────────────────────────────────────────
   Widget _stockTable(
-      List<Map<String, dynamic>> data, int start, double screenWidth) {
-    // 32 is the sum of horizontal margins (16 on each side)
+      List<Map<String, dynamic>> data, double screenWidth, int totalCount) {
     final double cardInnerWidth = screenWidth - 32;
-    // Set a minimum width for the table. If inner width is smaller, it will scroll
     final double w = cardInnerWidth < 1000 ? 1000 : cardInnerWidth;
     
     final cols = [
       _Col('#', w * 0.04, null),
-      _Col('Formula', w * 0.20, 'name'), // slightly wider
+      _Col('Formula', w * 0.32, 'name'),
       _Col('Type', w * 0.11, null),
-      _Col('Dose', w * 0.12, 'dose'),
+      _Col('Dose', w * 0.11, 'dose'),
       _Col('Qty', w * 0.08, 'quantity'),
       _Col('Price', w * 0.11, 'price'),
-      _Col('Expiry', w * 0.16, 'expiry'),
-      _Col('Status', w * 0.18, null),
+      _Col('Expiry', w * 0.17, 'expiry'),
+      _Col('Status', w * 0.06, null),
     ];
 
     final tableWidget = Column(
       children: [
         Container(
-          height: 48,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF00695C), Color(0xFF004D40)], // Premium Teal gradient
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
+          height: 38,
+          color: _teal,
           child: Row(
               children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
         ),
         Expanded(
           child: ListView.builder(
+            controller: _scrollController,
             padding: EdgeInsets.zero,
-            itemCount: data.length,
+            itemCount: data.length + 1,
             itemBuilder: (ctx, i) {
+              if (i == data.length) {
+                return Container(
+                  width: w,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  alignment: Alignment.center,
+                  color: Colors.white,
+                  child: Text(
+                    data.length >= totalCount
+                        ? 'Showing all $totalCount medicines'
+                        : 'Loading more...',
+                    style: const TextStyle(color: _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+                  ),
+                );
+              }
               final b = data[i];
               final qty = b['quantity'] as int;
               final type = b['type'] as String;
@@ -1024,58 +1227,78 @@ class _InventoryPageState extends State<InventoryPage>
                     Row(children: [
                       _dCell(
                           cols[0].w,
-                          Text('${start + i + 1}',
-                              style: const TextStyle(color: _textMid, fontSize: 13, fontWeight: FontWeight.bold))),
+                          Text('${i + 1}',
+                              style: const TextStyle(color: _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
                       _dCell(
                           cols[1].w,
                           Row(children: [
                             Expanded(
-                                child: Text(b['name'],
-                                    style: TextStyle(
+                              child: RichText(
+                                overflow: TextOverflow.ellipsis,
+                                text: TextSpan(
+                                  style: const TextStyle(fontSize: 13, color: _textDark),
+                                  children: [
+                                    TextSpan(
+                                      text: b['name'] ?? '',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
                                         color: isWarning ? _red.withValues(alpha: 0.9) : _textDark,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.5),
-                                    overflow: TextOverflow.ellipsis)),
-                            if (_isManager)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 6, right: 4),
-                                child: Icon(Icons.edit_rounded,
-                                    size: 14, color: _teal.withValues(alpha: 0.5)),
+                                      ),
+                                    ),
+                                    if (b['formula'] != null && (b['formula'] as String).isNotEmpty) ...[
+                                      const TextSpan(text: ' '),
+                                      TextSpan(
+                                        text: '(${b['formula']})',
+                                        style: TextStyle(
+                                          color: isWarning ? _red.withValues(alpha: 0.7) : _textLight,
+                                          fontWeight: FontWeight.normal,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
+                            ),
                           ])),
                       _dCell(cols[2].w, _typePill(type)),
                       _dCell(
                           cols[3].w,
                           Text(b['dose'] ?? '—',
-                              style: const TextStyle(color: _textMid, fontSize: 13, fontWeight: FontWeight.w500))),
-                      _dCell(cols[4].w, _qtyBadge(qty, lowStock)),
-                      _dCell(cols[5].w, _priceBadge(price)),
-                      _dCell(cols[6].w, _expBadge(expText, expSoon)),
+                              style: const TextStyle(color: _textDark, fontSize: 12.5))),
+                      _dCell(
+                          cols[4].w,
+                          Text(NumberFormat('#,###').format(qty),
+                              style: TextStyle(
+                                  color: lowStock ? _red : _textDark,
+                                  fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
+                                  fontSize: 12.5))),
+                      _dCell(
+                          cols[5].w,
+                          Text(_fmtPrice(price),
+                              style: const TextStyle(color: _textDark, fontSize: 12.5, fontWeight: FontWeight.w500))),
+                      _dCell(
+                          cols[6].w,
+                          Text(expText,
+                              style: TextStyle(
+                                  color: expSoon ? _red : _textDark,
+                                  fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
+                                  fontSize: 12.5))),
                       _dCell(
                           cols[7].w,
-                          _statusLabel(
-                              lowStock: lowStock, expSoon: expSoon, isTable: true)),
+                          Center(
+                            child: _statusDot(lowStock: lowStock, expSoon: expSoon),
+                          )),
                     ]),
-                    if (isWarning)
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 4,
-                        child: Container(color: _red),
-                      ),
                   ],
                 ),
               );
 
-              if (_isManager) {
-                return InkWell(
+              return InkWell(
                   onTap: () => _showEditSheet(b),
-                  hoverColor: _teal.withValues(alpha: 0.05),
+                  hoverColor: const Color(0xFFF3F7F6),
                   child: rowContent,
                 );
-              }
-              return rowContent;
             },
           ),
         ),
@@ -1083,7 +1306,7 @@ class _InventoryPageState extends State<InventoryPage>
     );
 
     final cardContent = Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -1111,11 +1334,24 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   // ── Stock Cards (narrow screens) ──────────────────────────────────────────
-  Widget _stockCards(List<Map<String, dynamic>> data, int start) =>
+  Widget _stockCards(List<Map<String, dynamic>> data, int totalCount) =>
       ListView.builder(
+        controller: _scrollController,
         padding: const EdgeInsets.all(12),
-        itemCount: data.length,
+        itemCount: data.length + 1,
         itemBuilder: (ctx, i) {
+          if (i == data.length) {
+            return Container(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              alignment: Alignment.center,
+              child: Text(
+                data.length >= totalCount
+                    ? 'Showing all $totalCount medicines'
+                    : 'Loading more...',
+                style: const TextStyle(color: _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+              ),
+            );
+          }
           final b = data[i];
           final qty = _asInt(b['quantity']);
           final type = b['type']?.toString() ?? '';
@@ -1130,7 +1366,6 @@ class _InventoryPageState extends State<InventoryPage>
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              // Strong red background for warning items
               color: isWarning ? const Color(0xFFFFEBEE) : _white,
               borderRadius: BorderRadius.circular(12),
               border: Border(
@@ -1168,30 +1403,15 @@ class _InventoryPageState extends State<InventoryPage>
                         child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('${start + i + 1}. ${b['name']}',
+                        Text('${i + 1}. ${b['name']}',
                             style: TextStyle(
                                 color: isWarning ? _red : _textDark,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13.5)),
                       ],
                     )),
-                    if (_isManager)
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: _teal.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.edit_rounded,
-                            size: 14, color: _teal),
-                      )
-                    else
-                      _qtyBadge(qty, lowStock),
-                  ]),
-                  if (_isManager) ...[
-                    const SizedBox(height: 6),
                     _qtyBadge(qty, lowStock),
-                  ],
+                  ]),
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 6, children: [
                     _typePill(type),
@@ -1205,11 +1425,8 @@ class _InventoryPageState extends State<InventoryPage>
                 ]),
           );
 
-          if (_isManager) {
-            return GestureDetector(
+          return GestureDetector(
                 onTap: () => _showEditSheet(b), child: card);
-          }
-          return card;
         },
       );
 
@@ -1233,44 +1450,7 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
-  // ── Pagination ─────────────────────────────────────────────────────────────
-  Widget _pagination(int page, int total) => Container(
-        color: _white,
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _pgBtn(Icons.first_page_rounded, page > 0,
-              () => setState(() => _page = 0)),
-          _pgBtn(Icons.chevron_left_rounded, page > 0,
-              () => setState(() => _page--)),
-          const SizedBox(width: 12),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: _green50,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _green100),
-            ),
-            child: Text('${page + 1} / $total',
-                style: const TextStyle(
-                    color: _teal,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13)),
-          ),
-          const SizedBox(width: 12),
-          _pgBtn(Icons.chevron_right_rounded, page + 1 < total,
-              () => setState(() => _page++)),
-          _pgBtn(Icons.last_page_rounded, page + 1 < total,
-              () => setState(() => _page = total - 1)),
-        ]),
-      );
 
-  Widget _pgBtn(IconData icon, bool enabled, VoidCallback fn) =>
-      IconButton(
-        icon: Icon(icon,
-            size: 20, color: enabled ? _teal : Colors.grey[300]),
-        onPressed: enabled ? fn : null,
-      );
 
   // ── Pending Tab ───────────────────────────────────────────────────────────
   Widget _pendingTab() => StreamBuilder<QuerySnapshot>(
@@ -1313,7 +1493,7 @@ class _InventoryPageState extends State<InventoryPage>
           return ListView.separated(
             padding: const EdgeInsets.all(14),
             itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (ctx, i) => _requestCard(
                 docs[i].id,
                 docs[i].data() as Map<String, dynamic>,
@@ -1322,7 +1502,6 @@ class _InventoryPageState extends State<InventoryPage>
         },
       );
 
-  // ── Log Tab ───────────────────────────────────────────────────────────────
   // ── Log Tab (Merged Cloud + Local Pending) ──────────────────────────────
   Widget _logTab() => StreamBuilder<List<Map<String, dynamic>>>(
         stream: _logState.stream,
@@ -1338,7 +1517,6 @@ class _InventoryPageState extends State<InventoryPage>
                 'No activity yet.\nStock updates will appear here.');
           }
 
-          // Ensure strict temporal sort
           final sorted = list..sort((a, b) {
             final tsA = a['timestamp'] as Timestamp;
             final tsB = b['timestamp'] as Timestamp;
@@ -1489,14 +1667,12 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   // ── History Tab ───────────────────────────────────────────────────────────
-  // Uses a nested DefaultTabController so inner tabs fill full width
   Widget _historyTab() {
     return DefaultTabController(
       length: 2,
       child: Column(children: [
         Container(
           color: _white,
-          // Full-width inner tabs
           child: const TabBar(
             indicatorColor: _teal,
             labelColor: _teal,
@@ -1565,7 +1741,7 @@ class _InventoryPageState extends State<InventoryPage>
           return ListView.separated(
             padding: const EdgeInsets.all(14),
             itemCount: docs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (ctx, i) => _requestCard(
                 docs[i].id,
                 docs[i].data() as Map<String, dynamic>,
@@ -1722,8 +1898,6 @@ class _InventoryPageState extends State<InventoryPage>
               ),
             ),
           ],
-
-          // ── Approver info (shown for approved/rejected cards in History) ──
           if (status != 'pending') ...[
             const SizedBox(height: 10),
             Container(
@@ -1790,77 +1964,12 @@ class _InventoryPageState extends State<InventoryPage>
               ),
             ),
           ],
-
           const SizedBox(height: 14),
-
-          // Approve / Reject buttons for pending; status chip otherwise
-          if (status == 'pending' && !widget.isDispenser)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () =>
-                      _handleApproval(docId, data, 'rejected'),
-                  child: const Text('Reject',
-                      style: TextStyle(color: _red)),
-                ),
-                const SizedBox(width: 16),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: _teal),
-                  onPressed: () =>
-                      _handleApproval(docId, data, 'approved'),
-                  child: const Text('Approve',
-                      style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            )
-          else if (status == 'pending')
-            Align(
-              alignment: Alignment.centerRight,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _orange.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _orange.withValues(alpha: 0.45)),
-                ),
-                child: const Text('PENDING APPROVAL',
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: _orange)),
-              ),
-            )
-          else
-            Align(
-              alignment: Alignment.centerRight,
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(statusIcon, size: 16, color: statusColor),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                        color: statusColor.withValues(alpha: 0.4)),
-                  ),
-                  child: Text(status.toUpperCase(),
-                      style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: statusColor)),
-                ),
-              ]),
-            ),
         ]),
       ),
     );
   }
 
-  // ── Approve / Reject handler with inventory update ─────────────────────────
   Future<void> _handleApproval(
       String docId, Map<String, dynamic> data, String newStatus) async {
     final db = FirebaseFirestore.instance;
@@ -1892,7 +2001,6 @@ class _InventoryPageState extends State<InventoryPage>
         final requestType = data['requestType']?.toString() ?? '';
 
         if (requestType == 'edit_medicine') {
-          // Apply the edits to inventory
           final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
               ? _safeItemList(data['draftItems'])
               : _safeItemList(data['items']);
@@ -1931,7 +2039,6 @@ class _InventoryPageState extends State<InventoryPage>
         }
       }
 
-      // Add to log for edits (if it was an edit)
       if (newStatus == 'approved' &&
           (data['requestType']?.toString() ?? '') == 'edit_medicine') {
         final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
@@ -1977,8 +2084,6 @@ class _InventoryPageState extends State<InventoryPage>
     }
   }
 
-  /// Applies edit_medicine approved request to inventory.
-  /// Uses the docId stored in the request to update the right document.
   Future<void> _applyEditMedicine(
       DocumentReference branchRef,
       Map<String, dynamic> requestData,
@@ -1988,7 +2093,6 @@ class _InventoryPageState extends State<InventoryPage>
     final inventory = branchRef.collection('inventory');
     final batch = FirebaseFirestore.instance.batch();
 
-    // The original docId is stored at top-level in the request
     final originalDocId = requestData['docId']?.toString();
 
     for (final item in items) {
@@ -2010,7 +2114,6 @@ class _InventoryPageState extends State<InventoryPage>
         'approvedByName': reviewerName ?? 'Supervisor',
       };
 
-      // Use original docId if available, else fall back to item's oldId
       final targetDocId =
           originalDocId ?? item['oldId']?.toString();
 
@@ -2032,10 +2135,7 @@ class _InventoryPageState extends State<InventoryPage>
       final name = item['name']?.toString();
       final type = item['type']?.toString();
       if (name == null || type == null) continue;
-      final dose = item['dose']?.toString() ?? '';
-      final expiry = item['expiryDate']?.toString() ?? '';
-
-      // Try to find document by query
+      
       final q = await inventory
           .where('name_lower', isEqualTo: name.toLowerCase())
           .where('type', isEqualTo: type)
@@ -2117,7 +2217,6 @@ class _InventoryPageState extends State<InventoryPage>
       );
     }
 
-    // Mobile View
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2164,7 +2263,7 @@ class _InventoryPageState extends State<InventoryPage>
               ],
             ),
           );
-        }).toList(),
+        }),
       ],
     );
   }
@@ -2193,7 +2292,6 @@ class _InventoryPageState extends State<InventoryPage>
         dataRowMaxHeight: 44,
         columnSpacing: 16,
         columns: const [
-          // "Formula" label
           DataColumn(
               label: Text('Formula',
                   style: TextStyle(
@@ -2296,7 +2394,6 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
-  // ── Reusable widgets ──────────────────────────────────────────────────────
   Widget _hCell(double w, String label, String? sort) {
     final active = _sortField == sort;
     return InkWell(
@@ -2304,7 +2401,7 @@ class _InventoryPageState extends State<InventoryPage>
       child: Container(
         width: w,
         padding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+            const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
         child: Row(children: [
           Text(label,
               style: TextStyle(
@@ -2329,21 +2426,21 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _typePill(String type) {
     final color = _typeColor(type);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.45), width: 1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        _typeIconWidget(type, size: 11, color: color),
-        const SizedBox(width: 5),
+        _typeIconWidget(type, size: 10, color: color),
+        const SizedBox(width: 4),
         Flexible(
             child: Text(type,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     color: color,
-                    fontSize: 11,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w700))),
       ]),
     );
@@ -2368,7 +2465,7 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _dCell(double w, Widget child) => Container(
       width: w,
       padding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
       child: child);
 
   Widget _qtyBadge(int qty, bool low) => Container(
@@ -2408,6 +2505,21 @@ class _InventoryPageState extends State<InventoryPage>
                 fontSize: 12)),
       ]);
 
+  Widget _statusDot({required bool lowStock, required bool expSoon}) {
+    final Color dotColor = lowStock
+        ? _red
+        : (expSoon ? _amber : const Color(0xFF2E7D32));
+    
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: dotColor,
+        shape: BoxShape.circle,
+      ),
+    );
+  }
+
   Widget _statusLabel(
       {required bool lowStock, required bool expSoon, bool isTable = false}) {
     String label = '';
@@ -2427,31 +2539,6 @@ class _InventoryPageState extends State<InventoryPage>
       icon = Icons.access_time_rounded;
       badgeColor = _amber;
     } else {
-      if (isTable) {
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: const Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.check_circle_rounded, color: Color(0xFF2E7D32), size: 10),
-              SizedBox(width: 4),
-              Text(
-                'IN STOCK',
-                style: TextStyle(
-                  color: Color(0xFF2E7D32),
-                  fontSize: 8,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
       return const SizedBox.shrink();
     }
 
@@ -2532,9 +2619,6 @@ class _InventoryPageState extends State<InventoryPage>
       );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Edit Medicine Bottom Sheet (manager direct edit)
-// ═══════════════════════════════════════════════════════════════════════════════
 class _EditMedicineSheet extends StatefulWidget {
   final String branchId;
   final List<String> docIds;
@@ -2590,7 +2674,6 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
   void initState() {
     super.initState();
     final initialPrice = _parsePrice(widget.initial['price']);
-    // Label says "Formula" but field holds name
     _nameCtrl =
         TextEditingController(text: widget.initial['name']?.toString() ?? '');
     _doseCtrl =
@@ -2740,7 +2823,6 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           key: _formKey,
           child: SingleChildScrollView(
             child: Column(children: [
-              // "Formula" label
               _field(
                 controller: _nameCtrl,
                 label: 'Formula',
@@ -2818,8 +2900,9 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   ],
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Required';
-                    if (double.tryParse(v.trim()) == null)
+                    if (double.tryParse(v.trim()) == null) {
                       return 'Invalid price';
+                    }
                     return null;
                   },
                 )),

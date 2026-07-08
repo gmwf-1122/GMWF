@@ -2,7 +2,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:another_flushbar/flushbar.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
@@ -14,7 +13,6 @@ import '../models/token.dart';
 
 import 'dispensary/receptionist/receptionist_screen.dart';
 import 'dispensary/doctor/doctor_screen.dart';
-import 'overview.dart';
 import 'dispensary/dispensar/inventory.dart';
 import 'dispensary/dispensar/dispensar_screen.dart';
 import 'login_page.dart';
@@ -28,10 +26,12 @@ import '../widgets/gmwf_loading_view.dart';
 import 'global_modular_dashboard.dart'; // Unified modular entry point
 import 'madrassa/madrassa_dashboard.dart';
 import 'madrassa/madrassa_guardian_screen.dart';
+import '../theme/app_theme.dart';
+import '../theme/role_theme_provider.dart';
 
 import '../constants/navigator_key.dart';
 
-class HomeRouter extends StatelessWidget {
+class HomeRouter extends StatefulWidget {
   final User? user;
   final Map<String, dynamic>? localUser;
 
@@ -41,6 +41,31 @@ class HomeRouter extends StatelessWidget {
     this.localUser,
   });
 
+  @override
+  State<HomeRouter> createState() => _HomeRouterState();
+}
+
+class _HomeRouterState extends State<HomeRouter> {
+  late Future<Map<String, dynamic>?> _userDataFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _userDataFuture = _fetchUserData();
+  }
+
+  @override
+  void didUpdateWidget(HomeRouter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final uidChanged = widget.user?.uid != oldWidget.user?.uid;
+    final localUserChanged = widget.localUser != oldWidget.localUser;
+    if (uidChanged || localUserChanged) {
+      setState(() {
+        _userDataFuture = _fetchUserData();
+      });
+    }
+  }
+
   Future<bool> _checkConnectivity() async {
     try {
       final connectivityResult = await Connectivity()
@@ -49,12 +74,8 @@ class HomeRouter extends StatelessWidget {
         debugPrint("HomeRouter: Connectivity check timed out");
         return [ConnectivityResult.none];
       });
-      if (connectivityResult is List<ConnectivityResult>) {
-        return connectivityResult
-            .any((result) => result != ConnectivityResult.none);
-      } else {
-        return connectivityResult != ConnectivityResult.none;
-      }
+      return connectivityResult
+          .any((result) => result != ConnectivityResult.none);
     } catch (e) {
       debugPrint("Connectivity check error: $e");
       return false;
@@ -62,12 +83,12 @@ class HomeRouter extends StatelessWidget {
   }
 
   Future<Map<String, dynamic>?> _fetchUserData() async {
-    if (localUser != null && localUser!.isNotEmpty) {
+    if (widget.localUser != null && widget.localUser!.isNotEmpty) {
       debugPrint("HomeRouter: Using passed localUser data");
-      return localUser;
+      return widget.localUser;
     }
 
-    final currentUser = user;
+    final currentUser = widget.user;
     if (currentUser == null) {
       debugPrint(
           "HomeRouter: No Firebase user and no localUser -> checking cached data");
@@ -170,34 +191,31 @@ class HomeRouter extends StatelessWidget {
 
     // Branch /users
     try {
-      final branchesSnap = await FirebaseFirestore.instance
-          .collection("branches")
+      final querySnap = await FirebaseFirestore.instance
+          .collectionGroup('users')
+          .where(FieldPath.documentId, isEqualTo: uid)
+          .limit(1)
           .get()
           .timeout(const Duration(seconds: 10));
 
-      for (final branch in branchesSnap.docs) {
-        final userDoc = await branch.reference
-            .collection("users")
-            .doc(uid)
-            .get()
-            .timeout(const Duration(seconds: 5));
-
-        if (userDoc.exists) {
-          final data = userDoc.data()!;
-          final userData = {
-            ...data,
-            "branchId": branch.id,
-            "uid": uid,
-            "email": currentUser.email,
-            "name": data['username'] ?? data['name'] ?? 'User',
-            "username": data['username'] ?? 'unknown',
-          };
-          await _cacheUserDataLocally(userData);
-          return userData;
-        }
+      if (querySnap.docs.isNotEmpty) {
+        final doc = querySnap.docs.first;
+        final data = doc.data();
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        final userData = {
+          ...data,
+          "branchId": branchId,
+          "uid": uid,
+          "email": currentUser.email,
+          "name": data['username'] ?? data['name'] ?? 'User',
+          "username": data['username'] ?? 'unknown',
+        };
+        await _cacheUserDataLocally(userData);
+        return userData;
       }
     } catch (e) {
-      debugPrint('HomeRouter: Error fetching user from Firestore branches: $e');
+      debugPrint('HomeRouter: Error fetching user from Firestore branches via collectionGroup: $e');
     }
 
     // Hive fallback
@@ -273,10 +291,6 @@ class HomeRouter extends StatelessWidget {
     final r = role.toLowerCase().trim();
 
     switch (r) {
-      // Case blocks for executive roles (ceo, chairman, admin, manager) 
-      // are now handled by the globalRoles logic in the build method.
-      // These cases in switch are now legacy/fallback.
-
       case 'server':
         return ServerDashboardWithSync(branchId: branchId);
 
@@ -288,22 +302,11 @@ class HomeRouter extends StatelessWidget {
         );
 
       case 'receptionist':
-        return FutureBuilder<void>(
-          future: _bootstrapReceptionistData(branchId),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(
-                body: Center(
-                    child: CircularProgressIndicator(
-                        color: Color(0xFF4CAF50))),
-              );
-            }
-            return ReceptionistScreen(
-              branchId: branchId,
-              receptionistId: uid,
-              receptionistName: userName,
-            );
-          },
+        return ReceptionistBootstrapWrapper(
+          branchId: branchId,
+          receptionistId: uid,
+          receptionistName: userName,
+          bootstrapFunction: _bootstrapReceptionistData,
         );
 
       case 'dispenser':
@@ -316,8 +319,6 @@ class HomeRouter extends StatelessWidget {
 
       case 'supervisor':
       case 'branch manager':
-        // These are now handled by globalRoles above but kept here for safety
-        // until we ensure they are always caught by the globalRoles check.
         return GlobalModularDashboard(userData: {
           'role': r,
           'branchId': branchId,
@@ -337,7 +338,6 @@ class HomeRouter extends StatelessWidget {
       case 'dasterkhwaan kitchen':
         return DasterkhwaanKitchen(branchId: branchId, username: userName);
 
-      // ✅ FIX: pass branchId, username and correct UserRole enum value
       case 'donations':
         return DonationsScreen.embedded(
           branchId:   branchId,
@@ -346,12 +346,13 @@ class HomeRouter extends StatelessWidget {
         );
 
       case 'madrassa admin':
+      case 'madrassa principal':
       case 'madrassa teacher':
         return MadrassaDashboard(
           branchId: branchId,
           username: userName,
           role: role,
-          isAdmin: r == 'madrassa admin',
+          isAdmin: r == 'madrassa admin' || r == 'madrassa principal',
         );
 
       case 'madrassa parent':
@@ -430,7 +431,7 @@ class HomeRouter extends StatelessWidget {
     // 💡 FIX: We use a multi-stage loading to prevent the "Double Login" flicker.
     // We only redirect to login if we are CERTAIN there is no user.
     return FutureBuilder<Map<String, dynamic>?>(
-      future: _fetchUserData(),
+      future: _userDataFuture,
       builder: (context, snapshot) {
         // While we are fetching, show the loading view.
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -445,7 +446,7 @@ class HomeRouter extends StatelessWidget {
           debugPrint("HomeRouter: No user data - checking for late arrival...");
           
           // Final fallback check to prevent race condition
-          if (user == null && localUser == null) {
+          if (widget.user == null && widget.localUser == null) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
               if (context.mounted) {
                 Navigator.pushAndRemoveUntil(
@@ -455,20 +456,9 @@ class HomeRouter extends StatelessWidget {
                 );
               }
             });
+            debugPrint(
+                "HomeRouter: No user data found - redirecting to login");
           }
-          debugPrint(
-              "HomeRouter: No user data found - redirecting to login");
-
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (context.mounted) {
-              // Removed Flushbar to avoid navigator lock conflict with Navigator.push
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (_) => const LoginPage()),
-                (route) => false,
-              );
-            }
-          });
 
           return const Scaffold(
             body: Center(
@@ -483,7 +473,7 @@ class HomeRouter extends StatelessWidget {
         final branchId =
             (data['branchId'] as String? ?? 'unknown').trim();
         final uid = (data['uid'] as String?) ??
-            user?.uid ??
+            widget.user?.uid ??
             data['uid'] ??
             'unknown';
         final userName =
@@ -524,13 +514,73 @@ class HomeRouter extends StatelessWidget {
           'branch manager',
         ];
         
+        final roleTheme = RoleThemeData.fromString(role);
         if (globalRoles.contains(role)) {
           debugPrint("HomeRouter -> Routing Global User to Modular Dashboard");
-          return GlobalModularDashboard(userData: data);
+          return RoleThemeScope(
+            role: roleTheme,
+            child: GlobalModularDashboard(userData: data),
+          );
         } else {
           debugPrint("HomeRouter -> Routing Operational User directly to $role screen");
-          return _getScreenByRole(role, branchId, uid, userName, data);
+          return RoleThemeScope(
+            role: roleTheme,
+            child: _getScreenByRole(role, branchId, uid, userName, data),
+          );
         }
+      },
+    );
+  }
+}
+
+/// Stateful wrapper to ensure receptionist synchronization only runs once
+/// and doesn't loop infinitely whenever receptionist view rebuilds.
+class ReceptionistBootstrapWrapper extends StatefulWidget {
+  final String branchId;
+  final String receptionistId;
+  final String receptionistName;
+  final Future<void> Function(String) bootstrapFunction;
+
+  const ReceptionistBootstrapWrapper({
+    super.key,
+    required this.branchId,
+    required this.receptionistId,
+    required this.receptionistName,
+    required this.bootstrapFunction,
+  });
+
+  @override
+  State<ReceptionistBootstrapWrapper> createState() => _ReceptionistBootstrapWrapperState();
+}
+
+class _ReceptionistBootstrapWrapperState extends State<ReceptionistBootstrapWrapper> {
+  late Future<void> _bootstrapFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _bootstrapFuture = widget.bootstrapFunction(widget.branchId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _bootstrapFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(
+                color: Color(0xFF4CAF50),
+              ),
+            ),
+          );
+        }
+        return ReceptionistScreen(
+          branchId: widget.branchId,
+          receptionistId: widget.receptionistId,
+          receptionistName: widget.receptionistName,
+        );
       },
     );
   }

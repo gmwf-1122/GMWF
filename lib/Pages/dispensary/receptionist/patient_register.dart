@@ -3,8 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
-import 'package:intl/intl.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'package:gmwf/services/firestore_service.dart';
@@ -140,7 +138,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     final today = DateTime.now();
     int age     = today.year - birth.year;
     if (today.month < birth.month ||
-        (today.month == birth.month && today.day < birth.day)) age--;
+        (today.month == birth.month && today.day < birth.day)) {
+      age--;
+    }
     setState(() => _calculatedAge = age);
   }
 
@@ -262,8 +262,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         if (event is RawKeyDownEvent) {
           if (_genderNode.hasFocus) {
             String? newValue;
-            if (event.logicalKey == LogicalKeyboardKey.keyM)      newValue = 'Male';
-            else if (event.logicalKey == LogicalKeyboardKey.keyF) newValue = 'Female';
+            if (event.logicalKey == LogicalKeyboardKey.keyM) {
+              newValue = 'Male';
+            } else if (event.logicalKey == LogicalKeyboardKey.keyF) newValue = 'Female';
             else if (event.logicalKey == LogicalKeyboardKey.keyO) newValue = 'Other';
             if (newValue != null) {
               setState(() => _selectedGender = newValue);
@@ -390,8 +391,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       inputFormatters: [CNICInputFormatter()],
                       validator: (v) {
                         final r = RegExp(r'^\d{5}-\d{7}-\d{1}$');
-                        if (v?.isEmpty ?? true)
+                        if (v?.isEmpty ?? true) {
                           return 'Enter ${_isChild ? 'Guardian ' : ''}CNIC';
+                        }
                         if (!r.hasMatch(v!)) return 'Format: 12345-1234567-1';
                         return null;
                       },
@@ -446,20 +448,23 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       keyboardType: TextInputType.datetime,
                       validator: (v) {
                         if (v!.isEmpty) return 'Enter DOB';
-                        if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v))
+                        if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v)) {
                           return 'Use dd-MM-yyyy';
+                        }
                         final p   = v.split('-');
                         final day   = int.tryParse(p[0]) ?? 0;
                         final month = int.tryParse(p[1]) ?? 0;
                         final year  = int.tryParse(p[2]) ?? 0;
                         if (day < 1 || day > 31)   return 'Day must be 01-31';
                         if (month < 1 || month > 12) return 'Month must be 01-12';
-                        if (year < 1900 || year > DateTime.now().year + 1)
+                        if (year < 1900 || year > DateTime.now().year + 1) {
                           return 'Year must be between 1900 and ${DateTime.now().year + 1}';
+                        }
                         try {
                           final date = DateTime(year, month, day);
-                          if (date.day != day || date.month != month)
+                          if (date.day != day || date.month != month) {
                             return 'Invalid date (e.g., Feb 30 does not exist)';
+                          }
                           _calculateAge(v);
                           return null;
                         } catch (_) {

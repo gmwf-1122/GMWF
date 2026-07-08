@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 
@@ -82,7 +81,9 @@ class _DoctorScreenState extends State<DoctorScreen>
   static String resolveQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     return 'zakat';
   }
@@ -267,10 +268,12 @@ class _DoctorScreenState extends State<DoctorScreen>
     try {
       final doc = await FirebaseFirestore.instance
           .collection('branches').doc(widget.branchId).get();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _branchName = doc.data()?['name'] ?? 'Free Dispensary';
         _loadingBranch = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
     }
@@ -818,6 +821,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     _syncDebounce?.cancel();
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
+    ConnectionManager().stop();
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

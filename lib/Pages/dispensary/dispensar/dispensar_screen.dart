@@ -8,7 +8,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
 
-import 'package:gmwf/config/constants.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/services/auth_service.dart';
@@ -180,7 +179,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
     final myId = RealtimeManager().clientId;
     if (senderId.isNotEmpty && myId != null && senderId == myId) return;
 
-    final serial = data['serial']?.toString()?.trim();
+    final serial = data['serial']?.toString().trim();
     final branch = (data['branchId'] ?? event['branchId'] ?? event['_senderBranch'] ?? '')
         .toString().toLowerCase().trim();
 
@@ -576,6 +575,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
     _syncDebounce?.cancel();
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
+    ConnectionManager().stop();
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

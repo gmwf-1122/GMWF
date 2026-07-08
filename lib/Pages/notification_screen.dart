@@ -104,7 +104,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 builder: (context, snapshot) {
                   final users = snapshot.data?.docs ?? [];
                   return DropdownButtonFormField<String>(
-                    value: _selectedReceiverId,
+                    initialValue: _selectedReceiverId,
                     hint: const Text("Select User"),
                     items: users
                         .map((doc) => DropdownMenuItem(
@@ -119,7 +119,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
               ),
             if (widget.role == 'admin')
               DropdownButtonFormField<String>(
-                value: _selectedReceiverRole,
+                initialValue: _selectedReceiverRole,
                 hint: const Text("Select Role (Optional)"),
                 items: ['doctor', 'receptionist', 'dispenser', 'supervisor']
                     .map((role) => DropdownMenuItem(

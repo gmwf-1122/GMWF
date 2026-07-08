@@ -1,22 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show listEquals;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:rxdart/rxdart.dart';
+
 import 'package:intl/intl.dart';
 import 'package:excel/excel.dart' hide Border;
 import 'dart:io';
 import 'dart:async';
+import 'dart:convert';
 import 'package:shimmer/shimmer.dart';
 import '../../constants/colors.dart';
 import 'donations_shared.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'widgets/transaction_card.dart';
 import '../../models/donation_models.dart';
 import '../../services/donations_local_storage.dart';
+import '../../services/local_storage_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'widgets/dashboard_premium_overview.dart';
 import 'widgets/dashboard_analytics_panel.dart';
 import 'widgets/dashboard_empty_state.dart';
+import 'donation_pagination_provider.dart';
 
-class DashboardTab extends StatefulWidget {
+
+
+class DashboardTab extends ConsumerStatefulWidget {
   final String branchId;
   final String username;
   final String branchName;
@@ -47,10 +55,10 @@ class DashboardTab extends StatefulWidget {
   });
 
   @override
-  State<DashboardTab> createState() => _DashboardTabState();
+  ConsumerState<DashboardTab> createState() => _DashboardTabState();
 }
 
-class _DashboardTabState extends State<DashboardTab> {
+class _DashboardTabState extends ConsumerState<DashboardTab> {
   GmwfSubCategory? _selectedGmwfSub;
   DonationSubtype? _selectedSubtype;
 
@@ -58,13 +66,20 @@ class _DashboardTabState extends State<DashboardTab> {
   DateTime? _endDate;
   String _statusFilter = 'All';
   final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _searchHasFocus = false;
+  final ScrollController _scrollController = ScrollController();
 
   // Advanced filters
   String _paymentMethodFilter = 'All';
+  String _entryTypeFilter = 'All';
   double? _minAmount;
   double? _maxAmount;
 
-  late Stream<List<DonationRecord>> _donationsStream;
+  // Sort mode: newestFirst (default), oldestFirst, highestAmount, lowestAmount
+  String _sortMode = 'newestFirst';
+
+
   List<DonationRecord> _currentDonations = [];
   Timer? _searchDebounce;
 
@@ -75,21 +90,35 @@ class _DashboardTabState extends State<DashboardTab> {
   @override
   void initState() {
     super.initState();
+    _searchFocusNode.addListener(_onSearchFocusChanged);
     _searchCtrl.addListener(_onSearchChanged);
     DonationsLocalStorage.downloadAllDonations(widget.branchId);
-    _initStream();
+    // Provider will handle data loading; no need for _initStream()
+  }
+
+  void _onSearchFocusChanged() {
+    setState(() {
+      _searchHasFocus = _searchFocusNode.hasFocus;
+    });
   }
 
   void _onSearchChanged() {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
-      if (mounted) _initStream();
+      if (mounted) {
+        // Local-only filtering already happens in _applyFilters() via setState.
+        // No need to hit Firestore again for a text search — just rebuild.
+        setState(() {});
+      }
     });
   }
 
   @override
   void dispose() {
+    _searchFocusNode.removeListener(_onSearchFocusChanged);
+    _searchFocusNode.dispose();
     _searchCtrl.dispose();
+    _scrollController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
   }
@@ -97,323 +126,264 @@ class _DashboardTabState extends State<DashboardTab> {
   @override
   void didUpdateWidget(DashboardTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.branchId != widget.branchId ||
-        oldWidget.selectedCategory != widget.selectedCategory ||
-        oldWidget.role != widget.role) {
-      _initStream();
+    if (oldWidget.branchId != widget.branchId) {
+      DonationsLocalStorage.downloadAllDonations(widget.branchId);
+    }
+    if (oldWidget.branchId != widget.branchId) {
+      // Only re-fetch from the provider (Firestore) when the branch actually
+      // changes. Category/role changes are filtered locally in _applyFilters(),
+      // so they must NOT trigger a Firestore refresh.
+      ref.refresh(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
     }
   }
 
   void _initStream() {
-    final localStream = DonationsLocalStorage.streamAllDonations(widget.branchId);
+    // Legacy stream logic removed.
+    ref.refresh(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
+  }
 
-    Query<Map<String, dynamic>> query;
-    if (widget.branchId == 'all') {
-      query = FirebaseFirestore.instance.collectionGroup('donations');
-    } else {
-      query = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('donations');
-    }
-
-    if (widget.selectedCategory != DonationCategory.all) {
-      query = query.where('categoryId', isEqualTo: widget.selectedCategory.name);
-    }
-
-    final cloudStream = query
-        .snapshots()
-        .map((snap) => snap.docs.map((doc) {
-              final data = Map<String, dynamic>.from(doc.data() as Map);
-              // Fallback for branchId if not in document data (needed for collectionGroup)
-              if (data['branchId'] == null || data['branchId'].toString().isEmpty) {
-                data['branchId'] = doc.reference.parent.parent?.id ?? '';
-              }
-              return DonationRecord.fromMap(data, doc.id);
-            }).toList())
-        .onErrorReturnWith((e, s) {
-      debugPrint("[DashboardTab] Firestore Stream Error: $e");
-      return [];
-    });
-
-    _donationsStream = Rx.combineLatest2<List<DonationRecord>, List<DonationRecord>,
-        List<DonationRecord>>(
-      localStream,
-      cloudStream,
-      (localList, cloudList) {
-        debugPrint("[DashboardTab] Local: ${localList.length}, Cloud: ${cloudList.length}");
-
-        List<DonationRecord> filterByDate(List<DonationRecord> list) {
-          if (_startDate == null && _endDate == null) return list;
-          return list.where((d) {
-            final date = DateTime.tryParse(d.date) ?? DateTime.now();
-            final dateOnly = DateTime(date.year, date.month, date.day);
-            if (_startDate != null) {
-              final start = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
-              if (dateOnly.isBefore(start)) return false;
-            }
-            if (_endDate != null) {
-              final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
-              if (dateOnly.isAfter(end)) return false;
-            }
-            return true;
-          }).toList();
+  /// Apply all active client-side filters to the raw donation list.
+  List<DonationRecord> _applyFilters(List<DonationRecord> raw) {
+    final q = _searchCtrl.text.toLowerCase();
+    return raw.where((d) {
+      // date range
+      if (_startDate != null || _endDate != null) {
+        final date = DateTime.tryParse(d.date) ?? DateTime.now();
+        final dateOnly = DateTime(date.year, date.month, date.day);
+        if (_startDate != null) {
+          final start = DateTime(_startDate!.year, _startDate!.month, _startDate!.day);
+          if (dateOnly.isBefore(start)) return false;
         }
-
-        final filteredLocal = filterByDate(localList);
-        final filteredCloud = filterByDate(cloudList);
-
-        // ── Last-writer-wins merge using lastUpdatedAt timestamps ─────────────
-        // Helper: parse lastUpdatedAt falling back to timestamp or epoch-zero
-        DateTime ts(DonationRecord r) {
-          final raw = r.lastUpdatedAt ?? r.timestamp;
-          if (raw != null) {
-            final parsed = DateTime.tryParse(raw);
-            if (parsed != null) return parsed;
-          }
-          // Fallback: treat localId as ms-since-epoch if numeric
-          final ms = int.tryParse(r.localId);
-          if (ms != null && ms > 1000000000000) {
-            return DateTime.fromMillisecondsSinceEpoch(ms);
-          }
-          return DateTime.fromMillisecondsSinceEpoch(0);
+        if (_endDate != null) {
+          final end = DateTime(_endDate!.year, _endDate!.month, _endDate!.day);
+          if (dateOnly.isAfter(end)) return false;
         }
-
-        final Map<String, DonationRecord> merged = {};
-        // Seed with cloud data
-        for (var d in filteredCloud) {
-          final mergeKey = '${d.branchId}_${d.localId}';
-          merged[mergeKey] = d;
+      }
+      // sync-deleted
+      if (d.syncStatus == 'deleted') return false;
+      // status
+      if (_statusFilter != 'All' && d.status.toLowerCase() != _statusFilter.toLowerCase()) {
+        return false;
+      }
+      // category
+      if (widget.selectedCategory != DonationCategory.all &&
+          d.categoryId != widget.selectedCategory.name) return false;
+      // gmwf sub-category
+      if (_selectedGmwfSub != null && d.gmwfSubCategoryId != _selectedGmwfSub!.name) return false;
+      // subtype
+      if (_selectedSubtype != null && d.subtypeId != _selectedSubtype!.name) return false;
+      // search
+      if (q.isNotEmpty) {
+        final donorMatch = d.donorName.toLowerCase().contains(q);
+        final receiptMatch = d.receiptNo.toLowerCase().contains(q);
+        final goodsMatch = d.goodsItem?.toLowerCase().contains(q) ?? false;
+        if (!donorMatch && !receiptMatch && !goodsMatch) return false;
+      }
+      // payment method
+      if (_paymentMethodFilter != 'All' && d.paymentMethod != _paymentMethodFilter) return false;
+      // entry type
+      if (_entryTypeFilter != 'All') {
+        if (d.isGoods != (_entryTypeFilter == 'Goods Only')) return false;
+      }
+      // amount range
+      final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+      if (_minAmount != null && amt < _minAmount!) return false;
+      if (_maxAmount != null && amt > _maxAmount!) return false;
+      // role-based visibility
+      if (widget.role == UserRole.chairman || widget.role == UserRole.hqManager) return true;
+      // Allow records without a collectorId (e.g., imported or anonymous)
+      if (d.collectorId == null || d.collectorId!.isEmpty) return true;
+      if (d.collectorId == widget.userId) return true;
+      if (widget.role == UserRole.manager) return true;
+      return false;
+    }).toList()
+      ..sort((a, b) {
+        switch (_sortMode) {
+          case 'oldestFirst':
+            final c = a.date.compareTo(b.date);
+            return c != 0 ? c : a.localId.compareTo(b.localId);
+          case 'highestAmount':
+            final amtA = a.amount > 0 ? a.amount : (a.probableAmount ?? 0.0);
+            final amtB = b.amount > 0 ? b.amount : (b.probableAmount ?? 0.0);
+            return amtB.compareTo(amtA);
+          case 'lowestAmount':
+            final amtA2 = a.amount > 0 ? a.amount : (a.probableAmount ?? 0.0);
+            final amtB2 = b.amount > 0 ? b.amount : (b.probableAmount ?? 0.0);
+            return amtA2.compareTo(amtB2);
+          case 'newestFirst':
+          default:
+            final c = b.date.compareTo(a.date);
+            return c != 0 ? c : b.localId.compareTo(a.localId);
         }
-        // Local wins only if its lastUpdatedAt >= cloud's lastUpdatedAt
-        for (var local in filteredLocal) {
-          final mergeKey = '${local.branchId}_${local.localId}';
-          final existing = merged[mergeKey];
-          if (existing == null) {
-            // Not in Firestore yet — always include local (new/unsynced)
-            merged[mergeKey] = local;
-          } else {
-            // Keep whichever is newer (last-writer-wins)
-            if (!ts(local).isBefore(ts(existing))) {
-              merged[mergeKey] = local;
-            }
-          }
-        }
-
-        // ── Filter out tombstoned (deleted) records AFTER merging ─────────────
-        final allRecords = merged.values.where((d) => d.syncStatus != 'deleted').toList();
-        allRecords.sort((a, b) {
-          final dateCmp = b.date.compareTo(a.date);
-          if (dateCmp != 0) return dateCmp;
-          return b.localId.compareTo(a.localId);
-        });
-
-        final filtered = allRecords.where((d) {
-          if (_statusFilter != 'All' && d.status.toLowerCase() != _statusFilter.toLowerCase()) {
-            return false;
-          }
-          if (widget.selectedCategory != DonationCategory.all &&
-              d.categoryId != widget.selectedCategory.name) {
-            return false;
-          }
-          if (_selectedGmwfSub != null && d.gmwfSubCategoryId != _selectedGmwfSub!.name) {
-            return false;
-          }
-          if (_selectedSubtype != null && d.subtypeId != _selectedSubtype!.name) return false;
-
-          if (_searchCtrl.text.isNotEmpty) {
-            final q = _searchCtrl.text.toLowerCase();
-            final donorMatch = d.donorName.toLowerCase().contains(q);
-            final receiptMatch = d.receiptNo.toLowerCase().contains(q);
-            final goodsMatch = d.goodsItem?.toLowerCase().contains(q) ?? false;
-            if (!donorMatch && !receiptMatch && !goodsMatch) return false;
-          }
-
-          if (_paymentMethodFilter != 'All' && d.paymentMethod != _paymentMethodFilter) {
-            return false;
-          }
-          final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
-          if (_minAmount != null && amt < _minAmount!) return false;
-          if (_maxAmount != null && amt > _maxAmount!) return false;
-
-          if (widget.role == UserRole.chairman || widget.role == UserRole.hqManager) return true;
-          if (d.collectorId == widget.userId) return true;
-          if (widget.role == UserRole.manager) return true;
-          return false;
-        });
-
-        final result = filtered.toList()
-          ..sort((a, b) {
-            int cmp = b.date.compareTo(a.date);
-            if (cmp != 0) return cmp;
-            return b.localId.compareTo(a.localId);
-          });
-
-        _currentDonations = result;
-
-        double total = 0, received = 0, pending = 0;
-        for (var d in result) {
-          final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
-          total += amt;
-          if (d.status == DonationStatus.received) {
-            received += amt;
-          } else {
-            pending += amt;
-          }
-        }
-
-        if (widget.onStatsChanged != null) {
-          Future.microtask(
-              () => widget.onStatsChanged!(total, received, pending, result.length));
-        }
-
-        return result;
-      },
-    );
+      });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DashboardPremiumOverview(
-                  currentDonations: _currentDonations,
-                  branchName: widget.branchName,
-                  branchId: widget.branchId,
-                  role: widget.role,
-                  onAddTap: widget.onAddTap,
-                  onExportTap: () => _showExportDialog(context, 'EXCEL'),
-                  onSummaryTap: _showAnalyticsDialog,
-                  isAnalyticsActive: false,
-                ),
-                const SizedBox(height: 24),
-                _buildSearchAndFilterBar(),
-                _buildActiveFilterChips(),
-                const SizedBox(height: 12),
-                if (widget.branchId == 'all') _buildBranchSummary(),
-                const SizedBox(height: 8),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 4),
-                  child: Text('TRANSACTIONS',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.gray400,
-                          letterSpacing: 1.2)),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-          StreamBuilder<List<DonationRecord>>(
-            stream: _donationsStream,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return SliverFillRemaining(
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.error_outline_rounded,
-                            color: Colors.redAccent, size: 48),
-                        const SizedBox(height: 16),
-                        Text('Sync Error: ${snapshot.error}',
-                            style: const TextStyle(color: AppColors.gray600)),
-                      ],
-                    ),
-                  ),
-                );
-              }
+    // ConsumerStatefulWidget already provides `ref` — no nested Consumer needed.
+    final donationState = ref.watch(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
 
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return SliverList(
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) => Shimmer.fromColors(
-                      baseColor: AppColors.gray100,
-                      highlightColor: Colors.white,
-                      child: Container(
-                        height: 72,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16)),
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification.metrics.pixels >= notification.metrics.maxScrollExtent * 0.8) {
+          ref.read(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)).notifier).fetchNextPage();
+        }
+        return false;
+      },
+      child: CustomScrollView(
+        controller: _scrollController,
+        slivers: [
+          // ── Header block (overview + filters) ────────────────────────────
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DashboardPremiumOverview(
+                    currentDonations: _currentDonations,
+                    branchName: widget.branchName,
+                    branchId: widget.branchId,
+                    role: widget.role,
+                    onAddTap: widget.onAddTap,
+                    onExportTap: () => _showExportDialog(context, 'EXCEL'),
+                    onSummaryTap: _showAnalyticsDialog,
+                    isAnalyticsActive: false,
+                    onImportTap: _importDonations,
+                  ),
+                  const SizedBox(height: 24),
+                  _buildSearchAndFilterBar(),
+                  _buildActiveFilterChips(),
+                  const SizedBox(height: 12),
+                  if (widget.branchId == 'all') _buildBranchSummary(),
+                  const SizedBox(height: 8),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(
+                      'TRANSACTIONS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.gray400,
+                        letterSpacing: 1.2,
                       ),
                     ),
-                    childCount: 5,
                   ),
-                );
-              }
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
 
-              final donations = snapshot.data ?? [];
+          // ── Transaction list (sliver) ─────────────────────────────────────
+          donationState.when(
+            data: (rawDonations) {
+              final donations = _applyFilters(rawDonations);
+
+              // Update stats after frame to avoid setState-during-build.
+              // IMPORTANT: only setState when the computed list actually
+              // changed — otherwise this runs every single frame forever
+              // (setState → rebuild → postFrameCallback → setState → ...).
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+
+                final changed = donations.length != _currentDonations.length ||
+                    !listEquals(donations, _currentDonations);
+
+                if (changed) {
+                  debugPrint('[Dashboard] raw=${rawDonations.length}, filtered=${donations.length}, _currentDonations=${_currentDonations.length}');
+                  setState(() {
+                    _currentDonations = donations;
+                  });
+                }
+
+                double total = 0, received = 0, pending = 0;
+                for (final d in donations) {
+                  final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+                  total += amt;
+                  if (d.status == DonationStatus.received) {
+                    received += amt;
+                  } else {
+                    pending += amt;
+                  }
+                }
+                widget.onStatsChanged?.call(total, received, pending, donations.length);
+              });
+
               if (donations.isEmpty) {
                 return SliverFillRemaining(
-                  child: DashboardEmptyState(
-                    selectedCategory: widget.selectedCategory,
-                    selectedSubtype: _selectedSubtype,
-                    selectedGmwfSub: _selectedGmwfSub,
-                    isSearchActive: _searchCtrl.text.isNotEmpty,
-                    paymentMethodFilter: _paymentMethodFilter,
-                    minAmount: _minAmount,
-                    maxAmount: _maxAmount,
-                    onClearFilters: () {
-                      setState(() {
-                        _selectedGmwfSub = null;
-                        _selectedSubtype = null;
-                        _searchCtrl.clear();
-                        _paymentMethodFilter = 'All';
-                        _minAmount = null;
-                        _maxAmount = null;
-                        _startDate = null;
-                        _endDate = null;
-                      });
-                      widget.onCatChanged(DonationCategory.all);
-                      _initStream();
-                    },
-                    onAddTap: widget.onAddTap,
+                  hasScrollBody: false,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: DashboardEmptyState(
+                      selectedCategory: widget.selectedCategory,
+                      selectedSubtype: _selectedSubtype,
+                      selectedGmwfSub: _selectedGmwfSub,
+                      isSearchActive: _searchCtrl.text.isNotEmpty,
+                      paymentMethodFilter: _paymentMethodFilter,
+                      minAmount: _minAmount,
+                      maxAmount: _maxAmount,
+                      onClearFilters: () {
+                        setState(() {
+                          _selectedGmwfSub = null;
+                          _selectedSubtype = null;
+                          _searchCtrl.clear();
+                          _paymentMethodFilter = 'All';
+                          _entryTypeFilter = 'All';
+                          _minAmount = null;
+                          _maxAmount = null;
+                          _startDate = null;
+                          _endDate = null;
+                        });
+                        widget.onCatChanged(DonationCategory.all);
+                      },
+                      onAddTap: widget.onAddTap,
+                    ),
                   ),
                 );
               }
 
-              return SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final donation = donations[index];
-                    final prevDonation = index > 0 ? donations[index - 1] : null;
-
-                    bool showHeader = false;
-                    if (prevDonation == null || prevDonation.date != donation.date) {
-                      showHeader = true;
-                    }
-
-                    final card = TransactionCard(
-                      donation: donation,
-                      currentUserRole: widget.role,
-                      currentUsername: widget.username,
-                      onTap: () {},
-                    );
-
-                    if (showHeader) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildDateHeader(donation.date),
-                          card,
-                        ],
+              return SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (ctx, index) {
+                      final donation = donations[index];
+                      final prev = index > 0 ? donations[index - 1] : null;
+                      final showHeader = prev == null || prev.date != donation.date;
+                      final card = TransactionCard(
+                        donation: donation,
+                        currentUserRole: widget.role,
+                        currentUsername: widget.username,
+                        onTap: () {},
                       );
-                    }
-                    return card;
-                  },
-                  childCount: donations.length,
+                      if (showHeader) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [_buildDateHeader(donation.date), card],
+                        );
+                      }
+                      return card;
+                    },
+                    childCount: donations.length,
+                  ),
                 ),
               );
             },
+            loading: () => const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.all(48),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
+            error: (err, _) => SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Center(child: Text('Error loading donations: $err')),
+              ),
+            ),
           ),
+
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ),
@@ -437,39 +407,63 @@ class _DashboardTabState extends State<DashboardTab> {
     final yesterdayStr =
         DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
 
-    String label;
-    if (dateStr == todayStr) {
+    final String label;
+    final bool isToday = dateStr == todayStr;
+    final bool isYesterday = dateStr == yesterdayStr;
+
+    if (isToday) {
       label = 'TODAY';
-    } else if (dateStr == yesterdayStr) {
+    } else if (isYesterday) {
       label = 'YESTERDAY';
     } else {
       final date = DateTime.tryParse(dateStr) ?? DateTime.now();
       label = DateFormat('EEEE, dd MMM yyyy').format(date).toUpperCase();
     }
 
+    final Color badgeColor;
+    final Color textColor;
+    
+    if (isToday) {
+      badgeColor = AppColors.primary.withValues(alpha: 0.1);
+      textColor = AppColors.primary;
+    } else if (isYesterday) {
+      badgeColor = AppColors.gray500.withValues(alpha: 0.1);
+      textColor = AppColors.gray700;
+    } else {
+      badgeColor = AppColors.gray200.withValues(alpha: 0.5);
+      textColor = AppColors.gray500;
+    }
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 12, 4, 8),
+      padding: const EdgeInsets.fromLTRB(4, 16, 4, 8),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: AppColors.gray200.withValues(alpha: 0.5),
-              borderRadius: BorderRadius.circular(8),
+              color: badgeColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isToday ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
+                width: 1,
+              ),
             ),
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: AppColors.gray600,
-                letterSpacing: 1,
+                fontWeight: FontWeight.w900,
+                color: textColor,
+                letterSpacing: 1.2,
               ),
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
-            child: Divider(color: AppColors.gray200, thickness: 1),
+          Expanded(
+            child: Divider(
+              color: AppColors.gray200.withValues(alpha: 0.6),
+              thickness: 1.0,
+            ),
           ),
         ],
       ),
@@ -506,8 +500,6 @@ class _DashboardTabState extends State<DashboardTab> {
     }
     if (type == 'EXCEL') {
       _exportToExcel(list);
-    } else if (type == 'PDF_RECEIPTS') {
-      downloadBulkReceiptsGridPdf(list, widget.branchName, context);
     } else {
       downloadTransactionsLedgerPdf(list, widget.branchName, context);
     }
@@ -579,6 +571,203 @@ class _DashboardTabState extends State<DashboardTab> {
     }
   }
 
+  Future<void> _importDonations() async {
+    // Pick JSON file
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Select Parsed JSON Donations File',
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
+    if (result == null || result.files.single.path == null) return;
+
+    final file = File(result.files.single.path!);
+    final jsonContent = await file.readAsString();
+
+    List<dynamic> jsonList;
+    try {
+      jsonList = json.decode(jsonContent) as List<dynamic>;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Invalid JSON file format: $e'),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+      return;
+    }
+
+    final total = jsonList.length;
+    if (total == 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No records found in selected JSON file.'),
+          backgroundColor: Colors.orangeAccent,
+        ));
+      }
+      return;
+    }
+
+    int imported = 0;
+    int skipped = 0;
+    String statusMessage = "Checking for existing records...";
+    StateSetter? updateDialog;
+
+    // Detect target branch from the JSON data, fallback to current widget branch
+    String targetBranchId = widget.branchId;
+    String targetBranchName = widget.branchName;
+    if (jsonList.isNotEmpty && jsonList.first is Map) {
+      final firstRecord = jsonList.first as Map;
+      if (firstRecord.containsKey('branchId')) {
+        targetBranchId = (firstRecord['branchId']?.toString() ?? widget.branchId).toLowerCase().trim();
+      }
+      if (firstRecord.containsKey('branchName')) {
+        targetBranchName = firstRecord['branchName']?.toString() ?? targetBranchId;
+      }
+    }
+
+    // Show Progress Dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            updateDialog = setStateDialog;
+            final percent = total > 0 ? ((imported + skipped) / total * 100).toStringAsFixed(0) : '0';
+
+            return PopScope(
+              canPop: false,
+              child: Center(
+                child: Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 40),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(32.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(color: AppColors.primary),
+                        const SizedBox(height: 24),
+                        Text(
+                          'Importing $targetBranchName Donations',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.gray900,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        LinearProgressIndicator(
+                          value: total > 0 ? (imported + skipped) / total : 0,
+                          backgroundColor: AppColors.gray100,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Imported: $imported  •  Skipped: $skipped  of  $total',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.gray700,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          statusMessage,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.gray400,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    try {
+      final box = DonationsLocalStorage.getBox();
+      final keysToDelete = <dynamic>[];
+      for (var key in box.keys) {
+        final keyStr = key.toString();
+        if (keyStr.startsWith('${targetBranchId}_') || 
+            keyStr.startsWith('${targetBranchId}__')) {
+          keysToDelete.add(key);
+        }
+      }
+      for (var k in keysToDelete) {
+        await box.delete(k);
+      }
+      await box.flush();
+
+      // Also clear branch donations from Firestore to prevent double counting/backfill
+      final firestoreSnap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(targetBranchId)
+          .collection('donations')
+          .get();
+      for (final doc in firestoreSnap.docs) {
+        await doc.reference.delete();
+      }
+
+      final branchCode = LocalStorageService.getBranchCode(targetBranchId);
+
+      for (int i = 0; i < total; i++) {
+        final recordMap = Map<String, dynamic>.from(jsonList[i] as Map);
+        
+        final receiptNoRaw = recordMap['receiptNo']?.toString() ?? '';
+        final cleanRcpt = cleanReceiptNumber(receiptNoRaw);
+        
+        if (DonationsLocalStorage.isReceiptNoDuplicate(cleanRcpt)) {
+          skipped++;
+          continue;
+        }
+        
+        final dateVal = recordMap['date']?.toString() ?? '';
+        
+        // Generate unique localId
+        final sheetName = recordMap['notes']?.toString().split('sheet: ').last.split('.').first ?? 'unknown';
+        final localId = "import_${branchCode}_${sheetName.toLowerCase().trim()}_${cleanRcpt.replaceAll(RegExp(r'\D'), '')}_$i";
+        recordMap['localId'] = localId;
+        imported++;
+
+        // Perform save (updates existing or inserts new)
+        await DonationsLocalStorage.saveDonation(
+          branchId: targetBranchId,
+          data: recordMap,
+        );
+
+        if (i % 25 == 0 || i == total - 1) {
+          updateDialog?.call(() {
+            statusMessage = "Saving receipt: $cleanRcpt";
+          });
+          // Yield to UI thread to paint the progress update
+          await Future.delayed(const Duration(milliseconds: 1));
+        }
+      }
+    } catch (e) {
+      debugPrint("Import Error: $e");
+    } finally {
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop(); // Dismiss progress dialog safely
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Import complete! Processed $total records: $imported new, $skipped updated/overwritten in $targetBranchName branch.'),
+          backgroundColor: Colors.green,
+        ));
+        setState(() {
+          _initStream();
+        });
+      }
+    }
+  }
+
   void _showSyncProgress(BuildContext context, String message) {
     showDialog(
       context: context,
@@ -625,16 +814,25 @@ class _DashboardTabState extends State<DashboardTab> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.gray200),
+                border: Border.all(
+                  color: _searchHasFocus
+                      ? const Color(0xFF0D5C3A) // Emerald focus color
+                      : const Color(0x0A000000),
+                  width: _searchHasFocus ? 1.5 : 1.0,
+                ),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.03),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3)),
+                    color: _searchHasFocus
+                        ? const Color(0xFF0D5C3A).withValues(alpha: 0.08) // Soft glowing green focus shadow
+                        : Colors.black.withValues(alpha: 0.02),
+                    blurRadius: _searchHasFocus ? 12 : 8,
+                    offset: const Offset(0, 3),
+                  ),
                 ],
               ),
               child: TextField(
                 controller: _searchCtrl,
+                focusNode: _searchFocusNode,
                 decoration: InputDecoration(
                   hintText: 'Search by donor, receipt #, or goods...',
                   hintStyle: const TextStyle(
@@ -654,63 +852,66 @@ class _DashboardTabState extends State<DashboardTab> {
               ),
             ),
           ),
-          const SizedBox(width: 10),
-          ScaleButton(
+          _HeaderActionButton(
             onTap: _showAdvancedFilterDialog,
-            child: Container(
-              height: 50,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              decoration: BoxDecoration(
-                color: hasFilters
-                    ? AppColors.primary.withValues(alpha: 0.06)
-                    : Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color:
-                        hasFilters ? AppColors.primary : AppColors.gray200),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.tune_rounded,
-                      size: 18,
-                      color: hasFilters
-                          ? AppColors.primary
-                          : AppColors.gray600),
-                  const SizedBox(width: 8),
-                  Text('Filters',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: hasFilters
-                              ? AppColors.primary
-                              : AppColors.gray700)),
-                ],
-              ),
+            hasFilters: hasFilters,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: hasFilters
+                        ? AppColors.primary.withValues(alpha: 0.12)
+                        : AppColors.gray100,
+                  ),
+                  child: Icon(
+                    Icons.tune_rounded,
+                    size: 14,
+                    color: hasFilters ? AppColors.primary : AppColors.gray600,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Filters',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: hasFilters ? AppColors.primary : AppColors.gray700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 10),
-          ScaleButton(
+          _HeaderActionButton(
             onTap: _showSortDialog,
-            child: Container(
-              height: 50,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.gray200),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.swap_vert_rounded,
-                      size: 18, color: AppColors.gray600),
-                  SizedBox(width: 8),
-                  Text('Sort',
-                      style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.gray700)),
-                ],
-              ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppColors.gray100,
+                  ),
+                  child: const Icon(
+                    Icons.swap_vert_rounded,
+                    size: 14,
+                    color: AppColors.gray600,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Sort',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.gray700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -748,34 +949,42 @@ class _DashboardTabState extends State<DashboardTab> {
                     color: AppColors.gray900)),
             const SizedBox(height: 16),
             _sortOption(Icons.arrow_downward_rounded, 'Newest First',
-                () { setState(() {}); Navigator.pop(context); }),
+                () { setState(() => _sortMode = 'newestFirst'); Navigator.pop(context); }, isActive: _sortMode == 'newestFirst'),
             _sortOption(Icons.arrow_upward_rounded, 'Oldest First',
-                () { setState(() {}); Navigator.pop(context); }),
+                () { setState(() => _sortMode = 'oldestFirst'); Navigator.pop(context); }, isActive: _sortMode == 'oldestFirst'),
             _sortOption(Icons.attach_money_rounded, 'Highest Amount',
-                () { setState(() {}); Navigator.pop(context); }),
+                () { setState(() => _sortMode = 'highestAmount'); Navigator.pop(context); }, isActive: _sortMode == 'highestAmount'),
             _sortOption(Icons.money_off_rounded, 'Lowest Amount',
-                () { setState(() {}); Navigator.pop(context); }),
+                () { setState(() => _sortMode = 'lowestAmount'); Navigator.pop(context); }, isActive: _sortMode == 'lowestAmount'),
           ],
         ),
       ),
     );
   }
 
-  Widget _sortOption(IconData icon, String label, VoidCallback onTap) {
+  Widget _sortOption(IconData icon, String label, VoidCallback onTap, {bool isActive = false}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
-      child: Padding(
+      child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        decoration: BoxDecoration(
+          color: isActive ? AppColors.primary.withValues(alpha: 0.06) : null,
+          borderRadius: BorderRadius.circular(10),
+        ),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: AppColors.gray500),
+            Icon(icon, size: 20, color: isActive ? AppColors.primary : AppColors.gray500),
             const SizedBox(width: 14),
-            Text(label,
-                style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.gray800)),
+            Expanded(
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                      color: isActive ? AppColors.primary : AppColors.gray800)),
+            ),
+            if (isActive)
+              const Icon(Icons.check_rounded, size: 18, color: AppColors.primary),
           ],
         ),
       ),
@@ -803,7 +1012,7 @@ class _DashboardTabState extends State<DashboardTab> {
                 InkWell(
                   onTap: () async {
                     final range = await showDateRangePicker(
-                      context: context,
+                      context: ctx,
                       firstDate: DateTime(2020),
                       lastDate: DateTime(2030),
                       initialDateRange: _startDate != null && _endDate != null
@@ -892,6 +1101,20 @@ class _DashboardTabState extends State<DashboardTab> {
                       setLocalState(() => _paymentMethodFilter = v!),
                 ),
                 const SizedBox(height: 20),
+                const Text('Donation Entry Type',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.gray500)),
+                const SizedBox(height: 8),
+                _dropdownFilter(
+                  value: _safeDropdownValue(
+                      _entryTypeFilter, const ['All', 'Cash Only', 'Goods Only'], 'All'),
+                  items: const ['All', 'Cash Only', 'Goods Only'],
+                  onChanged: (v) =>
+                      setLocalState(() => _entryTypeFilter = v!),
+                ),
+                const SizedBox(height: 20),
                 const Text('Amount Range (PKR)',
                     style: TextStyle(
                         fontSize: 12,
@@ -938,11 +1161,11 @@ class _DashboardTabState extends State<DashboardTab> {
                   _endDate = null;
                   _statusFilter = 'All';
                   _paymentMethodFilter = 'All';
+                  _entryTypeFilter = 'All';
                   _minAmount = null;
                   _maxAmount = null;
                   widget.onCatChanged(DonationCategory.all);
                 });
-                _initStream();
                 Navigator.pop(ctx);
               },
               child:
@@ -951,7 +1174,6 @@ class _DashboardTabState extends State<DashboardTab> {
             ElevatedButton(
               onPressed: () {
                 setState(() {});
-                _initStream();
                 Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
@@ -979,33 +1201,28 @@ class _DashboardTabState extends State<DashboardTab> {
       chips.add(_activeChip('Dates', () => setState(() {
             _startDate = null;
             _endDate = null;
-            _initStream();
           })));
     }
     if (widget.selectedCategory != DonationCategory.all) {
       chips.add(_activeChip(widget.selectedCategory.label,
           () => setState(() {
                 widget.onCatChanged(DonationCategory.all);
-                _initStream();
               })));
     }
     if (_statusFilter != 'All') {
       chips.add(_activeChip(_statusFilter, () => setState(() {
             _statusFilter = 'All';
-            _initStream();
           })));
     }
     if (_paymentMethodFilter != 'All') {
       chips.add(_activeChip(_paymentMethodFilter, () => setState(() {
             _paymentMethodFilter = 'All';
-            _initStream();
           })));
     }
     if (_minAmount != null || _maxAmount != null) {
       chips.add(_activeChip('Amount Range', () => setState(() {
             _minAmount = null;
             _maxAmount = null;
-            _initStream();
           })));
     }
 
@@ -1084,7 +1301,7 @@ class _DashboardTabState extends State<DashboardTab> {
     
     for (var d in _currentDonations) {
       final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
-      final isRec = d.status == 'Received';
+      final isRec = d.status.toLowerCase() == 'received';
       
       final current = branchData[d.branchName] ?? (received: 0.0, pending: 0.0, count: 0);
       branchData[d.branchName] = (
@@ -1161,7 +1378,7 @@ class _DashboardTabState extends State<DashboardTab> {
                         children: [
                           Text('${data.count} entries', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.gray400)),
                           Text('PKR ${NumberFormat('#,###').format(data.received + data.pending)}', 
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.gray900, fontFamily: 'DMMono')),
+                              style: GoogleFonts.dmMono(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.gray900)),
                         ],
                       ),
                     ],
@@ -1181,11 +1398,10 @@ class _DashboardTabState extends State<DashboardTab> {
       children: [
         Text(label, style: const TextStyle(fontSize: 11, color: AppColors.gray500, fontWeight: FontWeight.w500)),
         Text('PKR ${NumberFormat('#,###').format(value)}', 
-            style: TextStyle(
+            style: GoogleFonts.dmMono(
               fontSize: 12, 
               fontWeight: isBold ? FontWeight.w900 : FontWeight.w700, 
               color: isBold ? color : AppColors.gray700,
-              fontFamily: 'DMMono'
             )),
       ],
     );
@@ -1213,7 +1429,6 @@ class _ExportDialog extends StatefulWidget {
 
 class _ExportDialogState extends State<_ExportDialog> {
   late String _selectedType;
-  String _pdfExportMode = 'LEDGER';
 
   @override
   void initState() {
@@ -1286,11 +1501,8 @@ class _ExportDialogState extends State<_ExportDialog> {
         break;
     }
 
-    final String exportType = _selectedType == 'PDF'
-        ? (_pdfExportMode == 'RECEIPTS' ? 'PDF_RECEIPTS' : 'PDF_LEDGER')
-        : 'EXCEL';
-    widget.onExport(exportType, list);
-  }
+    widget.onExport(_selectedType, list);
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -1416,43 +1628,6 @@ class _ExportDialogState extends State<_ExportDialog> {
                     ],
                   ),
                 ),
-
-                if (_selectedType == 'PDF') ...[
-                  const SizedBox(height: 20),
-                  const Text('PDF EXPORT TYPE',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: Color(0xFF94A3B8),
-                          letterSpacing: 1.2)),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Row(
-                      children: [
-                        _formatToggleBtn(
-                          label: 'Ledger Table',
-                          icon: Icons.list_alt_rounded,
-                          color: pdfColor,
-                          isSelected: _pdfExportMode == 'LEDGER',
-                          onTap: () => setState(() => _pdfExportMode = 'LEDGER'),
-                        ),
-                        const SizedBox(width: 4),
-                        _formatToggleBtn(
-                          label: '3x3 Receipts',
-                          icon: Icons.grid_view_rounded,
-                          color: pdfColor,
-                          isSelected: _pdfExportMode == 'RECEIPTS',
-                          onTap: () => setState(() => _pdfExportMode = 'RECEIPTS'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
 
                 const SizedBox(height: 20),
 
@@ -1597,4 +1772,78 @@ class _RangeOption {
     required this.sublabel,
     required this.icon,
   });
+}
+
+class _HeaderActionButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final Widget child;
+  final bool hasFilters;
+  final bool isActive;
+
+  const _HeaderActionButton({
+    required this.onTap,
+    required this.child,
+    this.hasFilters = false,
+    this.isActive = false,
+  });
+
+  @override
+  State<_HeaderActionButton> createState() => _HeaderActionButtonState();
+}
+
+class _HeaderActionButtonState extends State<_HeaderActionButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasFilters = widget.hasFilters;
+    final isActive = widget.isActive;
+    
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: ScaleButton(
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _isHovered ? 1.03 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            height: 50,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: hasFilters || isActive
+                  ? AppColors.primary.withValues(alpha: _isHovered ? 0.10 : 0.06)
+                  : (_isHovered ? AppColors.gray50 : Colors.white),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: hasFilters || isActive
+                    ? AppColors.primary
+                    : (_isHovered ? AppColors.gray300 : const Color(0x0A000000)),
+                width: hasFilters || isActive || _isHovered ? 1.5 : 1.0,
+              ),
+              boxShadow: [
+                if (hasFilters || isActive)
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: _isHovered ? 0.20 : 0.15),
+                    blurRadius: _isHovered ? 14 : 10,
+                    offset: _isHovered ? const Offset(0, 6) : const Offset(0, 4),
+                  )
+                else
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: _isHovered ? 0.04 : 0.02),
+                    blurRadius: _isHovered ? 10 : 6,
+                    offset: _isHovered ? const Offset(0, 4) : const Offset(0, 2),
+                  ),
+              ],
+            ),
+            child: widget.child,
+          ),
+        ),
+      ),
+    );
+  }
 }

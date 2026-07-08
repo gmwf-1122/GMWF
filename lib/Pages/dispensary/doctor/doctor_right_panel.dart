@@ -282,7 +282,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           final inventoryId = (med['inventoryId'] ?? '').toString().trim();
           if (inventoryId.isEmpty) continue;
 
-          final qty = ((med['quantity'] ?? 0) as num).toInt();
+          final medQty = med['quantity'];
+          final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
           // For multi-day prescriptions, account for the multiplier
           // (injections/drips are always × 1)
           final days = (presc['daysOfMedicine'] as int?) ?? 1;
@@ -384,7 +385,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   int _getAvailableStock(Map<String, dynamic>? inventoryMed) {
     if (inventoryMed == null) return 999999;
 
-    final totalStock  = ((inventoryMed['quantity'] ?? 0) as num).toInt();
+    final invQty = inventoryMed['quantity'];
+    final totalStock = (invQty is num ? invQty.toInt() : int.tryParse(invQty?.toString() ?? '') ?? 0);
     final inventoryId = inventoryMed['id']?.toString() ?? '';
 
     // Quantity reserved by OTHER pending patients (from Hive scan)
@@ -394,7 +396,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     int sessionQty = 0;
     for (final med in widget.prescriptions) {
       if (med['inventoryId']?.toString() == inventoryId) {
-        sessionQty += ((med['quantity'] ?? 0) as num).toInt();
+        final medQty = med['quantity'];
+        sessionQty += (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
       }
     }
 
@@ -553,7 +556,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    value: mealTiming,
+                    initialValue: mealTiming,
                     isDense: true,
                     decoration: const InputDecoration(
                       labelText: 'Timing Instruction',
@@ -568,7 +571,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   if (isSyrup) ...[
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: dosage,
+                      initialValue: dosage,
                       isDense: true,
                       decoration: const InputDecoration(
                         labelText: 'Dosage', border: OutlineInputBorder(), isDense: true,
@@ -638,9 +641,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 if (qty == 0) return;
                 if (isInventory) {
                   final availableStock = _getAvailableStock(inventoryMed);
-                  if (qty > availableStock) {
+                  final totalRequired = qty * _daysOfMedicine;
+                  if (totalRequired > availableStock) {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: Text('⚠️ Stock Limit Exceeded! Available: $availableStock'),
+                        content: Text('⚠️ Stock Limit Exceeded! Need $totalRequired but only $availableStock available.'),
                         backgroundColor: Colors.red));
                     return;
                   }
@@ -1011,7 +1015,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       // At save time we include THIS session's qty in available (since
       // _getAvailableStock subtracts session qty already), so compare
       // against the raw per-day qty.
-      final perDayQty = ((med['quantity'] ?? 0) as num).toInt();
+      final medQty = med['quantity'];
+      final perDayQty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
       // Re-add session qty to get "others only" available
       final othersOnly = available + perDayQty;
 

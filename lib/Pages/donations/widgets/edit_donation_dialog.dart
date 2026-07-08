@@ -48,6 +48,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
   String _paymentMethod = 'Cash';
   bool   _saving        = false;
   String? _errorMessage;
+  DateTime? _selectedDate;
+  final _bookReceiptNoCtrl = TextEditingController();
 
   @override
   void initState() {
@@ -65,6 +67,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
     _selectedCategory = d.category == DonationCategory.all ? DonationCategory.gmwf : d.category;
     _selectedGmwfSub  = d.gmwfSubCategory;
     _selectedSubtype  = d.subtype;
+    _selectedDate     = DateTime.tryParse(d.date) ?? DateTime.now();
+    _bookReceiptNoCtrl.text = d.bookReceiptNo ?? '';
   }
 
   @override
@@ -74,6 +78,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
     _reasonCtrl.dispose();
     _notesCtrl.dispose();
     _goodsCtrl.dispose();
+    _bookReceiptNoCtrl.dispose();
     super.dispose();
   }
 
@@ -102,6 +107,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
         'notes':            d.notes,
         'goodsItem':        d.goodsItem,
         'branchName':       d.branchName,
+        'date':             d.date,
+        'bookReceiptNo':    d.bookReceiptNo,
       };
 
       final editEntry = {
@@ -121,6 +128,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
       final newPayment   = _paymentMethod;
       final newNotes     = _notesCtrl.text.trim();
       final newGoodsItem = _goodsCtrl.text.trim();
+      final newDate      = _selectedDate != null ? DateFormat('yyyy-MM-dd').format(_selectedDate!) : d.date;
+      final newBookRcpt  = _bookReceiptNoCtrl.text.trim();
       final updatedHistory = [...(d.editHistory ?? []), editEntry];
 
       final updatedFields = <String, dynamic>{
@@ -131,6 +140,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
         'subtypeId':        newSubtypeId,
         'paymentMethod':    newPayment,
         'notes':            newNotes,
+        'date':             newDate,
+        'bookReceiptNo':    newBookRcpt.isNotEmpty ? newBookRcpt : null,
         if (d.isGoods) 'goodsItem': newGoodsItem,
         'editedAt':         now,
         'editedBy':         widget.currentUsername,
@@ -212,6 +223,14 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
     }
     if (_paymentMethod != d.paymentMethod && !d.isGoods) {
       changes.add({'field': 'paymentMethod', 'label': 'Payment', 'old': d.paymentMethod, 'new': _paymentMethod});
+    }
+    final newDateStr = _selectedDate != null ? DateFormat('yyyy-MM-dd').format(_selectedDate!) : d.date;
+    if (newDateStr != d.date) {
+      changes.add({'field': 'date', 'label': 'Date', 'old': d.date, 'new': newDateStr});
+    }
+    final newBook = _bookReceiptNoCtrl.text.trim();
+    if (newBook != (d.bookReceiptNo ?? '')) {
+      changes.add({'field': 'bookReceiptNo', 'label': 'Book Receipt #', 'old': d.bookReceiptNo ?? '', 'new': newBook});
     }
     if (_notesCtrl.text.trim() != d.notes) {
       changes.add({'field': 'notes', 'label': 'Notes', 'old': d.notes, 'new': _notesCtrl.text.trim()});
@@ -512,6 +531,73 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                             )).toList(),
                         ),
                       ],
+
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionLabel('Donation Date'),
+                                const SizedBox(height: 6),
+                                InkWell(
+                                  onTap: () async {
+                                    final picked = await showDatePicker(
+                                      context: context,
+                                      initialDate: _selectedDate ?? DateTime.now(),
+                                      firstDate: DateTime(2000),
+                                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                                    );
+                                    if (picked != null) {
+                                      setState(() => _selectedDate = picked);
+                                    }
+                                  },
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.gray50,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: AppColors.gray200),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.gray500),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          DateFormat('dd MMM yyyy').format(_selectedDate ?? DateTime.now()),
+                                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionLabel('Book Receipt # (Manual)'),
+                                const SizedBox(height: 6),
+                                TextFormField(
+                                  controller: _bookReceiptNoCtrl,
+                                  decoration: _inputDecoration(
+                                    hint: 'e.g. B-12345',
+                                    icon: Icons.confirmation_number_outlined,
+                                    iconColor: AppColors.gray500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
 
                       // Notes
                       const SizedBox(height: 16),

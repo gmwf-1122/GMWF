@@ -1,5 +1,4 @@
 // lib/services/permission_service.dart
-import 'package:flutter/foundation.dart';
 
 enum AppPermission {
   // Global / Executive
@@ -38,7 +37,9 @@ enum AppPermission {
   
   // Assets & Stock
   manageStock,
-  manageAssets,
+  manageFinance,
+  voidFinanceRecord,
+  transferEmployeeBranch,
   
   // Data
   downloadData,
@@ -75,7 +76,8 @@ class PermissionService {
       AppPermission.reverseTokens, 
       AppPermission.manageInventory, 
       AppPermission.manageStock, 
-      AppPermission.manageAssets, 
+      AppPermission.manageFinance, 
+      AppPermission.voidFinanceRecord,
       AppPermission.viewDonations, 
       AppPermission.manageDonations, 
       AppPermission.manageKitchen, 
@@ -93,7 +95,7 @@ class PermissionService {
       AppPermission.reverseTokens, 
       AppPermission.manageInventory, 
       AppPermission.manageStock, 
-      AppPermission.manageAssets,
+      AppPermission.manageFinance,
       AppPermission.manageMadrassaAdmin, // Added for full Madrassa Admin view
       AppPermission.viewPatients,        // Added for Patients list
       AppPermission.registerPatients,    // Added for Registration

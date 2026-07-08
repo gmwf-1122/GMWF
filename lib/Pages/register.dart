@@ -1,11 +1,8 @@
 // lib/pages/register.dart
 
-import 'dart:typed_data';
-import 'dart:io' show File;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
@@ -226,8 +223,9 @@ class _RegisterState extends State<Register>
         type: FileType.custom, allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png']);
     if (result != null && result.files.isNotEmpty) {
       setState(() {
-        if (type == 'identification') _identificationFile = result.files.first;
-        else if (type == 'degree')    _degreeFile          = result.files.first;
+        if (type == 'identification') {
+          _identificationFile = result.files.first;
+        } else if (type == 'degree')    _degreeFile          = result.files.first;
       });
     }
   }
@@ -297,11 +295,6 @@ class _RegisterState extends State<Register>
         profileImageBytes:  _profileImageBytes,
         identificationFile: _identificationFile,
         degreeFile:         _degreeFile,
-      );
-
-      if (user == null) throw Exception(
-        'Account could not be created. If this persists, check Firebase Console '
-        'for a partial account under $email and delete it before retrying.',
       );
 
       final registeredName = _usernameController.text.trim();
@@ -727,7 +720,7 @@ class _RegisterState extends State<Register>
 
   Widget _buildRoleDropdown(RoleThemeData t) {
     return DropdownButtonFormField<String>(
-      value: _selectedRole,
+      initialValue: _selectedRole,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
@@ -953,7 +946,7 @@ class _RegisterState extends State<Register>
     String Function(String)? itemLabel,
   }) {
     return DropdownButtonFormField<String>(
-      value: value,
+      initialValue: value,
       hint: Text(hint, style: TextStyle(color: t.textTertiary, fontSize: 13)),
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),

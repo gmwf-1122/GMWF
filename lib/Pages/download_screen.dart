@@ -2,7 +2,6 @@
 // Note: excel package aliased as 'xl' to avoid Border conflict with Flutter
 
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
@@ -146,9 +145,10 @@ class _DownloadScreenState extends State<DownloadScreen>
   // ─── Sanitisers ─────────────────────────────────────────────────────────────
   dynamic _sanitizeValue(dynamic value) {
     if (value is Timestamp) return value.toDate().toIso8601String();
-    if (value is Map)
+    if (value is Map) {
       return value.map(
           (k, v) => MapEntry(k.toString(), _sanitizeValue(v)));
+    }
     if (value is List) return value.map(_sanitizeValue).toList();
     return value ?? '';
   }
@@ -239,8 +239,7 @@ class _DownloadScreenState extends State<DownloadScreen>
           onPrimary: Colors.white,
           surface: t.bgCard,
           onSurface: t.textPrimary,
-        ),
-        dialogBackgroundColor: t.bgCard,
+        ), dialogTheme: DialogThemeData(backgroundColor: t.bgCard),
       ),
       child: child!,
     );
@@ -325,7 +324,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         try {
           final snap = await db.collection('branches').doc(bid).collection('patients').get();
           for (final doc in snap.docs) {
-            final data = doc.data() as Map<String, dynamic>;
+            final data = doc.data();
             data['patientId'] = doc.id; data['branchId'] = bid;
             final sanitized = _sanitizeForJson(data);
             if (_isDateInRange(sanitized['registrationDate'] ?? sanitized['createdAt'])) {
@@ -341,7 +340,7 @@ class _DownloadScreenState extends State<DownloadScreen>
               for (final type in ['zakat', 'non-zakat', 'gmwf']) {
                 final qSnap = await dateDoc.reference.collection(type).get();
                 for (final doc in qSnap.docs) {
-                  final d = doc.data() as Map<String, dynamic>;
+                  final d = doc.data();
                   d['serial'] = doc.id; d['date'] = dateDoc.id; d['queueType'] = type; d['branchId'] = bid;
                   allTokens.add(_sanitizeForJson(d)); tokens++;
                 }
@@ -452,7 +451,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         try {
           final snap = await db.collection('branches').doc(bid).collection('madrassa_students').get();
           for (final doc in snap.docs) {
-            final data = doc.data() as Map<String, dynamic>;
+            final data = doc.data();
             data['studentId'] = doc.id; data['branchId'] = bid;
             allMadrassaStudents.add(_sanitizeForJson(data)); madrassaS++;
           }
@@ -462,7 +461,7 @@ class _DownloadScreenState extends State<DownloadScreen>
           if (_dateMode == DateFilterMode.allTime) {
             final snap = await db.collection('branches').doc(bid).collection('madrassa_daily_logs').get();
             for (final doc in snap.docs) {
-              final d = doc.data() as Map<String, dynamic>;
+              final d = doc.data();
               d['date'] = doc.id; d['branchId'] = bid;
               allMadrassaLogs.add(_sanitizeForJson(d)); madrassaL++;
             }
@@ -910,7 +909,7 @@ class _DownloadScreenState extends State<DownloadScreen>
               const LinearProgressIndicator()
             else
               DropdownButtonFormField<String>(
-                value: _selectedBranch,
+                initialValue: _selectedBranch,
                 dropdownColor: t.bgCard,
                 decoration: _inputDecor(
                     'Select Branch', Icons.business_outlined, t),
@@ -971,8 +970,9 @@ class _DownloadScreenState extends State<DownloadScreen>
                   ),
                   onSelected: isBusy ? null : (v) {
                     setState(() {
-                      if (v) _selectedCategories.add(cat['id']);
-                      else if (_selectedCategories.length > 1) _selectedCategories.remove(cat['id']);
+                      if (v) {
+                        _selectedCategories.add(cat['id']);
+                      } else if (_selectedCategories.length > 1) _selectedCategories.remove(cat['id']);
                     });
                   },
                 );

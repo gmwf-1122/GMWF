@@ -149,7 +149,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     final s = (rawStatus ?? '').toLowerCase().trim();
     if (s.isEmpty) return 'zakat';
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     if (s == 'zakat') return 'zakat';
     debugPrint('[TokenScreen] ⚠️ Unknown patient status "$rawStatus" — defaulting to zakat');
@@ -1318,7 +1320,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                           _infoBadge(Icons.phone,
                               'Phone: ${_patientData!['phone'] ?? '-'}'),
                           _infoBadge(Icons.category,
-                              '${_resolveQueueType(_patientData!['status'] as String?)}'),
+                              _resolveQueueType(_patientData!['status'] as String?)),
                         ]),
                         if (_hasTokenToday) ...[
                           const SizedBox(height: 10),
@@ -1466,10 +1468,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       Map<String, dynamic> patient) {
     final ownCnic      = patient['cnic']?.toString().trim();
     final guardianCnic = patient['guardianCnic']?.toString().trim();
-    if (ownCnic != null && ownCnic.isNotEmpty)
+    if (ownCnic != null && ownCnic.isNotEmpty) {
       return (cnic: ownCnic, label: 'CNIC');
-    if (guardianCnic != null && guardianCnic.isNotEmpty)
+    }
+    if (guardianCnic != null && guardianCnic.isNotEmpty) {
       return (cnic: guardianCnic, label: 'Guardian CNIC');
+    }
     return (cnic: '-', label: 'CNIC');
   }
 

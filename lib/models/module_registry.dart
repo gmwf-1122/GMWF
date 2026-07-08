@@ -13,7 +13,7 @@ import '../pages/branches.dart';
 import '../pages/users.dart';
 import '../pages/server.dart';
 import '../pages/download_screen.dart';
-import '../pages/assets.dart';
+import '../pages/office/finance_page.dart';
 import '../pages/Dasterkhwaan/office_boy.dart';
 import '../pages/Dasterkhwaan/kitchen.dart';
 import '../pages/branches_register.dart';
@@ -146,7 +146,7 @@ class ModuleRegistry {
         branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? 'User',
         userId:   data['uid'] ?? '',
-        role:     UserRoleX.fromString(data['role'] ?? 'staff', data['name']),
+        role:     UserRoleX.fromString(data['role'] ?? 'staff'),
       ),
       category: ModuleCategory.office,
       isFeatured: true,
@@ -341,16 +341,17 @@ class ModuleRegistry {
       category: ModuleCategory.office,
     ),
     AppModule(
-      id: 'assets',
-      title: 'Assets',
-      description: 'Track and manage branch property/assets',
-      icon: Icons.web_asset_rounded,
-      requiredPermission: AppPermission.manageAssets,
+      id: 'finance',
+      title: 'Finance',
+      description: 'Manage employees, track attendance, and handle payroll',
+      icon: Icons.monetization_on_outlined,
+      requiredPermission: AppPermission.manageFinance,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      builder: (context, data) => AssetsPage(
+      isFeatured: true,
+      builder: (context, data) => FinancePage(
         branchId: data['branchId'] ?? 'all',
-        isAdmin: true, // Executives get admin privileges in assets
+        isAdmin: true,
       ),
       category: ModuleCategory.office,
     ),
@@ -452,7 +453,7 @@ class ModuleRegistry {
         'inventory',
         'pending_requests',
         'inventory_ledger',
-        'assets',
+        'finance',
       ];
       
       if (isBM) {
@@ -472,7 +473,7 @@ class ModuleRegistry {
         'branches': 'Summary',
         'inventory': 'Inventory',
         'pending_requests': 'Requests',
-        'assets': 'Assets',
+        'finance': 'Finance',
         'inventory_ledger': 'Medicine Ledger',
         'office_boy': 'Office',
         'kitchen': 'Kitchen',

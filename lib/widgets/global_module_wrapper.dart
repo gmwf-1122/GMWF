@@ -16,6 +16,8 @@ import '../models/module_registry.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
+import 'package:hive/hive.dart';
+import '../services/local_storage_service.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -88,23 +90,43 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   }
 
   Future<void> _loadBranches() async {
+    final localBranchesBox = Hive.box(LocalStorageService.branchesBox);
+
     // ── Branch-scoped roles: never fetch all branches ──────────────────────
-    // Branch managers and supervisors are locked to a single branch.
-    // We build a synthetic one-item list so the rest of the UI works without
-    // ever querying or exposing any other branch's data.
     if (_isBranchScoped) {
       final myBranchId = (widget.userData['branchId'] as String? ?? '').trim();
       if (myBranchId.isEmpty || myBranchId == _kGlobalBranchId) {
         if (mounted) setState(() { _loading = false; _loadError = 'No branch assigned to your account.'; });
         return;
       }
-      // Fetch only the name of the user's own branch (single document read).
+
+      // Check cache first
+      final cachedBranch = localBranchesBox.get('branch:$myBranchId');
+      if (cachedBranch is Map) {
+        final name = (cachedBranch['name'] as String?) ?? myBranchId;
+        if (mounted) {
+          setState(() {
+            _branches = [{'id': myBranchId, 'name': name}];
+            _selectedBranchId = myBranchId;
+            _selectedBranchName = name;
+            _loading = false;
+            SyncService().updateAuthorizedBranches([myBranchId]);
+          });
+          _pillAnim.forward();
+        }
+        _refreshBranchInfoBackground(myBranchId);
+        return;
+      }
+
+      // Fallback: Fetch only the name of the user's own branch (single document read).
       try {
         final doc = await FirebaseFirestore.instance
             .collection('branches')
             .doc(myBranchId)
             .get();
         final name = (doc.data()?['name'] as String?) ?? myBranchId;
+        await localBranchesBox.put('branch:$myBranchId', {'id': myBranchId, 'name': name});
+
         if (mounted) {
           setState(() {
             _branches = [{'id': myBranchId, 'name': name}];
@@ -128,36 +150,60 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
       }
       return;
     }
-    // ── Global / executive roles: fetch all branches as before ─────────────
+
+    // ── Global / executive roles: check cache first ─────────────────────────
+    final localBranches = localBranchesBox.values
+        .where((val) => val is Map && val['id'] != null)
+        .map((val) => {'id': val['id'].toString(), 'name': val['name']?.toString() ?? val['id'].toString()})
+        .toList();
+
+    if (localBranches.isNotEmpty) {
+      localBranches.sort((a, b) => a['name']!.compareTo(b['name']!));
+      final allBranchesList = [
+        {'id': 'all', 'name': 'All Branches (Consolidated)'},
+        ...localBranches,
+      ];
+
+      if (mounted) {
+        setState(() {
+          _branches = allBranchesList;
+          _loading = false;
+          final branchIds = localBranches.map((b) => b['id'].toString()).toList();
+          SyncService().updateAuthorizedBranches(branchIds);
+          _updateSelectedBranchState();
+        });
+      }
+      _refreshAllBranchesBackground();
+      return;
+    }
+
+    // Fallback: fetch all branches from Firestore
     try {
-      final snap =
-          await FirebaseFirestore.instance.collection('branches').get();
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
       final branches = snap.docs.map((d) {
         final data = d.data();
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
       }).toList();
 
+      for (final b in branches) {
+        await localBranchesBox.put('branch:${b['id']}', b);
+      }
+
+      branches.sort((a, b) => a['name']!.compareTo(b['name']!));
+      final allBranchesList = [
+        {'id': 'all', 'name': 'All Branches (Consolidated)'},
+        ...branches,
+      ];
+
       if (mounted) {
         setState(() {
-          _branches = branches;
+          _branches = allBranchesList;
           _loading = false;
           
-          // ── Update Sync Service with authorized branches ───────────────
-          final branchIds = _branches.map((b) => b['id'].toString()).toList();
+          final branchIds = branches.map((b) => b['id'].toString()).toList();
           SyncService().updateAuthorizedBranches(branchIds);
-          // ───────────────────────────────────────────────────────────────
 
-          if (_selectedBranchId != null) {
-            final exists = _branches.any((b) => b['id'] == _selectedBranchId);
-            if (!exists) {
-              _selectedBranchId = null;
-              _selectedBranchName = null;
-            } else {
-              final b = _branches.firstWhere((b) => b['id'] == _selectedBranchId);
-              _selectedBranchName = b['name'];
-              _pillAnim.forward();
-            }
-          }
+          _updateSelectedBranchState();
         });
       }
     } catch (_) {
@@ -168,6 +214,47 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
         });
       }
     }
+  }
+
+  void _updateSelectedBranchState() {
+    if (_selectedBranchId != null) {
+      final exists = _branches.any((b) => b['id'] == _selectedBranchId);
+      if (!exists) {
+        _selectedBranchId = null;
+        _selectedBranchName = null;
+      } else {
+        final b = _branches.firstWhere((b) => b['id'] == _selectedBranchId);
+        _selectedBranchName = b['name'];
+        _pillAnim.forward();
+      }
+    }
+  }
+
+  Future<void> _refreshBranchInfoBackground(String myBranchId) async {
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(myBranchId)
+          .get();
+      if (doc.exists) {
+        final name = (doc.data()?['name'] as String?) ?? myBranchId;
+        final localBranchesBox = Hive.box(LocalStorageService.branchesBox);
+        await localBranchesBox.put('branch:$myBranchId', {'id': myBranchId, 'name': name});
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _refreshAllBranchesBackground() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      final localBranchesBox = Hive.box(LocalStorageService.branchesBox);
+      for (final d in snap.docs) {
+        final data = d.data();
+        final id = d.id;
+        final name = data['name'] as String? ?? id;
+        await localBranchesBox.put('branch:$id', {'id': id, 'name': name});
+      }
+    } catch (_) {}
   }
 
   void _selectBranch(String id, String name) {
@@ -184,12 +271,18 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     // ───────────────────────────────────────────────────────────────────────
   }
 
+  void clearLoadError() {
+    setState(() {
+      _loadError = null;
+    });
+  }
+
   // Branch-scoped roles always have their branch set; only global roles may
   // need to pick a branch if one isn't already selected.
   bool get _needsBranch =>
       widget.module.isBranchDependent &&
       !_isBranchScoped &&
-      (_selectedBranchId == null || _selectedBranchId == _kGlobalBranchId);
+      _selectedBranchId == null;
 
   String get _role =>
       (widget.userData['role'] as String? ?? '').toLowerCase();
@@ -517,7 +610,7 @@ class _BranchSheet extends StatelessWidget {
                 : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: state._branches.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         const SizedBox(height: 8),
                     itemBuilder: (ctx, i) {
                       final b = state._branches[i];
@@ -638,7 +731,7 @@ class _BranchPickerBody extends StatelessWidget {
             TextButton(
               onPressed: () {
                 state._loadBranches();
-                state.setState(() => state._loadError = null);
+                state.clearLoadError();
               },
               child: const Text('Retry'),
             ),

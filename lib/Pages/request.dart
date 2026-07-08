@@ -378,7 +378,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
           child: ListView.separated(
             padding: const EdgeInsets.all(12),
             itemCount: allDocs.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (context, i) =>
                 _buildRequestCard(context, allDocs[i]),
           ),
@@ -1071,8 +1071,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
     if (proposed['dob'] != null || original['dob'] != null) {
       final date = (proposed['dob'] as Timestamp?)?.toDate() ??
           (original['dob'] as Timestamp?)?.toDate();
-      if (date != null)
+      if (date != null) {
         dobCtrl.text = DateFormat('dd-MM-yyyy').format(date);
+      }
     }
 
     await showDialog(
@@ -1667,8 +1668,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
     int operationCount = 0;
 
     for (final item in items) {
-      final name = item['name']?.toString()?.trim();
-      final type = item['type']?.toString()?.trim();
+      final name = item['name']?.toString().trim();
+      final type = item['type']?.toString().trim();
 
       if (name == null || name.isEmpty || type == null || type.isEmpty) {
         debugPrint('Skipping item: missing name or type');
@@ -1724,7 +1725,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       }
 
       if (warehouseSnap.exists) {
-        final dataMap = warehouseSnap.data() as Map<String, dynamic>? ?? {};
+        final dataMap = warehouseSnap.data() ?? {};
         final curQty  = _safeInt(dataMap['quantity']);
         batch.update(warehouse.doc(warehouseId), {
           'quantity':      curQty + qty,
@@ -2093,7 +2094,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final snap = await ref.get();
     if (!snap.exists) return;
 
-    final data = snap.data() as Map<String, dynamic>? ?? {};
+    final data = snap.data() ?? {};
     if (data['status'] != 'pending') return;
 
     final originalItems = _safeItemList(data['items']);

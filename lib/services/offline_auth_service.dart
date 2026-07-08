@@ -183,6 +183,22 @@ class OfflineAuthService {
     }
   }
 
+  // ── Update the cached user data blob ─────────────────────────────────────
+  static Future<void> updateCachedUserData(Map<String, dynamic> userData, {String? usernameOrEmail}) async {
+    try {
+      String? key = usernameOrEmail?.trim().toLowerCase();
+      if (key == null || key.isEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        key = prefs.getString(_keyLastUsername);
+      }
+      if (key == null) return;
+      await _secureWrite(_dataKey(key), jsonEncode(userData));
+      debugPrint('[OfflineAuth] User data updated in cache for $key');
+    } catch (e) {
+      debugPrint('[OfflineAuth] updateCachedUserData error: $e');
+    }
+  }
+
   // ── Update the cached password (called after a successful password change) ─
   static Future<bool> updateCachedPassword(String newPassword, {String? usernameOrEmail}) async {
     try {

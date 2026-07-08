@@ -257,11 +257,21 @@ class AuthService {
       final doc = await _firestore.collection('users').doc(uid).get();
       if (doc.exists) return doc.data();
 
-      // 2. Check all branches
-      final branches = await _firestore.collection('branches').get();
-      for (final branch in branches.docs) {
-        final bDoc = await branch.reference.collection('users').doc(uid).get();
-        if (bDoc.exists) return bDoc.data();
+      // 2. Check all branches via collection group
+      final querySnap = await _firestore
+          .collectionGroup('users')
+          .where(FieldPath.documentId, isEqualTo: uid)
+          .limit(1)
+          .get();
+      if (querySnap.docs.isNotEmpty) {
+        final doc = querySnap.docs.first;
+        final data = doc.data();
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        return {
+          ...data,
+          'branchId': branchId,
+        };
       }
     } catch (e) {
       debugPrint('[AuthService] getUserByUid failed: $e');
@@ -287,21 +297,26 @@ class AuthService {
     } catch (_) {}
 
     try {
-      final branches = await _firestore.collection('branches').get();
-      for (final branch in branches.docs) {
-        final users = await branch.reference
-            .collection('users')
-            .where('usernameLower', isEqualTo: lower)
-            .limit(1)
-            .get();
-        if (users.docs.isNotEmpty) {
-          final d = users.docs.first;
-          return {'email': d['email'], 'username': d['username'],
-                  'role': d['role'], 'branchId': branch.id, 'uid': d.id};
-        }
+      final querySnap = await _firestore
+          .collectionGroup('users')
+          .where('usernameLower', isEqualTo: lower)
+          .limit(1)
+          .get();
+      if (querySnap.docs.isNotEmpty) {
+        final doc = querySnap.docs.first;
+        final d = doc.data();
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        return {
+          'email': d['email'],
+          'username': d['username'],
+          'role': d['role'],
+          'branchId': branchId,
+          'uid': doc.id
+        };
       }
     } catch (e) {
-      debugPrint('[AuthService] _findUserByUsername branch search failed: $e');
+      debugPrint('[AuthService] _findUserByUsername branch search failed via collectionGroup: $e');
     }
     return null;
   }

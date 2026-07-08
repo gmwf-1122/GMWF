@@ -6,7 +6,7 @@ import '../services/local_storage_service.dart';
 class ServerDataViewer extends StatefulWidget {
   final String branchId;
 
-  const ServerDataViewer({Key? key, required this.branchId}) : super(key: key);
+  const ServerDataViewer({super.key, required this.branchId});
 
   @override
   State<ServerDataViewer> createState() => _ServerDataViewerState();

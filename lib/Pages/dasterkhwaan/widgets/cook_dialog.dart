@@ -249,7 +249,7 @@ void showSavedFoodDialog(
 
   StockItem? selectedItem;
   if (isEdit) {
-    final dishName = existing!['dish'] as String? ?? '';
+    final dishName = existing['dish'] as String? ?? '';
     try {
       selectedItem = allStockItems.firstWhere((i) => i.name == dishName);
     } catch (_) {}
@@ -280,7 +280,7 @@ void showSavedFoodDialog(
         // can redistribute it freely (e.g. fix a wrong value).
         double availableQty = selectedItem?.quantity ?? 0;
         if (isEdit && selectedItem != null) {
-          final prevUsed    = (existing!['usedKg']   as num? ?? 0).toDouble();
+          final prevUsed    = (existing['usedKg']   as num? ?? 0).toDouble();
           final prevSaved   = (existing['savedKg']  as num? ?? 0).toDouble();
           final prevWasted  = (existing['wastedKg'] as num? ?? 0).toDouble();
           availableQty += prevUsed + prevSaved + prevWasted;
@@ -626,7 +626,9 @@ void showSavedFoodDialog(
                                   ? null
                                   : () async {
                                       if (!formKey.currentState!
-                                          .validate()) return;
+                                          .validate()) {
+                                        return;
+                                      }
                                       if (selectedItem == null) return;
 
                                       final usedKg   = double.tryParse(usedCtrl.text)   ?? 0;
@@ -745,7 +747,7 @@ void showCookDialog(
 }) {
   final isEdit = existing != null && docId != null;
   final bool isReceived =
-      isEdit ? (existing!['isReceivedFood'] as bool? ?? false) : isReceivedFood;
+      isEdit ? (existing['isReceivedFood'] as bool? ?? false) : isReceivedFood;
 
   final formKey        = GlobalKey<FormState>();
   final dishCtrl       = TextEditingController(text: existing?['dish'] ?? '');
@@ -766,7 +768,7 @@ void showCookDialog(
 
   final List<Map<String, dynamic>> ingredientRows = (!isReceived && isEdit)
       ? List<Map<String, dynamic>>.from(
-          (existing!['ingredients'] as List<dynamic>? ?? [])
+          (existing['ingredients'] as List<dynamic>? ?? [])
               .map((e) => Map<String, dynamic>.from(e as Map)))
       : (isReceived ? [] : [{'name': '', 'qty': '', 'unit': 'kg'}]);
 
@@ -1191,7 +1193,7 @@ void showCookDialog(
                               );
                               double availableQty = stockItem.quantity;
                               if (isEdit &&
-                                  !(existing!['isReceivedFood'] as bool? ?? false)) {
+                                  !(existing['isReceivedFood'] as bool? ?? false)) {
                                 final oldIng =
                                     (existing['ingredients'] as List<dynamic>? ?? [])
                                         .map((e) => Map<String, dynamic>.from(e as Map))
@@ -1245,7 +1247,7 @@ void showCookDialog(
                           final batch    = fs.batch();
 
                           if (isEdit) {
-                            if (!(existing!['isReceivedFood'] as bool? ?? false)) {
+                            if (!(existing['isReceivedFood'] as bool? ?? false)) {
                               final oldIngredients =
                                   List<Map<String, dynamic>>.from(
                                       (existing['ingredients'] as List<dynamic>? ?? [])
@@ -1599,7 +1601,7 @@ class _IngredientRowState extends State<_IngredientRow> {
           SizedBox(
             width: 68,
             child: DropdownButtonFormField<String>(
-              value: _unit,
+              initialValue: _unit,
               isDense: true,
               decoration: kInputDeco('', Icons.straighten).copyWith(
                 prefixIcon: null,

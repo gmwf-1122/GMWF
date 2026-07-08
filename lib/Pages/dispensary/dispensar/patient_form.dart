@@ -198,11 +198,11 @@ class _PatientFormState extends State<PatientForm> {
       if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
     if (found.isEmpty && serial.isNotEmpty) {
-      found = await _fetchFromPrescriptionsScanAll(serial);
+      found = await _fetchFromSerialsEmbedded(serial);
       if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
     if (found.isEmpty && serial.isNotEmpty) {
-      found = await _fetchFromSerialsEmbedded(serial);
+      found = await _fetchFromPrescriptionsScanAll(serial);
       if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
     }
     if (found.isEmpty) found = _searchHive(serial, cnic);
@@ -275,19 +275,23 @@ class _PatientFormState extends State<PatientForm> {
 
   Future<Map<String, dynamic>> _fetchFromPrescriptionsScanAll(String serial) async {
     try {
-      final cnicDocs = await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId)
-          .collection('prescriptions').get();
-      for (final cnicDoc in cnicDocs.docs) {
-        final prescSnap = await cnicDoc.reference.collection('prescriptions').doc(serial).get();
-        if (prescSnap.exists && prescSnap.data() != null) {
-          final d = Map<String, dynamic>.from(prescSnap.data()!);
-          d['id'] = prescSnap.id; d['serial'] = prescSnap.id;
-          d['patientCnic'] = cnicDoc.id; d['cnic'] = cnicDoc.id;
-          return d;
+      final snapshot = await FirebaseFirestore.instance
+          .collectionGroup('prescriptions')
+          .where(FieldPath.documentId, isEqualTo: serial)
+          .limit(1)
+          .get();
+      if (snapshot.docs.isNotEmpty) {
+        final prescSnap = snapshot.docs.first;
+        final d = Map<String, dynamic>.from(prescSnap.data());
+        d['id'] = prescSnap.id; d['serial'] = prescSnap.id;
+        final parentPath = prescSnap.reference.parent.parent;
+        if (parentPath != null) {
+          d['patientCnic'] = parentPath.id; 
+          d['cnic'] = parentPath.id;
         }
+        return d;
       }
-    } catch (e) { debugPrint('[PatientForm] Firestore scan-all error: $e'); }
+    } catch (e) { debugPrint('[PatientForm] Firestore collectionGroup error: $e'); }
     return {};
   }
 
@@ -374,7 +378,7 @@ class _PatientFormState extends State<PatientForm> {
     for (final med in medicines) {
       if (med is! Map) continue;
       final medMap = Map<String, dynamic>.from(med);
-      final medicineId = (medMap['inventoryId'] ??
+      var medicineId = (medMap['inventoryId'] ??
               medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
       final perDayRaw = medMap['quantity'] ?? medMap['qty'] ?? 0;
       final perDay = perDayRaw is num
@@ -394,9 +398,23 @@ class _PatientFormState extends State<PatientForm> {
             keyUsed = medicineId;
           }
         }
+        // Name fallback
+        if (existing == null) {
+          for (final key in stockBox.keys) {
+            final val = stockBox.get(key);
+            if (val is Map && (val['name']?.toString().toLowerCase().trim() == medMap['name']?.toString().toLowerCase().trim())) {
+              existing = val;
+              keyUsed = key.toString();
+              // Update medicineId for Firestore deduction to match the correct ID
+              medicineId = (val['id'] ?? val['medicineId'] ?? medicineId).toString();
+              break;
+            }
+          }
+        }
         if (existing is Map) {
           final updated = Map<String, dynamic>.from(existing);
-          final current = (updated['quantity'] as num?)?.toDouble() ?? 0.0;
+          final q = updated['quantity'];
+          final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
           updated['quantity'] = (current - qtyNum).clamp(0.0, double.infinity);
           stockBox.put(keyUsed, updated);
           debugPrint('[PatientForm] Hive stock $medicineId: $current → ${updated['quantity']}');
@@ -404,30 +422,38 @@ class _PatientFormState extends State<PatientForm> {
       } catch (e) {
         debugPrint('[PatientForm] Hive stock decrement failed $medicineId: $e');
       }
-      bool firestoreWritten = false;
-      try {
-        final conn = await Connectivity().checkConnectivity();
-        final online = !conn.contains(ConnectivityResult.none);
-        if (online) {
-          await FirebaseFirestore.instance
-              .collection('branches').doc(branchId)
-              .collection('inventory').doc(medicineId)
-              .update({'quantity': FieldValue.increment(-qtyNum)});
-          firestoreWritten = true;
-          debugPrint('[PatientForm] ✅ Firestore inventory $medicineId -= $qtyNum');
+      // Fire and forget Firestore update so it doesn't block UI loop
+      Future<void> updateFirestore() async {
+        try {
+          final conn = await Connectivity().checkConnectivity();
+          final online = !conn.contains(ConnectivityResult.none);
+          if (online) {
+            final docRef = FirebaseFirestore.instance
+                .collection('branches').doc(branchId)
+                .collection('inventory').doc(medicineId);
+            await FirebaseFirestore.instance.runTransaction((transaction) async {
+              final snapshot = await transaction.get(docRef);
+              if (snapshot.exists) {
+                final q = snapshot.data()?['quantity'];
+                final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+                final updated = (current - qtyNum).clamp(0.0, double.infinity);
+                transaction.update(docRef, {'quantity': updated});
+              }
+            });
+            debugPrint('[PatientForm] ✅ Firestore inventory $medicineId -= $qtyNum');
+            return;
+          }
+        } catch (e) {
+          debugPrint('[PatientForm] Firestore inventory update failed: $e');
         }
-      } catch (e) {
-        debugPrint('[PatientForm] Firestore inventory update failed: $e');
-      }
-      if (!firestoreWritten) {
+        // If offline or failed, enqueue sync
         await LocalStorageService.enqueueSync({
           'type': 'update_inventory', 'branchId': branchId,
-          'medicineId': medicineId, 'delta': -qtyNum, 'serial': serial,
-          'data': {'medicineId': medicineId, 'medicineName': medMap['name'] ?? '',
-              'delta': -qtyNum, 'serial': serial},
+          'inventoryId': medicineId, 'delta': -qtyNum,
         });
-        debugPrint('[PatientForm] 📥 Queued inventory deduction: $medicineId -= $qtyNum');
       }
+      updateFirestore();
+
     }
   }
 
@@ -438,13 +464,10 @@ class _PatientFormState extends State<PatientForm> {
       if (med is! Map) continue;
       final medMap = Map<String, dynamic>.from(med);
       final type = medMap['type']?.toString();
-      final name = medMap['name']?.toString();
       
       final t = (type ?? '').toLowerCase();
-      final n = (name ?? '').toLowerCase();
-      final isInjOrDrip = t.contains('injection') || t.contains('inj') || t.contains('drip') ||
-                          n.contains('injection') || n.contains('inj.') || n.contains('inj ');
-      final isSyringe = t.contains('syringe') || n.contains('syringe');
+      final isInjOrDrip = t.contains('injection') || t.contains('drip');
+      final isSyringe = t.contains('syringe');
       
       if (isInjOrDrip && !isSyringe) {
         final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
@@ -462,9 +485,8 @@ class _PatientFormState extends State<PatientForm> {
         for (final key in stockBox.keys) {
           final val = stockBox.get(key);
           if (val is Map) {
-            final name = (val['name'] ?? '').toString().toLowerCase();
             final type = (val['type'] ?? '').toString().toLowerCase();
-            if (name.contains('syringe') || type.contains('syringe')) {
+            if (type.contains('syringe')) {
               syringeKey = key.toString();
               syringeMap = Map<String, dynamic>.from(val);
               break;
@@ -473,41 +495,43 @@ class _PatientFormState extends State<PatientForm> {
         }
         
         if (syringeKey != null && syringeMap != null) {
-          final current = (syringeMap['quantity'] as num?)?.toDouble() ?? 0.0;
+          final q = syringeMap['quantity'];
+          final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
           syringeMap['quantity'] = (current - totalSyringesToDeduct).clamp(0.0, double.infinity);
           await stockBox.put(syringeKey, syringeMap);
           debugPrint('[PatientForm] Auto-deducted $totalSyringesToDeduct Syringe ($syringeKey) from Hive: $current → ${syringeMap['quantity']}');
           
           final rawSyringeId = syringeKey.replaceFirst('stock:', '');
-          bool firestoreWritten = false;
-          try {
-            final conn = await Connectivity().checkConnectivity();
-            final online = !conn.contains(ConnectivityResult.none);
-            if (online) {
-              await FirebaseFirestore.instance
-                  .collection('branches').doc(branchId)
-                  .collection('inventory').doc(rawSyringeId)
-                  .update({'quantity': FieldValue.increment(-totalSyringesToDeduct)});
-              firestoreWritten = true;
-              debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore');
+          Future<void> updateSyringeFirestore() async {
+            try {
+              final conn = await Connectivity().checkConnectivity();
+              final online = !conn.contains(ConnectivityResult.none);
+              if (online) {
+                final docRef = FirebaseFirestore.instance
+                    .collection('branches').doc(branchId)
+                    .collection('inventory').doc(rawSyringeId);
+                await FirebaseFirestore.instance.runTransaction((transaction) async {
+                  final snapshot = await transaction.get(docRef);
+                  if (snapshot.exists) {
+                    final q = snapshot.data()?['quantity'];
+                    final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+                    final updated = (current - totalSyringesToDeduct).clamp(0.0, double.infinity);
+                    transaction.update(docRef, {'quantity': updated});
+                  }
+                });
+                debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore');
+                return;
+              }
+            } catch (e) {
+              debugPrint('[PatientForm] Auto-deducted syringe Firestore update failed: $e');
             }
-          } catch (e) {
-            debugPrint('[PatientForm] Auto-deducted syringe Firestore update failed: $e');
-          }
-          
-          if (!firestoreWritten) {
+            // If offline or failed, enqueue sync
             await LocalStorageService.enqueueSync({
               'type': 'update_inventory', 'branchId': branchId,
-              'medicineId': rawSyringeId, 'delta': -totalSyringesToDeduct, 'serial': serial,
-              'data': {
-                'medicineId': rawSyringeId, 
-                'medicineName': syringeMap['name'] ?? 'Syringe',
-                'delta': -totalSyringesToDeduct, 
-                'serial': serial
-              },
+              'inventoryId': rawSyringeId, 'delta': -totalSyringesToDeduct,
             });
-            debugPrint('[PatientForm] 📥 Queued auto syringe deduction: $rawSyringeId -= $totalSyringesToDeduct');
           }
+          updateSyringeFirestore();
         } else {
           debugPrint('[PatientForm] ⚠️ Auto syringe deduction skipped: No syringe item found in stock_items');
         }
@@ -521,7 +545,139 @@ class _PatientFormState extends State<PatientForm> {
   Future<void> _dispenseOnly() async {
     if (_isDispensed) return;
     final days = _daysOfMedicine;
-    
+
+    final allPrescriptions = (_data['prescriptions'] as List?) ?? [];
+    final medicines = allPrescriptions
+        .where((m) => m is Map &&
+            (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
+        .toList();
+
+    // Check stock levels first
+    final stockBox = Hive.box(LocalStorageService.stockBox);
+    final List<String> insufficientMeds = [];
+
+    for (final med in medicines) {
+      if (med is! Map) continue;
+      final medMap = Map<String, dynamic>.from(med);
+      final medicineId = (medMap['inventoryId'] ??
+              medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
+      final perDayRaw = medMap['quantity'] ?? medMap['qty'] ?? 0;
+      final perDay = perDayRaw is num
+          ? perDayRaw.toDouble()
+          : double.tryParse(perDayRaw.toString()) ?? 0.0;
+      if (medicineId.isEmpty || perDay <= 0) continue;
+      
+      final multiplier = _isInjectableType(medMap['type']?.toString()) ? 1 : days;
+      final qtyNum = perDay * multiplier;
+
+      var existing = stockBox.get('stock:$medicineId');
+      if (existing == null) {
+        existing = stockBox.get(medicineId);
+      }
+      // Name fallback
+      if (existing == null) {
+        for (final val in stockBox.values) {
+          if (val is Map && (val['name']?.toString().toLowerCase().trim() == medMap['name']?.toString().toLowerCase().trim())) {
+            existing = val;
+            break;
+          }
+        }
+      }
+
+      double currentStock = 0.0;
+      if (existing is Map) {
+        final q = existing['quantity'];
+        currentStock = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+      }
+
+      if (currentStock < qtyNum) {
+        final medName = medMap['name'] ?? 'Unknown Medicine';
+        insufficientMeds.add('$medName (Required: ${qtyNum.toInt()}, Stock: ${currentStock.toInt()})');
+      }
+    }
+
+    // Check syringes if needed
+    double totalSyringesToDeduct = 0.0;
+    for (final med in allPrescriptions) {
+      if (med is! Map) continue;
+      final medMap = Map<String, dynamic>.from(med);
+      final type = medMap['type']?.toString();
+      
+      final t = (type ?? '').toLowerCase();
+      final isInjOrDrip = t.contains('injection') || t.contains('drip');
+      final isSyringe = t.contains('syringe');
+      
+      if (isInjOrDrip && !isSyringe) {
+        final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
+        final qty = qtyRaw is num ? qtyRaw.toDouble() : double.tryParse(qtyRaw.toString()) ?? 1.0;
+        totalSyringesToDeduct += qty;
+      }
+    }
+
+    if (totalSyringesToDeduct > 0.0) {
+      String? syringeKey;
+      Map<String, dynamic>? syringeMap;
+      
+      for (final key in stockBox.keys) {
+        final val = stockBox.get(key);
+        if (val is Map) {
+          final type = (val['type'] ?? '').toString().toLowerCase();
+          if (type.contains('syringe')) {
+            syringeKey = key.toString();
+            syringeMap = Map<String, dynamic>.from(val);
+            break;
+          }
+        }
+      }
+      
+      double currentSyringes = 0.0;
+      if (syringeMap != null) {
+        final q = syringeMap['quantity'];
+        currentSyringes = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+      }
+      
+      if (currentSyringes < totalSyringesToDeduct) {
+        final name = syringeMap != null ? (syringeMap['name'] ?? 'Syringe') : 'Syringe';
+        insufficientMeds.add('$name (Required: ${totalSyringesToDeduct.toInt()}, Stock: ${currentSyringes.toInt()})');
+      }
+    }
+
+    if (insufficientMeds.isNotEmpty) {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Insufficient Stock'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('The following items do not have enough stock to dispense:'),
+              const SizedBox(height: 12),
+              ...insufficientMeds.map((med) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text('• $med', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+              )),
+              const SizedBox(height: 12),
+              const Text('Please adjust or add stock before dispensing this prescription.'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     // Fallback/standard RoleTheme read to display dialogue matching exact color palette
     var t = RoleThemeScope.dataOf(context);
     if (RoleThemeScope.of(context) == RoleTheme.admin) {
@@ -628,21 +784,24 @@ class _PatientFormState extends State<PatientForm> {
           if (medicines.isNotEmpty) 'medicines': medicines,
         },
       ));
-      try {
-        final branchRef = FirebaseFirestore.instance
-            .collection('branches').doc(widget.branchId);
-        await branchRef.collection('dispensary').doc(dateKey)
-            .collection(dateKey).doc(serial)
-            .set(dispensaryRecord, SetOptions(merge: true));
-        await branchRef.collection('serials').doc(dateKey)
-            .collection(queueType).doc(serial)
-            .set(minimalUpdate, SetOptions(merge: true));
-      } catch (e) {
-        await LocalStorageService.enqueueSync({
-          'type': 'save_dispensary_record', 'branchId': widget.branchId,
-          'dateKey': dateKey, 'serial': serial, 'data': dispensaryRecord,
-        });
+      Future<void> saveToFirestore() async {
+        try {
+          final branchRef = FirebaseFirestore.instance
+              .collection('branches').doc(widget.branchId);
+          await branchRef.collection('dispensary').doc(dateKey)
+              .collection(dateKey).doc(serial)
+              .set(dispensaryRecord, SetOptions(merge: true));
+          await branchRef.collection('serials').doc(dateKey)
+              .collection(queueType).doc(serial)
+              .set(minimalUpdate, SetOptions(merge: true));
+        } catch (e) {
+          await LocalStorageService.enqueueSync({
+            'type': 'save_dispensary_record', 'branchId': widget.branchId,
+            'dateKey': dateKey, 'serial': serial, 'data': dispensaryRecord,
+          });
+        }
       }
+      saveToFirestore();
       await LocalStorageService.enqueueSync({
         'type': 'update_serial_status', 'branchId': widget.branchId,
         'dateKey': dateKey, 'queueType': queueType, 'serial': serial,

@@ -26,7 +26,9 @@ class _IdHelper {
 
   static List<String> expand(Iterable<String> ids) {
     final result = <String>{};
-    for (final id in ids) result.addAll(variants(id));
+    for (final id in ids) {
+      result.addAll(variants(id));
+    }
     return result.where((s) => s.isNotEmpty).toList();
   }
 
@@ -389,7 +391,9 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
 
       if (data['prescription'] is Map) {
         final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-        for (final key in nested.keys) data.putIfAbsent(key, () => nested[key]);
+        for (final key in nested.keys) {
+          data.putIfAbsent(key, () => nested[key]);
+        }
       }
 
       data['serial'] ??= data['id'] ?? doc.id;
@@ -713,7 +717,9 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
       final data = Map<String, dynamic>.from(doc.data() as Map);
       if (data['prescription'] is Map) {
         final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-        for (final key in nested.keys) data.putIfAbsent(key, () => nested[key]);
+        for (final key in nested.keys) {
+          data.putIfAbsent(key, () => nested[key]);
+        }
       }
       data['serial'] ??= data['id'] ?? doc.id;
       if (!identity.docBelongsToThisChild(data)) continue;
@@ -1250,7 +1256,7 @@ class _HistoryEntry {
           timing:    m['timing']?.toString() ?? '',
           meal:      m['meal']?.toString() ?? '',
           dosage:    m['dosage']?.toString() ?? m['dose']?.toString() ?? '',
-          quantity:  (m['quantity'] as num?)?.toInt() ?? 1,
+          quantity:  (m['quantity'] is num ? (m['quantity'] as num).toInt() : int.tryParse(m['quantity']?.toString() ?? '') ?? 1),
           frequency: m['frequency']?.toString() ?? '',
         ));
       }
@@ -1276,7 +1282,7 @@ class _HistoryEntry {
       vitals:    (data['vitals'] as Map?)?.cast<String, dynamic>() ?? {},
       raw:       data,
       source:    source,
-      days:      (data['daysOfMedicine'] as num?)?.toInt() ?? 1,
+      days:      (data['daysOfMedicine'] is num ? (data['daysOfMedicine'] as num).toInt() : int.tryParse(data['daysOfMedicine']?.toString() ?? '') ?? 1),
     );
   }
 

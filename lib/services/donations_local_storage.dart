@@ -21,6 +21,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:collection/collection.dart';
 
 import 'local_storage_service.dart';
 import '../models/donation_models.dart';
@@ -44,11 +45,136 @@ class DonationsLocalStorage {
     await LocalStorageService.openBoxSafe(LocalStorageService.syncBox);
     // Required by LocalStorageService.nextReceiptNumber() offline path
     await LocalStorageService.openBoxSafe('app_settings');
+    await LocalStorageService.openBoxSafe('app_flags');
+
 
     debugPrint('[DonationsLocalStorage] Boxes opened safely. Init sequence FINISHED.');
     
     // Resume receipt sequence from max existing if possible
     await _syncReceiptSequence();
+
+    // Migrate duplicate clean receipt firestoreIds to unique ones to prevent collision overwrites in Firestore
+    await migrateDuplicateReceiptFirestoreIds();
+
+    // Clean up any incorrect 'all' branch garbage — runs only once per install
+    // to avoid a Firestore read on every cold boot.
+    final flags = Hive.box('app_flags');
+    if (flags.get('all_branch_garbage_cleaned', defaultValue: false) != true) {
+      await _cleanAllBranchGarbage();
+      await flags.put('all_branch_garbage_cleaned', true);
+    }
+  }
+
+  static Future<void> _cleanAllBranchGarbage() async {
+    try {
+      final box = Hive.box(donationsBox);
+      final syncBox = Hive.box(LocalStorageService.syncBox);
+
+      // 1. Delete local 'all' records
+      final localKeysToDelete = <dynamic>[];
+      for (var key in box.keys) {
+        final keyStr = key.toString();
+        if (keyStr.startsWith('all_') || keyStr.startsWith('all__')) {
+          localKeysToDelete.add(key);
+        }
+      }
+      if (localKeysToDelete.isNotEmpty) {
+        for (var k in localKeysToDelete) {
+          await box.delete(k);
+        }
+        await box.flush();
+        debugPrint('[DonationsLS] Cleaned ${localKeysToDelete.length} local garbage "all" records.');
+      }
+
+      // 2. Delete queued 'all' records from syncBox
+      final syncKeysToDelete = <dynamic>[];
+      for (var key in syncBox.keys) {
+        final val = syncBox.get(key);
+        if (val is Map) {
+          final bId = val['branchId']?.toString();
+          if (bId == 'all') {
+            syncKeysToDelete.add(key);
+          }
+        }
+      }
+      if (syncKeysToDelete.isNotEmpty) {
+        for (var k in syncKeysToDelete) {
+          await syncBox.delete(k);
+        }
+        debugPrint('[DonationsLS] Cleaned ${syncKeysToDelete.length} queued garbage "all" sync tasks.');
+      }
+
+      // 3. Clear remote 'all' branch subcollection in Firestore
+      FirebaseFirestore.instance
+          .collection('branches')
+          .doc('all')
+          .collection('donations')
+          .get()
+          .then((snap) async {
+            if (snap.docs.isNotEmpty) {
+              debugPrint('[DonationsLS] Found ${snap.docs.length} garbage documents in branches/all/donations. Deleting...');
+              for (final doc in snap.docs) {
+                await doc.reference.delete();
+              }
+              debugPrint('[DonationsLS] Garbage remote "all" documents deleted.');
+            }
+          }).catchError((e) {
+            debugPrint('[DonationsLS] Error clearing remote "all" branch: $e');
+          });
+
+    } catch (e) {
+      debugPrint('[DonationsLS] Error cleaning "all" garbage: $e');
+    }
+  }
+
+  static Future<void> migrateDuplicateReceiptFirestoreIds() async {
+    final box = Hive.box(donationsBox);
+    int migratedCount = 0;
+    
+    for (var key in box.keys.toList()) {
+      final raw = box.get(key);
+      if (raw == null || raw is! Map) continue;
+      
+      final data = Map<String, dynamic>.from(raw);
+      final cleanRcpt = data['receiptNoClean']?.toString() ?? '';
+      final localId = data['localId']?.toString() ?? '';
+      final currentFsId = data['firestoreId']?.toString() ?? '';
+      final branchId = data['branchId']?.toString() ?? 'gujrat';
+      
+      if (cleanRcpt.isNotEmpty && localId.isNotEmpty && currentFsId == cleanRcpt) {
+        final newFsId = '${cleanRcpt}_$localId';
+        final updated = {
+          ...data,
+          'firestoreId': newFsId,
+          'syncStatus': 'pending',
+          'lastUpdatedAt': DateTime.now().toUtc().toIso8601String(),
+        };
+        await box.put(key, updated);
+        
+        // Enqueue deletion of the old document
+        await LocalStorageService.enqueueSync({
+          'type': 'delete_donation',
+          'branchId': branchId,
+          'firestoreId': cleanRcpt,
+        });
+
+        // Enqueue sync for this updated unique document
+        await LocalStorageService.enqueueSync({
+          'type':     'save_donation',
+          'branchId': branchId,
+          'localId':  localId,
+          'hiveKey':  key.toString(),
+          'data':     _sanitize(updated),
+        });
+        
+        migratedCount++;
+      }
+    }
+    
+    if (migratedCount > 0) {
+      await box.flush();
+      debugPrint('[DonationsLS] Migrated $migratedCount records to unique firestoreIds and enqueued for sync & cleanup.');
+    }
   }
 
   static Future<void> _syncReceiptSequence() async {
@@ -134,7 +260,9 @@ class DonationsLocalStorage {
     required Map<String, dynamic> data,
   }) async {
     final branchIdNorm = branchId.toLowerCase().trim();
-    final localId  = _newLocalId();
+    final localId  = (data['localId'] as String?)?.isNotEmpty == true
+        ? data['localId'] as String
+        : _newLocalId();
     final date     = (data['date'] as String?) ?? _today();
     final key      = _donationKey(branchIdNorm, date, localId);
 
@@ -165,7 +293,14 @@ class DonationsLocalStorage {
     final isAnonymous = data['isAnonymous'] as bool? ?? false;
     final bankAcc     = (data['bankAccountNumber'] as String? ?? '').trim();
 
-    if (!isAnonymous && (phone.isNotEmpty || donorId.isNotEmpty || donorName.isNotEmpty)) {
+    final donorNameNorm = donorName.toLowerCase().trim();
+    final bool isAnonymousEffective = isAnonymous ||
+        donorNameNorm == 'valued donor' ||
+        donorNameNorm == 'anonymous';
+
+    recordMap['isAnonymous'] = isAnonymousEffective;
+
+    if (!isAnonymousEffective && (phone.isNotEmpty || donorId.isNotEmpty || donorName.isNotEmpty)) {
       DonorRecord? active;
 
       // Search GLOBALLY across all branches by donorId first, then phone
@@ -238,7 +373,8 @@ class DonationsLocalStorage {
     }
 
     final cleanRcpt = recordMap['receiptNoClean'] as String;
-    recordMap['firestoreId'] = cleanRcpt; // Ensure FS ID is the receipt number
+    // Append localId to guarantee uniqueness and prevent collisions/overwriting in Firestore.
+    recordMap['firestoreId'] = cleanRcpt.isNotEmpty ? '${cleanRcpt}_$localId' : localId;
     
     final sanitized = _sanitize(recordMap);
 
@@ -273,6 +409,22 @@ class DonationsLocalStorage {
     return DonationRecord.fromMap(sanitized, key);
   }
 
+  static bool isReceiptNoDuplicate(String receiptNo) {
+    if (receiptNo.trim().isEmpty) return false;
+    final clean = cleanReceiptNumber(receiptNo.trim());
+    final box = Hive.box(donationsBox);
+    for (var val in box.values) {
+      if (val is Map) {
+        if (val['syncStatus'] == 'deleted') continue;
+        final rcpt = cleanReceiptNumber(val['receiptNo']?.toString() ?? '');
+        if (rcpt == clean) return true;
+        final bookRcpt = cleanReceiptNumber(val['bookReceiptNo']?.toString() ?? '');
+        if (bookRcpt == clean) return true;
+      }
+    }
+    return false;
+  }
+
   static Future<void> updateDonationField(
     String hiveKey,
     Map<String, dynamic> fields, {
@@ -289,23 +441,39 @@ class DonationsLocalStorage {
       return;
     }
     final now = DateTime.now().toUtc().toIso8601String();
+
+    // Check if the date has changed to update the Hive key accordingly
+    final String oldDate = (raw as Map)['date']?.toString() ?? '';
+    final String newDate = fields['date']?.toString() ?? oldDate;
+    String finalKey = hiveKey;
+
     final updated = Map<String, dynamic>.from(raw as Map)
       ..addAll(_sanitize(fields))
       ..['lastUpdatedAt'] = now
       ..['isEdited'] = true;
 
-    await box.put(hiveKey, updated);
+    if (newDate != oldDate && newDate.isNotEmpty) {
+      final localId = (raw as Map)['localId']?.toString() ?? hiveKey.split('__').last;
+      finalKey = _donationKey(branchId.toLowerCase().trim(), newDate, localId);
+      updated['hiveKey'] = finalKey;
+
+      // Save under new key and delete old key
+      await box.put(finalKey, updated);
+      await box.delete(hiveKey);
+    } else {
+      await box.put(hiveKey, updated);
+    }
     await box.flush();
-    debugPrint('[DonationsLS] Updated → $hiveKey');
+    debugPrint('[DonationsLS] Updated → oldKey: $hiveKey, finalKey: $finalKey');
 
     // ── ENQUEUE AUDIT LOG ───────────────────────────────────────────────────
     final user = updated['recordedBy'] ?? 'Unknown';
     final userId = updated['collectorId'] ?? 'unknown';
-    
+
     await enqueueAuditLog(
       branchId: branchId,
       collection: 'donations',
-      documentId: (updated['firestoreId'] as String?) ?? (updated['localId'] as String?) ?? hiveKey,
+      documentId: (updated['firestoreId'] as String?) ?? (updated['localId'] as String?) ?? finalKey,
       action: 'update',
       userId: userId,
       username: user,
@@ -320,14 +488,15 @@ class DonationsLocalStorage {
         'type':        'update_donation',
         'branchId':    branchId,
         'firestoreId': fsId,
+        'hiveKey':     finalKey,
         'fields':      _sanitize(updated), // Send full updated map for conflict resolution
       });
     } else {
       await LocalStorageService.enqueueSync({
         'type':     'save_donation',
         'branchId': branchId,
-        'localId':  (updated['localId'] as String?) ?? hiveKey,
-        'hiveKey':  hiveKey,
+        'localId':  (updated['localId'] as String?) ?? finalKey,
+        'hiveKey':  finalKey,
         'data':     updated,
       });
     }
@@ -377,6 +546,51 @@ class DonationsLocalStorage {
     await box.put(hiveKey, updated);
     await box.flush();
     debugPrint('[DonationsLS] Synced → $hiveKey → $firestoreId');
+  }
+
+  static Future<void> mergeRemoteDonation(
+    String hiveKey,
+    String firestoreId,
+    Map<String, dynamic> remoteData,
+  ) async {
+    final box = Hive.box(donationsBox);
+    final existing = box.get(hiveKey);
+    final Map<String, dynamic> merged = existing != null
+        ? Map<String, dynamic>.from(existing as Map)
+        : <String, dynamic>{};
+
+    merged.addAll(_sanitize({
+      ...remoteData,
+      'firestoreId': firestoreId,
+      'hiveKey': hiveKey,
+      'syncStatus': 'synced',
+    }));
+
+    await box.put(hiveKey, merged);
+    await box.flush();
+    debugPrint('[DonationsLS] Merging remote donation -> $hiveKey');
+  }
+
+  static Future<void> mergeRemoteDonor(
+    String donorId,
+    Map<String, dynamic> remoteData,
+  ) async {
+    final box = Hive.box(donorsBox);
+    final key = _donorKey(donorId);
+    final existing = box.get(key);
+    final Map<String, dynamic> merged = existing != null
+        ? Map<String, dynamic>.from(existing as Map)
+        : <String, dynamic>{};
+
+    merged.addAll(_sanitize({
+      ...remoteData,
+      'id': donorId,
+      'syncStatus': 'synced',
+    }));
+
+    await box.put(key, merged);
+    await box.flush();
+    debugPrint('[DonationsLS] Merging remote donor -> $donorId');
   }
 
 
@@ -439,6 +653,19 @@ class DonationsLocalStorage {
         .toList();
   }
 
+  /// Fetch a page of donations for pagination.
+  static Future<List<DonationRecord>> fetchPage({
+    required String branchId,
+    required int offset,
+    required int limit,
+  }) async {
+    final all = getAllDonations(branchId);
+    // Ensure sorted newest first (date descending)
+    all.sort((a, b) => b.date.compareTo(a.date));
+    if (offset >= all.length) return [];
+    final end = (offset + limit) > all.length ? all.length : offset + limit;
+    return all.sublist(offset, end);
+  }
   /// Alias used by SubmissionService.getUnsubmittedPool().
   static List<DonationRecord> getDonationsList(String branchId) =>
       getAllDonations(branchId);
@@ -548,8 +775,15 @@ class DonationsLocalStorage {
   static Future<void> saveDonor(DonorRecord donor) async {
     final key = _donorKey(donor.id);
     final now = DateTime.now().toUtc().toIso8601String();
+    
+    // Roti donor fix
+    final phones = donor.phones.isEmpty && (donor.name.toLowerCase().contains('roti')) 
+        ? ['00000000000'] 
+        : donor.phones;
+
     final sanitized = _sanitize({
       ...donor.toMap(), 
+      'phones': phones,
       'lastUpdatedAt': now,
       'syncStatus': 'pending',
       'isEdited': true,
@@ -686,24 +920,35 @@ class DonationsLocalStorage {
       final cutoff = DateTime.now().subtract(Duration(days: days));
       final cutoffStr = DateFormat('yyyy-MM-dd').format(cutoff);
 
-      Query<Map<String, dynamic>> query;
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+
       if (branchId == 'all' || branchId.isEmpty) {
-        query = FirebaseFirestore.instance
-            .collectionGroup('donations')
-            .where('date', isGreaterThanOrEqualTo: cutoffStr);
+        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
+        for (final branchDoc in branchesSnap.docs) {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchDoc.id)
+              .collection('donations')
+              .where('date', isGreaterThanOrEqualTo: cutoffStr)
+              .get();
+          docs.addAll(snap.docs);
+        }
       } else {
-        query = FirebaseFirestore.instance
+        final snap = await FirebaseFirestore.instance
             .collection('branches')
             .doc(branchId)
             .collection('donations')
-            .where('date', isGreaterThanOrEqualTo: cutoffStr);
+            .where('date', isGreaterThanOrEqualTo: cutoffStr)
+            .get();
+        docs.addAll(snap.docs);
       }
 
-      final snap = await query.get();
       final box = Hive.box(donationsBox);
       int saved = 0;
+      final Set<String> remoteKeys = {};
+      final Map<String, dynamic> updates = {};
 
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         if (doc.id == 'credit_ledger') continue;
         final d = doc.data();
 
@@ -714,18 +959,17 @@ class DonationsLocalStorage {
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
+        remoteKeys.add(key);
 
         final existing = box.get(key);
         if (existing == null) {
-          await box.put(
-              key,
-              _sanitize({
-                ...d,
-                'firestoreId': doc.id,
-                'localId': localId,
-                'hiveKey': key,
-                'syncStatus': 'synced',
-              }));
+          updates[key] = _sanitize({
+            ...d,
+            'firestoreId': doc.id,
+            'localId': localId,
+            'hiveKey': key,
+            'syncStatus': 'synced',
+          });
           saved++;
         } else {
           final ex = Map<String, dynamic>.from(existing as Map);
@@ -741,16 +985,58 @@ class DonationsLocalStorage {
             if (cloudIsNewer) {
               ex.addAll(_sanitize({...d, 'firestoreId': doc.id, 'syncStatus': 'synced'}));
             }
-            await box.put(key, ex);
+            updates[key] = ex;
             saved++;
           }
         }
       }
 
+      if (updates.isNotEmpty) {
+        await box.putAll(updates);
+      }
+
+      // Cleanup local records that were deleted on Firestore
+      final isGlobal = branchId == 'all' || branchId.isEmpty;
+      final normBranch = branchId.toLowerCase().trim();
+      final keysToDelete = <String>[];
+
+      for (var key in box.keys) {
+        final keyStr = key.toString();
+        if (keyStr.contains('_credit_')) continue;
+
+        // Check if key belongs to the branch we are syncing
+        final belongsToBranch = isGlobal ||
+            keyStr.startsWith('${normBranch}_') ||
+            keyStr.startsWith('${normBranch}__');
+
+        if (!belongsToBranch) continue;
+
+        final raw = box.get(key);
+        if (raw == null || raw is! Map) continue;
+
+        final date = raw['date']?.toString() ?? '';
+        if (date.compareTo(cutoffStr) < 0) continue; // Out of date range
+
+        final syncStatus = raw['syncStatus']?.toString();
+        // Do not touch pending creations/edits
+        if (syncStatus == 'pending') continue;
+
+        // If not found in Firestore, it was deleted remotely!
+        if (!remoteKeys.contains(keyStr)) {
+          keysToDelete.add(keyStr);
+        }
+      }
+
+      if (keysToDelete.isNotEmpty) {
+        await box.deleteAll(keysToDelete);
+        debugPrint('[DonationsLS] Cleanup: Deleted ${keysToDelete.length} local records that were deleted on Firestore.');
+      }
+
+      await _syncReceiptSequence();
       await box.flush();
       debugPrint(
           '[DonationsLS] downloadAllDonations: merged $saved records '
-          '(${snap.docs.length} from Firestore, last $days days)');
+          '(${docs.length} from Firestore, last $days days)');
     } catch (e) {
       debugPrint('[DonationsLS] downloadAllDonations error: $e');
     }
@@ -759,8 +1045,22 @@ class DonationsLocalStorage {
   static Future<void> downloadTodayDonations(String branchId) =>
       downloadAllDonations(branchId, days: 1);
 
-  static Future<void> downloadDonors(String branchId) async {
+  static Future<void> downloadDonors(String branchId, {bool force = false}) async {
     try {
+      // ── 30-minute cooldown guard ──────────────────────────────────────────
+      if (!force) {
+        final settings = Hive.box('app_settings');
+        final ttlKey = 'donors_last_download_$branchId';
+        final lastStr = settings.get(ttlKey) as String?;
+        final last = lastStr != null ? DateTime.tryParse(lastStr) : null;
+        final now = DateTime.now();
+        if (last != null && now.difference(last) < const Duration(minutes: 30)) {
+          debugPrint('[DonationsLS] downloadDonors cooldown active for $branchId — skipping');
+          return;
+        }
+        await settings.put(ttlKey, now.toIso8601String());
+      }
+
       final box = Hive.box(donorsBox);
       
       QuerySnapshot<Map<String, dynamic>> branchSnap;
@@ -774,17 +1074,20 @@ class DonationsLocalStorage {
             .get();
       }
 
-      final rootSnap = await FirebaseFirestore.instance.collection('donors').get();
+      final bool isGlobalRequest = branchId == 'all' || branchId.isEmpty;
+      final rootSnap = isGlobalRequest
+          ? await FirebaseFirestore.instance.collection('donors').get()
+          : null;
 
-      final dnrBox = Hive.box(donorsBox);
+      final Map<String, dynamic> donorUpdates = {};
 
-      Future<void> put(QueryDocumentSnapshot<Map<String, dynamic>> doc) async {
+      void put(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
         final d = doc.data();
         final key = _donorKey(doc.id);
-        final existing = box.get(key);
+        final existing = box.get(key) ?? donorUpdates[key];
         
         if (existing == null) {
-          await box.put(key, _sanitize({...d, 'id': doc.id, 'syncStatus': 'synced'}));
+          donorUpdates[key] = _sanitize({...d, 'id': doc.id, 'syncStatus': 'synced'});
         } else {
           final ex = Map<String, dynamic>.from(existing as Map);
           // Only overwrite if Firestore has a NEWER or equal lastUpdatedAt
@@ -795,22 +1098,28 @@ class DonationsLocalStorage {
           
           if (ex['syncStatus'] != 'pending' || cloudIsNewer) {
             final merged = {...ex, ..._sanitize(d), 'id': doc.id, 'syncStatus': 'synced'};
-            await box.put(key, merged);
+            donorUpdates[key] = merged;
           }
         }
       }
 
       for (final doc in branchSnap.docs) {
-        await put(doc);
+        put(doc);
       }
-      for (final doc in rootSnap.docs) {
-        await put(doc);
+      if (rootSnap != null) {
+        for (final doc in rootSnap.docs) {
+          put(doc);
+        }
+      }
+
+      if (donorUpdates.isNotEmpty) {
+        await box.putAll(donorUpdates);
       }
 
       await box.flush();
       debugPrint(
           '[DonationsLS] downloadDonors: '
-          '${branchSnap.docs.length} branch + ${rootSnap.docs.length} root');
+          '${branchSnap.docs.length} branch + ${rootSnap?.docs.length ?? 0} root');
     } catch (e) {
       debugPrint('[DonationsLS] downloadDonors error: $e');
     }

@@ -76,67 +76,90 @@ class DashboardEmptyState extends StatelessWidget {
                 paymentMethodFilter != 'All' ||
                 minAmount != null ||
                 maxAmount != null)
-              ScaleButton(
+              _EmptyStateActionButton(
                 onTap: onClearFilters,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.2),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4)),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.filter_alt_off_rounded,
-                          size: 18, color: Colors.white),
-                      SizedBox(width: 10),
-                      Text('Clear All Filters',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
-                    ],
-                  ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.filter_alt_off_rounded,
+                        size: 18, color: Colors.white),
+                    SizedBox(width: 10),
+                    Text('Clear All Filters',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white)),
+                  ],
                 ),
               )
             else
-              ScaleButton(
+              _EmptyStateActionButton(
                 onTap: onAddTap,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.2),
-                          blurRadius: 10,
-                          offset: const Offset(0, 4)),
-                    ],
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.add_rounded, size: 20, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text('Record First Donation',
-                          style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white)),
-                    ],
-                  ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                    SizedBox(width: 8),
+                    Text('Record First Donation',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white)),
+                  ],
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyStateActionButton extends StatefulWidget {
+  final VoidCallback onTap;
+  final Widget child;
+
+  const _EmptyStateActionButton({
+    required this.onTap,
+    required this.child,
+  });
+
+  @override
+  State<_EmptyStateActionButton> createState() => _EmptyStateActionButtonState();
+}
+
+class _EmptyStateActionButtonState extends State<_EmptyStateActionButton> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      cursor: SystemMouseCursors.click,
+      child: ScaleButton(
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _isHovered ? 1.03 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            decoration: BoxDecoration(
+              color: _isHovered ? AppColors.primaryMid : AppColors.primary,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: _isHovered ? 0.35 : 0.2),
+                  blurRadius: _isHovered ? 16 : 10,
+                  offset: _isHovered ? const Offset(0, 6) : const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: widget.child,
+          ),
         ),
       ),
     );

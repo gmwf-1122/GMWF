@@ -29,7 +29,7 @@ void showAddStockDialog(
   final formKey  = GlobalKey<FormState>();
   final nameCtrl = TextEditingController(text: editItem?.name ?? '');
   final qtyCtrl  = TextEditingController(
-      text: isEdit ? '${editItem!.quantity}' : '0');
+      text: isEdit ? '${editItem.quantity}' : '0');
   String unit = editItem?.unit ?? 'kg';
 
   const units = [
@@ -146,7 +146,7 @@ void showAddStockDialog(
                 const SizedBox(width: 12),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: unit,
+                    initialValue: unit,
                     decoration: kInputDeco('Unit', Icons.straighten),
                     items: units
                         .map((u) => DropdownMenuItem(

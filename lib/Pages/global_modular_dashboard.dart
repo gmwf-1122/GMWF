@@ -2,7 +2,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'dart:async';
 
 import '../models/module_registry.dart';
@@ -11,8 +14,11 @@ import '../theme/role_theme_provider.dart';
 import 'settings_page.dart';
 import 'support_page.dart';
 import '../widgets/global_module_wrapper.dart';
+import '../widgets/home_snapshot_widgets.dart';
 import '../services/sync_service.dart';
 import 'admin/data_cleanup_screen.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../services/local_storage_service.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -125,6 +131,9 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
         () { if (mounted) _sidebarCtrl.forward(); });
 
     _recomputeFilteredModules();
+    if (!kIsWeb && (_isGlobalExecutive || _isFullExecutive)) {
+      _startBackgroundFullSync();
+    }
   }
 
   // ── Role helpers ──────────────────────────────────────────────────────────
@@ -187,6 +196,146 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     _cachedFilteredModules = filtered.toList();
   }
 
+  void updateSearchQuery(String query) {
+    setState(() {
+      _searchQuery = query;
+    });
+    _recomputeFilteredModules();
+  }
+
+  void clearSearch() {
+    setState(() {
+      _searchCtrl.clear();
+      _searchQuery = '';
+    });
+    _recomputeFilteredModules();
+  }
+
+  Future<void> _startBackgroundFullSync() async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
+      final branches = snap.docs.map((d) => d.id).toList();
+
+      for (final originalBId in branches) {
+        final bId = originalBId.toLowerCase().trim();
+        // 1. Initial full download if not already complete (patients, inventory, tokens, donations, donors)
+        await SyncService().initialFullDownload(bId);
+
+        // 2. Pre-cache dispensary records for the last 30 days
+        final now = DateTime.now();
+        final start = now.subtract(const Duration(days: 30));
+        final end = now.add(const Duration(days: 1));
+
+        final df = DateFormat('ddMMyy');
+        final days = <String>[];
+        for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
+          days.add(df.format(d));
+        }
+
+        final missingDays = <String>[];
+        for (final day in days) {
+          final cached = LocalStorageService.getBranchDayCache(bId, day, 'dispensary');
+          if (cached == null) {
+            missingDays.add(day);
+          }
+        }
+
+        if (missingDays.isNotEmpty) {
+          // Fetch raw docs in parallel
+          final Map<String, List<Map<String, dynamic>>> rawDocsMap = {};
+          final fetchRawFutures = missingDays.map((day) async {
+            try {
+              final snapDocs = await FirebaseFirestore.instance
+                  .collection('branches/$bId/dispensary/$day/$day')
+                  .get();
+              final docs = snapDocs.docs.map((doc) {
+                final data = Map<String, dynamic>.from(doc.data());
+                data['id'] = doc.id;
+                data['_syncDayKey'] = day;
+                return data;
+              }).toList();
+              rawDocsMap[day] = docs;
+            } catch (_) {}
+          });
+          await Future.wait(fetchRawFutures);
+
+          // Combine raw docs
+          final List<Map<String, dynamic>> allRawDocs = [];
+          for (final dayDocs in rawDocsMap.values) {
+            allRawDocs.addAll(dayDocs);
+          }
+
+          if (allRawDocs.isNotEmpty) {
+            List<Map<String, dynamic>> enrichedAll;
+            try {
+              enrichedAll = await LocalStorageService.enrichRawDocs(bId, allRawDocs);
+            } catch (e) {
+              debugPrint('[GlobalModularDashboard] enrichRawDocs failed, using raw docs: $e');
+              enrichedAll = allRawDocs.map((d) {
+                String firstNonEmpty(List<dynamic> candidates) {
+                  for (final c in candidates) {
+                    final s = c?.toString().trim() ?? '';
+                    if (s.isNotEmpty && s != 'null' && s != 'N/A') return s;
+                  }
+                  return '';
+                }
+                return {
+                  ...d,
+                  'name': firstNonEmpty([d['patientName'], d['name'], 'Unknown']),
+                  'phone': d['phone']?.toString() ?? 'N/A',
+                  'age': d['age']?.toString() ?? d['patientAge']?.toString() ?? 'N/A',
+                  'gender': d['gender']?.toString() ?? d['patientGender']?.toString() ?? 'N/A',
+                  'displayCnic': firstNonEmpty([d['patientCnic'], d['cnic'], d['guardianCnic'], 'N/A']),
+                  'isChild': (d['guardianCnic'] ?? '').toString().isNotEmpty && (d['patientCnic'] ?? d['cnic'] ?? '').toString().isEmpty,
+                  'doctorName': firstNonEmpty([d['doctorName'], d['prescribedBy'], 'Unknown']),
+                  'dispenserName': firstNonEmpty([d['dispenserName'], d['dispensedBy'], 'Unknown']),
+                  'tokenBy': firstNonEmpty([d['createdByName'], d['tokenBy'], d['createdBy'], 'Unknown']),
+                  'daysOfMedicine': (d['daysOfMedicine'] as num?)?.toInt() ?? 1,
+                  'frequentFlag': d['frequentFlag'] ?? false,
+                };
+              }).toList();
+            }
+
+            // Group by day and cache
+            final Map<String, List<Map<String, dynamic>>> enrichedByDay = {};
+            final displayFormat = DateFormat('dd MMM yyyy');
+
+            for (final d in enrichedAll) {
+              final day = d['_syncDayKey'] as String? ?? df.format(now);
+              d.remove('_syncDayKey');
+              d['dispenseDate'] = displayFormat.format(LocalStorageService.parseDdMMyy(day));
+              d['type'] = _resolveType(d);
+              enrichedByDay.putIfAbsent(day, () => []).add(d);
+            }
+
+            for (final day in missingDays) {
+              final dayEnriched = enrichedByDay[day] ?? [];
+              await LocalStorageService.putBranchDayCache(bId, day, 'dispensary', dayEnriched);
+            }
+          } else {
+            // Write empty cache for days with no records so we don't query Firestore again
+            for (final day in missingDays) {
+              await LocalStorageService.putBranchDayCache(bId, day, 'dispensary', []);
+            }
+          }
+        }
+      }
+      debugPrint('[GlobalModularDashboard] Background full branch sync completed successfully.');
+    } catch (e) {
+      debugPrint('[GlobalModularDashboard] Background full branch sync error: $e');
+    }
+  }
+
+  String _resolveType(Map<String, dynamic> data) {
+    final raw = (data['queueType'] ?? data['type'] ?? '').toString().toLowerCase().trim();
+    switch (raw) {
+      case 'zakat':     return 'zakat';
+      case 'non-zakat': return 'non-zakat';
+      case 'gmwf':      return 'gmwf';
+      default:          return 'Unknown';
+    }
+  }
+
   void _logout() async {
     await FirebaseAuth.instance.signOut();
     if (mounted) {
@@ -232,8 +381,8 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (_, anim, __) => dest,
-        transitionsBuilder: (_, anim, __, child) => FadeTransition(
+        pageBuilder: (_, anim, _) => dest,
+        transitionsBuilder: (_, anim, _, child) => FadeTransition(
           opacity: CurvedAnimation(parent: anim, curve: Curves.easeOut),
           child: SlideTransition(
             position: Tween<Offset>(
@@ -253,36 +402,55 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   @override
   Widget build(BuildContext context) {
     final roleTheme = RoleThemeData.fromString(_role);
-    Color? customColor;
-    final prefColorStr = widget.userData['preferredColor'] as String?;
-    if (prefColorStr != null && prefColorStr.isNotEmpty) {
-      try {
-        final hex = prefColorStr.replaceAll('#', '');
-        customColor = Color(int.parse('FF$hex', radix: 16));
-      } catch (_) {}
-    }
 
-    return RoleThemeScope(
-      role: roleTheme,
-      child: Builder(builder: (ctx) {
-        final t = RoleThemeData.of(roleTheme, customColor);
-        final isDesktop = MediaQuery.of(ctx).size.width >= 900;
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(),
+      builder: (context, Box box, child) {
+        Color? customColor;
+        
+        // 1. Try local settings override first
+        final localHex = box.get('custom_accent_color') as String?;
+        if (localHex != null && localHex.isNotEmpty) {
+          try {
+            final hex = localHex.replaceAll('#', '');
+            customColor = Color(int.parse('FF$hex', radix: 16));
+          } catch (_) {}
+        }
+        
+        // 2. Fallback to user metadata preference
+        if (customColor == null) {
+          final prefColorStr = widget.userData['preferredColor'] as String?;
+          if (prefColorStr != null && prefColorStr.isNotEmpty) {
+            try {
+              final hex = prefColorStr.replaceAll('#', '');
+              customColor = Color(int.parse('FF$hex', radix: 16));
+            } catch (_) {}
+          }
+        }
 
-        return FadeTransition(
-          opacity: _pageOpacity,
-          child: Scaffold(
-            backgroundColor: t.bg,
-            body: isDesktop
-                ? Row(children: [
-                    _Sidebar(state: this, t: t),
-                    Expanded(
-                        child:
-                            _MainContent(state: this, t: t, isDesktop: true)),
-                  ])
-                : _MobileLayout(state: this, t: t),
-          ),
+        return RoleThemeScope(
+          role: roleTheme,
+          child: Builder(builder: (ctx) {
+            final t = RoleThemeData.of(roleTheme, customColor);
+            final isDesktop = MediaQuery.of(ctx).size.width >= 900;
+
+            return FadeTransition(
+              opacity: _pageOpacity,
+              child: Scaffold(
+                backgroundColor: t.bg,
+                body: isDesktop
+                    ? Row(children: [
+                        _Sidebar(state: this, t: t),
+                        Expanded(
+                            child:
+                                _MainContent(state: this, t: t, isDesktop: true)),
+                      ])
+                    : _MobileLayout(state: this, t: t),
+              ),
+            );
+          }),
         );
-      }),
+      },
     );
   }
 }
@@ -623,7 +791,7 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
   bool _hov = false;
 
   static const _icons = {
-    DashboardCategoryFilter.overall: Icons.grid_view_rounded,
+    DashboardCategoryFilter.overall: Icons.home_outlined,
     DashboardCategoryFilter.office: Icons.business_center_outlined,
     DashboardCategoryFilter.dispensary: Icons.local_pharmacy_outlined,
     DashboardCategoryFilter.dasterkhwaan: Icons.restaurant_outlined,
@@ -636,7 +804,7 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
     final sel = widget.selected;
     final dark = widget.dark;
     final label = widget.cat == DashboardCategoryFilter.overall
-        ? 'All Modules'
+        ? 'Dashboard'
         : widget.cat.name[0].toUpperCase() + widget.cat.name.substring(1);
 
     return MouseRegion(
@@ -1098,7 +1266,6 @@ class _MainContent extends StatelessWidget {
   const _MainContent(
       {required this.state, required this.t, required this.isDesktop});
 
-  bool get _dark => state._isGlobalExecutive;
   bool get _showMobileChips =>
       !isDesktop && state._mobileShowsCategoryChips && !state._isSupervisor;
 
@@ -1107,18 +1274,21 @@ class _MainContent extends StatelessWidget {
     final filtered = state._cachedFilteredModules;
     final double hPad = isDesktop ? 36 : 20;
 
+    final showSnapshot = state._selectedCategory == DashboardCategoryFilter.overall && state._searchQuery.isEmpty;
+
     return CustomScrollView(
       physics: const BouncingScrollPhysics(),
       slivers: [
         SliverToBoxAdapter(
           child: _HeroHeader(state: state, t: t, isDesktop: isDesktop),
         ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 0),
-            child: _SearchBar(state: state, t: t),
+        if (!showSnapshot)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(hPad, 16, hPad, 0),
+              child: _SearchBar(state: state, t: t),
+            ),
           ),
-        ),
         if (_showMobileChips)
           SliverToBoxAdapter(
             child: Padding(
@@ -1127,24 +1297,46 @@ class _MainContent extends StatelessWidget {
               child: _CategoryChips(state: state, t: t),
             ),
           ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 14),
-            child: _SectionLabel(
-                state: state, t: t, count: filtered.length, isDesktop: isDesktop),
-          ),
-        ),
-        filtered.isEmpty
-            ? SliverToBoxAdapter(
-                child: _EmptySearch(state: state, t: t, hPad: hPad))
-            : SliverPadding(
-                padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 56),
-                sliver: _ModuleGrid(
-                    state: state,
-                    t: t,
-                    modules: filtered,
-                    isDesktop: isDesktop),
+        if (showSnapshot)
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 56),
+            sliver: SliverToBoxAdapter(
+              child: HomeSnapshotDashboard(
+                userData: state.widget.userData,
+                t: t,
+                availableModules: state._availableModules,
+                onOpenModule: state._openModule,
+                isDesktop: isDesktop,
+                onViewReports: () {
+                  final reportsModule = state._availableModules.firstWhere(
+                    (m) => m.id == 'executive_dashboard',
+                    orElse: () => ModuleRegistry.allModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                  );
+                  state._openModule(reportsModule);
+                },
               ),
+            ),
+          )
+        else ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 14),
+              child: _SectionLabel(
+                  state: state, t: t, count: filtered.length, isDesktop: isDesktop),
+            ),
+          ),
+          filtered.isEmpty
+              ? SliverToBoxAdapter(
+                  child: _EmptySearch(state: state, t: t, hPad: hPad))
+              : SliverPadding(
+                  padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 56),
+                  sliver: _ModuleGrid(
+                      state: state,
+                      t: t,
+                      modules: filtered,
+                      isDesktop: isDesktop),
+                ),
+        ],
       ],
     );
   }
@@ -1482,7 +1674,7 @@ class _StatPillState extends State<_StatPill> with SingleTickerProviderStateMixi
         widget.pulse
             ? AnimatedBuilder(
                 animation: _a,
-                builder: (_, __) => Opacity(
+                builder: (_, _) => Opacity(
                   opacity: _a.value,
                   child: Icon(widget.icon, size: 8, color: widget.t.accent),
                 ))
@@ -1678,8 +1870,7 @@ class _SearchBar extends StatelessWidget {
             onChanged: (v) {
               state._searchDebounce?.cancel();
               state._searchDebounce = Timer(const Duration(milliseconds: 220), () {
-                state.setState(() => state._searchQuery = v.trim());
-                state._recomputeFilteredModules();
+                state.updateSearchQuery(v.trim());
               });
             },
             style: TextStyle(
@@ -1701,11 +1892,7 @@ class _SearchBar extends StatelessWidget {
                               ? const Color(0xFF8B949E)
                               : t.textTertiary,
                           size: 18),
-                      onPressed: () => state.setState(() {
-                            state._searchCtrl.clear();
-                            state._searchQuery = '';
-                            state._recomputeFilteredModules();
-                          }),
+                      onPressed: () => state.clearSearch(),
                     )
                   : null,
               border: InputBorder.none,
@@ -1830,11 +2017,7 @@ class _EmptySearch extends StatelessWidget {
                     fontSize: 13)),
             const SizedBox(height: 20),
             TextButton(
-              onPressed: () => state.setState(() {
-                state._searchCtrl.clear();
-                state._searchQuery = '';
-                state._recomputeFilteredModules();
-              }),
+              onPressed: () => state.clearSearch(),
               style: TextButton.styleFrom(
                 foregroundColor: t.accent,
                 padding: const EdgeInsets.symmetric(
@@ -2033,6 +2216,29 @@ class _ModuleCardState extends State<_ModuleCard>
     final dark = widget.dark;
     final tiny = MediaQuery.of(context).size.width < 480;
 
+    // Determine category accent color and gradients
+    final Color categoryColor;
+    switch (widget.module.category) {
+      case ModuleCategory.office:
+        categoryColor = const Color(0xFF6366F1); // Indigo
+        break;
+      case ModuleCategory.dispensary:
+        categoryColor = const Color(0xFF0D9488); // Teal
+        break;
+      case ModuleCategory.dasterkhwaan:
+        categoryColor = const Color(0xFFF97316); // Orange
+        break;
+      case ModuleCategory.madrassa:
+        categoryColor = const Color(0xFF8B5CF6); // Purple
+        break;
+    }
+
+    final categoryGradient = LinearGradient(
+      colors: [categoryColor.withValues(alpha: 0.85), categoryColor],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hov = true),
       onExit: (_) => setState(() {
@@ -2051,24 +2257,23 @@ class _ModuleCardState extends State<_ModuleCard>
             curve: Curves.easeOutCubic,
             transform: Matrix4.identity()
               ..translate(0.0, _hov ? -5.0 : 0.0),
-            padding: EdgeInsets.all(widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20)),
             decoration: BoxDecoration(
               color: dark ? const Color(0xFF161B22) : t.bgCard,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
                 color: _hov
-                    ? t.accent.withValues(alpha: 0.5)
+                    ? categoryColor.withValues(alpha: 0.5)
                     : (dark ? const Color(0xFF30363D) : t.bgRule),
                 width: _hov ? 1.5 : 1,
               ),
               boxShadow: _hov
                   ? [
                       BoxShadow(
-                          color: t.accent.withValues(alpha: 0.12),
+                          color: categoryColor.withValues(alpha: 0.25),
                           blurRadius: 24,
                           offset: const Offset(0, 10)),
                       BoxShadow(
-                          color: t.accent.withValues(alpha: 0.08),
+                          color: categoryColor.withValues(alpha: 0.08),
                           blurRadius: 4,
                           offset: const Offset(0, 2)),
                     ]
@@ -2079,93 +2284,117 @@ class _ModuleCardState extends State<_ModuleCard>
                           offset: const Offset(0, 4)),
                     ],
             ),
-            child: Stack(
-              children: [
-                // Subtle corner accent on hover
-                if (_hov)
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22.5),
+              child: Stack(
+                children: [
                   Positioned(
-                    top: -20, right: -20,
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 5,
                     child: Container(
-                      width: 60, height: 60,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: t.accent.withValues(alpha: 0.05),
-                      ),
+                      color: categoryColor,
                     ),
                   ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Icon box with gradient
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
-                      padding: EdgeInsets.all(tiny ? 10 : 12),
-                      decoration: BoxDecoration(
-                        gradient: _hov ? t.accentGradient : null,
-                        color: !_hov ? (dark ? const Color(0xFF21262D) : t.accent.withValues(alpha: 0.08)) : null,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: _hov ? [
-                          BoxShadow(color: t.accent.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))
-                        ] : [],
-                      ),
-                      child: Icon(
-                        widget.module.icon,
-                        color: _hov ? Colors.white : t.accent,
-                        size: widget.isHero ? 28 : (tiny ? 20 : 24),
-                      ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      widget.isHero ? (widget.isDesktop ? 29 : 23) : (tiny ? 19 : 25),
+                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
+                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
+                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
                     ),
+                    child: Stack(
+                      children: [
+                        // Subtle corner accent on hover
+                        if (_hov)
+                          Positioned(
+                            top: -20, right: -20,
+                            child: Container(
+                              width: 60, height: 60,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: categoryColor.withValues(alpha: 0.06),
+                              ),
+                            ),
+                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Icon box with gradient
+                            AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              padding: EdgeInsets.all(tiny ? 10 : 12),
+                              decoration: BoxDecoration(
+                                gradient: _hov ? categoryGradient : null,
+                                color: !_hov ? (dark ? const Color(0xFF21262D) : categoryColor.withValues(alpha: 0.12)) : null,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: _hov ? [
+                                  BoxShadow(color: categoryColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))
+                                ] : [],
+                              ),
+                              child: Icon(
+                                widget.module.icon,
+                                color: _hov ? Colors.white : categoryColor,
+                                size: widget.isHero ? 28 : (tiny ? 20 : 24),
+                              ),
+                            ),
 
-                    const Spacer(),
+                            const Spacer(),
 
-                    // Title
-                    Text(
-                      widget.module.title,
-                      style: TextStyle(
-                        color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
-                        fontSize: widget.isHero ? (widget.isDesktop ? 18 : 16) : (tiny ? 13 : (widget.isDesktop ? 15 : 14)),
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.4,
-                        height: 1.2,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                            // Title
+                            Text(
+                              widget.module.title,
+                              style: TextStyle(
+                                color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
+                                fontSize: widget.isHero ? (widget.isDesktop ? 18 : 16) : (tiny ? 13 : (widget.isDesktop ? 15 : 14)),
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.4,
+                                height: 1.2,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+
+                            if (!tiny) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                widget.module.description,
+                                style: TextStyle(
+                                  color: dark ? const Color(0xFF8B949E) : t.textTertiary,
+                                  fontSize: 11.5,
+                                  height: 1.4,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+
+                            const SizedBox(height: 12),
+
+                            // Arrow indicator
+                            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 220),
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: _hov ? categoryColor : (dark ? const Color(0xFF21262D) : categoryColor.withValues(alpha: 0.1)),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  Icons.arrow_forward_rounded,
+                                  color: _hov ? Colors.white : categoryColor,
+                                  size: 13,
+                                ),
+                              ),
+                            ]),
+                          ],
+                        ),
+                      ],
                     ),
-
-                    if (!tiny) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        widget.module.description,
-                        style: TextStyle(
-                          color: dark ? const Color(0xFF8B949E) : t.textTertiary,
-                          fontSize: 11.5,
-                          height: 1.4,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-
-                    const SizedBox(height: 12),
-
-                    // Arrow indicator
-                    Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: _hov ? t.accent : (dark ? const Color(0xFF21262D) : t.accentMuted),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.arrow_forward_rounded,
-                          color: _hov ? Colors.white : t.accent,
-                          size: 13,
-                        ),
-                      ),
-                    ]),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),

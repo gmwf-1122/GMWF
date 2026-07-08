@@ -767,8 +767,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     if (raw == null) return 'N/A';
     try {
       if (raw is Timestamp) return DateFormat(fmt).format(raw.toDate());
-      if (raw is String && raw.isNotEmpty)
+      if (raw is String && raw.isNotEmpty) {
         return DateFormat(fmt).format(DateTime.parse(raw));
+      }
     } catch (_) {}
     return 'N/A';
   }
@@ -805,7 +806,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: DropdownButtonFormField<String>(
-        value: value,
+        initialValue: value,
         hint: Text(label, style: TextStyle(color: t.textTertiary, fontSize: 13)),
         isExpanded: true, dropdownColor: t.bgCard,
         icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),

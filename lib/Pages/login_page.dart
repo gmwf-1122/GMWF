@@ -9,7 +9,6 @@ import 'package:another_flushbar/flushbar.dart';
 
 import '../services/offline_auth_service.dart';
 import 'home_router.dart';
-import 'overview.dart';
 import 'donations/donor_portal.dart';
 
 class LoginPage extends StatefulWidget {
@@ -395,31 +394,29 @@ class _LoginPageState extends State<LoginPage> {
     }
 
     try {
-      final branches = await FirebaseFirestore.instance
-          .collection('branches')
+      final querySnap = await FirebaseFirestore.instance
+          .collectionGroup('users')
+          .where(FieldPath.documentId, isEqualTo: uid)
+          .limit(1)
           .get()
           .timeout(const Duration(seconds: 10));
-      for (final branch in branches.docs) {
-        final doc = await branch.reference
-            .collection('users')
-            .doc(uid)
-            .get()
-            .timeout(const Duration(seconds: 5));
-        if (doc.exists && doc.data() != null) {
-          final d = doc.data()!;
-          return {
-            'uid': uid,
-            'email': user.email,
-            'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
-            'role': d['role'] ?? 'unknown',
-            'branchId': branch.id,
-            'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
-            ...d,
-          };
-        }
+      if (querySnap.docs.isNotEmpty) {
+        final doc = querySnap.docs.first;
+        final d = doc.data();
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        return {
+          'uid': uid,
+          'email': user.email,
+          'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
+          'role': d['role'] ?? 'unknown',
+          'branchId': branchId,
+          'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
+          ...d,
+        };
       }
     } catch (e) {
-      debugPrint('[LoginPage] Branch /users fetch failed: $e');
+      debugPrint('[LoginPage] Branch /users fetch failed via collectionGroup: $e');
     }
 
     return null;
@@ -440,28 +437,24 @@ class _LoginPageState extends State<LoginPage> {
         return {'email': doc['email'], 'username': doc['username']};
       }
 
-      final branches = await FirebaseFirestore.instance
-          .collection('branches')
+      final querySnap = await FirebaseFirestore.instance
+          .collectionGroup('users')
+          .where('username', isEqualTo: lower)
+          .limit(1)
           .get()
           .timeout(const Duration(seconds: 10));
-      for (final branch in branches.docs) {
-        final users = await branch.reference
-            .collection('users')
-            .where('username', isEqualTo: lower)
-            .limit(1)
-            .get()
-            .timeout(const Duration(seconds: 5));
-        if (users.docs.isNotEmpty) {
-          final doc = users.docs.first;
-          return {
-            'email': doc['email'],
-            'username': doc['username'],
-            'branchId': branch.id,
-          };
-        }
+      if (querySnap.docs.isNotEmpty) {
+        final doc = querySnap.docs.first;
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        return {
+          'email': doc['email'],
+          'username': doc['username'],
+          'branchId': branchId,
+        };
       }
     } catch (e) {
-      debugPrint('[LoginPage] Username lookup failed: $e');
+      debugPrint('[LoginPage] Username lookup failed via collectionGroup: $e');
     }
     return null;
   }
@@ -683,7 +676,7 @@ class _LoginPageState extends State<LoginPage> {
                             "assets/logo/gmwf-1.png",
                             height: 120,
                             fit: BoxFit.contain,
-                            errorBuilder: (_, __, ___) => const Icon(
+                            errorBuilder: (_, _, _) => const Icon(
                               Icons.local_pharmacy,
                               size: 100,
                               color: Color(0xFF00695C),

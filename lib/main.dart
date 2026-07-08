@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:bitsdojo_window/bitsdojo_window.dart';
@@ -195,6 +196,19 @@ Future<void> main() async {
       FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
       _installGlobalErrorHandlers();
 
+      try {
+        if (!kIsWeb && Platform.isWindows) {
+          final appSupportDir = await getApplicationSupportDirectory();
+          final hiveDir = path.join(appSupportDir.path, 'gmwf_hive');
+          await Hive.initFlutter(hiveDir);
+        } else {
+          await Hive.initFlutter();
+        }
+        await Hive.openBox('app_settings');
+      } catch (e) {
+        debugPrint('[Main] Pre-init Hive/settings failed: $e');
+      }
+
       // Show window immediately
       if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
         doWhenWindowReady(() {
@@ -206,7 +220,7 @@ Future<void> main() async {
         });
       }
 
-      runApp(const MyApp());
+      runApp(const ProviderScope(child: MyApp()));
     },
   );
 }
@@ -226,7 +240,9 @@ class _InitializationScreenState extends State<InitializationScreen> {
   @override
   void initState() {
     super.initState();
-    _startInit();
+    if (kIsWeb || !Platform.environment.containsKey('FLUTTER_TEST')) {
+      _startInit();
+    }
   }
 
   Future<void> _startInit() async {
@@ -248,7 +264,7 @@ class _InitializationScreenState extends State<InitializationScreen> {
       Hive.registerAdapter(TimestampAdapter());
 
       // 3. Services
-      await Future.wait([
+      await Future.wait<dynamic>([
         LocalStorageService.init(),
         DonationsLocalStorage.init(),
         ServerSyncManager.initHive(),
@@ -266,6 +282,7 @@ class _InitializationScreenState extends State<InitializationScreen> {
       }
     } catch (e, st) {
       debugPrint("[Init] CRITICAL ERROR: $e");
+      debugPrint("[Init] STACK TRACE: $st");
       await _logError("Init Failed: $e", st.toString());
       if (mounted) {
         setState(() {
@@ -324,6 +341,7 @@ class _InitializationScreenState extends State<InitializationScreen> {
   }
 }
 
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 
 class MyApp extends StatelessWidget {
@@ -331,117 +349,167 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: navigatorKey,
-      title: 'GM-D',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        fontFamily: GoogleFonts.dmSans().fontFamily,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          primary: AppColors.primary,
-          secondary: AppColors.navy,
-        ),
-        scaffoldBackgroundColor: AppColors.gray50,
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppColors.gray200, width: 1.5),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppColors.gray200, width: 1.5),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
-          ),
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray600),
-          hintStyle: const TextStyle(fontSize: 14, color: AppColors.gray400),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          ),
-        ),
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
-            TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
-            TargetPlatform.macOS: FadeUpwardsPageTransitionsBuilder(),
-          },
-        ),
-      ),
-      builder: (context, child) {
-        if (!kIsWeb && Platform.isWindows) {
-          return Scaffold(
-            body: Overlay(
-              initialEntries: [
-                OverlayEntry(
-                  builder: (context) => Column(
-                    children: [
-                      const CustomTitleBar(),
-                      Expanded(child: child!),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
-        return child!;
-      },
-      initialRoute: '/',
-      routes: {
-        '/': (context) => const InitializationScreen(),
-        '/home': (context) => StreamBuilder<User?>(
-              stream: FirebaseAuth.instance.authStateChanges(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const GmwfLoadingView();
-                }
-                if (snapshot.hasData && snapshot.data != null) {
-                  return HomeRouter(user: snapshot.data!);
-                }
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(),
+      builder: (context, Box box, child) {
+        final colorHex = box.get('custom_accent_color') as String?;
 
-                return FutureBuilder<Map<String, dynamic>?>(
-                  future: offline_auth.OfflineAuthService.getCachedUserData(),
-                  builder: (context, cachedSnap) {
-                    if (cachedSnap.connectionState == ConnectionState.waiting) {
-                      return const GmwfLoadingView();
-                    }
-                    if (cachedSnap.hasData && cachedSnap.data != null) {
-                      return HomeRouter(user: null, localUser: cachedSnap.data!);
-                    }
-                    return const LoginPage();
-                  },
-                );
+        Color seedColor = AppColors.primary;
+        if (colorHex != null && colorHex.isNotEmpty) {
+          try {
+            final hex = colorHex.replaceAll('#', '');
+            seedColor = Color(int.parse('FF$hex', radix: 16));
+          } catch (_) {}
+        }
+
+        final cardRadius = box.get('card_radius', defaultValue: 16.0) as double;
+        final fontFamily = GoogleFonts.dmSans().fontFamily;
+
+        return MaterialApp(
+          navigatorKey: navigatorKey,
+          title: 'GM-D',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            fontFamily: fontFamily,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: seedColor,
+              primary: seedColor,
+              secondary: AppColors.navy,
+            ),
+            scaffoldBackgroundColor: AppColors.gray50,
+            cardTheme: CardThemeData(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+              ),
+            ),
+            dialogTheme: DialogThemeData(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+              ),
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: const BorderSide(color: AppColors.gray200, width: 1.5),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: const BorderSide(color: AppColors.gray200, width: 1.5),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: BorderSide(color: seedColor, width: 1.5),
+              ),
+              labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray600),
+              hintStyle: const TextStyle(fontSize: 14, color: AppColors.gray400),
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: seedColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
+              ),
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
+              ),
+            ),
+            pageTransitionsTheme: const PageTransitionsTheme(
+              builders: {
+                TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+                TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+                TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+                TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+                TargetPlatform.macOS: FadeUpwardsPageTransitionsBuilder(),
               },
             ),
-        '/login': (context) => const LoginPage(),
-        '/admin': (context) => const OverviewScreen(),
-        '/chairman': (context) => const OverviewScreen(),
-        '/donations': (context) => const DonationsScreen.embedded(),
-        '/dispensar': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments
-              as Map<String, dynamic>?;
-          return DispensarScreen(branchId: args?['branchId'] ?? 'unknown');
-        },
-        '/inventory': (context) {
-          final args = ModalRoute.of(context)!.settings.arguments
-              as Map<String, dynamic>?;
-          return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
-        },
+          ),
+          builder: (context, child) {
+            final mediaQuery = MediaQuery.of(context);
+            final scale = Hive.isBoxOpen('app_settings')
+                ? Hive.box('app_settings').get('font_scale', defaultValue: 1.0) as double
+                : 1.0;
+
+            final adjustedChild = MediaQuery(
+              data: mediaQuery.copyWith(
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: child!,
+            );
+
+            if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
+              return Scaffold(
+                body: Overlay(
+                  initialEntries: [
+                    OverlayEntry(
+                      builder: (context) => Column(
+                        children: [
+                          const CustomTitleBar(),
+                          Expanded(child: adjustedChild),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            return adjustedChild;
+          },
+          initialRoute: '/',
+          routes: {
+            '/': (context) => const InitializationScreen(),
+            '/home': (context) => StreamBuilder<User?>(
+                  stream: FirebaseAuth.instance.authStateChanges(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const GmwfLoadingView();
+                    }
+                    if (snapshot.hasData && snapshot.data != null) {
+                      return HomeRouter(user: snapshot.data!);
+                    }
+
+                    return FutureBuilder<Map<String, dynamic>?>(
+                      future: offline_auth.OfflineAuthService.getCachedUserData(),
+                      builder: (context, cachedSnap) {
+                        if (cachedSnap.connectionState == ConnectionState.waiting) {
+                          return const GmwfLoadingView();
+                        }
+                        if (cachedSnap.hasData && cachedSnap.data != null) {
+                          return HomeRouter(user: null, localUser: cachedSnap.data!);
+                        }
+                        return const LoginPage();
+                      },
+                    );
+                  },
+                ),
+            '/login': (context) => const LoginPage(),
+            '/admin': (context) => const OverviewScreen(),
+            '/chairman': (context) => const OverviewScreen(),
+            '/donations': (context) => const DonationsScreen.embedded(),
+            '/dispensar': (context) {
+              final args = ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>?;
+              return DispensarScreen(branchId: args?['branchId'] ?? 'unknown');
+            },
+            '/inventory': (context) {
+              final args = ModalRoute.of(context)!.settings.arguments
+                  as Map<String, dynamic>?;
+              return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
+            },
+          },
+        );
       },
     );
   }

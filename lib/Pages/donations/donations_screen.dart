@@ -12,8 +12,8 @@ import 'donations_dashboard.dart';
 import 'donors_registry.dart';
 import 'widgets/add_donation_wizard.dart';
 import '../../models/donation_models.dart';
-import '../../constants/colors.dart';
-
+import '../../widgets/global_module_wrapper.dart';
+// Missing file
 
 const String kStatusPending = 'pending';
 
@@ -120,7 +120,9 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
           : _viewingBranchId;
     } else if (!isGlobal) {
       _viewingBranchId   = widget.branchId;
-      _viewingBranchName = widget.branchName;
+      _viewingBranchName = widget.branchName.isNotEmpty
+          ? widget.branchName
+          : resolveBranchName(widget.branchId);
     } else {
       // Global role with no pre-passed branches — we will fetch them below
       _viewingBranchId   = '';
@@ -185,7 +187,37 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     catch (_) { return 'TEMP-${DateTime.now().millisecondsSinceEpoch}'; }
   }
 
+  List<({String id, String name})> get _branchOptions {
+    final extras = <({String id, String name})>[];
+    
+    if (widget.role.canSeeAllBranches) {
+      extras.add((id: 'all', name: 'All Branches (Consolidated)'));
+    }
 
+    for (int i = 0; i < widget.allBranchIds.length; i++) {
+      final bid   = widget.allBranchIds[i];
+      if (bid.isEmpty || bid == 'all') continue;
+      
+      final bname = i < widget.allBranchNames.length
+          ? widget.allBranchNames[i] : bid;
+      if (bid != widget.branchId && bid != 'all') extras.add((id: bid, name: bname));
+    }
+    
+    // If own branch is valid, put it first. Otherwise just return extras.
+    if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+      final own = (id: widget.branchId, name: widget.branchName);
+      return [own, ...extras];
+    }
+    return extras;
+  }
+
+  bool get _canSwitchBranch {
+    if (GlobalModuleWrapper.isWrapped(context)) return false;
+    return widget.role.canSeeAllBranches && _branchOptions.length > 1;
+  }
+
+  void _switchBranch(String id, String name) =>
+      setState(() { _viewingBranchId = id; _viewingBranchName = name; });
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +253,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                     borderRadius: BorderRadius.circular(6),
                   ),
                   padding: const EdgeInsets.all(3),
-                  child: Image.asset('assets/logo/gmwf-1.png', fit: BoxFit.contain),
+                  child: Image.asset('assets/logo/gmwf.png', fit: BoxFit.contain),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -235,7 +267,13 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                 ),
               ],
             ),
-
+            actions: [
+              if (_canSwitchBranch)
+                IconButton(
+                  icon: const Icon(Icons.swap_horiz_rounded, color: Colors.white),
+                  onPressed: () => _Header.showBranchPicker(context, _branchOptions, _viewingBranchId, _switchBranch, t),
+                ),
+            ],
             bottom: TabBar(
               controller: _mobileTabController,
               labelColor: DonDS.tealLight,
@@ -276,6 +314,10 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
           branchName:      _viewingBranchName,
           username:        widget.username,
           role:            widget.role,
+          canSwitchBranch: _canSwitchBranch,
+          branchOptions:   _branchOptions,
+          currentBranchId: _viewingBranchId,
+          onBranchSwitch:  _switchBranch,
         ),
 
         // ── Main Content Area ───────────────────────────────────────────
@@ -316,106 +358,11 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     if (result != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Donation recorded: ${cleanReceiptNumber(result.receiptNo)}'),
+          content: Text('Donation recorded: ${result.receiptNo}'),
           backgroundColor: Colors.green,
           behavior: SnackBarBehavior.floating,
         ),
       );
-
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: true,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 24),
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'Donation Saved!',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.gray900),
-                  ),
-                ),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.gray50,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppColors.gray100),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'RECEIPT DETAILS',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.gray400, letterSpacing: 1),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Receipt No: ${cleanReceiptNumber(result.receiptNo)}',
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.gray900, fontFamily: 'DMMono'),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Donor: ${result.donorName}',
-                        style: const TextStyle(fontSize: 13, color: AppColors.gray700, fontWeight: FontWeight.w500),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        result.isGoods
-                            ? 'Goods: ${result.goodsItem ?? 'Donation'}'
-                            : 'Amount: PKR ${NumberFormat('#,##0').format(result.amount)}',
-                        style: const TextStyle(fontSize: 13, color: AppColors.gray900, fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 20),
-                const Text(
-                  'Would you like to print the receipt or share it with the donor?',
-                  style: TextStyle(fontSize: 13, color: AppColors.gray600, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('CLOSE', style: TextStyle(color: AppColors.gray500, fontWeight: FontWeight.w700)),
-              ),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  showReceiptShareSheet(context, result.toMap());
-                },
-                icon: const Icon(Icons.share_rounded, size: 16),
-                label: const Text('PRINT & SHARE'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  elevation: 0,
-                ),
-              ),
-            ],
-          ),
-        );
-      }
     }
   }
 }
@@ -425,14 +372,44 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _Header extends StatelessWidget {
-  final String   branchName, username;
+  final String   branchName, username, currentBranchId;
   final UserRole role;
+  final bool     canSwitchBranch;
+  final List<({String id, String name})> branchOptions;
+  final void Function(String id, String name) onBranchSwitch;
 
   const _Header({
     required this.branchName,
     required this.username,
     required this.role,
+    required this.canSwitchBranch,
+    required this.branchOptions,
+    required this.currentBranchId,
+    required this.onBranchSwitch,
   });
+
+  static void showBranchPicker(
+    BuildContext context,
+    List<({String id, String name})> options,
+    String currentBranchId,
+    void Function(String id, String name) onSelect,
+    RoleThemeData t,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      barrierColor: Colors.black.withValues(alpha: 0.4),
+      builder: (_) => _BranchPickerSheet(
+        options: options,
+        currentBranchId: currentBranchId,
+        onSelect: (id, name) {
+          onSelect(id, name);
+          Navigator.pop(context);
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -445,8 +422,17 @@ class _Header extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(24, MediaQuery.of(context).padding.top + 16, 24, 16),
       decoration: BoxDecoration(
         color: t.bgCard,
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(20),
+          bottomRight: Radius.circular(20),
+        ),
+        border: Border(bottom: BorderSide(color: t.bgRule.withValues(alpha: 0.8), width: 1.5)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
         ],
       ),
       child: Row(
@@ -455,14 +441,16 @@ class _Header extends StatelessWidget {
             width: 44, height: 44,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4)),
               ],
             ),
             padding: const EdgeInsets.all(4),
-            child: Image.asset('assets/logo/gmwf-1.png', fit: BoxFit.contain),
+            child: Image.asset('assets/logo/gmwf.png', fit: BoxFit.contain),
           ),
+          const SizedBox(width: 16),
+          _Avatar(username: username, roleColor: rc),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -481,6 +469,15 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+          if (canSwitchBranch) ...[
+            const SizedBox(width: 12),
+            _BranchPicker(
+              branchName: branchName,
+              canSwitchBranch: canSwitchBranch,
+              onTap: () => showBranchPicker(context, branchOptions, currentBranchId, onBranchSwitch, t),
+              t: t,
+            ),
+          ],
           if (showRolePill) ...[
             const SizedBox(width: 12),
             _RolePill(role: role),
@@ -491,7 +488,79 @@ class _Header extends StatelessWidget {
   }
 }
 
+class _BranchPicker extends StatelessWidget {
+  final String branchName;
+  final bool canSwitchBranch;
+  final VoidCallback onTap;
+  final RoleThemeData t;
 
+  const _BranchPicker({required this.branchName, required this.canSwitchBranch, required this.onTap, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: canSwitchBranch ? onTap : null,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: t.bgCardAlt.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: t.bgRule),
+            boxShadow: [
+              BoxShadow(
+                color: t.accent.withValues(alpha: 0.02),
+                blurRadius: 4,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.location_on_rounded, size: 14, color: t.accent),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('BRANCH',
+                      style: TextStyle(
+                          fontSize: 7.5,
+                          fontWeight: FontWeight.w900,
+                          color: t.textTertiary,
+                          letterSpacing: 1.2)),
+                  const SizedBox(height: 1),
+                  Text(
+                    branchName.isNotEmpty ? branchName : 'Select...',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: t.textPrimary,
+                        letterSpacing: -0.2),
+                  ),
+                ],
+              ),
+              if (canSwitchBranch) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: t.textTertiary),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _Avatar extends StatelessWidget {
   final String username;
@@ -500,23 +569,35 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    width: 44, height: 44,
+    width: 46, height: 46,
     decoration: BoxDecoration(
-      gradient: LinearGradient(
-        colors: [roleColor, roleColor.withValues(alpha: 0.7)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ),
       shape: BoxShape.circle,
+      border: Border.all(color: roleColor.withValues(alpha: 0.25), width: 1.5),
       boxShadow: [
-        BoxShadow(color: roleColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 3)),
+        BoxShadow(
+          color: roleColor.withValues(alpha: 0.15),
+          blurRadius: 10,
+          spreadRadius: 1,
+        ),
       ],
-      border: Border.all(color: Colors.white, width: 2),
     ),
-    child: Center(
-      child: Text(
-        username.isNotEmpty ? username[0].toUpperCase() : '?',
-        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+    child: Padding(
+      padding: const EdgeInsets.all(2.5),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [roleColor, roleColor.withValues(alpha: 0.75)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          shape: BoxShape.circle,
+        ),
+        child: Center(
+          child: Text(
+            username.isNotEmpty ? username[0].toUpperCase() : '?',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+          ),
+        ),
       ),
     ),
   );
@@ -528,7 +609,7 @@ class _RolePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
     decoration: BoxDecoration(
       color: role.roleColor.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(20),
@@ -551,7 +632,100 @@ class _RolePill extends StatelessWidget {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// BRANCH PICKER SHEET
-// ─────────────────────────────────────────────────────────────────────────────
-
+class _BranchPickerSheet extends StatelessWidget {
+  final List<({String id, String name})>      options;
+  final String                                currentBranchId;
+  final void Function(String id, String name) onSelect;
+
+  const _BranchPickerSheet({
+    required this.options,
+    required this.currentBranchId,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const SizedBox(height: 12),
+        Container(
+            width: 36, height: 4,
+            decoration: BoxDecoration(
+                color: t.bgRule, borderRadius: BorderRadius.circular(2))),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                  color: t.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12)),
+              child: Icon(Icons.domain_rounded,
+                  size: 20, color: t.accent),
+            ),
+            const SizedBox(width: 16),
+            Text('Switch Branch', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: t.textPrimary, letterSpacing: -0.5)),
+          ]),
+        ),
+        const SizedBox(height: 16),
+        ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
+          child: ListView.separated(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            itemCount: options.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 4),
+            itemBuilder: (ctx, i) {
+              final opt = options[i];
+              final isSel = opt.id == currentBranchId;
+              return InkWell(
+                onTap: () => onSelect(opt.id, opt.name),
+                borderRadius: BorderRadius.circular(16),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isSel ? t.accent.withValues(alpha: 0.08) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: isSel ? t.accent.withValues(alpha: 0.3) : Colors.transparent),
+                  ),
+                  child: Row(children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: isSel ? t.accent.withValues(alpha: 0.12) : t.bgCardAlt,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(child: Icon(Icons.location_on_rounded, size: 20, color: isSel ? t.accent : t.textTertiary)),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(opt.name, style: TextStyle(fontSize: 15, fontWeight: isSel ? FontWeight.w800 : FontWeight.w700, color: isSel ? t.accent : t.textPrimary)),
+                      Text(opt.id, style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                    ])),
+                    if (isSel) Icon(Icons.check_circle_rounded, color: t.accent, size: 22),
+                  ]),
+                ),
+              );
+            },
+          ),
+        ),
+        SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
+      ]),
+    );
+  }
+}

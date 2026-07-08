@@ -69,7 +69,9 @@ class RealtimeRouter {
     if (raw == null || raw.trim().isEmpty) return 'zakat';
     final s = raw.toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     if (s == 'zakat') return 'zakat';
     return 'zakat';
@@ -184,7 +186,7 @@ Serial: ${data['serial'] ?? 'N/A'}
                      data['branchId']?.toString() ??
                      '').toLowerCase().trim();
 
-    final serial = data['serial']?.toString()?.trim();
+    final serial = data['serial']?.toString().trim();
 
     if (branchId.isEmpty || serial == null || serial.isEmpty) {
       if (kDebugMode) {
@@ -249,8 +251,8 @@ Serial: ${data['serial'] ?? 'N/A'}
   }
 
   static Future<void> _handleDeleteEntry(Map<String, dynamic> data) async {
-    final branchId = data['branchId']?.toString()?.toLowerCase()?.trim();
-    final serial   = data['serial']?.toString()?.trim();
+    final branchId = data['branchId']?.toString().toLowerCase().trim();
+    final serial   = data['serial']?.toString().trim();
 
     if (branchId == null || branchId.isEmpty ||
         serial == null || serial.isEmpty) {
@@ -267,7 +269,7 @@ Serial: ${data['serial'] ?? 'N/A'}
     Map<String, dynamic> data,
     Map<String, dynamic> fullMessage,
   ) async {
-    final serial   = data['serial']?.toString()?.trim();
+    final serial   = data['serial']?.toString().trim();
     final branchId = (fullMessage['branchId']?.toString() ??
                      data['branchId']?.toString() ??
                      '').toLowerCase().trim();
@@ -347,7 +349,7 @@ Serial: ${data['serial'] ?? 'N/A'}
     Map<String, dynamic> fullMessage,
   ) async {
     final branchId = (data['branchId']?.toString() ?? '').toLowerCase().trim();
-    final serial   = data['serial']?.toString()?.trim();
+    final serial   = data['serial']?.toString().trim();
 
     if (branchId.isEmpty || serial == null || serial.isEmpty) {
       if (kDebugMode) print('❌ dispense_completed missing branchId or serial');

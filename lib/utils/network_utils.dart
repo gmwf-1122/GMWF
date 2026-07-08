@@ -36,7 +36,9 @@ bool _shouldExcludeIp(String ip) {
       ip.startsWith('236.') ||
       ip.startsWith('237.') ||
       ip.startsWith('238.') ||
-      ip.startsWith('239.')) return true;
+      ip.startsWith('239.')) {
+    return true;
+  }
 
   // Broadcast / reserved
   if (ip.startsWith('255.')) return true;

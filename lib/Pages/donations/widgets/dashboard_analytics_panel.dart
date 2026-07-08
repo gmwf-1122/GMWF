@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../constants/colors.dart';
@@ -27,6 +28,7 @@ class AnalyticsInsightsDialog extends StatefulWidget {
 class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
   TrendPeriod _selectedPeriod = TrendPeriod.month;
   DonorSort _donorSort = DonorSort.contribution;
+  String? _selectedTrendKey;
 
   @override
   Widget build(BuildContext context) {
@@ -40,19 +42,46 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
       );
     }
 
+    // ── Calculate reference date from the latest donation in dataset ──────────
+    DateTime refDate = DateTime.now();
+    DateTime? latestDate;
+    for (var d in widget.currentDonations) {
+      final date = DateTime.tryParse(d.date);
+      if (date != null) {
+        if (latestDate == null || date.isAfter(latestDate)) {
+          latestDate = date;
+        }
+      }
+    }
+    if (latestDate != null) {
+      refDate = latestDate;
+    }
+
     // ── Calculations ──────────────────────────────────────────────────────────
     double totalAmt = 0;
+    double totalCash = 0;
+    double totalGoods = 0;
     int totalCount = widget.currentDonations.length;
     final Map<String, double> catTotals = {};
     final Map<String, double> subCatTotals = {};
     final Map<String, double> natureTotals = {}; // By DonationSubtype
     final Map<String, double> branchTotals = {};
     final Map<String, double> trendTotals = {};
+    // Category breakdown per trend key: key -> { categoryId -> amount }
+    final Map<String, Map<String, double>> trendCatBreakdown = {};
     
     // Donor Ranking data
-    final Map<String, ({String name, String phone, double total, DateTime firstSeen, int count})> donorStats = {};
+    final Map<String, ({
+      String name,
+      String phone,
+      double total,
+      double cashTotal,
+      double goodsTotal,
+      DateTime firstSeen,
+      int count
+    })> donorStats = {};
     
-    // ── Pre-populate Trends with zeros ────────────────────────────────────────
+    // ── Pre-populate Trends with zeros based on reference date ────────────────
     switch (_selectedPeriod) {
       case TrendPeriod.day:
         for (int i = 1; i <= 7; i++) {
@@ -60,7 +89,8 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
         }
         break;
       case TrendPeriod.week:
-        for (int i = 1; i <= 31; i++) {
+        final daysInMonth = DateTime(refDate.year, refDate.month + 1, 0).day;
+        for (int i = 1; i <= daysInMonth; i++) {
           trendTotals[i.toString().padLeft(2, '0')] = 0;
         }
         break;
@@ -70,8 +100,8 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
         }
         break;
       case TrendPeriod.year:
-        final currentYear = DateTime.now().year;
-        for (int i = currentYear - 4; i <= currentYear; i++) {
+        final centerYear = refDate.year;
+        for (int i = centerYear - 4; i <= centerYear; i++) {
           trendTotals[i.toString()] = 0;
         }
         break;
@@ -80,17 +110,33 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
     for (var d in widget.currentDonations) {
       final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
       totalAmt += amt;
+      final isGoods = d.isGoods;
+      if (isGoods) {
+        totalGoods += d.probableAmount ?? 0.0;
+      } else {
+        totalCash += d.amount;
+      }
       catTotals[d.categoryId] = (catTotals[d.categoryId] ?? 0) + amt;
       
       // Donor grouping
       final date = DateTime.tryParse(d.date) ?? DateTime.now();
       final donorId = d.donorId.isEmpty ? 'anon_${d.donorName}_${d.phone}' : d.donorId;
-      final existing = donorStats[donorId] ?? (name: d.donorName, phone: d.phone, total: 0.0, firstSeen: date, count: 0);
+      final existing = donorStats[donorId] ?? (
+        name: d.donorName,
+        phone: d.phone,
+        total: 0.0,
+        cashTotal: 0.0,
+        goodsTotal: 0.0,
+        firstSeen: date,
+        count: 0
+      );
       
       donorStats[donorId] = (
         name: existing.name,
         phone: existing.phone,
         total: existing.total + amt,
+        cashTotal: existing.cashTotal + (isGoods ? 0.0 : amt),
+        goodsTotal: existing.goodsTotal + (isGoods ? amt : 0.0),
         firstSeen: date.isBefore(existing.firstSeen) ? date : existing.firstSeen,
         count: existing.count + 1,
       );
@@ -108,28 +154,49 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
       if (d.subtypeId != null) natureTotals[d.subtypeId!] = (natureTotals[d.subtypeId!] ?? 0) + amt;
       branchTotals[d.branchName] = (branchTotals[d.branchName] ?? 0) + amt;
       
-      // Trend grouping
-      String groupKey;
+      // Trend grouping with correct date range checks
+      bool includeInTrend = false;
+      String? groupKey;
       switch (_selectedPeriod) {
         case TrendPeriod.day:
-          groupKey = date.weekday.toString();
+          final startOfWeek = refDate.subtract(Duration(days: refDate.weekday - 1));
+          final startOfWeekDate = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
+          final dateOnly = DateTime(date.year, date.month, date.day);
+          final diffDays = dateOnly.difference(startOfWeekDate).inDays;
+          if (diffDays >= 0 && diffDays < 7) {
+            includeInTrend = true;
+            groupKey = date.weekday.toString();
+          }
           break;
         case TrendPeriod.week:
-          groupKey = date.day.toString().padLeft(2, '0');
+          if (date.year == refDate.year && date.month == refDate.month) {
+            includeInTrend = true;
+            groupKey = date.day.toString().padLeft(2, '0');
+          }
           break;
         case TrendPeriod.month:
-          groupKey = date.month.toString().padLeft(2, '0');
+          if (date.year == refDate.year) {
+            includeInTrend = true;
+            groupKey = date.month.toString().padLeft(2, '0');
+          }
           break;
         case TrendPeriod.year:
+          includeInTrend = true;
           groupKey = date.year.toString();
           break;
       }
-      if (trendTotals.containsKey(groupKey)) {
-        trendTotals[groupKey] = (trendTotals[groupKey] ?? 0) + amt;
+      if (includeInTrend && groupKey != null) {
+        if (trendTotals.containsKey(groupKey)) {
+          trendTotals[groupKey] = (trendTotals[groupKey] ?? 0) + amt;
+        }
+        // Track category breakdown per trend key
+        trendCatBreakdown.putIfAbsent(groupKey, () => {});
+        trendCatBreakdown[groupKey]![d.categoryId] = (trendCatBreakdown[groupKey]![d.categoryId] ?? 0) + amt;
       }
     }
 
     final avgDonation = totalCount > 0 ? totalAmt / totalCount : 0.0;
+    final sortedBranches = branchTotals.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
     final sortedTrends = trendTotals.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
     
     // Sort Donors
@@ -143,152 +210,173 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
     return Dialog(
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isMobile = constraints.maxWidth < 1000;
-          return Container(
-            width: isMobile ? double.infinity : 1100,
-            constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF8FAFC),
-              borderRadius: BorderRadius.circular(isMobile ? 20 : 32),
-              boxShadow: [
-                BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 40, offset: const Offset(0, 20)),
-              ],
-            ),
-            child: Column(
-              children: [
-                _DialogHeader(branchName: widget.branchName, isMobile: isMobile),
+      child: Container(
+        width: 1100,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 40, offset: const Offset(0, 20)),
+          ],
+        ),
+        child: Column(
+          children: [
+            _DialogHeader(branchName: widget.branchName),
 
-                // ── Scrollable Body ─────────────────────────────────────────────
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: EdgeInsets.all(isMobile ? 16 : 32),
-                    child: Column(
+            // ── Scrollable Body ─────────────────────────────────────────────
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── Smart Insights ──────────────────────────────────────
+                    _InsightsPanel(
+                      totalAmt: totalAmt,
+                      totalCash: totalCash,
+                      totalGoods: totalGoods,
+                      avgDonation: avgDonation,
+                      catTotals: catTotals,
+                      donations: widget.currentDonations,
+                    ),
+                    const SizedBox(height: 32),
+
+                    // ── KPI Cards ───────────────────────────────────────────
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _KPICard(
+                            label: 'TOTAL REVENUE',
+                            value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
+                            subValue: 'Cash: PKR ${NumberFormat('#,###').format(totalCash)} | Goods: PKR ${NumberFormat('#,###').format(totalGoods)}',
+                            icon: Icons.payments_rounded,
+                            color: const Color(0xFF0F172A),
+                            isPrimary: true,
+                          ),
+                        ),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: _KPICard(
+                            label: 'TOTAL RECEIPTS',
+                            value: totalCount.toString(),
+                            icon: Icons.receipt_long_rounded,
+                            color: const Color(0xFF6366F1),
+                          ),
+                        ),
+                        const SizedBox(width: 24),
+                        Expanded(
+                          child: _KPICard(
+                            label: 'AVERAGE VALUE',
+                            value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
+                            icon: Icons.analytics_rounded,
+                            color: const Color(0xFF0D9488),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+
+                    Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // ── Smart Insights ──────────────────────────────────────
-                        _InsightsPanel(
-                          totalAmt: totalAmt,
-                          avgDonation: avgDonation,
-                          catTotals: catTotals,
-                          isMobile: isMobile,
-                        ),
-                        const SizedBox(height: 24),
-
-                        // ── KPI Cards ───────────────────────────────────────────
-                        if (isMobile)
-                          Column(
-                            children: [
-                              _KPICard(
-                                label: 'TOTAL REVENUE',
-                                value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
-                                icon: Icons.payments_rounded,
-                                color: const Color(0xFF0F172A),
-                                isPrimary: true,
-                              ),
-                              const SizedBox(height: 12),
-                              _KPICard(
-                                label: 'TOTAL RECEIPTS',
-                                value: totalCount.toString(),
-                                icon: Icons.receipt_long_rounded,
-                                color: const Color(0xFF6366F1),
-                              ),
-                              const SizedBox(height: 12),
-                              _KPICard(
-                                label: 'AVERAGE VALUE',
-                                value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
-                                icon: Icons.analytics_rounded,
-                                color: const Color(0xFF0D9488),
-                              ),
-                            ],
-                          )
-                        else
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _KPICard(
-                                  label: 'TOTAL REVENUE',
-                                  value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
-                                  icon: Icons.payments_rounded,
-                                  color: const Color(0xFF0F172A),
-                                  isPrimary: true,
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                child: _KPICard(
-                                  label: 'TOTAL RECEIPTS',
-                                  value: totalCount.toString(),
-                                  icon: Icons.receipt_long_rounded,
-                                  color: const Color(0xFF6366F1),
-                                ),
-                              ),
-                              const SizedBox(width: 24),
-                              Expanded(
-                                child: _KPICard(
-                                  label: 'AVERAGE VALUE',
-                                  value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
-                                  icon: Icons.analytics_rounded,
-                                  color: const Color(0xFF0D9488),
-                                ),
-                              ),
-                            ],
-                          ),
-                        const SizedBox(height: 24),
-
-                        if (isMobile)
-                          Column(
+                        // ── Left Column: Categories & Branches ────────────────
+                        Expanded(
+                          flex: 4,
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               _ChartSection(
                                 title: 'Allocation Breakdown',
                                 subtitle: 'Comprehensive program distribution',
-                                isMobile: isMobile,
                                 child: _CombinedDonutChart(
                                   catTotals: catTotals,
                                   subCatTotals: subCatTotals,
                                   natureTotals: natureTotals,
                                 ),
                               ),
-                              const SizedBox(height: 24),
-                              _ChartSection(
-                                title: 'Contribution Trends',
-                                subtitle: _selectedPeriod == TrendPeriod.day
-                                    ? 'This week — Mon to Sun'
-                                    : _selectedPeriod == TrendPeriod.week
-                                        ? 'This month — ${DateFormat('MMMM yyyy').format(DateTime.now())}'
-                                        : _selectedPeriod == TrendPeriod.month
-                                            ? 'This year — ${DateTime.now().year}'
-                                            : 'All time record',
-                                trailing: Wrap(
-                                  spacing: 4,
-                                  runSpacing: 4,
-                                  children: TrendPeriod.values.map((p) {
-                                    final isActive = _selectedPeriod == p;
-                                    return GestureDetector(
-                                      onTap: () => setState(() => _selectedPeriod = p),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: isActive ? AppColors.primary : Colors.transparent,
-                                          borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(color: isActive ? AppColors.primary : AppColors.gray200),
-                                        ),
-                                        child: Text(
-                                          p.name.toUpperCase(),
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.w800,
-                                            color: isActive ? Colors.white : AppColors.gray500,
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 32),
+
+                        // ── Right Column: Trends & Donors ─────────────────────
+                        Expanded(
+                          flex: 6,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              GestureDetector(
+                                onTap: () {
+                                  if (_selectedTrendKey != null) {
+                                    setState(() => _selectedTrendKey = null);
+                                  }
+                                },
+                                behavior: HitTestBehavior.translucent,
+                                child: _ChartSection(
+                                  title: 'Contribution Trends',
+                                  subtitle: _selectedPeriod == TrendPeriod.day
+                                      ? 'Active week — Mon to Sun'
+                                      : _selectedPeriod == TrendPeriod.week
+                                          ? 'Active month — ${DateFormat('MMMM yyyy').format(refDate)}'
+                                          : _selectedPeriod == TrendPeriod.month
+                                              ? 'Active year — ${refDate.year}'
+                                              : 'All time record',
+                                  trailing: Row(
+                                    children: TrendPeriod.values.map((p) {
+                                      final isActive = _selectedPeriod == p;
+                                      return GestureDetector(
+                                        onTap: () => setState(() {
+                                          _selectedPeriod = p;
+                                          _selectedTrendKey = null;
+                                        }),
+                                        child: Container(
+                                          margin: const EdgeInsets.only(left: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: isActive ? AppColors.primary : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: isActive ? AppColors.primary : AppColors.gray200),
+                                          ),
+                                          child: Text(
+                                            p.name.toUpperCase(),
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              color: isActive ? Colors.white : AppColors.gray500,
+                                            ),
                                           ),
                                         ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      _TrendLineChart(
+                                        sortedTrends: sortedTrends,
+                                        period: _selectedPeriod,
+                                        referenceDate: refDate,
+                                        selectedKey: _selectedTrendKey,
+                                        onPointSelected: (key) {
+                                          setState(() {
+                                            _selectedTrendKey = _selectedTrendKey == key ? null : key;
+                                          });
+                                        },
                                       ),
-                                    );
-                                  }).toList(),
+                                      if (_selectedTrendKey != null && trendTotals.containsKey(_selectedTrendKey)) ...[
+                                        const SizedBox(height: 16),
+                                        _TrendSelectionSummary(
+                                          selectedKey: _selectedTrendKey!,
+                                          period: _selectedPeriod,
+                                          selectedTotal: trendTotals[_selectedTrendKey!] ?? 0,
+                                          catBreakdown: trendCatBreakdown[_selectedTrendKey!] ?? {},
+                                          allTrendTotals: trendTotals,
+                                          referenceDate: refDate,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                 ),
-                                isMobile: isMobile,
-                                child: _TrendLineChart(sortedTrends: sortedTrends, period: _selectedPeriod, isMobile: isMobile),
                               ),
                               const SizedBox(height: 24),
                               _ChartSection(
@@ -309,114 +397,19 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                                     ),
                                   ],
                                 ),
-                                isMobile: isMobile,
                                 child: _DonorRankingList(sortedDonors: sortedDonors),
                               ),
                             ],
-                          )
-                        else
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // ── Left Column: Categories & Branches ────────────────
-                              Expanded(
-                                flex: 4,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _ChartSection(
-                                      title: 'Allocation Breakdown',
-                                      subtitle: 'Comprehensive program distribution',
-                                      isMobile: isMobile,
-                                      child: _CombinedDonutChart(
-                                        catTotals: catTotals,
-                                        subCatTotals: subCatTotals,
-                                        natureTotals: natureTotals,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 32),
-
-                              // ── Right Column: Trends & Donors ─────────────────────
-                              Expanded(
-                                flex: 6,
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    _ChartSection(
-                                      title: 'Contribution Trends',
-                                      subtitle: _selectedPeriod == TrendPeriod.day
-                                          ? 'This week — Mon to Sun'
-                                          : _selectedPeriod == TrendPeriod.week
-                                              ? 'This month — ${DateFormat('MMMM yyyy').format(DateTime.now())}'
-                                              : _selectedPeriod == TrendPeriod.month
-                                                  ? 'This year — ${DateTime.now().year}'
-                                                  : 'All time record',
-                                      trailing: Row(
-                                        children: TrendPeriod.values.map((p) {
-                                          final isActive = _selectedPeriod == p;
-                                          return GestureDetector(
-                                            onTap: () => setState(() => _selectedPeriod = p),
-                                            child: Container(
-                                              margin: const EdgeInsets.only(left: 8),
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: isActive ? AppColors.primary : Colors.transparent,
-                                                borderRadius: BorderRadius.circular(6),
-                                                border: Border.all(color: isActive ? AppColors.primary : AppColors.gray200),
-                                              ),
-                                              child: Text(
-                                                p.name.toUpperCase(),
-                                                style: TextStyle(
-                                                  fontSize: 9,
-                                                  fontWeight: FontWeight.w800,
-                                                  color: isActive ? Colors.white : AppColors.gray500,
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        }).toList(),
-                                      ),
-                                      isMobile: isMobile,
-                                      child: _TrendLineChart(sortedTrends: sortedTrends, period: _selectedPeriod, isMobile: isMobile),
-                                    ),
-                                    const SizedBox(height: 24),
-                                    _ChartSection(
-                                      title: 'Top Donors',
-                                      subtitle: 'Largest contributors to the cause',
-                                      trailing: Wrap(
-                                        spacing: 8,
-                                        children: [
-                                          _FilterTab(
-                                            label: 'MOST',
-                                            isActive: _donorSort == DonorSort.contribution,
-                                            onTap: () => setState(() => _donorSort = DonorSort.contribution),
-                                          ),
-                                          _FilterTab(
-                                            label: 'OLDEST',
-                                            isActive: _donorSort == DonorSort.oldest,
-                                            onTap: () => setState(() => _donorSort = DonorSort.oldest),
-                                          ),
-                                        ],
-                                      ),
-                                      isMobile: isMobile,
-                                      child: _DonorRankingList(sortedDonors: sortedDonors),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
                           ),
+                        ),
                       ],
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
@@ -424,50 +417,39 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
 
 class _DialogHeader extends StatelessWidget {
   final String branchName;
-  final bool isMobile;
-  const _DialogHeader({required this.branchName, required this.isMobile});
+  const _DialogHeader({required this.branchName});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(isMobile ? 16 : 32, isMobile ? 16 : 32, isMobile ? 12 : 24, isMobile ? 16 : 24),
+      padding: const EdgeInsets.fromLTRB(32, 32, 24, 24),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(isMobile ? 20 : 32)),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
         border: Border(bottom: BorderSide(color: AppColors.gray100, width: 1.5)),
       ),
       child: Row(
         children: [
-          if (!isMobile) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: const Icon(Icons.insights_rounded, color: AppColors.primary, size: 28),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(16),
             ),
-            const SizedBox(width: 20),
-          ],
+            child: const Icon(Icons.insights_rounded, color: AppColors.primary, size: 28),
+          ),
+          const SizedBox(width: 20),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Intelligence Dashboard', 
-                  style: TextStyle(
-                    fontSize: isMobile ? 18 : 24, 
-                    fontWeight: FontWeight.w900, 
-                    color: AppColors.gray900, 
-                    letterSpacing: -0.5
-                  ),
-                ),
+                const Text('Intelligence Dashboard', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.gray900, letterSpacing: -0.5)),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
                     const SizedBox(width: 8),
-                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.gray500, letterSpacing: 1)),
+                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.gray500, letterSpacing: 1)),
                   ],
                 ),
               ],
@@ -475,7 +457,7 @@ class _DialogHeader extends StatelessWidget {
           ),
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: Icon(Icons.close_rounded, color: AppColors.gray400, size: isMobile ? 24 : 28),
+            icon: const Icon(Icons.close_rounded, color: AppColors.gray400, size: 28),
           ),
         ],
       ),
@@ -486,49 +468,63 @@ class _DialogHeader extends StatelessWidget {
 class _KPICard extends StatelessWidget {
   final String label;
   final String value;
+  final String? subValue;
   final IconData icon;
   final Color color;
   final bool isPrimary;
 
-  const _KPICard({required this.label, required this.value, required this.icon, required this.color, this.isPrimary = false});
+  const _KPICard({
+    required this.label,
+    required this.value,
+    this.subValue,
+    required this.icon,
+    required this.color,
+    this.isPrimary = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: isPrimary ? color : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: isPrimary ? color : AppColors.gray200.withValues(alpha: 0.6)),
-        boxShadow: [
-          BoxShadow(color: isPrimary ? color.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 8)),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isPrimary ? Colors.white.withValues(alpha: 0.15) : color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isPrimary ? color : Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: isPrimary ? color : AppColors.gray200.withValues(alpha: 0.6)),
+          boxShadow: [
+            BoxShadow(color: isPrimary ? color.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 8)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: isPrimary ? Colors.white.withValues(alpha: 0.15) : color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(icon, color: isPrimary ? Colors.white : color, size: 24),
             ),
-            child: Icon(icon, color: isPrimary ? Colors.white : color, size: 24),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: isPrimary ? Colors.white.withValues(alpha: 0.8) : AppColors.gray500, letterSpacing: 1)),
-                const SizedBox(height: 6),
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: isPrimary ? Colors.white : AppColors.gray900, letterSpacing: -0.5)),
-                ),
-              ],
+            const SizedBox(width: 20),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: isPrimary ? Colors.white.withValues(alpha: 0.8) : AppColors.gray500, letterSpacing: 1)),
+                  const SizedBox(height: 6),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: isPrimary ? Colors.white : AppColors.gray900, letterSpacing: -0.5)),
+                  ),
+                  if (subValue != null) ...[
+                    const SizedBox(height: 4),
+                    Text(subValue!, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isPrimary ? Colors.white.withOpacity(0.7) : AppColors.gray500)),
+                  ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -539,13 +535,12 @@ class _ChartSection extends StatelessWidget {
   final String subtitle;
   final Widget child;
   final Widget? trailing;
-  final bool isMobile;
-  const _ChartSection({required this.title, required this.subtitle, required this.child, this.trailing, required this.isMobile});
+  const _ChartSection({required this.title, required this.subtitle, required this.child, this.trailing});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.all(isMobile ? 16 : 24),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
@@ -554,30 +549,20 @@ class _ChartSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (isMobile) ...[
-            Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.gray900)),
-            const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.gray500)),
-            if (trailing != null) ...[
-              const SizedBox(height: 12),
-              trailing!,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.gray900)),
+                  const SizedBox(height: 4),
+                  Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.gray500)),
+                ],
+              ),
+              if (trailing != null) trailing!,
             ],
-          ] else ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.gray900)),
-                    const SizedBox(height: 4),
-                    Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.gray500)),
-                  ],
-                ),
-                if (trailing != null) trailing!,
-              ],
-            ),
-          ],
+          ),
           const SizedBox(height: 24),
           child,
         ],
@@ -684,9 +669,51 @@ class _LegendRow extends StatelessWidget {
           Container(width: isSmall ? 8 : 12, height: isSmall ? 8 : 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 12),
           Expanded(child: Text(label, style: TextStyle(fontSize: isSmall ? 11 : 13, fontWeight: isSmall ? FontWeight.w500 : FontWeight.w700, color: AppColors.gray700))),
-          Text('PKR ${NumberFormat('#,###').format(amount)}', style: TextStyle(fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: AppColors.gray900, fontFamily: 'DMMono')),
+          Text('PKR ${NumberFormat('#,###').format(amount)}', style: GoogleFonts.dmMono(fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: AppColors.gray900)),
         ],
       ),
+    );
+  }
+}
+
+class _BranchPerformanceList extends StatelessWidget {
+  final List<MapEntry<String, double>> sortedBranches;
+  const _BranchPerformanceList({required this.sortedBranches});
+
+  @override
+  Widget build(BuildContext context) {
+    if (sortedBranches.isEmpty) return const Text('No branch data available');
+    final max = sortedBranches.first.value;
+
+    return Column(
+      children: sortedBranches.take(5).map((e) {
+        final percent = max > 0 ? e.value / max : 0.0;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(e.key, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.gray800)),
+                  Text('PKR ${NumberFormat('#,###').format(e.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.primary)),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percent,
+                  minHeight: 8,
+                  backgroundColor: const Color(0xFFF1F5F9),
+                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary.withValues(alpha: 0.8)),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 }
@@ -694,18 +721,45 @@ class _LegendRow extends StatelessWidget {
 class _TrendLineChart extends StatelessWidget {
   final List<MapEntry<String, double>> sortedTrends;
   final TrendPeriod period;
-  final bool isMobile;
-  const _TrendLineChart({required this.sortedTrends, required this.period, required this.isMobile});
+  final DateTime referenceDate;
+  final String? selectedKey;
+  final ValueChanged<String>? onPointSelected;
+
+  const _TrendLineChart({
+    required this.sortedTrends,
+    required this.period,
+    required this.referenceDate,
+    this.selectedKey,
+    this.onPointSelected,
+  });
+
+  int? get _selectedIndex {
+    if (selectedKey == null) return null;
+    for (int i = 0; i < sortedTrends.length; i++) {
+      if (sortedTrends[i].key == selectedKey) return i;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
     if (sortedTrends.isEmpty) return const SizedBox(height: 200, child: Center(child: Text('No trend data')));
+
+    final selIdx = _selectedIndex;
 
     return SizedBox(
       height: 200,
       child: LineChart(
         LineChartData(
           lineTouchData: LineTouchData(
+            touchCallback: (event, response) {
+              if (event is FlTapUpEvent && response?.lineBarSpots != null && response!.lineBarSpots!.isNotEmpty) {
+                final idx = response.lineBarSpots!.first.spotIndex;
+                if (idx >= 0 && idx < sortedTrends.length) {
+                  onPointSelected?.call(sortedTrends[idx].key);
+                }
+              }
+            },
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (spot) => const Color(0xFF1E293B),
               getTooltipItems: (List<LineBarSpot> touchedSpots) {
@@ -735,9 +789,7 @@ class _TrendLineChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                interval: period == TrendPeriod.week 
-                    ? (isMobile ? 6.0 : 3.0) 
-                    : (period == TrendPeriod.month && isMobile ? 2.0 : 1.0),
+                interval: period == TrendPeriod.week ? 3 : 1,
                 getTitlesWidget: (val, meta) {
                   final idx = val.toInt();
                   if (idx < 0 || idx >= sortedTrends.length) return const SizedBox.shrink();
@@ -747,17 +799,14 @@ class _TrendLineChart extends StatelessWidget {
                   
                   switch (period) {
                     case TrendPeriod.day:
-                      // key is weekday string '1'..'7'
                       final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
                       final dIdx = int.tryParse(key) ?? 1;
                       label = days[(dIdx - 1) % 7];
                       break;
                     case TrendPeriod.week:
-                      // key is day string '01'..'31'
-                      label = '${DateFormat('MMM').format(DateTime.now())} ${int.tryParse(key) ?? key}';
+                      label = '${DateFormat('MMM').format(referenceDate)} ${int.tryParse(key) ?? key}';
                       break;
                     case TrendPeriod.month:
-                      // key is month string '01'..'12'
                       final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
                       final mIdx = int.tryParse(key) ?? 1;
                       label = months[(mIdx - 1) % 12];
@@ -767,9 +816,17 @@ class _TrendLineChart extends StatelessWidget {
                       break;
                   }
                   
+                  final isSelected = selIdx == idx;
                   return Padding(
                     padding: const EdgeInsets.only(top: 8),
-                    child: Text(label, style: const TextStyle(color: AppColors.gray400, fontSize: 10, fontWeight: FontWeight.w600)),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: isSelected ? AppColors.primary : AppColors.gray400,
+                        fontSize: isSelected ? 11 : 10,
+                        fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
+                      ),
+                    ),
                   );
                 },
               ),
@@ -785,7 +842,15 @@ class _TrendLineChart extends StatelessWidget {
               isStrokeCapRound: true,
               dotData: FlDotData(
                 show: true,
-                getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(radius: 4, color: Colors.white, strokeWidth: 2, strokeColor: AppColors.primary),
+                getDotPainter: (spot, percent, barData, index) {
+                  final isSelected = selIdx == index;
+                  return FlDotCirclePainter(
+                    radius: isSelected ? 7 : 4,
+                    color: isSelected ? AppColors.primary : Colors.white,
+                    strokeWidth: isSelected ? 3 : 2,
+                    strokeColor: isSelected ? const Color(0xFF0F172A) : AppColors.primary,
+                  );
+                },
               ),
               belowBarData: BarAreaData(
                 show: true,
@@ -797,19 +862,233 @@ class _TrendLineChart extends StatelessWidget {
               ),
             ),
           ],
+          extraLinesData: selIdx != null
+              ? ExtraLinesData(verticalLines: [
+                  VerticalLine(
+                    x: selIdx!.toDouble(),
+                    color: AppColors.primary.withValues(alpha: 0.3),
+                    strokeWidth: 1,
+                    dashArray: [4, 4],
+                  ),
+                ])
+              : const ExtraLinesData(),
         ),
       ),
     );
   }
 }
 
+class _TrendSelectionSummary extends StatelessWidget {
+  final String selectedKey;
+  final TrendPeriod period;
+  final double selectedTotal;
+  final Map<String, double> catBreakdown;
+  final Map<String, double> allTrendTotals;
+  final DateTime referenceDate;
+
+  const _TrendSelectionSummary({
+    required this.selectedKey,
+    required this.period,
+    required this.selectedTotal,
+    required this.catBreakdown,
+    required this.allTrendTotals,
+    required this.referenceDate,
+  });
+
+  String get _periodLabel {
+    switch (period) {
+      case TrendPeriod.day:
+        final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        final idx = int.tryParse(selectedKey) ?? 1;
+        return days[(idx - 1) % 7];
+      case TrendPeriod.week:
+        return '${DateFormat('MMMM').format(referenceDate)} ${int.tryParse(selectedKey) ?? selectedKey}';
+      case TrendPeriod.month:
+        final months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        final idx = int.tryParse(selectedKey) ?? 1;
+        return '${months[(idx - 1) % 12]} ${referenceDate.year}';
+      case TrendPeriod.year:
+        return 'Year $selectedKey';
+    }
+  }
+
+  String? get _previousKey {
+    final keys = allTrendTotals.keys.toList()..sort();
+    final idx = keys.indexOf(selectedKey);
+    if (idx > 0) return keys[idx - 1];
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final prevKey = _previousKey;
+    final prevTotal = prevKey != null ? (allTrendTotals[prevKey] ?? 0) : 0.0;
+    final diff = selectedTotal - prevTotal;
+    final diffPercent = prevTotal > 0 ? (diff / prevTotal) * 100 : 0.0;
+    final isUp = diff >= 0;
+
+    final sortedCats = catBreakdown.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    final allTotal = allTrendTotals.values.fold(0.0, (sum, v) => sum + v);
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [const Color(0xFF0F172A), const Color(0xFF1E293B)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: period label + total
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.calendar_today_rounded, color: AppColors.primary, size: 16),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _periodLabel,
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'PKR ${NumberFormat('#,###').format(selectedTotal)}',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              // Difference badge
+              if (prevKey != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isUp ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFFEF4444).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                        color: isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        size: 14,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${isUp ? '+' : ''}${diffPercent.toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          color: isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          // Difference from previous period
+          if (prevKey != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              '${isUp ? '+' : ''}PKR ${NumberFormat('#,###').format(diff)} vs previous',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w600),
+            ),
+          ],
+
+          // Category breakdown
+          if (sortedCats.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text('CATEGORY BREAKDOWN', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+            const SizedBox(height: 10),
+            ...sortedCats.map((e) {
+              final cat = DonationCategory.values.firstWhere((c) => c.name == e.key, orElse: () => DonationCategory.all);
+              final percent = selectedTotal > 0 ? (e.value / selectedTotal) * 100 : 0.0;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Container(width: 10, height: 10, decoration: BoxDecoration(color: cat.color, shape: BoxShape.circle)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(cat.label, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12, fontWeight: FontWeight.w600)),
+                    ),
+                    Text(
+                      'PKR ${NumberFormat('#,###').format(e.value)}',
+                      style: GoogleFonts.dmMono(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 42,
+                      child: Text(
+                        '${percent.toStringAsFixed(0)}%',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+
+          // Share of all-time total
+          if (allTotal > 0) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: selectedTotal / allTotal,
+                minHeight: 4,
+                backgroundColor: Colors.white.withValues(alpha: 0.1),
+                valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${(selectedTotal / allTotal * 100).toStringAsFixed(1)}% of total period contributions',
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 9, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+
 class _InsightsPanel extends StatelessWidget {
   final double totalAmt;
+  final double totalCash;
+  final double totalGoods;
   final double avgDonation;
   final Map<String, double> catTotals;
-  final bool isMobile;
+  final List<DonationRecord> donations;
 
-  const _InsightsPanel({required this.totalAmt, required this.avgDonation, required this.catTotals, required this.isMobile});
+  const _InsightsPanel({
+    required this.totalAmt,
+    required this.totalCash,
+    required this.totalGoods,
+    required this.avgDonation,
+    required this.catTotals,
+    required this.donations,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -819,8 +1098,56 @@ class _InsightsPanel extends StatelessWidget {
       topCatName = DonationCategory.values.firstWhere((c) => c.name == sorted.first.key, orElse: () => DonationCategory.all).label;
     }
 
+    // ── Group donations by calendar year ─────────────────────────────────────
+    final Map<int, double> yearlyTotals = {};
+    for (var d in donations) {
+      final date = DateTime.tryParse(d.date) ?? DateTime.now();
+      final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+      yearlyTotals[date.year] = (yearlyTotals[date.year] ?? 0.0) + amt;
+    }
+
+    final sortedYears = yearlyTotals.keys.toList()..sort();
+
+    // ── Build historical insights ────────────────────────────────────────────
+    final List<String> historicalPoints = [];
+    for (var year in sortedYears) {
+      historicalPoints.add('$year: PKR ${NumberFormat('#,###').format(yearlyTotals[year]!)}');
+    }
+    final historyText = historicalPoints.isNotEmpty
+        ? 'Historical Collections: ${historicalPoints.join(' | ')}'
+        : 'No historical collections recorded.';
+
+    // ── Estimate next year collections (YoY Growth Forecasting) ──────────────
+    String forecastText = '';
+    final nextYear = DateTime.now().year + 1;
+    if (sortedYears.length >= 2) {
+      final List<double> growthRates = [];
+      for (int i = 0; i < sortedYears.length - 1; i++) {
+        final prevVal = yearlyTotals[sortedYears[i]] ?? 0.0;
+        final newVal = yearlyTotals[sortedYears[i + 1]] ?? 0.0;
+        if (prevVal > 0) {
+          growthRates.add((newVal - prevVal) / prevVal);
+        }
+      }
+      final double avgGrowth = growthRates.isNotEmpty
+          ? growthRates.reduce((a, b) => a + b) / growthRates.length
+          : 0.05; // 5% default growth rate
+      
+      final currentYear = DateTime.now().year;
+      final currentYearTotal = yearlyTotals[currentYear] ?? (yearlyTotals[sortedYears.last] ?? 0.0);
+      final nextYearEst = currentYearTotal * (1 + avgGrowth);
+      final pctString = (avgGrowth * 100).toStringAsFixed(1);
+      final sign = avgGrowth >= 0 ? '+' : '';
+      forecastText = 'Estimated collection for year $nextYear: PKR ${NumberFormat('#,###').format(nextYearEst)} (${sign}${pctString}% projected trend).';
+    } else {
+      final currentYear = DateTime.now().year;
+      final currentYearTotal = yearlyTotals[currentYear] ?? 0.0;
+      final nextYearEst = currentYearTotal > 0 ? currentYearTotal * 1.05 : avgDonation * 50;
+      forecastText = 'Estimated collection for year $nextYear: PKR ${NumberFormat('#,###').format(nextYearEst)} (estimated with baseline 5% growth).';
+    }
+
     return Container(
-      padding: EdgeInsets.all(isMobile ? 20 : 28),
+      padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
@@ -850,6 +1177,13 @@ class _InsightsPanel extends StatelessWidget {
           _InsightItem(icon: Icons.trending_up_rounded, text: 'The highest contribution comes from $topCatName.', color: Colors.blueAccent),
           _InsightItem(icon: Icons.lightbulb_outline_rounded, text: 'Average contribution per receipt is PKR ${NumberFormat('#,###').format(avgDonation)}.', color: Colors.amberAccent),
           _InsightItem(icon: Icons.verified_user_rounded, text: 'Total consolidated revenue reached PKR ${NumberFormat('#,###').format(totalAmt)}.', color: const Color(0xFF34D399)),
+          _InsightItem(
+            icon: Icons.payments_rounded,
+            text: 'Consolidated breakdown: PKR ${NumberFormat('#,###').format(totalCash)} in cash contributions and PKR ${NumberFormat('#,###').format(totalGoods)} in goods/ajnas estimated value.',
+            color: Colors.lightGreenAccent,
+          ),
+          _InsightItem(icon: Icons.history_rounded, text: historyText, color: Colors.cyanAccent),
+          _InsightItem(icon: Icons.online_prediction_rounded, text: forecastText, color: Colors.purpleAccent),
         ],
       ),
     );
@@ -969,7 +1303,7 @@ class _NatureBreakdownChart extends StatelessWidget {
               Container(width: 8, height: 8, decoration: BoxDecoration(color: sub.color, shape: BoxShape.circle)),
               const SizedBox(width: 10),
               Expanded(child: Text(sub.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.gray600))),
-              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray900, fontFamily: 'DMMono')),
+              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: GoogleFonts.dmMono(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray900)),
             ],
           ),
         );
@@ -979,7 +1313,7 @@ class _NatureBreakdownChart extends StatelessWidget {
 }
 
 class _DonorRankingList extends StatelessWidget {
-  final List<MapEntry<String, ({String name, String phone, double total, DateTime firstSeen, int count})>> sortedDonors;
+  final List<MapEntry<String, ({String name, String phone, double total, double cashTotal, double goodsTotal, DateTime firstSeen, int count})>> sortedDonors;
   const _DonorRankingList({required this.sortedDonors});
 
   @override
@@ -1016,8 +1350,11 @@ class _DonorRankingList extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text('PKR ${NumberFormat('#,###').format(data.total)}', 
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.gray900, fontFamily: 'DMMono')),
-                  const Text('total contribution', style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: AppColors.gray400)),
+                      style: GoogleFonts.dmMono(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.gray900)),
+                  Text(
+                    'Cash: PKR ${NumberFormat('#,###').format(data.cashTotal)} · Goods: PKR ${NumberFormat('#,###').format(data.goodsTotal)}',
+                    style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: AppColors.gray500),
+                  ),
                 ],
               ),
             ],

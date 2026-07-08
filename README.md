@@ -44,12 +44,28 @@ A multi-layered donation recording and auditing system with a full credit chain:
 - **WhatsApp Integration** — One-tap thank-you message and receipt sharing via WhatsApp
 - **Excel Export** — Chairman-level ledger export for external auditing
 
+### 🎓 Madrassa & Education Services
+A complete academic management system for the foundation's educational institutions:
+- **Student Enrollment** — Dynamic student profiles, class assignment, and enrollment workflows
+- **Daily logs & Monthly Reports** — Attendance sheets, academic logging, and behavior reports (`daily_log_view.dart`, `monthly_report_view.dart`)
+- **Holiday Management** — Schedule holidays and academic breaks globally or branch-specifically
+- **Guardian Portal** — Dedicated `MadrassaGuardianScreen` allowing parents to track their child's attendance, reports, and fees
+
+### 👥 HR, Payroll & Employee Management
+Integrated workforce management to streamline foundation personnel operations:
+- **Employee Directory** — Centralized staff records containing roles, active branches, and contract details
+- **Salary Ledger & Payroll** — Dynamic tracking of salary payments, payment history, and payroll ledgers
+- **Employee Attendance** — Digital attendance register for staff clock-in/clock-out tracking
+- **Branch Transfers** — Record and orchestrate employee relocations between foundation branches
+- **Audit Logs** — System-wide logger tracking sensitive financial modifications and profile updates
+
 ### 📊 Executive Dashboards
 Role-specific dashboards for organizational leadership:
 - **Chairman Portal** — Global overview of all branches with KPI cards (revenue, patients, food tokens served, donations), branch performance tables, and donation auditing
 - **CEO Dashboard** — Aggregate operational metrics and branch comparison
 - **HQ Manager View** — Multi-branch oversight with cross-branch credit ledger monitoring
 - **Branch Manager View** — Localized branch performance with patient cards and operational metrics
+- **Supervisor Portal** — Localized branch oversight, inventory approvals, and request management
 
 ---
 
@@ -150,6 +166,11 @@ lib/
 │   │   ├── donations_dashboard.dart # Analytics + charts
 │   │   ├── credit_ledger.dart       # Chain-of-custody ledger
 │   │   └── donations_shared.dart    # Design system + PDF + messaging
+│   ├── madrassa/
+│   │   ├── views/                   # Academic log, reports, oversight
+│   │   ├── dialogs/                 # Student registration & enrollment
+│   │   ├── providers/               # State management for courses and marks
+│   │   └── madrassa_dashboard.dart  # Portal for teacher/admin dashboard
 │   ├── chairman_screen.dart         # Executive portal
 │   ├── ceo_screen.dart              # CEO dashboard
 │   ├── manager_screen.dart          # HQ Manager view
@@ -159,9 +180,11 @@ lib/
 │   ├── firestore_service.dart       # Primary write gateway (Hive + LAN + Firestore)
 │   ├── sync_service.dart            # Client-side Firestore uploader
 │   ├── local_storage_service.dart   # Hive box management
+│   ├── donations_local_storage.dart # Donations offline persistence
+│   ├── finance_local_storage.dart   # Salaries and financial records
 │   └── auth_service.dart            # Firebase Auth + role-based routing
 ├── realtime/                        # LAN server, discovery, WebSocket management
-├── models/                          # Patient, Token, Prescription, Inventory, Donation
+├── models/                          # Patient, Token, Prescription, Inventory, Donation, Student, Log
 ├── theme/                           # Role-based theming + design tokens
 └── widgets/                         # Shared UI components + dashboards
 ```

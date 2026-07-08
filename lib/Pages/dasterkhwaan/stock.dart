@@ -124,7 +124,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   ),
                   const SizedBox(height: 14),
                   DropdownButtonFormField<String>(
-                    value: unit,
+                    initialValue: unit,
                     decoration:
                         _inputDeco(label: "Unit", icon: Icons.straighten),
                     items: units

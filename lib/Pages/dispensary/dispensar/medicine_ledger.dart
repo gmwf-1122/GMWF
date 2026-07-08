@@ -11,11 +11,13 @@ import 'dart:async';
 class MedicineLedgerPage extends StatefulWidget {
   final String branchId;
   final Map<String, dynamic>? initialMedicine;
+  final bool isEmbedded;
 
   const MedicineLedgerPage({
     super.key,
     required this.branchId,
     this.initialMedicine,
+    this.isEmbedded = false,
   });
 
   @override
@@ -92,24 +94,51 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
 
     try {
       final medId = _selectedMed!['id'] ?? _selectedMed!['docId'] ?? '';
+      final selectedType = (_selectedMed!['type'] ?? '').toString().toLowerCase();
+      final isSelectedMedSyringe = selectedType.contains('syringe');
       
       // 1. Query Logs (Additions, Registrations, Edits) from inventory_log (All-Time)
-      // We will try by medicineId first
-      QuerySnapshot additionsSnap;
+      final List<Future<QuerySnapshot>> logQueries = [];
       if (medId.isNotEmpty) {
-        additionsSnap = await FirebaseFirestore.instance
+        logQueries.add(FirebaseFirestore.instance
             .collection('branches')
             .doc(widget.branchId)
             .collection('inventory_log')
             .where('medicineId', isEqualTo: medId)
-            .get();
+            .get());
+        logQueries.add(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('inventory_log')
+            .where('docId', isEqualTo: medId)
+            .get());
+        logQueries.add(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('inventory_log')
+            .where('newId', isEqualTo: medId)
+            .get());
+        logQueries.add(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('inventory_log')
+            .where('oldId', isEqualTo: medId)
+            .get());
       } else {
-        additionsSnap = await FirebaseFirestore.instance
+        logQueries.add(FirebaseFirestore.instance
             .collection('branches')
             .doc(widget.branchId)
             .collection('inventory_log')
             .where('medicineName', isEqualTo: _selectedMed!['name'])
-            .get();
+            .get());
+      }
+
+      final snapshots = await Future.wait(logQueries);
+      final Map<String, DocumentSnapshot> uniqueDocs = {};
+      for (final snap in snapshots) {
+        for (final doc in snap.docs) {
+          uniqueDocs[doc.id] = doc;
+        }
       }
 
       double totalAdded = 0;
@@ -117,9 +146,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       List<Map<String, dynamic>> logs = [];
       DateTime? earliestDate;
 
-      for (final doc in additionsSnap.docs) {
+      for (final doc in uniqueDocs.values) {
         final d = doc.data() as Map<String, dynamic>;
-        final qty = (d['quantityAdded'] as num?)?.toDouble() ?? 0.0;
+        final q = d['quantityAdded'];
+        final qty = (q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0);
         final ts = (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
         final action = d['action'] ?? '';
         
@@ -127,14 +157,14 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           earliestDate = ts;
         }
         
-        if (action == 'edit_stock') {
+        if (action == 'edit_stock' || action == 'medicine_edited') {
            totalAdjusted += qty;
            logs.add({
              'type': qty >= 0 ? 'added' : 'removed',
              'qty': qty.abs(),
              'date': ts,
-             'user': d['performedByName'] ?? 'Admin',
-             'msg': 'Manual Adjustment',
+             'user': d['performedByName'] ?? d['performedBy'] ?? 'Admin',
+             'msg': action == 'medicine_edited' ? 'Medicine Edited' : 'Manual Adjustment',
            });
         } else {
            totalAdded += qty;
@@ -142,8 +172,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
              'type': 'added',
              'qty': qty,
              'date': ts,
-             'user': d['performedByName'] ?? 'Unknown',
-             'msg': action == 'medicine_registered_directly' ? 'Initial Registration' : 'Restock',
+             'user': d['performedByName'] ?? d['performedBy'] ?? 'Unknown',
+             'msg': (action == 'medicine_registered_directly' || action == 'medicine_registered') 
+                 ? 'Initial Registration' 
+                 : 'Restock',
            });
         }
       }
@@ -197,7 +229,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               }
 
               if (isMatch) {
-                final days = (d['daysOfMedicine'] as num?)?.toDouble() ?? 1.0;
+                final dQty = d['daysOfMedicine'];
+                final days = (dQty is num ? dQty.toDouble() : double.tryParse(dQty?.toString() ?? '') ?? 1.0);
                 final perDayRaw = rx['quantity'] ?? rx['qty'] ?? 0;
                 final perDay = perDayRaw is num ? perDayRaw.toDouble() : double.tryParse(perDayRaw.toString()) ?? 0.0;
                 
@@ -215,6 +248,24 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   'msg': 'Dispensed (Token: ${d['serial']})',
                   'days': days.toInt(),
                 });
+              } else if (isSelectedMedSyringe) {
+                final typeStr = rx['type']?.toString().toLowerCase() ?? '';
+                final isInjOrDrip = typeStr.contains('injection') || typeStr.contains('drip');
+                final isRxSyringe = typeStr.contains('syringe');
+                if (isInjOrDrip && !isRxSyringe) {
+                  final perDayRaw = rx['quantity'] ?? rx['qty'] ?? 1;
+                  final perDay = perDayRaw is num ? perDayRaw.toDouble() : double.tryParse(perDayRaw.toString()) ?? 1.0;
+                  dayTotalRemoved += perDay;
+
+                  dayLogs.add({
+                    'type': 'removed',
+                    'qty': perDay,
+                    'date': curr,
+                    'user': d['dispenserName'] ?? 'Unknown',
+                    'msg': 'Auto-deducted Syringe (Token: ${d['serial']})',
+                    'days': 1,
+                  });
+                }
               }
             }
           }
@@ -233,7 +284,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
 
 
       // 4. Get Current Remaining
-      final currentStock = (_selectedMed!['quantity'] as num?)?.toDouble() ?? 0.0;
+      final smQty = _selectedMed!['quantity'];
+      final currentStock = (smQty is num ? smQty.toDouble() : double.tryParse(smQty?.toString() ?? '') ?? 0.0);
 
       // 5. Finalize Report
       // Sort logs by date descending
@@ -277,7 +329,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       backgroundColor: _bg,
       body: CustomScrollView(
         slivers: [
-          _buildSliverAppBar(),
+          if (!widget.isEmbedded)
+            _buildSliverAppBar(),
           SliverToBoxAdapter(child: _buildFilters()),
           if (_isLoading)
             const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: _teal)))
@@ -436,17 +489,20 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             child: Center(child: Text('No transactions recorded for this period', style: TextStyle(color: _textLight))),
           )
         else
-          ...logs.map((log) => _buildLogTile(log)).toList(),
+          ...logs.map((log) => _buildLogTile(log)),
         const SizedBox(height: 100), // Space for FAB
       ]),
     );
   }
 
   Widget _buildSummaryCards(Map<String, dynamic> report) {
-    final added = (report['totalAdded'] as num).toDouble();
-    final removed = (report['totalRemoved'] as num).toDouble();
+    final ta = report['totalAdded'];
+    final added = (ta is num ? ta.toDouble() : double.tryParse(ta?.toString() ?? '') ?? 0.0);
+    final tr = report['totalRemoved'];
+    final removed = (tr is num ? tr.toDouble() : double.tryParse(tr?.toString() ?? '') ?? 0.0);
     final net = added - removed;
-    final adjusted = (report['totalAdjusted'] as num?)?.toDouble() ?? 0.0;
+    final tAdj = report['totalAdjusted'];
+    final adjusted = (tAdj is num ? tAdj.toDouble() : double.tryParse(tAdj?.toString() ?? '') ?? 0.0);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),

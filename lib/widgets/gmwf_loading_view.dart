@@ -138,7 +138,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                     width: logoSize,
                     height: logoSize,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Icon(
+                    errorBuilder: (_, _, _) => Icon(
                       Icons.local_pharmacy,
                       size: logoSize,
                       color: const Color(0xFF00695C),

@@ -4,7 +4,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:another_flushbar/flushbar.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';

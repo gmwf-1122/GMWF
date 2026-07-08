@@ -1,10 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:logger/logger.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/donations_local_storage.dart';
+import 'package:gmwf/pages/madrassa/utils/madrassa_local_storage.dart';
+import 'package:gmwf/services/finance_local_storage.dart';
+import 'package:gmwf/services/finance_loans_storage.dart';
+import 'package:gmwf/services/permission_service.dart';
+import 'package:gmwf/services/offline_auth_service.dart';
 
 class SyncService {
   static final SyncService _instance = SyncService._internal();
@@ -15,6 +22,7 @@ class SyncService {
   bool _isUploading = false;
   String? _currentBranchId;
   List<String> _authorizedBranches = [];
+  String? _currentUserRole;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   Timer? _dailyTokenTimer;
@@ -34,17 +42,19 @@ class SyncService {
     _setupDailyTokenRefresh(branchId);
     
     _periodicSyncTimer?.cancel();
-    _periodicSyncTimer = Timer.periodic(const Duration(minutes: 15), (_) {
+    // 30-minute periodic sync — reduced from 15 min to halve quota usage.
+    // Finance bulk downloads run separately via triggerFinanceRefresh().
+    _periodicSyncTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       triggerUpload();
     });
 
     triggerUpload();
-    print("SyncService started for branch: $branchId");
+    Logger().d("SyncService started for branch: $branchId");
   }
 
   void updateAuthorizedBranches(List<String> branchIds) {
     _authorizedBranches = branchIds;
-    print("SyncService: Updated authorized branches: $branchIds");
+    Logger().d("SyncService: Updated authorized branches: $branchIds");
     triggerUpload();
   }
 
@@ -82,10 +92,10 @@ class SyncService {
       }
       
       if (queued > 0) {
-        print('[SyncService] 📥 Backfill: queued $queued pending donations for upload');
+        Logger().d('[SyncService] 📥 Backfill: queued $queued pending donations for upload');
       }
     } catch (e) {
-      print('[SyncService] _enqueueMissingDonations error: $e');
+      Logger().d('[SyncService] _enqueueMissingDonations error: $e');
     }
   }
 
@@ -102,13 +112,29 @@ class SyncService {
     });
   }
 
-  Future<void> triggerUpload() async {
+  Future<void> triggerUpload({bool force = false}) async {
     if (_currentBranchId == null) return;
 
-    final connectivity = await Connectivity().checkConnectivity();
-    final isOnline     = connectivity.any((r) => r != ConnectivityResult.none);
+    bool isOnline = true;
+    try {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        final connectivity = await Connectivity().checkConnectivity();
+        isOnline = connectivity.any((r) => r != ConnectivityResult.none);
+      }
+    } catch (_) {
+      isOnline = true;
+    }
 
     if (isOnline && !_isUploading) {
+      if (_currentUserRole == null) {
+        try {
+          final userData = await OfflineAuthService.getCachedUserData();
+          if (userData != null) {
+            _currentUserRole = userData['role'] as String?;
+          }
+        } catch (_) {}
+      }
+
       await _uploadPending();
 
       final remainingQueue = Hive.box(LocalStorageService.syncBox).length;
@@ -118,11 +144,22 @@ class SyncService {
           if (_currentBranchId != null) branchesToSync.add(_currentBranchId!);
           if (_authorizedBranches.isNotEmpty) branchesToSync.addAll(_authorizedBranches);
 
+          final settings = Hive.box('app_settings');
           for (final bId in branchesToSync) {
-            await _refreshDataForBranch(bId);
+            final lastRefreshStr = settings.get('last_refresh_$bId') as String?;
+            final lastRefresh = lastRefreshStr != null ? DateTime.tryParse(lastRefreshStr) : null;
+            final now = DateTime.now();
+            // Cooldown raised to 30 min to match the periodic timer and avoid
+            // back-to-back downloads on rapid connectivity-change events.
+            if (force || lastRefresh == null || now.difference(lastRefresh) > const Duration(minutes: 30)) {
+              await settings.put('last_refresh_$bId', now.toIso8601String());
+              await _refreshDataForBranch(bId);
+            } else {
+              Logger().d("[SyncService] Skipping automatic refresh for branch $bId (cooldown active)");
+            }
           }
         } catch (e) {
-          print("Refresh after upload failed: $e");
+          Logger().d("Refresh after upload failed: $e");
         }
       }
     }
@@ -134,10 +171,61 @@ class SyncService {
       await LocalStorageService.downloadInventory(branchId);
       await LocalStorageService.refreshPrescriptions(branchId);
       await LocalStorageService.downloadMedicineRestrictions(branchId);
-      await DonationsLocalStorage.downloadAllDonations(branchId);
-      await DonationsLocalStorage.downloadDonors(branchId);
+
+      final role = _currentUserRole;
+
+      // Only download donations if the user has donations permission
+      final hasDonationsPerm = role == null ||
+          PermissionService().hasPermission(role, AppPermission.viewDonations) ||
+          PermissionService().hasPermission(role, AppPermission.manageDonations);
+      if (hasDonationsPerm) {
+        await DonationsLocalStorage.downloadAllDonations(branchId);
+        await DonationsLocalStorage.downloadDonors(branchId);
+      }
+
+      // Only download Madrassa data if the user has madrassa permissions
+      final hasMadrassaPerm = role == null ||
+          PermissionService().hasPermission(role, AppPermission.manageMadrassa) ||
+          PermissionService().hasPermission(role, AppPermission.manageMadrassaAdmin);
+      if (hasMadrassaPerm) {
+        await MadrassaLocalStorage.downloadStudents(branchId);
+        await MadrassaLocalStorage.downloadLogsForMonth(branchId, DateTime.now().year, DateTime.now().month);
+        await MadrassaLocalStorage.downloadHolidays(branchId);
+      }
+
+      // Finance bulk downloads (heavy collectionGroup scans) are intentionally
+      // excluded from the periodic sync cycle. Call triggerFinanceRefresh()
+      // explicitly when the Finance page is opened.
     } catch (e) {
-      print("[SyncService] Error refreshing branch $branchId: $e");
+      Logger().d("[SyncService] Error refreshing branch $branchId: $e");
+    }
+  }
+
+  /// Call this when the Finance module is opened by the user.
+  /// Respects the same TTL guards as FinanceLocalStorage so it won't hammer
+  /// Firestore if the page is opened multiple times within the cooldown window.
+  Future<void> triggerFinanceRefresh({bool force = false}) async {
+    final branchId = _currentBranchId;
+    if (branchId == null) return;
+
+    final role = _currentUserRole;
+    final hasFinancePerm = role == null ||
+        PermissionService().hasPermission(role, AppPermission.manageFinance);
+    if (!hasFinancePerm) return;
+
+    Logger().d('[SyncService] triggerFinanceRefresh for $branchId (force=$force)');
+    try {
+      await FinanceLocalStorage.downloadEmployees(branchId);
+      await FinanceLocalStorage.downloadSalaryHistory(branchId, force: force);
+      await FinanceLocalStorage.downloadAttendance(branchId, force: force);
+      await FinanceLocalStorage.downloadSalaryLedger(branchId);
+      await FinanceLocalStorage.downloadFinanceSettings(branchId);
+      await FinanceLocalStorage.downloadTransfers(branchId, force: force);
+      await FinanceLocalStorage.downloadAuditLogs(branchId, force: force);
+      await FinanceLocalStorage.downloadFinanceHolidays(branchId);
+      await FinanceLocalStorage.downloadLoans(branchId);
+    } catch (e) {
+      Logger().d('[SyncService] triggerFinanceRefresh error: $e');
     }
   }
 
@@ -246,7 +334,15 @@ class SyncService {
             final medicineId = (action['medicineId'] ?? (action['data'] as Map?)?['medicineId'])?.toString().trim();
             final delta = (action['delta'] ?? (action['data'] as Map?)?['delta'] as num?)?.toDouble() ?? 0.0;
             if (medicineId != null && delta != 0) {
-              await _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId).update({'quantity': FieldValue.increment(delta)});
+              final docRef = _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId);
+              await _db.runTransaction((transaction) async {
+                final snapshot = await transaction.get(docRef);
+                if (snapshot.exists) {
+                  final current = (snapshot.data()?['quantity'] as num?)?.toDouble() ?? 0.0;
+                  final updated = (current + delta).clamp(0.0, double.infinity);
+                  transaction.update(docRef, {'quantity': updated});
+                }
+              });
             }
           }
           else if (type == 'add_inventory_stock') {
@@ -255,8 +351,12 @@ class SyncService {
             if (medicineId != null && qty > 0) {
               await _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId).update({'quantity': FieldValue.increment(qty)});
               await _db.collection('branches').doc(branchId).collection('inventory_log').add({
-                'action': 'add_stock', 'medicineId': medicineId, 'quantityAdded': qty,
-                'performedBy': action['performedBy'] ?? '', 'performedByName': action['performedByName'] ?? '',
+                'action': 'add_stock',
+                'medicineId': medicineId,
+                'medicineName': action['medicineName'] ?? '',
+                'quantityAdded': qty,
+                'performedBy': action['performedBy'] ?? '',
+                'performedByName': action['performedByName'] ?? '',
                 'timestamp': FieldValue.serverTimestamp(),
               });
             }
@@ -267,7 +367,10 @@ class SyncService {
             final fsData = Map<String, dynamic>.from(data)..remove('id')..remove('syncStatus');
             await _db.collection('branches').doc(branchId).collection('inventory').doc(docId).set(fsData, SetOptions(merge: true));
             await _db.collection('branches').doc(branchId).collection('inventory_log').add({
-              'action': 'medicine_registered_directly', 'medicineName': data['name'], 'docId': docId,
+              'action': 'medicine_registered_directly',
+              'medicineName': data['name'],
+              'docId': docId,
+              'quantityAdded': (data['quantity'] as num?)?.toInt() ?? 0,
               'timestamp': FieldValue.serverTimestamp(),
             });
           }
@@ -282,7 +385,7 @@ class SyncService {
               final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
               final localUpdate  = data['lastUpdatedAt'] as String?;
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
-                if (hiveKey != null) await DonationsLocalStorage.markDonationSynced(hiveKey, stableId);
+                if (hiveKey != null) await DonationsLocalStorage.mergeRemoteDonation(hiveKey, stableId, remoteDoc.data() ?? {});
                 await queueBox.delete(key);
                 continue;
               }
@@ -311,6 +414,7 @@ class SyncService {
               final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
               final localUpdate  = data['lastUpdatedAt'] as String?;
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                await DonationsLocalStorage.mergeRemoteDonor(donorId, remoteDoc.data() ?? {});
                 await queueBox.delete(key);
                 continue;
               }
@@ -329,6 +433,7 @@ class SyncService {
               final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
               final localUpdate  = data['lastUpdatedAt'] as String?;
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                await DonationsLocalStorage.mergeRemoteDonor(donorId, remoteDoc.data() ?? {});
                 await queueBox.delete(key);
                 continue;
               }
@@ -346,6 +451,13 @@ class SyncService {
               final remoteUpdate = remoteDoc.data()?['lastUpdatedAt'] as String?;
               final localUpdate  = fields['lastUpdatedAt'] as String?;
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
+                final hiveKey = (action['hiveKey'] as String?) ?? DonationsLocalStorage.getBox().keys.firstWhere(
+                  (k) => k.toString().endsWith(firestoreId),
+                  orElse: () => '',
+                ).toString();
+                if (hiveKey.isNotEmpty) {
+                  await DonationsLocalStorage.mergeRemoteDonation(hiveKey, firestoreId, remoteDoc.data() ?? {});
+                }
                 await queueBox.delete(key);
                 continue;
               }
@@ -374,16 +486,359 @@ class SyncService {
             await docRef.set(fsData, SetOptions(merge: true));
             if (slipId != null) await DonationsLocalStorage.markBankSlipSynced(slipId, docRef.id);
           }
+          else if (type == 'save_employee') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final localId = action['localId']?.toString() ?? data['localId']?.toString();
+            final bId = action['branchId']?.toString() ?? data['branchId']?.toString() ?? branchId;
+            if (localId == null || localId.isEmpty) throw Exception('Missing localId');
+
+            for (final f in ['dob', 'cnicExpiry', 'joiningDate', 'exitDate']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+            if (data['createdAt'] is String) {
+              try {
+                data['createdAt'] = Timestamp.fromDate(DateTime.parse(data['createdAt'] as String));
+              } catch (_) {}
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('employees').doc(localId).set(fsData, SetOptions(merge: true));
+            
+            final box = Hive.box(LocalStorageService.employeesBox);
+            final localRecord = box.get(localId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = localId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(localId, updated);
+            }
+          }
+          else if (type == 'delete_employee') {
+            final localId = action['localId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (localId == null || localId.isEmpty) throw Exception('Missing localId');
+
+            await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete();
+          }
+          else if (type == 'save_salary_history') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final employeeId = action['employeeId']?.toString();
+            final historyId = action['historyId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (employeeId == null || historyId == null) throw Exception('Missing keys');
+
+            if (data['effectiveDate'] is String) {
+              try {
+                data['effectiveDate'] = Timestamp.fromDate(DateTime.parse(data['effectiveDate'] as String));
+              } catch (_) {}
+            }
+            if (data['createdAt'] is String) {
+              try {
+                data['createdAt'] = Timestamp.fromDate(DateTime.parse(data['createdAt'] as String));
+              } catch (_) {}
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('employees').doc(employeeId).collection('salary_history').doc(historyId).set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.salaryHistoryBox);
+            final key = '${employeeId}_$historyId';
+            final localRecord = box.get(key);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = historyId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(key, updated);
+            }
+          }
+          else if (type == 'save_attendance_record') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final dateStr = action['date']?.toString();
+            final employeeId = action['employeeId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (dateStr == null || employeeId == null) throw Exception('Missing date/employeeId');
+
+            if (data['markedAt'] is String) {
+              try {
+                data['markedAt'] = Timestamp.fromDate(DateTime.parse(data['markedAt'] as String));
+              } catch (_) {}
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('employee_attendance').doc(dateStr).collection('records').doc(employeeId).set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.attendanceBox);
+            final key = '${employeeId}_$dateStr';
+            final localRecord = box.get(key);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = employeeId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(key, updated);
+            }
+          }
+          else if (type == 'save_salary_ledger') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final recordId = action['recordId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (recordId == null) throw Exception('Missing recordId');
+
+            for (final f in ['date', 'createdAt', 'voidedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            final employeeDocRef = _db.collection('branches').doc(bId).collection('employees').doc(data['employeeId'] as String);
+            final ledgerDocRef = _db.collection('branches').doc(bId).collection('employee_salaries').doc(recordId);
+
+            await _db.runTransaction((transaction) async {
+              transaction.set(ledgerDocRef, fsData, SetOptions(merge: true));
+              
+              final type = data['type']?.toString();
+              final amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+              final isVoided = data['isVoided'] == true;
+              
+              double delta = 0.0;
+              if (type == 'advance_payment') {
+                delta = isVoided ? -amount : amount;
+              } else if (type == 'payout') {
+                final recovery = (data['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
+                delta = isVoided ? recovery : -recovery;
+              }
+
+              if (delta != 0) {
+                transaction.update(employeeDocRef, {'currentAdvanceBalance': FieldValue.increment(delta)});
+              }
+            });
+
+            final box = Hive.box(LocalStorageService.salaryLedgerBox);
+            final localRecord = box.get(recordId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = recordId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(recordId, updated);
+            }
+          }
+          else if (type == 'save_finance_settings') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final bId = action['branchId']?.toString() ?? branchId;
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('settings').doc('workSchedule').set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.financeSettingsBox);
+            final localRecord = box.get(bId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(bId, updated);
+            }
+          }
+          else if (type == 'save_branch_transfer') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final transferId = action['transferId']?.toString();
+            final employeeId = action['employeeId']?.toString();
+            final fromBranch = action['fromBranchId']?.toString();
+            final toBranch = action['toBranchId']?.toString();
+
+            if (transferId == null || employeeId == null || fromBranch == null || toBranch == null) {
+              throw Exception('Missing transfer arguments');
+            }
+
+            if (data['effectiveDate'] is String) {
+              try {
+                data['effectiveDate'] = Timestamp.fromDate(DateTime.parse(data['effectiveDate'] as String));
+              } catch (_) {}
+            }
+            if (data['createdAt'] is String) {
+              try {
+                data['createdAt'] = Timestamp.fromDate(DateTime.parse(data['createdAt'] as String));
+              } catch (_) {}
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+
+            final fromEmpRef = _db.collection('branches').doc(fromBranch).collection('employees').doc(employeeId);
+            final toEmpRef = _db.collection('branches').doc(toBranch).collection('employees').doc(employeeId);
+            final transferRef = _db.collection('branches').doc(toBranch).collection('employees').doc(employeeId).collection('branch_transfers').doc(transferId);
+
+            await _db.runTransaction((transaction) async {
+              final snapshot = await transaction.get(fromEmpRef);
+              if (snapshot.exists) {
+                final empData = Map<String, dynamic>.from(snapshot.data() ?? {});
+                empData['branchId'] = toBranch;
+                
+                transaction.set(toEmpRef, empData, SetOptions(merge: true));
+                transaction.delete(fromEmpRef);
+                transaction.set(transferRef, fsData, SetOptions(merge: true));
+              }
+            });
+
+            final box = Hive.box(LocalStorageService.branchTransfersBox);
+            final localRecord = box.get(transferId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = transferId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(transferId, updated);
+            }
+          }
+          else if (type == 'save_finance_holiday') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final holidayId = action['holidayId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (holidayId == null) throw Exception('Missing holidayId');
+
+            if (data['date'] is String) {
+              try {
+                data['date'] = Timestamp.fromDate(DateTime.parse(data['date'] as String));
+              } catch (_) {}
+            }
+            if (data['updatedAt'] is String) {
+              try {
+                data['updatedAt'] = Timestamp.fromDate(DateTime.parse(data['updatedAt'] as String));
+              } catch (_) {}
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('finance_holidays').doc(holidayId).set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.financeHolidaysBox);
+            final key = '${bId.toLowerCase().trim()}__hol__$holidayId';
+            final localRecord = box.get(key);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = holidayId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(key, updated);
+            }
+          }
+          else if (type == 'delete_finance_holiday') {
+            final holidayId = action['holidayId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (holidayId == null) throw Exception('Missing holidayId');
+
+            await _db.collection('branches').doc(bId).collection('finance_holidays').doc(holidayId).delete();
+          }
+          else if (type == 'save_finance_loan') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final loanId = action['loanId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (loanId == null) throw Exception('Missing loanId');
+
+            for (final f in ['dateIssued', 'closedAt', 'createdAt', 'updatedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+
+            if (data['payments'] is List) {
+              final paymentsList = List<dynamic>.from(data['payments'] as List);
+              final convertedPayments = <Map<String, dynamic>>[];
+              for (final p in paymentsList) {
+                if (p is Map) {
+                  final pMap = Map<String, dynamic>.from(p);
+                  for (final f in ['date', 'createdAt', 'voidedAt']) {
+                    if (pMap[f] is String) {
+                      try {
+                        pMap[f] = Timestamp.fromDate(DateTime.parse(pMap[f] as String));
+                      } catch (_) {}
+                    }
+                  }
+                  convertedPayments.add(pMap);
+                }
+              }
+              data['payments'] = convertedPayments;
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('finance_loans').doc(loanId).set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.financeLoansBox);
+            final localRecord = box.get(loanId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = loanId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(loanId, updated);
+            }
+          }
+          else if (type == 'save_audit_log') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final logId = data['id']?.toString() ?? action['localId']?.toString();
+            final bId = action['branchId']?.toString() ?? data['branchContext']?.toString() ?? branchId;
+            if (logId == null) throw Exception('Missing logId');
+
+            for (final f in ['timestamp', 'updatedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            
+            // Mirror to branch collection and global_audit_logs collection
+            await _db.collection('branches').doc(bId).collection('audit_logs').doc(logId).set(fsData, SetOptions(merge: true));
+            await _db.collection('global_audit_logs').doc(logId).set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.auditLogsBox);
+            final localRecord = box.get(logId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = logId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(logId, updated);
+            }
+          }
+          else if (type == 'save_madrassa_log') {
+            final dateKey = action['dateKey'] as String?;
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            if (dateKey == null) throw Exception('Missing dateKey');
+            await _db.collection('branches').doc(branchId).collection('madrassa_daily_logs').doc(dateKey).set(data, SetOptions(merge: true));
+          }
+          else if (type == 'update_madrassa_student') {
+            final studentId = action['studentId'] as String?;
+            final currentLines = action['currentLines'] as int?;
+            if (studentId == null || currentLines == null) throw Exception('Missing studentId/currentLines');
+            await _db.collection('branches').doc(branchId).collection('madrassa_students').doc(studentId).update({
+              'currentLines': currentLines,
+              'lastUpdatedAt': FieldValue.serverTimestamp(),
+            });
+          }
 
           await queueBox.delete(key);
-        } catch (e) {
+        } catch (e, stackTrace) {
           action['attempts'] = attempts + 1;
           await queueBox.put(key, action);
+          Logger().d("[SyncService] ❌ Upload failed for key: $key (type: $type, attempt: ${attempts + 1}). Error: $e");
+          debugPrint(stackTrace.toString());
         }
         await Future.delayed(const Duration(milliseconds: 600));
       }
     } catch (fatal) {
-      print("FATAL sync: $fatal");
+      Logger().d("FATAL sync: $fatal");
     } finally {
       _isUploading = false;
     }
@@ -394,38 +849,47 @@ class SyncService {
   }
 
   Future<void> syncTodayOnly(String branchId) async {
-    await LocalStorageService.downloadTodayTokens(branchId);
-    await DonationsLocalStorage.downloadAllDonations(branchId);
+    final normBranchId = branchId.toLowerCase().trim();
+    await LocalStorageService.downloadTodayTokens(normBranchId);
+    await DonationsLocalStorage.downloadAllDonations(normBranchId);
   }
 
   Future<void> initialFullDownload(String branchId) async {
+    final normBranchId = branchId.toLowerCase().trim();
     final settings = Hive.box('app_settings');
-    final key      = 'initial_download_done_$branchId';
+    final key      = 'initial_download_done_$normBranchId';
     if (settings.get(key, defaultValue: false)) {
-      await syncTodayOnly(branchId);
+      await syncTodayOnly(normBranchId);
       return;
     }
     try {
-      final patientsSnap = await _db.collection('branches').doc(branchId).collection('patients').get();
+      final patientsSnap = await _db.collection('branches').doc(normBranchId).collection('patients').get();
+      final List<Map<String, dynamic>> patientsList = [];
       for (final doc in patientsSnap.docs) {
         final d = doc.data();
-        d['patientId'] = doc.id; d['branchId'] = branchId;
-        await LocalStorageService.saveLocalPatient(d);
+        d['patientId'] = doc.id;
+        d['branchId'] = normBranchId;
+        patientsList.add(d);
       }
-      await LocalStorageService.downloadTodayTokens(branchId);
-      await LocalStorageService.downloadInventory(branchId);
-      await DonationsLocalStorage.downloadAllDonations(branchId);
-      await DonationsLocalStorage.downloadDonors(branchId);
+      await LocalStorageService.saveAllLocalPatients(patientsList);
+
+      await LocalStorageService.downloadTodayTokens(normBranchId);
+      await LocalStorageService.downloadInventory(normBranchId);
+      await DonationsLocalStorage.downloadAllDonations(normBranchId);
+      await DonationsLocalStorage.downloadDonors(normBranchId);
+      await FinanceLocalStorage.downloadAllFinanceData(normBranchId);
+      await FinanceLoansStorage.migrateLegacyAdvancesToLoans(performedBy: 'System');
       await settings.put(key, true);
     } catch (e) {
-      print('Initial download failed: $e');
+      Logger().d('Initial download failed: $e');
     }
   }
 
   Future<void> forceFullRefresh(String branchId) async {
+    final normBranchId = branchId.toLowerCase().trim();
     final settings = Hive.box('app_settings');
-    await settings.delete('initial_download_done_$branchId');
-    await initialFullDownload(branchId);
+    await settings.delete('initial_download_done_$normBranchId');
+    await initialFullDownload(normBranchId);
     await triggerUpload();
   }
 

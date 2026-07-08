@@ -31,6 +31,7 @@ class DonationRecord {
 
   final String paymentMethod;
   final String receiptNo;
+  final String? bookReceiptNo;
   final String notes;
 
   final String status;
@@ -83,6 +84,7 @@ class DonationRecord {
     this.probableAmount,
     required this.paymentMethod,
     required this.receiptNo,
+    this.bookReceiptNo,
     required this.notes,
     required this.status,
     required this.syncStatus,
@@ -138,6 +140,7 @@ class DonationRecord {
       probableAmount:     (map['probableAmount']     as num?)?.toDouble(),
       paymentMethod:      map['paymentMethod']       ?? 'Cash',
       receiptNo:          map['receiptNo']           ?? '',
+      bookReceiptNo:      map['bookReceiptNo']       as String?,
       notes:              map['notes']               ?? '',
       status:             map['status']              ?? kStatusPending,
       syncStatus:         map['syncStatus']          ?? 'pending',
@@ -183,6 +186,7 @@ class DonationRecord {
       'probableAmount':     probableAmount,
       'paymentMethod':      paymentMethod,
       'receiptNo':          receiptNo,
+      if (bookReceiptNo != null) 'bookReceiptNo': bookReceiptNo,
       'notes':              notes,
       'status':             status,
       'syncStatus':         syncStatus,
@@ -222,6 +226,8 @@ class DonationRecord {
     String? editedAt,
     String? lastUpdatedAt,
     List<Map<String, dynamic>>? editHistory,
+    String? date,
+    String? bookReceiptNo,
   }) {
     return DonationRecord(
       hiveKey:            hiveKey,
@@ -232,7 +238,7 @@ class DonationRecord {
       donorId:            donorId,
       donorName:          donorName,
       phone:              phone,
-      date:               date,
+      date:               date                   ?? this.date,
       timestamp:          this.timestamp,
       lastUpdatedAt:      lastUpdatedAt          ?? this.lastUpdatedAt,
       amount:             amount,
@@ -245,6 +251,7 @@ class DonationRecord {
       probableAmount:     probableAmount,
       paymentMethod:      paymentMethod,
       receiptNo:          receiptNo,
+      bookReceiptNo:      bookReceiptNo          ?? this.bookReceiptNo,
       notes:              notes,
       status:             status             ?? this.status,
       syncStatus:         syncStatus         ?? this.syncStatus,

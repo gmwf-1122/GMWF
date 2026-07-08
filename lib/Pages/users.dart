@@ -3,13 +3,14 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/services.dart';
 import 'dispensary/patient_detail_screen.dart';
 import 'user_detail_screen.dart';
-import 'package:intl/intl.dart';
 import 'dart:async';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
+import '../services/local_storage_service.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
@@ -309,8 +310,95 @@ class _UsersScreenState extends State<UsersScreen>
 
   // ── List ──
 
+  Future<void> _syncPatientsForBranch(String branchId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(branchId)
+          .collection('patients')
+          .get();
+      for (final doc in snap.docs) {
+        final d = doc.data();
+        d['patientId'] = doc.id;
+        d['branchId'] = branchId;
+        await LocalStorageService.saveLocalPatient(d);
+      }
+    } catch (e) {
+      debugPrint('Sync patients failed for branch $branchId: $e');
+    }
+  }
+
   Widget _buildList(String branchId, RoleThemeData t) {
-    final collection = widget.isPatientMode ? 'patients' : 'users';
+    if (widget.isPatientMode) {
+      _syncPatientsForBranch(branchId);
+      return ValueListenableBuilder<Box>(
+        valueListenable: Hive.box(LocalStorageService.patientsBox).listenable(),
+        builder: (context, box, _) {
+          final allLocal = LocalStorageService.getAllLocalPatients(branchId: branchId);
+          var filtered = allLocal.where((p) {
+            if (_filterStatus != null && p['status']?.toString().toLowerCase() != _filterStatus!.toLowerCase()) {
+              return false;
+            }
+            if (_genderFilter != null && p['gender']?.toString().toLowerCase() != _genderFilter!.toLowerCase()) {
+              return false;
+            }
+            if (_ageFilter != null) {
+              final age = (p['age'] as num?)?.toInt() ?? 0;
+              if (_ageFilter == 'child' && age > 18) return false;
+              if (_ageFilter == 'adult' && (age < 19 || age > 60)) return false;
+              if (_ageFilter == 'senior' && age < 61) return false;
+            }
+            if (_searchQuery.isNotEmpty) {
+              final name = (p['name'] as String?)?.toLowerCase() ?? '';
+              final phone = (p['phone'] as String?)?.toLowerCase() ?? '';
+              final cnic = (p['cnic'] as String?)?.toLowerCase() ?? '';
+              final gcnic = (p['guardianCnic'] as String?)?.toLowerCase() ?? '';
+              final uid = (p['patientId'] as String?)?.toLowerCase() ?? '';
+              return name.contains(_searchQuery) || phone.contains(_searchQuery) ||
+                  cnic.contains(_searchQuery) || gcnic.contains(_searchQuery) || uid.contains(_searchQuery);
+            }
+            return true;
+          }).toList();
+
+          filtered.sort((a, b) => (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? ''));
+
+          if (filtered.isEmpty) {
+            return _emptyState(t, Icons.person_search_rounded, 'No patients found', 'Try adjusting your search or filters');
+          }
+
+          return Column(children: [
+            Container(
+              color: t.accentMuted.withValues(alpha: 0.3),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.people_rounded, color: t.accent, size: 14),
+                    const SizedBox(width: 5),
+                    Text('${filtered.length} Patients', style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 12)),
+                  ]),
+                ),
+              ]),
+            ),
+            Expanded(
+              child: _familyView
+                  ? _buildFamilyView(filtered, branchId, t)
+                  : ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(10, 8, 10, 24),
+                      itemCount: filtered.length,
+                      itemBuilder: (ctx, i) => _buildCard(filtered[i], branchId, t),
+                    ),
+            ),
+          ]);
+        },
+      );
+    }
+
+    // Staff path (original StreamBuilder)
+    final collection = 'users';
     return StreamBuilder<QuerySnapshot>(
       stream: _getFilteredStream(branchId, collection),
       builder: (context, snapshot) {
@@ -326,36 +414,18 @@ class _UsersScreenState extends State<UsersScreen>
         if (_searchQuery.isNotEmpty) {
           docs = docs.where((doc) {
             final data = doc.data() as Map<String, dynamic>;
-            if (widget.isPatientMode) {
-              final name = (data['name'] as String?)?.toLowerCase() ?? '';
-              final phone = data['phone'] as String? ?? '';
-              final cnic = data['cnic'] as String? ?? '';
-              final guardianCnic = data['guardianCnic'] as String? ?? '';
-              final uid = doc.id.toLowerCase();
-              return name.contains(_searchQuery) || phone.contains(_searchQuery) ||
-                  cnic.contains(_searchQuery) || guardianCnic.contains(_searchQuery) || uid.contains(_searchQuery);
-            } else {
-              return ((data['username'] as String?)?.toLowerCase() ?? '').contains(_searchQuery);
-            }
+            return ((data['username'] as String?)?.toLowerCase() ?? '').contains(_searchQuery);
           }).toList();
         }
 
-        docs.sort((a, b) {
-          final da = a.data() as Map<String, dynamic>;
-          final db = b.data() as Map<String, dynamic>;
-          final key = widget.isPatientMode ? 'name' : 'username';
-          return (da[key] as String? ?? '').compareTo(db[key] as String? ?? '');
-        });
+        var list = docs.map((doc) => {'id': doc.id, ...doc.data() as Map<String, dynamic>}).toList();
+        list.sort((a, b) => (a['username'] as String? ?? '').compareTo(b['username'] as String? ?? ''));
 
-        if (docs.isEmpty) {
-          return _emptyState(t,
-              widget.isPatientMode ? Icons.person_search_rounded : Icons.manage_accounts_rounded,
-              'No ${widget.isPatientMode ? 'patients' : 'users'} found',
-              'Try adjusting your search or filters');
+        if (list.isEmpty) {
+          return _emptyState(t, Icons.manage_accounts_rounded, 'No users found', 'Try adjusting your search or filters');
         }
 
         return Column(children: [
-          // Count bar
           Container(
             color: t.accentMuted.withValues(alpha: 0.3),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -364,32 +434,28 @@ class _UsersScreenState extends State<UsersScreen>
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(widget.isPatientMode ? Icons.people_rounded : Icons.badge_rounded, color: t.accent, size: 14),
+                  Icon(Icons.badge_rounded, color: t.accent, size: 14),
                   const SizedBox(width: 5),
-                  Text('${docs.length} ${widget.isPatientMode ? 'Patients' : 'Users'}',
-                      style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 12)),
+                  Text('${list.length} Users', style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 12)),
                 ]),
               ),
             ]),
           ),
           Expanded(
-            child: widget.isPatientMode && _familyView
-                ? _buildFamilyView(docs, branchId, t)
-                : ListView.builder(
-                    physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 24),
-                    itemCount: docs.length,
-                    itemBuilder: (ctx, i) => _buildCard(docs[i], branchId, t),
-                  ),
+            child: ListView.builder(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 24),
+              itemCount: list.length,
+              itemBuilder: (ctx, i) => _buildCard(list[i], branchId, t),
+            ),
           ),
         ]);
       },
     );
   }
 
-  Widget _buildCard(QueryDocumentSnapshot doc, String branchId, RoleThemeData t) {
-    final data = doc.data() as Map<String, dynamic>;
-    final itemId = doc.id;
+  Widget _buildCard(Map<String, dynamic> data, String branchId, RoleThemeData t) {
+    final itemId = data['patientId'] ?? data['id'] ?? '';
     final profilePicUrl = data['profilePictureUrl'] as String?;
     final name = widget.isPatientMode
         ? (data['name'] ?? 'Unknown') as String
@@ -496,13 +562,12 @@ class _UsersScreenState extends State<UsersScreen>
 
   // ── Family view ──
 
-  Widget _buildFamilyView(List<QueryDocumentSnapshot> docs, String branchId, RoleThemeData t) {
+  Widget _buildFamilyView(List<Map<String, dynamic>> list, String branchId, RoleThemeData t) {
     Map<String, Map<String, dynamic>> cnicToGuardian = {};
     Map<String, List<Map<String, dynamic>>> families = {};
     List<Map<String, dynamic>> adultsWithoutChildren = [];
 
-    for (var doc in docs) {
-      final data = {...doc.data() as Map<String, dynamic>, 'id': doc.id};
+    for (var data in list) {
       if (data['isAdult'] == true) {
         final cnic = data['cnic'] as String? ?? '';
         if (cnic.isNotEmpty) cnicToGuardian[cnic] = data;
@@ -513,7 +578,9 @@ class _UsersScreenState extends State<UsersScreen>
         families[guardianCnic]!.add(data);
       }
     }
-    families.keys.forEach((gc) => adultsWithoutChildren.removeWhere((a) => a['cnic'] == gc));
+    for (var gc in families.keys) {
+      adultsWithoutChildren.removeWhere((a) => a['cnic'] == gc);
+    }
 
     return ListView(
       physics: const BouncingScrollPhysics(),
