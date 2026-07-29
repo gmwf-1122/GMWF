@@ -61,6 +61,11 @@ class AutoUpdateService {
     String? repoName,
     String? personalAccessToken,
   }) async {
+    // Web users run in the browser and do not use binary desktop/mobile installers.
+    if (kIsWeb) {
+      return null;
+    }
+
     final owner = repoOwner ?? defaultRepoOwner;
     final name = repoName ?? defaultRepoName;
 
@@ -106,7 +111,7 @@ class AutoUpdateService {
         downloadUrl: downloadUrl,
         releaseNotes: releaseNotes,
         forceUpdate: forceUpdate,
-        hasUpdate: isHigher,
+        hasUpdate: isHigher && downloadUrl.isNotEmpty,
       );
     } catch (e) {
       debugPrint('[AutoUpdateService] Failed to check Firestore version: $e');
@@ -137,23 +142,39 @@ class AutoUpdateService {
         String downloadUrl = '';
         final assets = data['assets'] as List?;
         if (assets != null && assets.isNotEmpty) {
-          final targetExt = (defaultTargetPlatform == TargetPlatform.android) ? '.apk' : '.exe';
-          final targetAsset = assets.firstWhere(
-            (a) => (a['name'] ?? '').toString().toLowerCase().endsWith(targetExt),
-            orElse: () => assets.firstWhere(
+          if (defaultTargetPlatform == TargetPlatform.android) {
+            // Strictly look for .apk assets on Android
+            final apkAsset = assets.firstWhere(
+              (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.apk'),
+              orElse: () => null,
+            );
+            if (apkAsset != null) {
+              downloadUrl = apkAsset['browser_download_url'] ?? apkAsset['url'] ?? '';
+            }
+          } else if (defaultTargetPlatform == TargetPlatform.windows) {
+            // Strictly look for .exe or .msi assets on Windows Desktop
+            final exeAsset = assets.firstWhere(
               (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.exe') ||
-                     (a['name'] ?? '').toString().toLowerCase().endsWith('.apk'),
-              orElse: () => assets.first,
-            ),
-          );
-          downloadUrl = targetAsset['browser_download_url'] ?? targetAsset['url'] ?? '';
+                     (a['name'] ?? '').toString().toLowerCase().endsWith('.msi'),
+              orElse: () => null,
+            );
+            if (exeAsset != null) {
+              downloadUrl = exeAsset['browser_download_url'] ?? exeAsset['url'] ?? '';
+            }
+          } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+            final macAsset = assets.firstWhere(
+              (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.dmg') ||
+                     (a['name'] ?? '').toString().toLowerCase().endsWith('.pkg'),
+              orElse: () => null,
+            );
+            if (macAsset != null) {
+              downloadUrl = macAsset['browser_download_url'] ?? macAsset['url'] ?? '';
+            }
+          }
         }
 
-        if (downloadUrl.isEmpty) {
-          downloadUrl = data['html_url'] ?? '';
-        }
-
-        final hasUpdate = compareVersions(currentVersion, tag) > 0;
+        final isHigher = compareVersions(currentVersion, tag) > 0;
+        final hasUpdate = isHigher && downloadUrl.isNotEmpty;
 
         return UpdateInfo(
           latestVersion: tag,
