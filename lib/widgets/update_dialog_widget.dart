@@ -47,19 +47,49 @@ class UpdateDialogWidget extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Icon Header
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: t.accent.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.system_update_rounded,
-                  color: t.accent,
-                  size: 32,
-                ),
+              // Logo Header with Update Badge
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: t.accent.withValues(alpha: 0.08),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: t.accent.withValues(alpha: 0.2), width: 1.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: t.accent.withValues(alpha: 0.1),
+                          blurRadius: 16,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Image.asset(
+                      'assets/logo/gmwf-1.png',
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  Positioned(
+                    right: -2,
+                    bottom: -2,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: t.accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: t.bgCard, width: 2),
+                      ),
+                      child: const Icon(
+                        Icons.system_update_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
 
