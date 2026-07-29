@@ -14,7 +14,6 @@ import '../services/sync_service.dart';
 import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import 'admin/data_cleanup_screen.dart';
-import 'settings/biometric_device_manager_page.dart';
 import '../services/auto_update_service.dart';
 import '../widgets/update_dialog_widget.dart';
 
@@ -1246,16 +1245,70 @@ class _SettingsPageState extends State<SettingsPage> {
                               _divider(t),
 
                               // 2. Card corner radius choices
-                              _buildSegmentedSelector<double>(
-                                t, 
-                                'card_radius', 
-                                activeRadius, 
-                                {
-                                  8.0: 'sharp',
-                                  16.0: 'medium',
-                                  24.0: 'round',
-                                }, 
-                                (radius) => box.put('card_radius', radius)
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildSegmentedSelector<double>(
+                                    t, 
+                                    'card_radius', 
+                                    activeRadius, 
+                                    {
+                                      8.0: 'sharp',
+                                      16.0: 'medium',
+                                      24.0: 'round',
+                                    }, 
+                                    (radius) async {
+                                      await box.put('card_radius', radius);
+                                      setState(() {});
+                                    }
+                                  ),
+                                  const SizedBox(height: 12),
+                                  AnimatedContainer(
+                                    duration: const Duration(milliseconds: 250),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(activeRadius),
+                                      border: Border.all(color: t.accent.withValues(alpha: 0.3), width: 1.5),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: t.accent,
+                                            borderRadius: BorderRadius.circular((activeRadius / 2).clamp(4.0, 12.0)),
+                                          ),
+                                          child: const Icon(Icons.rounded_corner_rounded, color: Colors.white, size: 20),
+                                        ),
+                                        const SizedBox(width: 14),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                'Card Radius Preview (${activeRadius.toInt()}px)',
+                                                style: TextStyle(
+                                                  color: t.textPrimary,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                'Cards, dialogs, and UI cards adjust live across the app.',
+                                                style: TextStyle(
+                                                  color: t.textSecondary,
+                                                  fontSize: 11.5,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                               ),
                               _divider(t),
 
