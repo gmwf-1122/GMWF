@@ -31,8 +31,10 @@ import 'services/local_storage_service.dart';
 import 'services/donations_local_storage.dart';
 import 'services/offline_auth_service.dart' as offline_auth;
 import 'realtime/server_sync_manager.dart';
+import 'realtime/realtime_router.dart';
 import 'widgets/gmwf_loading_view.dart';
 import 'widgets/custom_title_bar.dart';
+import 'tools/finance_v2_migration.dart';
 
 import 'constants/navigator_key.dart';
 
@@ -268,11 +270,70 @@ class _InitializationScreenState extends State<InitializationScreen> {
         LocalStorageService.init(),
         DonationsLocalStorage.init(),
         ServerSyncManager.initHive(),
+        RealtimeRouter.init(),
         PdfAssetCache.preload(),
       ]).timeout(const Duration(seconds: 15));
 
       await LocalStorageService.seedLocalAdmins();
+      await FinanceV2Migration.runMigration();
       await LocalStorageService.forceDeduplicatePatients();
+
+      // ── CLEANUP DUPLICATE/CORRUPTED DONATIONS ─────────────────────────────
+      try {
+        final box = Hive.box(DonationsLocalStorage.donationsBox);
+        
+        // 1. Delete double-nested keys from local Hive box instantly
+        final nestedKeys = box.keys.where((k) => k.toString().split('__').length > 3).toList();
+        if (nestedKeys.isNotEmpty) {
+          debugPrint('[CLEANUP] Found ${nestedKeys.length} double-nested Hive keys. Deleting...');
+          await box.deleteAll(nestedKeys);
+          await box.flush();
+        }
+
+        // 2. Query Firestore and clean up duplicate documents
+        final db = FirebaseFirestore.instance;
+        final snap = await db.collection('branches').doc('gujrat').collection('donations').get();
+        int deletedCount = 0;
+        
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          final docId = doc.id;
+          final receiptNo = data['receiptNo']?.toString() ?? '';
+          
+          bool shouldDelete = false;
+          if (docId.contains('__')) {
+            shouldDelete = true;
+          } else if (receiptNo.isEmpty) {
+            shouldDelete = true;
+          }
+          
+          if (shouldDelete) {
+            debugPrint('[CLEANUP] Deleting duplicate document from Firestore: $docId');
+            await doc.reference.delete();
+            deletedCount++;
+            
+            // Also search and delete it from local Hive box if it exists under any key
+            for (final hiveKey in box.keys.toList()) {
+              final raw = box.get(hiveKey);
+              if (raw is Map) {
+                final fsId = raw['firestoreId']?.toString();
+                final localId = raw['localId']?.toString();
+                if (fsId == docId || localId == docId || hiveKey.toString().contains(docId)) {
+                  debugPrint('[CLEANUP] Deleting duplicate key from Hive: $hiveKey');
+                  await box.delete(hiveKey);
+                }
+              }
+            }
+          }
+        }
+        if (deletedCount > 0) {
+          debugPrint('[CLEANUP] Done! Deleted $deletedCount duplicate Firestore documents.');
+          await box.flush();
+        }
+      } catch (cleanupErr) {
+        debugPrint('[CLEANUP] Error during duplicate cleanup: $cleanupErr');
+      }
+
       await _clearCrashMarkerOnSuccess();
 
       debugPrint("[Init] Success. Moving to home.");

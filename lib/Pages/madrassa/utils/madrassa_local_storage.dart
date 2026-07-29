@@ -287,6 +287,25 @@ class MadrassaLocalStorage {
         .toList();
   }
 
+  static List<Map<String, dynamic>> getAllLogsCached(String branchId) {
+    final prefix = '${branchId.toLowerCase().trim()}__log__';
+    final box = _getLogsBox();
+    final list = box.keys
+        .where((k) => k.toString().startsWith(prefix))
+        .map((k) {
+          final raw = box.get(k);
+          if (raw == null) return null;
+          final m = Map<String, dynamic>.from(raw as Map);
+          m['id'] = k.toString().split('__log__').last;
+          m['dateKey'] = k.toString().split('__log__').last;
+          return m;
+        })
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+    return list;
+  }
+
   static Stream<List<Map<String, dynamic>>> streamLogsForMonthCached(String branchId, int year, int month) {
     Stream<List<Map<String, dynamic>>> source() async* {
       yield getLogsForMonthCached(branchId, year, month);

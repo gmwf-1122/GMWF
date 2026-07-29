@@ -19,6 +19,9 @@ import '../services/sync_service.dart';
 import 'admin/data_cleanup_screen.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
+import '../services/image_upload_service.dart';
+import '../services/auto_update_service.dart';
+import '../utils/formatters.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -30,6 +33,7 @@ enum DashboardCategoryFilter {
   dispensary,
   dasterkhwaan,
   madrassa,
+  school,
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -45,8 +49,45 @@ class GlobalModularDashboard extends StatefulWidget {
 class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     with TickerProviderStateMixin {
   late List<AppModule> _availableModules;
-  late String _userName;
-  late String _role;
+  void refresh() { if (mounted) setState(() {}); }
+  
+  String get _userName {
+    final box = Hive.box('local_users');
+    final email = widget.userData['email']?.toString();
+    Map<String, dynamic> data = widget.userData;
+    if (email != null) {
+      final user = box.get('user:$email');
+      if (user != null && user is Map) {
+        data = Map<String, dynamic>.from(user);
+      }
+    }
+    return resolveUserDisplayName(data);
+  }
+
+  String get _userPhotoUrl {
+    final box = Hive.box('local_users');
+    final email = widget.userData['email']?.toString();
+    Map<String, dynamic> data = widget.userData;
+    if (email != null) {
+      final user = box.get('user:$email');
+      if (user != null && user is Map) {
+        data = Map<String, dynamic>.from(user);
+      }
+    }
+    return (data['profilePictureUrl'] ?? data['photoUrl'] ?? data['avatarUrl'])?.toString() ?? '';
+  }
+
+  String get _role {
+    final box = Hive.box('local_users');
+    final email = widget.userData['email']?.toString();
+    if (email != null) {
+      final user = box.get('user:$email');
+      if (user != null && user is Map) {
+        return (user['role'] as String? ?? 'unknown').toLowerCase();
+      }
+    }
+    return (widget.userData['role'] as String? ?? 'unknown').toLowerCase();
+  }
 
   DashboardCategoryFilter _selectedCategory = DashboardCategoryFilter.overall;
   final TextEditingController _searchCtrl = TextEditingController();
@@ -72,8 +113,6 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   @override
   void initState() {
     super.initState();
-    _role = (widget.userData['role'] as String? ?? 'unknown').toLowerCase();
-    _userName = widget.userData['name'] ?? widget.userData['username'] ?? 'User';
 
     final allModules = ModuleRegistry.getAvailableModules(_role);
     if (_role == 'ceo') {
@@ -81,6 +120,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
           .where((m) =>
               m.id == 'executive_dashboard' ||
               m.id == 'kitchen' ||
+              m.id == 'dasterkhwaan_inventory' ||
               m.id == 'madrassa_admin')
           .toList();
     } else {
@@ -163,10 +203,10 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   /// Desktop sidebar shows category nav for full-exec/branch-manager,
   /// module tiles for supervisor.
   bool get _sidebarShowsCategories =>
-      (_isFullExecutive && _role != 'ceo') || _isBranchManager;
+      _isFullExecutive || _isBranchManager;
 
   bool get _mobileShowsCategoryChips =>
-      (_isFullExecutive && _role != 'ceo') || _isBranchManager;
+      _isFullExecutive || _isBranchManager;
 
   @override
   void dispose() {
@@ -492,9 +532,19 @@ class _Sidebar extends StatelessWidget {
               children: [
                 _SidebarBrand(state: state, t: t, dark: _dark),
                 Divider(color: _divider, height: 1),
-                const SizedBox(height: 14),
-                _buildNav(context),
-                const Spacer(),
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 14),
+                        _buildNav(context),
+                        const SizedBox(height: 14),
+                      ],
+                    ),
+                  ),
+                ),
                 Divider(color: _divider, height: 1, indent: 16, endIndent: 16),
                 _SidebarActions(state: state, t: t, dark: _dark),
               ],
@@ -508,53 +558,51 @@ class _Sidebar extends StatelessWidget {
   Widget _buildNav(BuildContext context) {
     // ── Supervisor: module tiles ─────────────────────────────────────────────
     if (state._isSupervisor) {
-      return Expanded(
-        child: Column(children: [
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
             child: _NavLabel(label: 'MY MODULES', muted: _muted),
           ),
-          Expanded(
-            child: ListView.builder(
-              padding: EdgeInsets.zero,
-              itemCount: state._availableModules.length,
-              itemBuilder: (ctx, i) => _AnimatedEntry(
-                index: i,
+          ...state._availableModules.asMap().entries.map((e) => _AnimatedEntry(
+                index: e.key,
                 ctrl: state._sidebarCtrl,
                 child: _SidebarModuleTile(
-                  module: state._availableModules[i],
+                  module: e.value,
                   t: t,
                   dark: _dark,
-                  onTap: () => state._openModule(state._availableModules[i]),
+                  onTap: () => state._openModule(e.value),
                 ),
-              ),
-            ),
-          ),
-        ]),
+              )),
+        ],
       );
     }
 
     // ── Full exec / branch manager: category nav ─────────────────────────────
     if (state._sidebarShowsCategories) {
-      return Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-          child: _NavLabel(label: 'NAVIGATE', muted: _muted),
-        ),
-        ...state._visibleCategories.asMap().entries.map((e) =>
-            _AnimatedEntry(
-              index: e.key,
-              ctrl: state._sidebarCtrl,
-              child: _SidebarCatItem(
-                cat: e.value,
-                selected: state._selectedCategory == e.value,
-                t: t,
-                dark: _dark,
-                onTap: () => state._changeCategory(e.value),
-              ),
-            )),
-        const SizedBox(height: 8),
-      ]);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: _NavLabel(label: 'NAVIGATE', muted: _muted),
+          ),
+          ...state._visibleCategories.asMap().entries.map((e) =>
+              _AnimatedEntry(
+                index: e.key,
+                ctrl: state._sidebarCtrl,
+                child: _SidebarCatItem(
+                  cat: e.value,
+                  selected: state._selectedCategory == e.value,
+                  t: t,
+                  dark: _dark,
+                  onTap: () => state._changeCategory(e.value),
+                ),
+              )),
+          const SizedBox(height: 8),
+        ],
+      );
     }
 
     return const SizedBox.shrink();
@@ -585,12 +633,29 @@ class _SidebarBrand extends StatelessWidget {
                     fontWeight: FontWeight.w900,
                     fontSize: 16,
                     letterSpacing: 1)),
-            Text('System',
-                style: TextStyle(
-                    color: dark
-                        ? const Color(0xFF8B949E)
-                        : t.textTertiary,
-                    fontSize: 10)),
+            Row(
+              children: [
+                Text('System',
+                    style: TextStyle(
+                        color: dark
+                            ? const Color(0xFF8B949E)
+                            : t.textTertiary,
+                        fontSize: 10)),
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text('v${AutoUpdateService.currentVersion}',
+                      style: TextStyle(
+                          color: t.accent,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
           ]),
         ]),
         const SizedBox(height: 18),
@@ -616,8 +681,10 @@ class _SidebarBrand extends StatelessWidget {
           style: TextStyle(
               color: dark ? Colors.white : t.textPrimary,
               fontSize: 14,
-              fontWeight: FontWeight.w700),
-          overflow: TextOverflow.ellipsis,
+              fontWeight: FontWeight.w700,
+              height: 1.25),
+          softWrap: true,
+          maxLines: 3,
         ),
       ]),
     );
@@ -647,7 +714,9 @@ class _SidebarActions extends StatelessWidget {
               context,
               MaterialPageRoute(
                   builder: (_) =>
-                      SettingsPage(userData: state.widget.userData))),
+                      SettingsPage(userData: state.widget.userData))).then((_) {
+            state.refresh();
+          }),
         ),
         if (state._isFullExecutive)
           _ActionTile(
@@ -796,6 +865,7 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
     DashboardCategoryFilter.dispensary: Icons.local_pharmacy_outlined,
     DashboardCategoryFilter.dasterkhwaan: Icons.restaurant_outlined,
     DashboardCategoryFilter.madrassa: Icons.menu_book_outlined,
+    DashboardCategoryFilter.school: Icons.school_outlined,
   };
 
   @override
@@ -1067,6 +1137,19 @@ class _MobileLayout extends StatelessWidget {
                 fontWeight: FontWeight.w900,
                 fontSize: 16,
                 letterSpacing: 1)),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: t.accent.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text('v${AutoUpdateService.currentVersion}',
+              style: TextStyle(
+                  color: t.accent,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold)),
+        ),
       ]),
       actions: [
         IconButton(
@@ -1149,67 +1232,63 @@ class _MobileLayout extends StatelessWidget {
                 height: 1),
             const SizedBox(height: 8),
 
-            // Supervisor: module list in drawer
-            if (state._isSupervisor) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: _NavLabel(
-                    label: 'MY MODULES',
-                    muted: _dark
-                        ? const Color(0xFF8B949E)
-                        : t.textTertiary),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  padding: EdgeInsets.zero,
-                  itemCount: state._availableModules.length,
-                  itemBuilder: (ctx, i) {
-                    final m = state._availableModules[i];
-                    return ListTile(
-                      dense: true,
-                      leading:
-                          Icon(m.icon, color: t.accent, size: 18),
-                      title: Text(m.title,
-                          style: TextStyle(
-                              color: _dark
-                                  ? const Color(0xFFE6EDF3)
-                                  : t.textPrimary,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600)),
-                      trailing: Icon(Icons.arrow_forward_ios_rounded,
-                          color: t.textTertiary, size: 12),
-                      onTap: () {
-                        Navigator.pop(context);
-                        state._openModule(m);
-                      },
-                    );
-                  },
+            // Scrollable navigation links
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (state._isSupervisor) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                        child: _NavLabel(
+                            label: 'MY MODULES',
+                            muted: _dark
+                                ? const Color(0xFF8B949E)
+                                : t.textTertiary),
+                      ),
+                      ...state._availableModules.map((m) => ListTile(
+                            dense: true,
+                            leading: Icon(m.icon, color: t.accent, size: 18),
+                            title: Text(m.title,
+                                style: TextStyle(
+                                    color: _dark
+                                        ? const Color(0xFFE6EDF3)
+                                        : t.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600)),
+                            trailing: Icon(Icons.arrow_forward_ios_rounded,
+                                color: t.textTertiary, size: 12),
+                            onTap: () {
+                              Navigator.pop(context);
+                              state._openModule(m);
+                            },
+                          )),
+                    ] else if (state._mobileShowsCategoryChips) ...[
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                        child: _NavLabel(
+                            label: 'NAVIGATE',
+                            muted: _dark
+                                ? const Color(0xFF8B949E)
+                                : t.textTertiary),
+                      ),
+                      ...state._visibleCategories.map((cat) => _SidebarCatItem(
+                            cat: cat,
+                            selected: state._selectedCategory == cat,
+                            t: t,
+                            dark: _dark,
+                            onTap: () {
+                              state._changeCategory(cat);
+                              Navigator.pop(context);
+                            },
+                          )),
+                    ],
+                  ],
                 ),
               ),
-            ]
-            // Category nav for others
-            else if (state._mobileShowsCategoryChips) ...[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                child: _NavLabel(
-                    label: 'NAVIGATE',
-                    muted: _dark
-                        ? const Color(0xFF8B949E)
-                        : t.textTertiary),
-              ),
-              ...state._visibleCategories.map((cat) => _SidebarCatItem(
-                    cat: cat,
-                    selected: state._selectedCategory == cat,
-                    t: t,
-                    dark: _dark,
-                    onTap: () {
-                      state._changeCategory(cat);
-                      Navigator.pop(context);
-                    },
-                  )),
-              const Expanded(child: SizedBox.shrink()),
-            ] else
-              const Expanded(child: SizedBox.shrink()),
+            ),
 
             Divider(
                 color: _dark ? const Color(0xFF30363D) : t.bgRule,
@@ -1225,7 +1304,9 @@ class _MobileLayout extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                         builder: (_) => SettingsPage(
-                            userData: state.widget.userData)));
+                            userData: state.widget.userData))).then((_) {
+                  state.refresh();
+                });
               },
             ),
             _ActionTile(
@@ -1434,31 +1515,48 @@ class _DarkHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final dateStr = '${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}';
+    final isCeo = state._role == 'ceo';
+    final isChairman = state._role == 'chairman';
+    final hour = now.hour;
+
+    final greetingBadgeText = isCeo 
+        ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, CEO' 
+        : (isChairman ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, Chairman' : '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}');
+
+    final mainGreetingTitle = state._userName;
 
     return Container(
       margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 36 : 24, hPad, 0),
       decoration: BoxDecoration(
         color: const Color(0xFF0D1117),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF30363D)),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: t.accent.withValues(alpha: 0.25)),
         boxShadow: [
-          BoxShadow(color: t.accent.withValues(alpha: 0.12), blurRadius: 40, offset: const Offset(0, 12)),
+          BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 40, offset: const Offset(0, 14)),
         ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          // Subtle accent glow top-right
-          Positioned(
-            top: -60, right: -60,
+          // Dynamic Time of Day Hero Image (Dawn, Morning, Afternoon, Evening, Dusk, Night)
+          const Positioned.fill(
+            child: _TimeOfDayHeroImage(),
+          ),
+          // Faded theme accent gradient overlay
+          Positioned.fill(
             child: Container(
-              width: 220, height: 220,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(colors: [
-                  t.accent.withValues(alpha: 0.12),
-                  Colors.transparent,
-                ]),
+                gradient: LinearGradient(
+                  colors: [
+                    t.accent.withValues(alpha: 0.98),
+                    t.accent.withValues(alpha: 0.88),
+                    t.accent.withValues(alpha: 0.75),
+                    t.accent.withValues(alpha: 0.60),
+                  ],
+                  stops: const [0.0, 0.35, 0.70, 1.0],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
               ),
             ),
           ),
@@ -1467,79 +1565,124 @@ class _DarkHero extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top row: role badge + time
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: t.accent.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: t.accent.withValues(alpha: 0.2)),
-                        boxShadow: [
-                          BoxShadow(color: t.accent.withValues(alpha: 0.05), blurRadius: 8)
-                        ],
+                // Top row: Greeting badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                    boxShadow: [
+                      BoxShadow(color: t.accent.withValues(alpha: 0.08), blurRadius: 8)
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          gradient: t.accentGradient,
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.5), blurRadius: 4)],
+                        ),
                       ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Container(width: 8, height: 8,
-                          decoration: BoxDecoration(
-                            gradient: t.accentGradient,
-                            shape: BoxShape.circle,
-                            boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.4), blurRadius: 4)],
-                          )),
-                        const SizedBox(width: 8),
-                        Text(state._role.toUpperCase(),
-                          style: TextStyle(color: t.accent, fontSize: 10.5,
-                            fontWeight: FontWeight.w900, letterSpacing: 1.8)),
-                      ]),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                // Name
-                Text(state._userName,
-                  style: TextStyle(
-                    color: const Color(0xFFE6EDF3),
-                    fontSize: isDesktop ? 32 : 24,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -1.2,
-                    height: 1.1,
+                      const SizedBox(width: 8),
+                      Text(
+                        greetingBadgeText.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(dateStr,
-                  style: const TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
+                // Greeting Name & User Photo Row
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            mainGreetingTitle,
+                            style: TextStyle(
+                              color: const Color(0xFFE6EDF3),
+                              fontSize: isDesktop ? 30 : 22,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -1.0,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            dateStr,
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _buildUserHeroAvatar(state._userPhotoUrl, state._userName, t, size: isDesktop ? 56 : 48),
+                  ],
+                ),
+                const SizedBox(height: 18),
                 // Live stat pills
                 Wrap(
-                  spacing: 10, runSpacing: 10,
+                  spacing: 10,
+                  runSpacing: 10,
                   children: [
-                    _StatPill(label: '${state._availableModules.length} Modules',
-                      icon: Icons.grid_view_rounded, t: t),
-                    _StatPill(label: 'Global Access',
-                      icon: Icons.public_rounded, t: t),
-                    _StatPill(label: 'Live',
-                      icon: Icons.circle, t: t, pulse: true),
+                    _StatPill(
+                      label: isCeo ? 'CEO EXECUTIVE' : state._role.toUpperCase(),
+                      icon: isCeo ? Icons.workspace_premium_rounded : Icons.verified_user_rounded,
+                      t: t,
+                    ),
+                    _StatPill(
+                      label: '${state._availableModules.length} Modules',
+                      icon: Icons.grid_view_rounded,
+                      t: t,
+                    ),
+                    _StatPill(
+                      label: 'Global Access',
+                      icon: Icons.public_rounded,
+                      t: t,
+                    ),
+                    _StatPill(
+                      label: 'Live',
+                      icon: Icons.circle,
+                      t: t,
+                      pulse: true,
+                    ),
                   ],
                 ),
               ],
             ),
           ),
-          // Avatar top-right on desktop
-          if (isDesktop)
-            Positioned(
-              top: 28, right: 28,
-              child: _AvatarMenu(state: state, t: t, dark: true),
-            ),
         ],
       ),
     );
   }
 
+  String _greetingEmoji(int hour) {
+    if (hour < 12) return '☀️';
+    if (hour < 17) return '🌤';
+    return '🌙';
+  }
+
+  String _timeOfDayString(int hour) {
+    if (hour < 12) return 'morning';
+    if (hour < 17) return 'afternoon';
+    return 'evening';
+  }
+
   String _weekday(int d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d-1];
-  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun',
-    'Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
 }
 
 // ── Light hero (Manager / HQ / Branch / Admin / Supervisor) ──────────────────
@@ -1554,13 +1697,21 @@ class _LightHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final dateStr = '${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}';
-    final greeting = _greeting(now.hour);
+    final isCeo = state._role == 'ceo';
+    final isChairman = state._role == 'chairman';
+    final hour = now.hour;
+
+    final greetingBadgeText = isCeo 
+        ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, CEO' 
+        : (isChairman ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, Chairman' : '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}');
+
+    final mainGreetingTitle = state._userName;
 
     return Container(
       margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 36 : 24, hPad, 0),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [t.accent, t.accentLight.withBlue(t.accentLight.blue + 10)],
+          colors: [t.accent, t.accentLight],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1573,53 +1724,100 @@ class _LightHero extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          // Decorative circles
-          Positioned(right: -40, top: -40,
-            child: Container(width: 180, height: 180,
-              decoration: BoxDecoration(shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.07)))),
-          Positioned(right: 60, bottom: -20,
-            child: Container(width: 100, height: 100,
-              decoration: BoxDecoration(shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.05)))),
+          // Dynamic Time of Day Hero Image (Dawn, Morning, Afternoon, Evening, Dusk, Night)
+          const Positioned.fill(
+            child: _TimeOfDayHeroImage(),
+          ),
+          // Left-faded gradient so greeting text is readable while masjid on right is completely clear
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    t.accent.withValues(alpha: 0.98),
+                    t.accent.withValues(alpha: 0.88),
+                    t.accent.withValues(alpha: 0.75),
+                    t.accent.withValues(alpha: 0.60),
+                  ],
+                  stops: const [0.0, 0.35, 0.70, 1.0],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+            ),
+          ),
           Padding(
             padding: EdgeInsets.all(isDesktop ? 28 : 20),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Greeting
-                      Text(greeting,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: isDesktop ? 14 : 12, fontWeight: FontWeight.w500)),
-                      const SizedBox(height: 4),
-                      Text(state._userName,
-                        style: TextStyle(color: Colors.white,
-                          fontSize: isDesktop ? 30 : 22,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -1, height: 1.1),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(dateStr,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12)),
-                      const SizedBox(height: 18),
-                      // Role + module count pills
-                      Wrap(spacing: 10, runSpacing: 10, children: [
-                        _WhitePill(label: state._role.toUpperCase(),
-                          icon: Icons.verified_user_rounded, t: t),
-                        _WhitePill(
-                          label: '${state._availableModules.length} Modules',
-                          icon: Icons.grid_view_rounded, t: t),
-                      ]),
-                    ],
+                // Greeting Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                  ),
+                  child: Text(
+                    greetingBadgeText.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
                   ),
                 ),
-                if (isDesktop) ...[
-                  const SizedBox(width: 20),
-                  _AvatarMenu(state: state, t: t, dark: false),
-                ],
+                const SizedBox(height: 8),
+                // Greeting Name & User Photo Row
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            mainGreetingTitle,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: isDesktop ? 28 : 22,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.8,
+                              height: 1.1,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            dateStr,
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    _buildUserHeroAvatar(state._userPhotoUrl, state._userName, t, size: isDesktop ? 56 : 48),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                // Role + module count pills
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    _WhitePill(
+                      label: state._role.toUpperCase(),
+                      icon: Icons.verified_user_rounded,
+                      t: t,
+                    ),
+                    _WhitePill(
+                      label: '${state._availableModules.length} Modules',
+                      icon: Icons.grid_view_rounded,
+                      t: t,
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -1628,14 +1826,100 @@ class _LightHero extends StatelessWidget {
     );
   }
 
-  String _greeting(int hour) {
-    if (hour < 12) return '☀️  Good morning';
-    if (hour < 17) return '🌤  Good afternoon';
-    return '🌙  Good evening';
+  String _greetingEmoji(int hour) {
+    if (hour < 12) return '☀️';
+    if (hour < 17) return '🌤';
+    return '🌙';
   }
+
+  String _timeOfDayString(int hour) {
+    if (hour < 12) return 'morning';
+    if (hour < 17) return 'afternoon';
+    return 'evening';
+  }
+
   String _weekday(int d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d-1];
-  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun',
-    'Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
+}
+
+Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {double size = 52}) {
+  final str = photoUrl.trim();
+  Widget child;
+  if (str.isNotEmpty) {
+    final bytes = ImageUploadService.decodeBase64ToBytes(str);
+    if (bytes != null) {
+      child = Image.memory(bytes, width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _buildUserAvatarFallback(userName, t, size));
+    } else if (str.startsWith('http://') || str.startsWith('https://')) {
+      child = Image.network(str, width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _buildUserAvatarFallback(userName, t, size));
+    } else {
+      child = _buildUserAvatarFallback(userName, t, size);
+    }
+  } else {
+    child = _buildUserAvatarFallback(userName, t, size);
+  }
+
+  return Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 2.5),
+      boxShadow: [
+        BoxShadow(
+          color: t.accent.withValues(alpha: 0.4),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: ClipOval(child: child),
+  );
+}
+
+Widget _buildUserAvatarFallback(String userName, RoleThemeData t, double size) {
+  final initial = userName.trim().isNotEmpty ? userName.trim()[0].toUpperCase() : 'U';
+  return Container(
+    color: t.accent.withValues(alpha: 0.8),
+    alignment: Alignment.center,
+    child: Text(
+      initial,
+      style: TextStyle(
+        color: Colors.white,
+        fontWeight: FontWeight.w900,
+        fontSize: size * 0.42,
+      ),
+    ),
+  );
+}
+
+// ── Dynamic Time-of-Day Hero Image ───────────────────────────────────────────
+class _TimeOfDayHeroImage extends StatelessWidget {
+  const _TimeOfDayHeroImage();
+
+  /// Maps the current hour to one of 8 hero images in assets/hero/.
+  static String _heroAssetForHour(int hour) {
+    if (hour >= 5 && hour < 7)   return 'assets/hero/Dawn.png';
+    if (hour >= 7 && hour < 10)  return 'assets/hero/Morning.png';
+    if (hour >= 10 && hour < 13) return 'assets/hero/Noon.png';
+    if (hour >= 13 && hour < 16) return 'assets/hero/Afternoon.png';
+    if (hour >= 16 && hour < 18) return 'assets/hero/Dusk.png';
+    if (hour >= 18 && hour < 20) return 'assets/hero/Evening.png';
+    if (hour >= 20 && hour < 23) return 'assets/hero/Night.png';
+    return 'assets/hero/Midnight.png'; // 23–4
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = _heroAssetForHour(DateTime.now().hour);
+    return Image.asset(
+      asset,
+      fit: BoxFit.fill,
+      errorBuilder: (context, error, stackTrace) => Image.asset(
+        'assets/hero.png',
+        fit: BoxFit.fill,
+      ),
+    );
+  }
 }
 
 // ── Shared pill widgets ───────────────────────────────────────────────────────
@@ -1717,115 +2001,7 @@ class _WhitePill extends StatelessWidget {
 
 
 
-// ── Avatar popup ──────────────────────────────────────────────────────────────
 
-class _AvatarMenu extends StatelessWidget {
-  final _GlobalModularDashboardState state;
-  final RoleThemeData t;
-  final bool dark;
-  const _AvatarMenu(
-      {required this.state, required this.t, required this.dark});
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<String>(
-      offset: const Offset(0, 54),
-      color: dark ? const Color(0xFF161B22) : t.bgCard,
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(
-              color: dark ? const Color(0xFF30363D) : t.bgRule)),
-      child: Container(
-        padding: const EdgeInsets.all(3),
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 2),
-          gradient: dark
-              ? LinearGradient(colors: [
-                  t.accent.withValues(alpha: 0.3),
-                  t.accent.withValues(alpha: 0.1),
-                ])
-              : null,
-        ),
-        child: CircleAvatar(
-          radius: 22,
-          backgroundColor: t.accentMuted,
-          child: Text(
-            state._userName.isNotEmpty
-                ? state._userName[0].toUpperCase()
-                : 'U',
-            style: TextStyle(
-                color: t.accent,
-                fontWeight: FontWeight.w900,
-                fontSize: 16),
-          ),
-        ),
-      ),
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          enabled: false,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(state._userName,
-                style: TextStyle(
-                    color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
-                    fontWeight: FontWeight.bold)),
-            Text(state._role.toUpperCase(),
-                style: TextStyle(
-                    color: t.accent, fontSize: 10, fontWeight: FontWeight.w700)),
-            const Divider(),
-          ]),
-        ),
-        _pmi(Icons.settings_outlined, 'settings', dark, t),
-        _pmi(Icons.help_outline_rounded, 'support', dark, t),
-        const PopupMenuDivider(),
-        const PopupMenuItem(
-          value: 'logout',
-          child: Row(children: [
-            Icon(Icons.logout_rounded, color: Colors.redAccent, size: 17),
-            SizedBox(width: 12),
-            Text('Sign Out',
-                style: TextStyle(
-                    color: Colors.redAccent,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13)),
-          ]),
-        ),
-      ],
-      onSelected: (v) {
-        if (v == 'settings') {
-          Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (_) =>
-                      SettingsPage(userData: state.widget.userData)));
-        } else if (v == 'support') {
-          Navigator.push(context,
-              MaterialPageRoute(builder: (_) => const SupportPage()));
-        } else if (v == 'logout') {
-          state._logout();
-        }
-      },
-    );
-  }
-
-  PopupMenuItem<String> _pmi(
-      IconData icon, String value, bool dark, RoleThemeData t) {
-    final label = value[0].toUpperCase() + value.substring(1);
-    return PopupMenuItem(
-      value: value,
-      child: Row(children: [
-        Icon(icon,
-            color: dark ? const Color(0xFF8B949E) : t.textSecondary,
-            size: 17),
-        const SizedBox(width: 12),
-        Text(label,
-            style: TextStyle(
-                color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
-                fontSize: 13)),
-      ]),
-    );
-  }
-}
 
 // ── Search bar ────────────────────────────────────────────────────────────────
 
@@ -2084,10 +2260,14 @@ class _ModuleGrid extends StatelessWidget {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: w < 480 ? 1 : 2,
+            crossAxisCount: w < 480 ? 1 : (heroModules.length < 2 ? 2 : heroModules.length),
             crossAxisSpacing: isDesktop ? 18 : 12,
             mainAxisSpacing: isDesktop ? 18 : 12,
-            childAspectRatio: w < 480 ? 2.2 : 1.8,
+            childAspectRatio: w < 480 
+                ? 2.2 
+                : (heroModules.length <= 1 
+                    ? 1.8 
+                    : (heroModules.length == 2 ? 1.55 : 1.25)),
           ),
           itemCount: heroModules.length,
           itemBuilder: (ctx, i) {
@@ -2199,8 +2379,8 @@ class _ModuleCardState extends State<_ModuleCard>
   void initState() {
     super.initState();
     _pressCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 140));
-    _pressScale = Tween<double>(begin: 1.0, end: 0.96).animate(
+        vsync: this, duration: const Duration(milliseconds: 100));
+    _pressScale = Tween<double>(begin: 1.0, end: 0.97).animate(
         CurvedAnimation(parent: _pressCtrl, curve: Curves.easeOut));
   }
 
@@ -2216,7 +2396,7 @@ class _ModuleCardState extends State<_ModuleCard>
     final dark = widget.dark;
     final tiny = MediaQuery.of(context).size.width < 480;
 
-    // Determine category accent color and gradients
+    // Get color for category
     final Color categoryColor;
     switch (widget.module.category) {
       case ModuleCategory.office:
@@ -2230,6 +2410,9 @@ class _ModuleCardState extends State<_ModuleCard>
         break;
       case ModuleCategory.madrassa:
         categoryColor = const Color(0xFF8B5CF6); // Purple
+        break;
+      case ModuleCategory.school:
+        categoryColor = const Color(0xFF2563EB); // Blue
         break;
     }
 
@@ -2253,142 +2436,213 @@ class _ModuleCardState extends State<_ModuleCard>
         child: ScaleTransition(
           scale: _pressScale,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutQuart,
             transform: Matrix4.identity()
-              ..translate(0.0, _hov ? -5.0 : 0.0),
+              ..translate(0.0, _hov ? -8.0 : 0.0),
             decoration: BoxDecoration(
-              color: dark ? const Color(0xFF161B22) : t.bgCard,
-              borderRadius: BorderRadius.circular(24),
+              color: dark 
+                  ? (_hov ? const Color(0xFF1F2937) : const Color(0xFF0F172A))
+                  : (_hov ? Colors.white : t.bgCard),
+              borderRadius: BorderRadius.circular(28),
               border: Border.all(
                 color: _hov
-                    ? categoryColor.withValues(alpha: 0.5)
-                    : (dark ? const Color(0xFF30363D) : t.bgRule),
-                width: _hov ? 1.5 : 1,
+                    ? categoryColor.withValues(alpha: 0.6)
+                    : (dark ? const Color(0xFF1E293B) : t.bgRule),
+                width: _hov ? 2.0 : 1.2,
               ),
               boxShadow: _hov
                   ? [
                       BoxShadow(
-                          color: categoryColor.withValues(alpha: 0.25),
-                          blurRadius: 24,
-                          offset: const Offset(0, 10)),
+                          color: categoryColor.withValues(alpha: 0.28),
+                          blurRadius: 30,
+                          offset: const Offset(0, 12)),
                       BoxShadow(
-                          color: categoryColor.withValues(alpha: 0.08),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2)),
+                          color: categoryColor.withValues(alpha: 0.1),
+                          blurRadius: 6,
+                          offset: const Offset(0, 3)),
                     ]
                   : [
                       BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.03),
-                          blurRadius: 10,
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 12,
                           offset: const Offset(0, 4)),
                     ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(22.5),
+              borderRadius: BorderRadius.circular(26.8),
               child: Stack(
                 children: [
-                  Positioned(
-                    left: 0,
-                    top: 0,
-                    bottom: 0,
-                    width: 5,
-                    child: Container(
-                      color: categoryColor,
+                  // Ambient glowing circular mesh in background on hover
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOut,
+                    top: _hov ? -15 : -60,
+                    right: _hov ? -15 : -60,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: _hov ? 130 : 80,
+                      height: _hov ? 130 : 80,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            categoryColor.withValues(alpha: 0.22),
+                            categoryColor.withValues(alpha: 0.05),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
                     ),
                   ),
+                  
+                  // Secondary glow on bottom left
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOut,
+                    bottom: _hov ? -20 : -80,
+                    left: _hov ? -20 : -80,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: _hov ? 100 : 60,
+                      height: _hov ? 100 : 60,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            categoryColor.withValues(alpha: 0.12),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // A sleek top border line indicating category color
+                  Positioned(
+                    left: 0, right: 0, top: 0,
+                    height: 4,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: _hov
+                              ? [categoryColor, categoryColor.withValues(alpha: 0.4)]
+                              : [categoryColor.withValues(alpha: 0.8), categoryColor.withValues(alpha: 0.2)],
+                        ),
+                      ),
+                    ),
+                  ),
+
                   Padding(
                     padding: EdgeInsets.fromLTRB(
-                      widget.isHero ? (widget.isDesktop ? 29 : 23) : (tiny ? 19 : 25),
-                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
-                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
-                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 14 : 20),
+                      widget.isHero ? (widget.isDesktop ? 26 : 20) : (tiny ? 18 : 22),
+                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 16 : 20),
+                      widget.isHero ? (widget.isDesktop ? 24 : 18) : (tiny ? 16 : 20),
+                      widget.isHero ? (widget.isDesktop ? 20 : 16) : (tiny ? 14 : 18),
                     ),
-                    child: Stack(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Subtle corner accent on hover
-                        if (_hov)
-                          Positioned(
-                            top: -20, right: -20,
-                            child: Container(
-                              width: 60, height: 60,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: categoryColor.withValues(alpha: 0.06),
-                              ),
-                            ),
-                          ),
-                        Column(
+                        // Icon & Arrow Indicator Header Row
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Icon box with gradient
-                            AnimatedContainer(
-                              duration: const Duration(milliseconds: 220),
-                              padding: EdgeInsets.all(tiny ? 10 : 12),
-                              decoration: BoxDecoration(
-                                gradient: _hov ? categoryGradient : null,
-                                color: !_hov ? (dark ? const Color(0xFF21262D) : categoryColor.withValues(alpha: 0.12)) : null,
-                                borderRadius: BorderRadius.circular(16),
-                                boxShadow: _hov ? [
-                                  BoxShadow(color: categoryColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))
-                                ] : [],
-                              ),
-                              child: Icon(
-                                widget.module.icon,
-                                color: _hov ? Colors.white : categoryColor,
-                                size: widget.isHero ? 28 : (tiny ? 20 : 24),
-                              ),
-                            ),
-
-                            const Spacer(),
-
-                            // Title
-                            Text(
-                              widget.module.title,
-                              style: TextStyle(
-                                color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
-                                fontSize: widget.isHero ? (widget.isDesktop ? 18 : 16) : (tiny ? 13 : (widget.isDesktop ? 15 : 14)),
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.4,
-                                height: 1.2,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-
-                            if (!tiny) ...[
-                              const SizedBox(height: 6),
-                              Text(
-                                widget.module.description,
-                                style: TextStyle(
-                                  color: dark ? const Color(0xFF8B949E) : t.textTertiary,
-                                  fontSize: 11.5,
-                                  height: 1.4,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-
-                            const SizedBox(height: 12),
-
-                            // Arrow indicator
-                            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                              AnimatedContainer(
-                                duration: const Duration(milliseconds: 220),
-                                padding: const EdgeInsets.all(6),
+                            // Icon container with dynamic scale and rotation on hover
+                            AnimatedRotation(
+                              turns: _hov ? 0.03 : 0,
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeOutBack,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                padding: EdgeInsets.all(tiny ? 10 : 12),
                                 decoration: BoxDecoration(
-                                  color: _hov ? categoryColor : (dark ? const Color(0xFF21262D) : categoryColor.withValues(alpha: 0.1)),
-                                  shape: BoxShape.circle,
+                                  gradient: _hov ? categoryGradient : null,
+                                  color: !_hov 
+                                      ? (dark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.1)) 
+                                      : null,
+                                  borderRadius: BorderRadius.circular(18),
+                                  boxShadow: _hov ? [
+                                    BoxShadow(
+                                      color: categoryColor.withValues(alpha: 0.4),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    )
+                                  ] : [],
                                 ),
                                 child: Icon(
-                                  Icons.arrow_forward_rounded,
+                                  widget.module.icon,
                                   color: _hov ? Colors.white : categoryColor,
-                                  size: 13,
+                                  size: widget.isHero ? 28 : (tiny ? 20 : 24),
                                 ),
                               ),
-                            ]),
+                            ),
+                            
+                            // Arrow Indicator
+                            AnimatedOpacity(
+                              opacity: widget.isHero || _hov ? 1.0 : 0.4,
+                              duration: const Duration(milliseconds: 200),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _hov 
+                                      ? categoryColor 
+                                      : (dark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.08)),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Transform.translate(
+                                  offset: Offset(_hov ? 2.0 : 0.0, 0.0),
+                                  child: Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: _hov ? Colors.white : categoryColor,
+                                    size: 14,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ],
+                        ),
+
+                        // Spacing
+                        const Spacer(),
+
+                        // Title
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: dark ? const Color(0xFFF3F4F6) : t.textPrimary,
+                            fontSize: widget.isHero ? (widget.isDesktop ? 18.5 : 16.5) : (tiny ? 13.5 : (widget.isDesktop ? 15.5 : 14.5)),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.4,
+                            height: 1.15,
+                          ),
+                          child: Text(
+                            widget.module.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+
+                        const SizedBox(height: 6),
+
+                        // Description
+                        AnimatedDefaultTextStyle(
+                          duration: const Duration(milliseconds: 200),
+                          style: TextStyle(
+                            color: dark 
+                                ? (_hov ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280))
+                                : (_hov ? t.textSecondary : t.textTertiary),
+                            fontSize: tiny ? 11.0 : 12.0,
+                            fontWeight: FontWeight.w500,
+                            height: 1.35,
+                          ),
+                          child: Text(
+                            widget.module.description,
+                            maxLines: widget.isHero ? 3 : 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),

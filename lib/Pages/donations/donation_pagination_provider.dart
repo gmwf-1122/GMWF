@@ -68,7 +68,7 @@ class DonationPaginationNotifier
     _hiveSubscription = Hive.box(DonationsLocalStorage.donationsBox).watch().listen((event) {
       if (!mounted) return;
       final local = DonationsLocalStorage.getAllDonations(branchId);
-      final currentData = state.value ?? [];
+      final currentData = state.valueOrNull ?? [];
       final merged = _dedup(currentData, local);
       state = AsyncValue.data(merged);
     });

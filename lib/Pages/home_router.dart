@@ -1,4 +1,5 @@
 // lib/pages/home_router.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +8,9 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/firestore_service.dart';
+import '../services/device_info_service.dart';
+import '../widgets/update_dialog_widget.dart';
+import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import '../models/patient.dart';
 import '../models/token.dart';
@@ -15,7 +19,9 @@ import 'dispensary/receptionist/receptionist_screen.dart';
 import 'dispensary/doctor/doctor_screen.dart';
 import 'dispensary/dispensar/inventory.dart';
 import 'dispensary/dispensar/dispensar_screen.dart';
+import 'dispensary/hybrid_dispensary_screen.dart';
 import 'login_page.dart';
+import 'access_revoked_screen.dart';
 import 'server.dart';
 
 import 'dasterkhwaan/office_boy.dart';
@@ -26,6 +32,7 @@ import '../widgets/gmwf_loading_view.dart';
 import 'global_modular_dashboard.dart'; // Unified modular entry point
 import 'madrassa/madrassa_dashboard.dart';
 import 'madrassa/madrassa_guardian_screen.dart';
+import 'school/school_dashboard.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 
@@ -47,11 +54,66 @@ class HomeRouter extends StatefulWidget {
 
 class _HomeRouterState extends State<HomeRouter> {
   late Future<Map<String, dynamic>?> _userDataFuture;
+  StreamSubscription<DocumentSnapshot>? _revokeListener;
+  Map<String, dynamic>? _accessRevokedData;
 
   @override
   void initState() {
     super.initState();
     _userDataFuture = _fetchUserData();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final userData = await _userDataFuture;
+      if (mounted && userData != null) {
+        final role = (userData['role'] ?? '').toString().toLowerCase();
+        final isServerMode = role == 'server';
+        UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _revokeListener?.cancel();
+    super.dispose();
+  }
+
+  /// Returns true if the given status string represents a revoked account.
+  static bool _isStatusRevoked(String status, Map<String, dynamic>? data) {
+    return status == 'inactive' ||
+        status == 'suspended' ||
+        status == 'terminated' ||
+        status == 'resigned' ||
+        status == 'retired' ||
+        status == 'offboarded' ||
+        status == 'revoked' ||
+        (data != null && data['isActive'] == false);
+  }
+
+  /// Start listening to the user's Firestore document for real-time revocation.
+  void _startRevokeListener(String uid, String? branchId) {
+    _revokeListener?.cancel();
+
+    // Listen on the top-level /users/{uid} document
+    _revokeListener = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snapshot) {
+      if (!snapshot.exists || !mounted) return;
+      final data = snapshot.data()!;
+      final status = (data['status'] ?? data['accountStatus'] ?? 'active')
+          .toString()
+          .toLowerCase()
+          .trim();
+      if (_isStatusRevoked(status, data)) {
+        debugPrint('[HomeRouter] Real-time revoke detected for UID: $uid');
+        setState(() {
+          _accessRevokedData = {...data, 'uid': uid};
+        });
+      }
+    }, onError: (e) {
+      debugPrint('[HomeRouter] Revoke listener error (top-level): $e');
+    });
   }
 
   @override
@@ -110,7 +172,10 @@ class _HomeRouterState extends State<HomeRouter> {
 
     final isOnline = await _checkConnectivity();
 
-    if (!isOnline) {
+    if (isOnline) {
+      // Record device session info for current active user on app startup
+      DeviceInfoService.recordUserSession(userId: uid, email: currentUser.email);
+    } else {
       debugPrint("HomeRouter: Device is offline, using local storage");
       try {
         final cachedData =
@@ -191,9 +256,39 @@ class _HomeRouterState extends State<HomeRouter> {
 
     // Branch /users
     try {
+      // 1. Try direct path query using cached branchId if available from local DB to avoid collectionGroup
+      final localUser = LocalStorageService.getLocalUserByUid(uid);
+      final cachedBranchId = localUser?['branchId'] as String?;
+      
+      if (cachedBranchId != null && cachedBranchId.isNotEmpty && cachedBranchId != 'all' && cachedBranchId != 'unknown') {
+        final docSnap = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(cachedBranchId)
+            .collection('users')
+            .doc(uid)
+            .get()
+            .timeout(const Duration(seconds: 10));
+            
+        if (docSnap.exists) {
+          final data = docSnap.data()!;
+          final userData = {
+            ...data,
+            "branchId": cachedBranchId,
+            "uid": uid,
+            "email": currentUser.email,
+            "name": data['username'] ?? data['name'] ?? 'User',
+            "username": data['username'] ?? 'unknown',
+          };
+          await _cacheUserDataLocally(userData);
+          return userData;
+        }
+      }
+
+      // 2. Fallback to collectionGroup by field 'uid' instead of 'FieldPath.documentId'
+      // (which crashes the Firebase C++ SDK on Windows)
       final querySnap = await FirebaseFirestore.instance
           .collectionGroup('users')
-          .where(FieldPath.documentId, isEqualTo: uid)
+          .where('uid', isEqualTo: uid)
           .limit(1)
           .get()
           .timeout(const Duration(seconds: 10));
@@ -215,7 +310,7 @@ class _HomeRouterState extends State<HomeRouter> {
         return userData;
       }
     } catch (e) {
-      debugPrint('HomeRouter: Error fetching user from Firestore branches via collectionGroup: $e');
+      debugPrint('HomeRouter: Error fetching user from Firestore branches: $e');
     }
 
     // Hive fallback
@@ -314,6 +409,17 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'pharmacist':
         return DispensarScreen(branchId: branchId);
 
+      case 'rec+dis':
+      case 'doc+rec':
+      case 'doc+dis':
+      case 'doc+rec+dis':
+        return HybridDispensaryScreen(
+          branchId: branchId,
+          userId: uid,
+          userName: userName,
+          role: r,
+        );
+
       case 'inventory':
         return InventoryPage(branchId: branchId);
 
@@ -336,7 +442,7 @@ class _HomeRouterState extends State<HomeRouter> {
 
       case 'kitchen':
       case 'dasterkhwaan kitchen':
-        return DasterkhwaanKitchen(branchId: branchId, username: userName);
+        return DasterkhwaanKitchen(branchId: branchId, username: userName, role: r);
 
       case 'donations':
         return DonationsScreen.embedded(
@@ -358,6 +464,12 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'madrassa parent':
       case 'madrassa guardian':
         return MadrassaGuardianScreen(userData: userData);
+
+      case 'school':
+      case 'school admin':
+      case 'school teacher':
+      case 'school principal':
+        return SchoolDashboard(branchId: branchId);
 
       default:
         debugPrint("Unknown role: $role");
@@ -443,41 +555,138 @@ class _HomeRouterState extends State<HomeRouter> {
 
         // Only redirect if snapshot is done AND we definitely have no data.
         if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
-          debugPrint("HomeRouter: No user data - checking for late arrival...");
+          debugPrint("HomeRouter: No user data found.");
           
-          // Final fallback check to prevent race condition
-          if (widget.user == null && widget.localUser == null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (context.mounted) {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                  (route) => false,
-                );
-              }
-            });
-            debugPrint(
-                "HomeRouter: No user data found - redirecting to login");
-          }
-
-          return const Scaffold(
+          return Scaffold(
             body: Center(
-                child: Text(
-                    "No user data found. Redirecting to login...")),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 64, color: Colors.orange),
+                    const SizedBox(height: 20),
+                    const Text(
+                      "Profile Retrieval Failed",
+                      style: TextStyle(
+                        fontSize: 20, 
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF111827),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "We couldn't retrieve your user profile role or branch details.\nThis could be due to a missing collectionGroup database index or lack of local cache.",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey, fontSize: 14),
+                    ),
+                    const SizedBox(height: 28),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            Navigator.pushReplacementNamed(context, '/home');
+                          },
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text("Retry"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00695C),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              await FirebaseAuth.instance.signOut();
+                              await offline_auth.OfflineAuthService.clearCredentials();
+                            } catch (e) {
+                              debugPrint("Error signing out: $e");
+                            }
+                            if (context.mounted) {
+                              Navigator.pushAndRemoveUntil(
+                                context,
+                                MaterialPageRoute(builder: (_) => const LoginPage()),
+                                (route) => false,
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.logout_rounded),
+                          label: const Text("Log Out"),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ],
+                    )
+                  ],
+                ),
+              ),
+            ),
           );
         }
 
         final data = snapshot.data!;
-        final role =
-            (data['role'] as String? ?? 'unknown').toLowerCase().trim();
-        final branchId =
-            (data['branchId'] as String? ?? 'unknown').trim();
-        final uid = (data['uid'] as String?) ??
-            widget.user?.uid ??
-            data['uid'] ??
-            'unknown';
-        final userName =
-            (data['name'] as String?) ?? (data['username'] as String?) ?? 'User';
+
+        // Check real-time revocation first (fires instantly when admin revokes)
+        if (_accessRevokedData != null) {
+          return AccessRevokedScreen(
+            userData: _accessRevokedData!,
+            reason: (_accessRevokedData!['status'] ?? 'revoked').toString().toLowerCase(),
+          );
+        }
+
+        final userStatus = (data['status'] ?? data['accountStatus'] ?? 'active').toString().toLowerCase().trim();
+        final isRevoked = _isStatusRevoked(userStatus, data);
+
+        if (isRevoked) {
+          return AccessRevokedScreen(userData: data, reason: userStatus);
+        }
+
+        // Start real-time listener for revocation (runs once per session)
+        final revokeUid = (data['uid'] ?? data['id'] ?? widget.user?.uid ?? '').toString();
+        final revokeBranch = (data['branchId']?.toString() ?? '').trim();
+        if (revokeUid.isNotEmpty && !revokeUid.startsWith('local-') && _revokeListener == null) {
+          _startRevokeListener(revokeUid, revokeBranch.isNotEmpty && revokeBranch != 'all' ? revokeBranch : null);
+        }
+
+        // ── Normalize Role (handles lists, legacy synonyms, nulls) ──
+        String rawRole = '';
+        if (data['role'] != null) {
+          rawRole = data['role'].toString();
+        } else if (data['roles'] is List && (data['roles'] as List).isNotEmpty) {
+          rawRole = (data['roles'] as List).first.toString();
+        } else if (data['type'] != null) {
+          rawRole = data['type'].toString();
+        }
+        rawRole = rawRole.toLowerCase().trim();
+        if (rawRole == 'dispensar' || rawRole == 'pharmacist' || rawRole == 'chemist') {
+          rawRole = 'dispenser';
+        } else if (rawRole == 'reception' || rawRole == 'front desk') {
+          rawRole = 'receptionist';
+        } else if (rawRole == 'doc') {
+          rawRole = 'doctor';
+        } else if (rawRole == 'rec + dispenser' || rawRole == 'rec_dis') {
+          rawRole = 'rec+dis';
+        }
+        final role = rawRole.isEmpty ? 'unknown' : rawRole;
+
+        // ── Normalize Branch ID (handles null, 'null', empty strings) ──
+        String rawBranch = (data['branchId']?.toString() ?? '').trim();
+        if (rawBranch.isEmpty || rawBranch == 'null' || rawBranch == 'unknown') {
+          rawBranch = 'all';
+        }
+        final branchId = rawBranch;
+
+        // ── Normalize UID & User Name ──
+        final uid = (data['uid'] ?? data['id'] ?? data['docId'] ?? widget.user?.uid ?? '').toString();
+        final userName = resolveUserDisplayName(data);
 
         debugPrint(
             "HomeRouter -> Role: $role | Branch: $branchId | UID: $uid | Name: $userName");

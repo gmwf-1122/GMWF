@@ -14,6 +14,7 @@ class StudentProgressDialog extends StatefulWidget {
   final int prevHifzLines;
   final String percentage;
   final int? estimatedDays;
+  final double? recentDailyRate;
 
   const StudentProgressDialog({
     Key? key,
@@ -27,6 +28,7 @@ class StudentProgressDialog extends StatefulWidget {
     this.prevHifzLines = 0,
     required this.percentage,
     this.estimatedDays,
+    this.recentDailyRate,
   }) : super(key: key);
 
   @override
@@ -89,6 +91,18 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
     return parts.join(' ');
   }
 
+  String _formatDays(int days) {
+    final y = days ~/ 365;
+    final rem = days % 365;
+    final m = rem ~/ 30;
+    final d = rem % 30;
+    final parts = <String>[];
+    if (y > 0) parts.add('$y yr${y > 1 ? 's' : ''}');
+    if (m > 0) parts.add('$m mo');
+    if (d > 0 || parts.isEmpty) parts.add('$d day${d != 1 ? 's' : ''}');
+    return parts.join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final totalMemorized = widget.currentLines + widget.prevHifzLines;
@@ -99,6 +113,17 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
     const teal = Color(0xFF008080);
     const tealLight = Color(0xFFE0F2F1);
     const cardBg = Color(0xFFF8FFFE);
+
+    final isHifz = widget.className.toLowerCase().contains('hifz') ||
+                   widget.className.contains('حفظ');
+    final daysSinceJoin = widget.joinDate != null
+        ? DateTime.now().difference(widget.joinDate!).inDays
+        : 0;
+    final int targetDays = 1095; // 3 years
+    final int daysLeftIn3Years = targetDays - daysSinceJoin;
+    final double linesPerDayRequired = daysLeftIn3Years > 0
+        ? remaining / daysLeftIn3Years
+        : 0.0;
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
@@ -408,6 +433,88 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                             ],
                           ),
                         ),
+
+                        if (isHifz) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: const Color(0xFFDCFCE7)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFDCFCE7),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.insights_rounded,
+                                    color: Color(0xFF16A34A),
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        '3-Year Hifz Target (36 Months)',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Color(0xFF15803D),
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.4,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      if (daysLeftIn3Years > 0) ...[
+                                        Text(
+                                          'Requires min. ${linesPerDayRequired.toStringAsFixed(1)} lines/day to finish on time',
+                                          style: const TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF166534),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Target Time Left: ${_formatDays(daysLeftIn3Years)} • Current pace: ${(widget.recentDailyRate ?? 0.0).toStringAsFixed(1)} lines/day',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ] else ...[
+                                        const Text(
+                                          'Target completion timeframe exceeded (3 years passed)',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFF991B1B),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Current pace: ${(widget.recentDailyRate ?? 0.0).toStringAsFixed(1)} lines/day',
+                                          style: TextStyle(
+                                            fontSize: 10.5,
+                                            color: Colors.grey[700],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
 
                         const SizedBox(height: 20),
 

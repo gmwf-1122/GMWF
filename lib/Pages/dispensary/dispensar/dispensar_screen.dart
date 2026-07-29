@@ -65,7 +65,9 @@ class _DispensarScreenState extends State<DispensarScreen> {
   @override
   void initState() {
     super.initState();
-    SyncService().start(widget.branchId);
+    if (!widget.isEmbedded) {
+      SyncService().start(widget.branchId);
+    }
     _listenConnectivity();
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
@@ -78,17 +80,21 @@ class _DispensarScreenState extends State<DispensarScreen> {
     _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
       // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
-      if (status.isConnected) {
+      if (status.isConnected && !widget.isEmbedded) {
         _syncDebounce?.cancel();
         _syncDebounce = Timer(const Duration(milliseconds: 300), _syncOnReconnect);
       }
     });
 
     // [BUG-13] Register via listener list — safe alongside DoctorScreen
-    _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
+    if (!widget.isEmbedded) {
+      _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      _startBackgroundSync();
+      if (!widget.isEmbedded) {
+        _startBackgroundSync();
+      }
     });
 
     _realtimeSub = RealtimeManager().messageStream.listen(_handleRealtimeMessage);
@@ -113,13 +119,15 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
     // 3. Start connection with whatever name we have so far.
     //    This ensures the identify message goes out quickly.
-    ConnectionManager().start(
-      role:     'dispenser',
-      branchId: widget.branchId,
-      username: resolvedName,
-    );
-    if (resolvedName != null) {
-      RealtimeManager().updateUsername(resolvedName);
+    if (!widget.isEmbedded) {
+      ConnectionManager().start(
+        role:     'dispenser',
+        branchId: widget.branchId,
+        username: resolvedName,
+      );
+      if (resolvedName != null) {
+        RealtimeManager().updateUsername(resolvedName);
+      }
     }
 
     // 4. Fetch from Firestore for the authoritative display name.
@@ -136,7 +144,9 @@ class _DispensarScreenState extends State<DispensarScreen> {
           if (mounted) setState(() => _dispenserName = firestoreName);
           // [FIX-USERNAME] Push updated name into RealtimeManager so future
           // messages carry the correct attribution.
-          RealtimeManager().updateUsername(firestoreName);
+          if (!widget.isEmbedded) {
+            RealtimeManager().updateUsername(firestoreName);
+          }
         }
       } catch (e) {
         debugPrint('[Dispenser] Could not fetch dispenser name from Firestore: $e');
@@ -164,6 +174,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   Future<void> _startBackgroundSync() async {
     try {
+      await LocalStorageService.downloadInventory(widget.branchId);
       await SyncService().initialFullDownload(widget.branchId);
     } catch (e) {
       debugPrint('Background sync error: $e');

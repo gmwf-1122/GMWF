@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.2.7
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -45,11 +45,13 @@ dependencies:
   universal_platform: ^1.1.0
 
   # Misc
+  image: ^4.3.0
   crypto: ^3.0.7
   intl: ^0.20.2
   bitsdojo_window: ^0.1.6
   window_manager: ^0.5.1
   excel: ^4.0.6
+  archive: ^3.6.1
   pdf: ^3.11.0
   url_launcher: ^6.3.2
   file_picker: ^10.3.8
@@ -62,11 +64,13 @@ dependencies:
   bonsoir: ^6.0.1
   web_socket_channel: ^3.0.3
   network_info_plus: ^7.0.0
+  device_info_plus: ^11.3.0
   logger: ^2.6.2
 
 
   shared_preferences: ^2.5.4
   flutter_secure_storage: ^10.0.0
+  local_auth: ^2.3.0
   lottie: ^3.3.0
   sentry_flutter: ^8.1.0
 
@@ -126,6 +130,7 @@ flutter:
     - assets/logo/gmwf.jpg
     - assets/logo/gmwf.png
     - assets/logo/gmwf-1.png
+    - assets/logo/twt_logo.png
     - assets/logo/gmwf-1.jpg
     - assets/icons/WA.png
     - assets/images/1.jpg
@@ -136,5 +141,8 @@ flutter:
     - assets/images/rx.png
     - assets/qr/anjuman.png
     - assets/qr/gm.png
+    - assets/hero.png
+    - assets/heroes.png
+    - assets/hero/
     - assets/fonts/NooriNastaliq.ttf
     - assets/fonts/Amiri-Regular.ttf

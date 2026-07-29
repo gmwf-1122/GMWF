@@ -10,7 +10,10 @@ import 'package:gmwf/services/donations_local_storage.dart';
 import 'package:gmwf/pages/madrassa/utils/madrassa_local_storage.dart';
 import 'package:gmwf/services/finance_local_storage.dart';
 import 'package:gmwf/services/finance_loans_storage.dart';
+import 'package:gmwf/services/finance_expenses_storage.dart';
 import 'package:gmwf/services/permission_service.dart';
+import 'package:collection/collection.dart';
+import 'package:uuid/uuid.dart';
 import 'package:gmwf/services/offline_auth_service.dart';
 
 class SyncService {
@@ -18,7 +21,8 @@ class SyncService {
   factory SyncService() => _instance;
   SyncService._internal();
 
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+  final Uuid _uuid = const Uuid();
   bool _isUploading = false;
   String? _currentBranchId;
   List<String> _authorizedBranches = [];
@@ -224,6 +228,7 @@ class SyncService {
       await FinanceLocalStorage.downloadAuditLogs(branchId, force: force);
       await FinanceLocalStorage.downloadFinanceHolidays(branchId);
       await FinanceLocalStorage.downloadLoans(branchId);
+      await FinanceExpensesStorage.downloadExpenses(branchId, force: force);
     } catch (e) {
       Logger().d('[SyncService] triggerFinanceRefresh error: $e');
     }
@@ -256,9 +261,16 @@ class SyncService {
         final attempts = (action['attempts'] as int?) ?? 0;
 
         if (attempts >= 5) {
-          if (type == 'save_donation' || type == 'update_donation' || type == 'delete_donation' || type == 'save_bank_slip') {
+          final retryForeverTypes = {
+            'save_donation', 'update_donation', 'delete_donation', 'save_bank_slip',
+            'update_inventory', 'add_inventory_stock', 'register_medicine',
+            'save_token_exception_request', 'approve_token_exception',
+          };
+          if (retryForeverTypes.contains(type)) {
             action['attempts'] = 0;
+            action['lastFailureLoggedAt'] = DateTime.now().toIso8601String();
             await queueBox.put(key, action);
+            await _flagPersistentSyncFailure(key, action, type);
             continue;
           } else {
             await queueBox.delete(key);
@@ -333,24 +345,73 @@ class SyncService {
           else if (type == 'update_inventory') {
             final medicineId = (action['medicineId'] ?? (action['data'] as Map?)?['medicineId'])?.toString().trim();
             final delta = (action['delta'] ?? (action['data'] as Map?)?['delta'] as num?)?.toDouble() ?? 0.0;
+            final txId = action['txId'] as String? ?? key;
             if (medicineId != null && delta != 0) {
               final docRef = _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId);
               await _db.runTransaction((transaction) async {
                 final snapshot = await transaction.get(docRef);
-                if (snapshot.exists) {
-                  final current = (snapshot.data()?['quantity'] as num?)?.toDouble() ?? 0.0;
-                  final updated = (current + delta).clamp(0.0, double.infinity);
-                  transaction.update(docRef, {'quantity': updated});
+                if (!snapshot.exists) {
+                  throw Exception('Inventory doc $medicineId not found yet — will retry');
                 }
+                final data = snapshot.data() ?? {};
+                final processedTx = Map<String, dynamic>.from(data['processedTx'] ?? {});
+                if (processedTx.containsKey(txId)) {
+                  debugPrint('[SyncService] Transaction $txId already applied to $medicineId — skipping');
+                  return;
+                }
+                final current = (data['quantity'] as num?)?.toDouble() ?? 0.0;
+                final updated = (current + delta).clamp(0.0, double.infinity);
+
+                // Prune entries older than 48h
+                final cutoff = DateTime.now().subtract(const Duration(hours: 48)).toIso8601String();
+                processedTx.removeWhere((_, v) => (v is String && v.compareTo(cutoff) < 0));
+                processedTx[txId] = DateTime.now().toIso8601String();
+
+                transaction.update(docRef, {
+                  'quantity': updated,
+                  'processedTx': processedTx,
+                });
               });
             }
           }
           else if (type == 'add_inventory_stock') {
             final medicineId = action['medicineId']?.toString().trim();
             final qty = (action['quantity'] as num?)?.toInt() ?? 0;
+            final txId = action['txId'] as String? ?? key;
             if (medicineId != null && qty > 0) {
-              await _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId).update({'quantity': FieldValue.increment(qty)});
-              await _db.collection('branches').doc(branchId).collection('inventory_log').add({
+              final docRef = _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId);
+              await _db.runTransaction((transaction) async {
+                final snapshot = await transaction.get(docRef);
+                if (!snapshot.exists) {
+                  throw Exception('Inventory doc $medicineId not found yet — will retry');
+                }
+                final data = snapshot.data() ?? {};
+                final processedTx = Map<String, dynamic>.from(data['processedTx'] ?? {});
+                if (processedTx.containsKey(txId)) {
+                  debugPrint('[SyncService] Restock Transaction $txId already applied to $medicineId — skipping');
+                  return;
+                }
+                final current = (data['quantity'] as num?)?.toDouble() ?? 0.0;
+                final updated = current + qty;
+
+                // Prune entries older than 48h
+                final cutoff = DateTime.now().subtract(const Duration(hours: 48)).toIso8601String();
+                processedTx.removeWhere((_, v) => (v is String && v.compareTo(cutoff) < 0));
+                processedTx[txId] = DateTime.now().toIso8601String();
+
+                transaction.update(docRef, {
+                  'quantity': updated,
+                  'processedTx': processedTx,
+                });
+              });
+
+              // Add to audit log using txId as document ID to prevent duplicate log items on retry
+              await _db
+                  .collection('branches')
+                  .doc(branchId)
+                  .collection('inventory_log')
+                  .doc(txId)
+                  .set({
                 'action': 'add_stock',
                 'medicineId': medicineId,
                 'medicineName': action['medicineName'] ?? '',
@@ -358,7 +419,7 @@ class SyncService {
                 'performedBy': action['performedBy'] ?? '',
                 'performedByName': action['performedByName'] ?? '',
                 'timestamp': FieldValue.serverTimestamp(),
-              });
+              }, SetOptions(merge: true));
             }
           }
           else if (type == 'register_medicine') {
@@ -373,6 +434,46 @@ class SyncService {
               'quantityAdded': (data['quantity'] as num?)?.toInt() ?? 0,
               'timestamp': FieldValue.serverTimestamp(),
             });
+          }
+          else if (type == 'save_token_exception_request') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final requestId = action['requestId']?.toString() ?? action['docId']?.toString() ?? data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            
+            for (final f in ['requestedAt', 'reviewedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+            
+            await _db
+                .collection('branches')
+                .doc(bId)
+                .collection('edit_requests')
+                .doc(requestId)
+                .set(data, SetOptions(merge: true));
+          }
+          else if (type == 'approve_token_exception') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final requestId = action['requestId']?.toString() ?? action['docId']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (requestId != null) {
+              for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
+                if (data[f] is String) {
+                  try {
+                    data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                  } catch (_) {}
+                }
+              }
+              await _db
+                  .collection('branches')
+                  .doc(bId)
+                  .collection('edit_requests')
+                  .doc(requestId)
+                  .update(data);
+            }
           }
           else if (type == 'save_donation') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
@@ -525,6 +626,31 @@ class SyncService {
 
             await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete();
           }
+          else if (type == 'save_user') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final uid = action['uid']?.toString() ?? data['uid']?.toString();
+            final bId = action['branchId']?.toString() ?? data['branchId']?.toString() ?? branchId;
+            if (uid == null || uid.isEmpty) throw Exception('Missing uid');
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('users').doc(uid).set(fsData, SetOptions(merge: true));
+
+            final role = (fsData['role'] as String? ?? 'staff').toLowerCase();
+            const globalRoles = ['ceo', 'chairman', 'admin', 'hq manager'];
+            if (!globalRoles.contains(role) && bId != 'all' && bId.isNotEmpty) {
+              await _db.collection('branches').doc(bId).collection('users').doc(uid).set(fsData, SetOptions(merge: true));
+            }
+          }
+          else if (type == 'delete_user') {
+            final uid = action['uid']?.toString();
+            final bId = action['branchId']?.toString() ?? branchId;
+            if (uid == null || uid.isEmpty) throw Exception('Missing uid');
+
+            await _db.collection('users').doc(uid).delete();
+            if (bId != 'all' && bId.isNotEmpty) {
+              await _db.collection('branches').doc(bId).collection('users').doc(uid).delete();
+            }
+          }
           else if (type == 'save_salary_history') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
             final employeeId = action['employeeId']?.toString();
@@ -602,23 +728,46 @@ class SyncService {
             final employeeDocRef = _db.collection('branches').doc(bId).collection('employees').doc(data['employeeId'] as String);
             final ledgerDocRef = _db.collection('branches').doc(bId).collection('employee_salaries').doc(recordId);
 
+            // GMWF v2 Conflict Check
+            final remoteDoc = await ledgerDocRef.get();
+            if (remoteDoc.exists) {
+              final remoteData = remoteDoc.data();
+              if (remoteData != null) {
+                final remoteVoid = remoteData['isVoided'] == true;
+                final localVoid = data['isVoided'] == true;
+                if (remoteVoid != localVoid || (remoteVoid && localVoid && remoteData['voidReason'] != data['voidReason'])) {
+                  await _handleSyncConflict(bId, recordId, 'salary_ledger', data, remoteData);
+                  await queueBox.delete(key);
+                  continue;
+                }
+              }
+            }
+
             await _db.runTransaction((transaction) async {
               transaction.set(ledgerDocRef, fsData, SetOptions(merge: true));
               
-              final type = data['type']?.toString();
+              final ledgerType = data['type']?.toString();
               final amount = (data['amount'] as num?)?.toDouble() ?? 0.0;
+              final amountMinor = (data['amountMinor'] as num?)?.toInt() ?? (amount * 100).round();
               final isVoided = data['isVoided'] == true;
               
               double delta = 0.0;
-              if (type == 'advance_payment') {
+              int deltaMinor = 0;
+              if (ledgerType == 'advance_payment') {
                 delta = isVoided ? -amount : amount;
-              } else if (type == 'payout') {
+                deltaMinor = isVoided ? -amountMinor : amountMinor;
+              } else if (ledgerType == 'payout') {
                 final recovery = (data['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
+                final recoveryMinor = (data['advanceDeductionsMinor'] as num?)?.toInt() ?? (recovery * 100).round();
                 delta = isVoided ? recovery : -recovery;
+                deltaMinor = isVoided ? recoveryMinor : -recoveryMinor;
               }
 
               if (delta != 0) {
-                transaction.update(employeeDocRef, {'currentAdvanceBalance': FieldValue.increment(delta)});
+                transaction.update(employeeDocRef, {
+                  'currentAdvanceBalance': FieldValue.increment(delta),
+                  'currentAdvanceBalanceMinor': FieldValue.increment(deltaMinor),
+                });
               }
             });
 
@@ -769,8 +918,36 @@ class SyncService {
               data['payments'] = convertedPayments;
             }
 
+            // GMWF v2 Conflict Check
+            final loanDocRef = _db.collection('branches').doc(bId).collection('finance_loans').doc(loanId);
+            final remoteDoc = await loanDocRef.get();
+            if (remoteDoc.exists) {
+              final remoteData = remoteDoc.data();
+              if (remoteData != null) {
+                final remotePayments = List<dynamic>.from(remoteData['payments'] as List? ?? []);
+                final localPayments = List<dynamic>.from(data['payments'] as List? ?? []);
+                
+                bool hasConflict = false;
+                for (final lp in localPayments) {
+                  if (lp is Map) {
+                    final rp = remotePayments.firstWhereOrNull((p) => p['id'] == lp['id']);
+                    if (rp is Map && rp['isVoided'] == true && lp['isVoided'] == true && rp['voidReason'] != lp['voidReason']) {
+                      hasConflict = true;
+                      break;
+                    }
+                  }
+                }
+                
+                if (hasConflict) {
+                  await _handleSyncConflict(bId, loanId, 'loan', data, remoteData);
+                  await queueBox.delete(key);
+                  continue;
+                }
+              }
+            }
+
             final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
-            await _db.collection('branches').doc(bId).collection('finance_loans').doc(loanId).set(fsData, SetOptions(merge: true));
+            await loanDocRef.set(fsData, SetOptions(merge: true));
 
             final box = Hive.box(LocalStorageService.financeLoansBox);
             final localRecord = box.get(loanId);
@@ -827,15 +1004,61 @@ class SyncService {
               'lastUpdatedAt': FieldValue.serverTimestamp(),
             });
           }
+          else if (type == 'save_expense' || type == 'void_expense') {
+            final expenseId = action['expenseId'] as String?;
+            final bId = action['branchId']?.toString() ?? branchId;
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            if (expenseId == null) throw Exception('Missing expenseId');
+
+            for (final f in ['date', 'createdAt', 'updatedAt', 'voidedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+
+            // GMWF v2 Conflict Check
+            final expDocRef = _db.collection('branches').doc(bId).collection('expenses').doc(expenseId);
+            final remoteDoc = await expDocRef.get();
+            if (remoteDoc.exists) {
+              final remoteData = remoteDoc.data();
+              if (remoteData != null) {
+                if (remoteData['isVoided'] == true && data['isVoided'] == true && remoteData['voidReason'] != data['voidReason']) {
+                  await _handleSyncConflict(bId, expenseId, 'expense', data, remoteData);
+                  await queueBox.delete(key);
+                  continue;
+                }
+              }
+            }
+
+            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await expDocRef.set(fsData, SetOptions(merge: true));
+
+            final box = Hive.box(LocalStorageService.expensesBox);
+            final localRecord = box.get(expenseId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(expenseId, updated);
+            }
+          }
 
           await queueBox.delete(key);
+          if (['update_inventory', 'add_inventory_stock', 'register_medicine', 'save_token_exception_request', 'approve_token_exception'].contains(type)) {
+            await _resolveInventorySyncFailure(key, branchId);
+          }
         } catch (e, stackTrace) {
           action['attempts'] = attempts + 1;
           await queueBox.put(key, action);
           Logger().d("[SyncService] ❌ Upload failed for key: $key (type: $type, attempt: ${attempts + 1}). Error: $e");
           debugPrint(stackTrace.toString());
+          if (['update_inventory', 'add_inventory_stock', 'register_medicine', 'save_token_exception_request', 'approve_token_exception'].contains(type)) {
+            await _logInventorySyncFailure(key, action, type, e.toString());
+          }
         }
-        await Future.delayed(const Duration(milliseconds: 600));
+        await Future.delayed(const Duration(milliseconds: 50));
       }
     } catch (fatal) {
       Logger().d("FATAL sync: $fatal");
@@ -843,6 +1066,8 @@ class SyncService {
       _isUploading = false;
     }
   }
+
+
 
   Future<void> syncUnsyncedPatients(String branchId) async {
     await triggerUpload();
@@ -905,5 +1130,124 @@ class SyncService {
     if (r.contains('non') || r.contains('general')) return 'non-zakat';
     if (r.contains('gmwf')) return 'gmwf';
     return 'zakat';
+  }
+
+  Future<void> _flagPersistentSyncFailure(String key, Map<String, dynamic> action, String type) async {
+    try {
+      final failuresBox = await Hive.openBox('sync_failures');
+      final failureRecord = {
+        'queueKey': key,
+        'type': type,
+        'action': action,
+        'flaggedAt': DateTime.now().toIso8601String(),
+        'attempts': action['attempts'],
+      };
+      await failuresBox.put(key, failureRecord);
+      debugPrint('[SyncService] Flagged persistent sync failure: key=$key type=$type');
+    } catch (e) {
+      debugPrint('[SyncService] Error flagging sync failure: $e');
+    }
+  }
+
+  Future<void> _logInventorySyncFailure(String queueKey, Map<String, dynamic> action, String type, String errorMsg) async {
+    try {
+      final bId = action['branchId'] as String? ?? _currentBranchId!;
+      final medId = action['medicineId'] ?? action['inventoryId'] ?? (action['data'] as Map?)?['medicineId'] ?? '';
+      final medName = action['medicineName'] ?? (action['data'] as Map?)?['name'] ?? 'Unknown Medicine';
+      
+      final docId = 'fail_${queueKey}';
+      
+      final failuresBox = await Hive.openBox('inventory_sync_failures');
+      final record = {
+        'queueKey': queueKey,
+        'type': type,
+        'medicineId': medId,
+        'medicineName': medName,
+        'error': errorMsg,
+        'timestamp': DateTime.now().toIso8601String(),
+        'actionData': action,
+        'attempts': action['attempts'] ?? 0,
+        'status': 'pending',
+      };
+      await failuresBox.put(docId, record);
+      
+      await _db
+          .collection('branches')
+          .doc(bId)
+          .collection('inventory_sync_failures')
+          .doc(docId)
+          .set({
+        ...record,
+        'timestamp': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+      debugPrint('[SyncService] Logged inventory sync failure for $medName: $errorMsg');
+    } catch (err) {
+      debugPrint('[SyncService] Error logging sync failure: $err');
+    }
+  }
+
+  Future<void> _resolveInventorySyncFailure(String queueKey, String branchId) async {
+    try {
+      final docId = 'fail_${queueKey}';
+      final failuresBox = await Hive.openBox('inventory_sync_failures');
+      await failuresBox.delete(docId);
+      
+      await _db
+          .collection('branches')
+          .doc(branchId)
+          .collection('inventory_sync_failures')
+          .doc(docId)
+          .update({
+        'status': 'resolved',
+        'resolvedAt': FieldValue.serverTimestamp(),
+      }).catchError((_) {});
+    } catch (err) {
+      debugPrint('[SyncService] Error resolving sync failure: $err');
+    }
+  }
+
+  Future<void> _handleSyncConflict(
+    String branchId,
+    String entityId,
+    String entityType,
+    Map<String, dynamic> localData,
+    Map<String, dynamic> remoteData,
+  ) async {
+    try {
+      final settings = Hive.box(LocalStorageService.financeSettingsBox);
+      final conflicts = List<Map<String, dynamic>>.from(
+        (settings.get('sync_conflicts') as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)),
+      );
+      
+      // Avoid duplicate conflicts
+      final exists = conflicts.any((c) => c['entityId'] == entityId && c['entityType'] == entityType);
+      if (!exists) {
+        conflicts.add({
+          'id': _uuid.v4(),
+          'entityId': entityId,
+          'entityType': entityType,
+          'branchId': branchId,
+          'local': localData,
+          'remote': remoteData,
+          'timestamp': DateTime.now().toUtc().toIso8601String(),
+        });
+        await settings.put('sync_conflicts', conflicts);
+        await settings.flush();
+      }
+
+      await _db.collection('branches').doc(branchId).collection('sync_conflicts').doc(entityId).set({
+        'entityId': entityId,
+        'entityType': entityType,
+        'local': localData,
+        'remote': remoteData,
+        'status': 'unresolved',
+        'timestamp': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      debugPrint('[SyncService] Conflict logged for $entityType: $entityId');
+    } catch (e) {
+      debugPrint('[SyncService] Error handling sync conflict: $e');
+    }
   }
 }

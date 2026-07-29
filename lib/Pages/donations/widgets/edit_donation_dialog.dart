@@ -36,6 +36,8 @@ class EditDonationDialog extends StatefulWidget {
 
 class _EditDonationDialogState extends State<EditDonationDialog> {
   final _formKey  = GlobalKey<FormState>();
+  final _donorNameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
   final _amountCtrl = TextEditingController();
   final _estimatedAmountCtrl = TextEditingController();
   final _reasonCtrl = TextEditingController();
@@ -55,6 +57,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
   void initState() {
     super.initState();
     final d = widget.donation;
+    _donorNameCtrl.text = d.donorName;
+    _phoneCtrl.text = d.phone;
     _amountCtrl.text  = d.amount > 0 ? d.amount.toStringAsFixed(d.amount % 1 == 0 ? 0 : 2) : '';
     final prob = d.probableAmount ?? 0.0;
     _estimatedAmountCtrl.text = prob > 0 ? prob.toStringAsFixed(prob % 1 == 0 ? 0 : 2) : '';
@@ -73,6 +77,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
 
   @override
   void dispose() {
+    _donorNameCtrl.dispose();
+    _phoneCtrl.dispose();
     _amountCtrl.dispose();
     _estimatedAmountCtrl.dispose();
     _reasonCtrl.dispose();
@@ -100,6 +106,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
         'amount':           d.amount,
         'probableAmount':   d.probableAmount,
         'donorName':        d.donorName,
+        'phone':            d.phone,
         'categoryId':       d.categoryId,
         'gmwfSubCategoryId': d.gmwfSubCategoryId,
         'subtypeId':        d.subtypeId,
@@ -120,6 +127,11 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
       };
 
       // Compute new values
+      final newDonorName = _donorNameCtrl.text.trim();
+      final newDonorNameNorm = newDonorName.toLowerCase();
+      final bool newIsAnonymous = newDonorNameNorm == 'anonymous' || newDonorNameNorm == 'valued donor' || newDonorNameNorm == 'walk-in donor';
+      final newPhone = _phoneCtrl.text.trim();
+
       final newAmount    = d.isGoods ? 0.0 : (double.tryParse(_amountCtrl.text) ?? d.amount);
       final newProbable  = d.isGoods ? (double.tryParse(_estimatedAmountCtrl.text) ?? 0.0) : d.probableAmount;
       final newCatId     = _selectedCategory?.name ?? d.categoryId;
@@ -131,10 +143,14 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
       final newDate      = _selectedDate != null ? DateFormat('yyyy-MM-dd').format(_selectedDate!) : d.date;
       final newBookRcpt  = _bookReceiptNoCtrl.text.trim();
       final updatedHistory = [...(d.editHistory ?? []), editEntry];
+      final nowUtc = DateTime.now().toUtc().toIso8601String();
 
       final updatedFields = <String, dynamic>{
         'amount':           newAmount,
         if (d.isGoods) 'probableAmount': newProbable,
+        'donorName':        newDonorName,
+        'isAnonymous':      newIsAnonymous,
+        'phone':            newPhone,
         'categoryId':       newCatId,
         'gmwfSubCategoryId': newGmwfSubId,
         'subtypeId':        newSubtypeId,
@@ -148,7 +164,29 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
         'editReason':       _reasonCtrl.text.trim(),
         'isEdited':         true,
         'editHistory':      updatedHistory,
+        'lastUpdatedAt':    nowUtc,
       };
+
+      // If donor is not anonymous/guest, update the donor registry name and phone
+      final donorId = d.donorId;
+      if (donorId.isNotEmpty && donorId != 'anonymous' && !donorId.startsWith('guest_')) {
+        final active = DonationsLocalStorage.getDonorById(donorId);
+        if (active != null) {
+          var updatedDonor = active;
+          bool changed = false;
+          if (active.name != newDonorName) {
+            updatedDonor = updatedDonor.copyWith(name: newDonorName);
+            changed = true;
+          }
+          if (newPhone.isNotEmpty && !active.phones.contains(newPhone)) {
+            updatedDonor = updatedDonor.copyWith(phones: [...active.phones, newPhone]);
+            changed = true;
+          }
+          if (changed) {
+            await DonationsLocalStorage.saveDonor(updatedDonor);
+          }
+        }
+      }
 
       // ── Firestore update ────────────────────────────────────────────────
       if (d.firestoreId != null && d.firestoreId!.isNotEmpty) {
@@ -158,14 +196,21 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
             .collection('donations')
             .doc(d.firestoreId);
 
-        // Remove editHistory from the map because we use arrayUnion for it
-        final firestoreFields = Map<String, dynamic>.from(updatedFields);
-        firestoreFields.remove('editHistory');
+        // Build the complete updated map from the donation record and edited fields
+        final fullMap = {
+          ...d.toMap(),
+          ...updatedFields,
+        }
+          ..remove('id')
+          ..remove('hiveKey')
+          ..remove('syncStatus')
+          ..remove('firestoreId')
+          ..remove('editHistory');
 
-        await docRef.update({
-          ...firestoreFields,
+        await docRef.set({
+          ...fullMap,
           'editHistory': FieldValue.arrayUnion([editEntry]),
-        });
+        }, SetOptions(merge: true));
       }
 
       // ── Local Hive update ───────────────────────────────────────────────
@@ -200,6 +245,16 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
 
   List<Map<String, dynamic>> _buildChangeList(DonationRecord d) {
     final changes = <Map<String, dynamic>>[];
+
+    final newDonorName = _donorNameCtrl.text.trim();
+    if (newDonorName != d.donorName) {
+      changes.add({'field': 'donorName', 'label': 'Donor Name', 'old': d.donorName, 'new': newDonorName});
+    }
+
+    final newPhone = _phoneCtrl.text.trim();
+    if (newPhone != d.phone) {
+      changes.add({'field': 'phone', 'label': 'Phone', 'old': d.phone, 'new': newPhone});
+    }
 
     final newAmt = double.tryParse(_amountCtrl.text) ?? d.amount;
     if (!d.isGoods && newAmt != d.amount) {
@@ -328,6 +383,35 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                         ),
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Reason is required' : null,
+                      ),
+
+                      const SizedBox(height: 16),
+                      // Donor Name (required)
+                      _sectionLabel('Donor Name *'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _donorNameCtrl,
+                        decoration: _inputDecoration(
+                          hint: 'Donor Name',
+                          icon: Icons.person_rounded,
+                          iconColor: AppColors.primary,
+                        ),
+                        validator: (v) =>
+                            (v == null || v.trim().isEmpty) ? 'Donor Name is required' : null,
+                      ),
+
+                      const SizedBox(height: 16),
+                      // Donor Phone (optional)
+                      _sectionLabel('Donor Phone'),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: _inputDecoration(
+                          hint: 'Donor Phone (e.g. 03001234567)',
+                          icon: Icons.phone_rounded,
+                          iconColor: AppColors.primary,
+                        ),
                       ),
 
                       const SizedBox(height: 20),

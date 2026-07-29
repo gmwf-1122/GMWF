@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:collection/collection.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../models/madrassa_config.dart';
 
@@ -60,27 +62,51 @@ final madrassaFilteredStudentsProvider = Provider.family<AsyncValue<List<Map<Str
           );
           
           final filtered = allStudents.where((d) {
-            final studentId = d['id'];
-            if (studentId != null && activeLogData.containsKey(studentId)) {
+            final statusVal = (d['status'] ?? (d['active'] == true ? 'active' : 'inactive')).toString().toLowerCase().trim();
+
+            final isInactiveOrDropped = statusVal == 'dropped' ||
+                statusVal == 'dropped_out' ||
+                statusVal == 'left' ||
+                statusVal == 'archived' ||
+                statusVal == 'inactive' ||
+                statusVal == 'hifz_completed' ||
+                statusVal == 'hifz_complete';
+
+            if (statusVal == 'active') {
+              final joinDateVal = d['joinDate'];
+              DateTime? joinDateTime;
+              if (joinDateVal is String) {
+                joinDateTime = DateTime.tryParse(joinDateVal);
+              } else if (joinDateVal is Timestamp) {
+                joinDateTime = joinDateVal.toDate();
+              }
+              if (joinDateTime != null) {
+                return !joinDateTime.isAfter(endOfSelected);
+              }
               return true;
             }
-            final statusVal = d['status'];
-            final isActive = (statusVal == null || statusVal == '')
-                ? (d['active'] == true)
-                : (statusVal == 'active');
-            
-            final joinDateVal = d['joinDate'];
-            DateTime? joinDateTime;
-            if (joinDateVal is String) {
-              joinDateTime = DateTime.tryParse(joinDateVal);
-            } else if (joinDateVal is Timestamp) {
-              joinDateTime = joinDateVal.toDate();
+
+            if (isInactiveOrDropped) {
+              DateTime? statusChangeDate;
+              final dynamic dateField = d['leftDate'] ?? d['droppedDate'] ?? d['archivedDate'] ?? d['hifzCompletedDate'];
+              if (dateField is Timestamp) {
+                statusChangeDate = dateField.toDate();
+              } else if (dateField is String) {
+                statusChangeDate = DateTime.tryParse(dateField);
+              }
+
+              final startOfSelected = DateTime(arg.selectedDate.year, arg.selectedDate.month, arg.selectedDate.day);
+
+              if (statusChangeDate != null) {
+                final statusDay = DateTime(statusChangeDate.year, statusChangeDate.month, statusChangeDate.day);
+                // Included ONLY for past dates strictly before the status change date
+                return startOfSelected.isBefore(statusDay);
+              }
+              // If no status change date recorded, do NOT show dropped/left student in daily log
+              return false;
             }
-            
-            if (joinDateTime != null) {
-              return isActive && !joinDateTime.isAfter(endOfSelected);
-            }
-            return isActive;
+
+            return false;
           }).toList();
 
           filtered.sort((a, b) {
@@ -94,4 +120,16 @@ final madrassaFilteredStudentsProvider = Provider.family<AsyncValue<List<Map<Str
       );
     },
   );
+});
+
+// All Logs Stream Provider
+final madrassaAllLogsProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, branchId) {
+  final Stream<List<Map<String, dynamic>>> hiveSource = () async* {
+    yield MadrassaLocalStorage.getAllLogsCached(branchId);
+    final box = Hive.box(MadrassaLocalStorage.logsBox);
+    await for (final _ in box.watch()) {
+      yield MadrassaLocalStorage.getAllLogsCached(branchId);
+    }
+  }();
+  return hiveSource.distinct((a, b) => const DeepCollectionEquality().equals(a, b));
 });

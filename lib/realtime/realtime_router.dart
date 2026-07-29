@@ -21,6 +21,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import '../services/local_storage_service.dart';
 import 'realtime_events.dart';
+import 'realtime_manager.dart';
 
 class RealtimeRouter {
   // ── [P3] Hive-backed dedup store ──────────────────────────────────────────
@@ -29,6 +30,7 @@ class RealtimeRouter {
   /// Must be called once at app startup alongside other Hive.openBox() calls.
   static Future<void> init() async {
     await Hive.openBox<String>(_dedupBox);
+    await RealtimeManager.initOutbox();
     _pruneExpired();
   }
 

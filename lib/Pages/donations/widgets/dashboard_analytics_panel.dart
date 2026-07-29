@@ -1338,7 +1338,7 @@ class _DonorRankingList extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(data.name.isEmpty ? 'Anonymous' : data.name.toUpperCase(), 
+                    Text(data.name.isEmpty ? 'Walk-in Donor' : data.name.toUpperCase(), 
                         style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.gray900),
                         overflow: TextOverflow.ellipsis),
                     Text('${data.count} donations · Joined ${DateFormat('MMM yyyy').format(data.firstSeen)}', 

@@ -162,7 +162,7 @@ class PatientFormHelper {
   // =========================================================================
   // PRINT SLIP — clean, English-only, small page (A5 or thermal 80mm)
   // Contents:
-  //   • gmwf.png logo  +  "Free Dispensary" title (English only)
+  //   • gmwf-1.png logo  +  "Free Dispensary" title (English only)
   //   • Lab tests (if any)
   //   • Custom medicines (name + dosage + quantity)
   //   • Custom injectables (name + quantity)
@@ -174,7 +174,7 @@ class PatientFormHelper {
     required String branchName,
   }) async {
     final english = await getEnglishFont();
-    final logoBytes = await loadAssetBytes('assets/logo/gmwf.png');
+    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.png');
 
     final isPhysio = data['isPhysiotherapist'] == true;
     final labTests = (data['labResults'] ?? []) as List;
@@ -709,7 +709,7 @@ class PatientFormHelper {
     final pdf = pw.Document();
     final english = await getEnglishFont();
     final urdu = await getNooriFont();
-    final logoBytes = await loadAssetBytes('assets/logo/gmwf.png');
+    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.png');
     final moonBytes = await loadAssetBytes('assets/images/moon.png');
     final rxBytes = await loadAssetBytes('assets/images/rx.png');
     final doctorName = data['doctorName']?.toString() ?? '';

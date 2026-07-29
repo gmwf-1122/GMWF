@@ -17,7 +17,7 @@ import 'patient_queue.dart';
 import 'patient_info.dart';
 import 'doctor_right_panel.dart';
 import 'patient_history.dart';
-import 'package:gmwf/pages/inventory_doc.dart';
+import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 
 class DoctorScreen extends StatefulWidget {
   final String branchId;
@@ -93,7 +93,9 @@ class _DoctorScreenState extends State<DoctorScreen>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
 
-    SyncService().start(widget.branchId);
+    if (!widget.isEmbedded) {
+      SyncService().start(widget.branchId);
+    }
     _loadBranchName();
     _listenConnectivity();
 
@@ -105,14 +107,16 @@ class _DoctorScreenState extends State<DoctorScreen>
     _connectionSub = ConnectionManager().statusStream.listen((s) {
       if (mounted) setState(() => _connectionStatus = s);
       // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
-      if (s.isConnected) {
+      if (s.isConnected && !widget.isEmbedded) {
         _syncDebounce?.cancel();
         _syncDebounce = Timer(const Duration(milliseconds: 300), _syncOnReconnect);
       }
     });
 
     // [BUG-13] Register via listener list — safe alongside DispensarScreen
-    _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
+    if (!widget.isEmbedded) {
+      _removeReconnectListener = ConnectionManager().addReconnectListener(_syncOnReconnect);
+    }
 
     _realtimeSub = RealtimeManager().messageStream.listen(_handleRealtimeUpdate);
   }
@@ -136,13 +140,15 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (mounted) setState(() => _username = resolvedName);
 
     // 3. Start connection immediately with whatever name is available.
-    ConnectionManager().start(
-      role:     'doctor',
-      branchId: widget.branchId,
-      username: resolvedName,
-    );
-    if (resolvedName != null) {
-      RealtimeManager().updateUsername(resolvedName);
+    if (!widget.isEmbedded) {
+      ConnectionManager().start(
+        role:     'doctor',
+        branchId: widget.branchId,
+        username: resolvedName,
+      );
+      if (resolvedName != null) {
+        RealtimeManager().updateUsername(resolvedName);
+      }
     }
 
     // 4. Fetch authoritative name from Firestore.
@@ -159,7 +165,9 @@ class _DoctorScreenState extends State<DoctorScreen>
         if (mounted) setState(() => _username = firestoreName);
         // [FIX-USERNAME] Push updated name into RealtimeManager so future
         // messages carry the correct attribution.
-        RealtimeManager().updateUsername(firestoreName);
+        if (!widget.isEmbedded) {
+          RealtimeManager().updateUsername(firestoreName);
+        }
       }
       final firestoreDegree = (snap.data()?['degree'] as String?)?.trim() ?? '';
       if (firestoreDegree.isNotEmpty) {
@@ -466,7 +474,7 @@ class _DoctorScreenState extends State<DoctorScreen>
           IconButton(
             icon: const Icon(Icons.inventory, color: Colors.white, size: 20),
             onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => InventoryDocPage(branchId: widget.branchId))),
+                MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDoctor: true, isDispenser: false))),
           ),
           IconButton(
               icon: const Icon(Icons.logout, color: Colors.white, size: 20),
@@ -542,7 +550,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         IconButton(
           icon: const Icon(Icons.inventory, size: 32, color: Colors.white),
           onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => InventoryDocPage(branchId: widget.branchId))),
+              MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDoctor: true, isDispenser: false))),
         ),
         IconButton(
             icon: const Icon(Icons.logout, size: 32, color: Colors.white),

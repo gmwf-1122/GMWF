@@ -86,10 +86,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     _patientsListenable =
         Hive.box(lss.LocalStorageService.patientsBox).listenable();
 
-    SyncService().start(widget.branchId);
+    if (!widget.isEmbedded) {
+      SyncService().start(widget.branchId);
+    }
     _loadBranchName();
     _listenConnectivity();
-    _startBackgroundSync();
+    if (!widget.isEmbedded) {
+      _startBackgroundSync();
+    }
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // _fetchReceptionistName() starts the connection once the name is resolved.
@@ -204,13 +208,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     if (mounted) setState(() => _username = resolvedName);
 
     // 3. Start connection immediately with whatever name is available.
-    ConnectionManager().start(
-      role:     'receptionist',
-      branchId: widget.branchId,
-      username: resolvedName,
-    );
-    if (resolvedName != null) {
-      RealtimeManager().updateUsername(resolvedName);
+    if (!widget.isEmbedded) {
+      ConnectionManager().start(
+        role:     'receptionist',
+        branchId: widget.branchId,
+        username: resolvedName,
+      );
+      if (resolvedName != null) {
+        RealtimeManager().updateUsername(resolvedName);
+      }
     }
 
     // 4. Optionally fetch authoritative name from Firestore if local was stale.
@@ -226,7 +232,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (mounted) setState(() => _username = firestoreName);
         // [FIX-USERNAME] Push updated name into RealtimeManager so future
         // messages carry the correct attribution.
-        RealtimeManager().updateUsername(firestoreName);
+        if (!widget.isEmbedded) {
+          RealtimeManager().updateUsername(firestoreName);
+        }
       }
     } catch (e) {
       debugPrint('[Receptionist] Could not fetch name from Firestore: $e');
@@ -425,11 +433,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         : widget.receptionistName;
 
     try {
+      final requestId = 'req_reversal_${widget.receptionistId}_${DateTime.now().millisecondsSinceEpoch}';
       await FirebaseFirestore.instance
           .collection('branches')
           .doc(widget.branchId)
           .collection('edit_requests')
-          .add({
+          .doc(requestId)
+          .set({
         'type': 'token_reversal',
         'requestType': 'token_reversal',
         'status': 'pending',

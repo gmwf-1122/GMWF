@@ -5,12 +5,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
 
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../services/auth_service.dart';
+import '../services/finance_local_storage.dart';
+import '../services/local_storage_service.dart';
+import '../services/image_upload_service.dart';
+import '../widgets/media_upload_tile.dart';
+import '../widgets/global_module_wrapper.dart';
+import '../widgets/app_back_button.dart';
+import 'package:hive/hive.dart';
 
 class Register extends StatefulWidget {
   const Register({super.key});
@@ -24,6 +32,7 @@ class _RegisterState extends State<Register>
   final _formKey = GlobalKey<FormState>();
   final AuthService _authService = AuthService();
 
+  String? _selectedDepartment;
   String? _selectedRole;
   String? _selectedBranch;
   String? _selectedDegree;
@@ -43,10 +52,42 @@ class _RegisterState extends State<Register>
   String? _selectedStudentId;
   List<Map<String, dynamic>> _branchStudents = [];
 
+  String? _selectedLinkedEmployeeId;
+  String? _matchedReasonText;
+
+  void _autoDetectEmployeeMatch() {
+    final cnic = _identificationController.text.trim();
+    final email = _emailController.text.trim();
+    final name = _usernameController.text.trim();
+    final branchId = _getBranchId();
+
+    final match = FinanceLocalStorage.findMatchingEmployeeForUser(
+      branchId: branchId,
+      cnic: cnic,
+      email: email,
+      username: name,
+      department: _selectedDepartment,
+      role: _selectedRole,
+    );
+
+    if (match != null) {
+      setState(() {
+        _selectedLinkedEmployeeId = match['id']?.toString() ?? match['localId']?.toString();
+        _matchedReasonText = match['matchReason']?.toString();
+      });
+      _snack('✨ Auto-linked to Employee: ${match['name']} (${_matchedReasonText ?? ""})', success: true);
+    } else {
+      _snack('No automatic employee match found by CNIC, Email, or Name+Role', error: false);
+    }
+  }
+
   XFile?        _profileImageXFile;
   Uint8List?    _profileImageBytes;
   PlatformFile? _identificationFile;
   PlatformFile? _degreeFile;
+  String?       _profilePictureBase64;
+  String?       _identificationBase64;
+  String?       _degreeBase64;
 
   bool _loading         = false;
   bool _obscurePassword = true;
@@ -54,23 +95,65 @@ class _RegisterState extends State<Register>
   late AnimationController _animController;
   late Animation<double>   _fadeAnim;
 
-  // ── Roles ────────────────────────────────────────────────────────────────
-  static const List<Map<String, dynamic>> _roleItems = [
-    {'label': 'CEO',              'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Admin',            'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'Chairman',         'icon': Icons.workspace_premium_rounded,    'type': 'crown'},
-    {'label': 'HQ Manager',       'icon': Icons.business_center_rounded,      'type': 'crown'},
-    {'label': 'Branch Manager',   'icon': Icons.manage_accounts_rounded,      'type': 'crown'},
-    {'label': 'Server',           'icon': Icons.shield_rounded,               'type': 'shield'},
-    {'label': 'Doctor',           'icon': Icons.medical_services_outlined,    'type': 'normal'},
-    {'label': 'Receptionist',     'icon': Icons.support_agent_rounded,        'type': 'normal'},
-    {'label': 'Dispenser',        'icon': Icons.medication_outlined,          'type': 'normal'},
-    {'label': 'Supervisor',       'icon': Icons.manage_accounts_outlined,     'type': 'normal'},
-    {'label': 'Office Boy',       'icon': Icons.confirmation_number_outlined, 'type': 'normal'},
-    {'label': 'Kitchen',          'icon': Icons.restaurant_outlined,          'type': 'normal'},
-    // ── Madrassa Roles (Staff only) ──────────────────────────────────────────
-    {'label': 'Madrassa Admin',   'icon': Icons.menu_book_rounded,            'type': 'madrassa'},
-    {'label': 'Madrassa Teacher', 'icon': Icons.school_rounded,               'type': 'madrassa'},
+  // ── Departments and Roles ────────────────────────────────────────────────
+  static const List<Map<String, dynamic>> _departments = [
+    {
+      'name': 'Administration',
+      'icon': Icons.admin_panel_settings_rounded,
+      'roles': [
+        {'label': 'CEO',              'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'CEO'},
+        {'label': 'Admin',            'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'Admin'},
+        {'label': 'Chairman',         'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'Chairman'},
+        {'label': 'HQ Manager',       'icon': Icons.business_center_rounded,      'type': 'crown',    'value': 'HQ Manager'},
+      ],
+    },
+    {
+      'name': 'Office',
+      'icon': Icons.business_rounded,
+      'roles': [
+        {'label': 'Branch Manager',   'icon': Icons.manage_accounts_rounded,      'type': 'normal',   'value': 'Branch Manager'},
+        {'label': 'Office Boy',       'icon': Icons.confirmation_number_outlined, 'type': 'normal',   'value': 'Office Boy'},
+        {'label': 'Server',           'icon': Icons.shield_rounded,               'type': 'shield',   'value': 'Server'},
+      ],
+    },
+    {
+      'name': 'Dispensary',
+      'icon': Icons.local_hospital_rounded,
+      'roles': [
+        {'label': 'Supervisor',       'icon': Icons.manage_accounts_outlined,     'type': 'normal',   'value': 'Supervisor'},
+        {'label': 'Doctor',           'icon': Icons.medical_services_outlined,    'type': 'normal',   'value': 'Doctor'},
+        {'label': 'Receptionist',     'icon': Icons.support_agent_rounded,        'type': 'normal',   'value': 'Receptionist'},
+        {'label': 'Dispenser',        'icon': Icons.medication_outlined,          'type': 'normal',   'value': 'Dispenser'},
+        {'label': 'Rec + Dispenser',       'icon': Icons.swap_horiz_rounded, 'type': 'hybrid', 'value': 'rec+dis'},
+        {'label': 'Doc + Receptionist',    'icon': Icons.swap_horiz_rounded, 'type': 'hybrid', 'value': 'doc+rec'},
+        {'label': 'Doc + Dispenser',       'icon': Icons.swap_horiz_rounded, 'type': 'hybrid', 'value': 'doc+dis'},
+        {'label': 'Doc + Rec + Dispenser', 'icon': Icons.swap_horiz_rounded, 'type': 'hybrid', 'value': 'doc+rec+dis'},
+      ],
+    },
+    {
+      'name': 'Dasterkhwaan',
+      'icon': Icons.restaurant_rounded,
+      'roles': [
+        {'label': 'Kitchen',          'icon': Icons.restaurant_outlined,          'type': 'normal',   'value': 'Kitchen'},
+      ],
+    },
+    {
+      'name': 'Madrassa',
+      'icon': Icons.menu_book_rounded,
+      'roles': [
+        {'label': 'Madrassa Admin',   'icon': Icons.menu_book_rounded,            'type': 'madrassa', 'value': 'Madrassa Admin'},
+        {'label': 'Madrassa Teacher', 'icon': Icons.school_rounded,               'type': 'madrassa', 'value': 'Madrassa Teacher'},
+      ],
+    },
+    {
+      'name': 'School',
+      'icon': Icons.school_rounded,
+      'roles': [
+        {'label': 'Principal',        'icon': Icons.stars_rounded,                'type': 'crown',    'value': 'Principal'},
+        {'label': 'School Admin',     'icon': Icons.school_rounded,               'type': 'school',   'value': 'School Admin'},
+        {'label': 'School Teacher',   'icon': Icons.co_present_rounded,           'type': 'school',   'value': 'School Teacher'},
+      ],
+    },
   ];
 
   final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'DPT (Physiotherapist)', 'Other'];
@@ -134,17 +217,29 @@ class _RegisterState extends State<Register>
 
   Future<bool> _usernameExists(String username) async {
     final lower = username.trim().toLowerCase();
-    final snap = await FirebaseFirestore.instance.collection('branches').get();
-    for (final doc in snap.docs) {
+    try {
+      final box = Hive.box('local_users');
+      for (final val in box.values) {
+        if (val is Map) {
+          final uName = (val['username']?.toString() ?? '').toLowerCase();
+          final uNameLower = (val['usernameLower']?.toString() ?? '').toLowerCase();
+          if (uName == lower || uNameLower == lower) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
       final res = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(doc.id)
           .collection('users')
           .where('usernameLower', isEqualTo: lower)
           .limit(1)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 5));
       if (res.docs.isNotEmpty) return true;
-    }
+    } catch (_) {}
+
     return false;
   }
 
@@ -167,56 +262,23 @@ class _RegisterState extends State<Register>
 
   Future<void> _pickProfileImage() async {
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 85);
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      if (!mounted) return;
-      try {
-        final t = RoleThemeScope.dataOf(context);
-        final cropped = await ImageCropper().cropImage(
-          sourcePath: picked.path,
-          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-          compressQuality: 80,
-          uiSettings: [
-            AndroidUiSettings(
-                toolbarTitle: 'Crop Photo',
-                toolbarColor: t.accent,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.square,
-                lockAspectRatio: true),
-            IOSUiSettings(title: 'Crop Photo', aspectRatioLockEnabled: true),
-            WebUiSettings(
-                context: context,
-                presentStyle: WebPresentStyle.dialog,
-                size: const CropperSize(width: 500, height: 500),
-                initialAspectRatio: 1.0),
-          ],
-        );
-        if (cropped != null) {
-          final cb = await cropped.readAsBytes();
-          setState(() {
-            _profileImageXFile = XFile(cropped.path);
-            _profileImageBytes = cb;
-          });
-        } else {
-          setState(() {
-            _profileImageXFile = picked;
-            _profileImageBytes = bytes;
-          });
-        }
-      } catch (_) {
-        setState(() {
-          _profileImageXFile = picked;
-          _profileImageBytes = bytes;
-        });
-      }
+      final source = await ImageUploadService.showSourceDialog(context, title: 'Choose Profile Photo Source');
+      if (source == null) return;
+      final b64 = await ImageUploadService.pickAndProcessImage(source: source, quality: 85);
+      if (b64 == null || b64.isEmpty) return;
+      final bytes = ImageUploadService.decodeBase64ToBytes(b64);
+      if (bytes == null || !mounted) return;
+      setState(() {
+        _profileImageBytes = bytes;
+        _profilePictureBase64 = b64;
+      });
     } catch (e) {
       _snack('Failed to pick image: $e', error: true);
     }
   }
 
   void _removeProfileImage() =>
-      setState(() { _profileImageXFile = null; _profileImageBytes = null; });
+      setState(() { _profileImageXFile = null; _profileImageBytes = null; _profilePictureBase64 = null; });
 
   Future<void> _pickDocument(String type) async {
     final result = await FilePicker.platform.pickFiles(
@@ -276,7 +338,7 @@ class _RegisterState extends State<Register>
 
       final branchId = _getBranchId();
 
-      final user = await _authService.signUp(
+      await _authService.signUp(
         email:              email,
         password:           _passwordController.text.trim(),
         username:           username,
@@ -295,13 +357,24 @@ class _RegisterState extends State<Register>
         profileImageBytes:  _profileImageBytes,
         identificationFile: _identificationFile,
         degreeFile:         _degreeFile,
+        profilePictureBase64: _profilePictureBase64,
+        identificationBase64: _identificationBase64,
+        degreeBase64:         _degreeBase64,
       );
 
       final registeredName = _usernameController.text.trim();
       // Reset the form so the admin can register another user without leaving the page.
       _formKey.currentState!.reset();
       setState(() {
+        _selectedDepartment   = null;
         _selectedRole         = null;
+        _profileImageBytes    = null;
+        _profileImageXFile    = null;
+        _identificationFile   = null;
+        _degreeFile           = null;
+        _profilePictureBase64 = null;
+        _identificationBase64 = null;
+        _degreeBase64         = null;
         _selectedBranch       = null;
         _selectedDegree       = null;
         _selectedStudentId    = null;
@@ -350,7 +423,8 @@ class _RegisterState extends State<Register>
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final requiresBranch = _requiresBranch();
-    final isDoctor = _selectedRole?.toLowerCase() == 'doctor';
+    final isDoctor = _selectedRole != null &&
+        (_selectedRole!.toLowerCase() == 'doctor' || _selectedRole!.toLowerCase().contains('doc'));
 
     return Scaffold(
       backgroundColor: t.bg,
@@ -373,33 +447,26 @@ class _RegisterState extends State<Register>
             child: Column(
               children: [
                 // ── Header ──────────────────────────────────────────────
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 16, 16, 0),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () => Navigator.pop(context),
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.20),
-                            borderRadius: BorderRadius.circular(10),
+                if (!GlobalModuleWrapper.isWrapped(context)) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 16, 0),
+                    child: Row(
+                      children: [
+                        const AppBackButton(color: Colors.white),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Register New User',
+                            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
                         ),
-                      ),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Text(
-                          'Register New User',
-                          style: TextStyle(color: Colors.white, fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: 0.2),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
+                  const SizedBox(height: 8),
+                ] else
+                  const SizedBox(height: 16),
                 Expanded(
                   child: FadeTransition(
                     opacity: _fadeAnim,
@@ -419,41 +486,14 @@ class _RegisterState extends State<Register>
                               icon: Icons.badge_outlined,
                               accent: const Color(0xFF6A1B9A),
                               child: Column(children: [
+                                _buildDepartmentDropdown(t),
+                                const SizedBox(height: 14),
                                 _buildRoleDropdown(t),
-                                if (_selectedRole != null && requiresBranch) ...[
+                                const SizedBox(height: 14),
+                                _buildBranchDropdown(t),
+                                if (_selectedRole == 'Madrassa Parent') ...[
                                   const SizedBox(height: 14),
-                                  _buildSimpleDropdown(t,
-                                    value: _selectedBranch,
-                                    items: _branches.map((b) => b['name'] as String).toList(),
-                                    hint: _branches.isEmpty ? 'Loading branches...' : 'Select Branch *',
-                                    icon: Icons.location_city_rounded,
-                                    onChanged: (v) {
-                                      setState(() {
-                                        _selectedBranch = v;
-                                        _selectedStudentId = null;
-                                        if (_selectedRole == 'Madrassa Parent') {
-                                          final bId = _getBranchId();
-                                          _loadStudentsForBranch(bId);
-                                        }
-                                      });
-                                    },
-                                    validator: (v) => v == null ? 'Required' : null,
-                                  ),
-                                ],
-                                if (_selectedRole == 'Madrassa Parent' && _selectedBranch != null) ...[
-                                  const SizedBox(height: 14),
-                                  _buildSimpleDropdown(t,
-                                    value: _selectedStudentId,
-                                    items: _branchStudents.map((s) => s['id'] as String).toList(),
-                                    hint: _branchStudents.isEmpty ? 'No students found' : 'Select Child (Student) *',
-                                    icon: Icons.child_care_rounded,
-                                    itemLabel: (id) {
-                                      final s = _branchStudents.firstWhere((element) => element['id'] == id);
-                                      return "${s['name']} (Roll: ${s['rollNumber']})";
-                                    },
-                                    onChanged: (v) => setState(() => _selectedStudentId = v),
-                                    validator: (v) => v == null ? 'Required' : null,
-                                  ),
+                                  _buildChildDropdown(t),
                                 ],
                                 if (_selectedRole != null && !requiresBranch) ...[
                                   const SizedBox(height: 14),
@@ -525,6 +565,9 @@ class _RegisterState extends State<Register>
                             ),
                             const SizedBox(height: 16),
 
+                            _buildLinkedEmployeeCard(t),
+                            const SizedBox(height: 16),
+
                             _buildCard(t,
                               title: 'Financial Details',
                               icon: Icons.account_balance_wallet_outlined,
@@ -585,27 +628,25 @@ class _RegisterState extends State<Register>
                             const SizedBox(height: 16),
 
                             _buildCard(t,
-                              title: 'Documents',
+                              title: 'Documents & Attachments',
                               icon: Icons.folder_outlined,
                               accent: const Color(0xFF37474F),
                               child: Column(children: [
-                                _buildFileCard(t,
-                                  title: 'Identification Document',
-                                  subtitle: 'CNIC, Passport, or Government ID',
-                                  file: _identificationFile,
-                                  onTap: () => _pickDocument('identification'),
-                                  onRemove: () => setState(() => _identificationFile = null),
+                                MediaUploadTile(
+                                  label: 'Identification / CNIC Document',
                                   icon: Icons.badge_outlined,
+                                  initialValue: _identificationBase64,
+                                  isDocument: true,
+                                  onChanged: (val) => setState(() => _identificationBase64 = val),
                                 ),
                                 if (isDoctor) ...[
                                   const SizedBox(height: 12),
-                                  _buildFileCard(t,
-                                    title: 'Degree Certificate',
-                                    subtitle: 'Medical degree / diploma',
-                                    file: _degreeFile,
-                                    onTap: () => _pickDocument('degree'),
-                                    onRemove: () => setState(() => _degreeFile = null),
+                                  MediaUploadTile(
+                                    label: 'Degree Certificate',
                                     icon: Icons.school_outlined,
+                                    initialValue: _degreeBase64,
+                                    isDocument: true,
+                                    onChanged: (val) => setState(() => _degreeBase64 = val),
                                   ),
                                 ],
                               ]),
@@ -677,17 +718,22 @@ class _RegisterState extends State<Register>
                 border: Border.all(color: _profileImageBytes != null ? t.accent : t.bgRule, width: 3),
                 boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 6))],
               ),
-              child: CircleAvatar(
-                radius: 54,
-                backgroundColor: t.accentMuted,
-                backgroundImage: _profileImageBytes != null ? MemoryImage(_profileImageBytes!) : null,
-                child: _profileImageBytes == null
-                    ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withValues(alpha: 0.4)),
-                        const SizedBox(height: 4),
-                        Text('Add Photo', style: TextStyle(fontSize: 11, color: t.textTertiary, fontWeight: FontWeight.w500)),
-                      ])
-                    : null,
+              child: Builder(
+                builder: (context) {
+                  final displayBytes = _profileImageBytes ?? ImageUploadService.decodeBase64ToBytes(_profilePictureBase64);
+                  return CircleAvatar(
+                    radius: 54,
+                    backgroundColor: t.accentMuted,
+                    backgroundImage: displayBytes != null ? MemoryImage(displayBytes) : null,
+                    child: displayBytes == null
+                        ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withValues(alpha: 0.4)),
+                            const SizedBox(height: 4),
+                            Text('Add Photo', style: TextStyle(fontSize: 11, color: t.textTertiary, fontWeight: FontWeight.w500)),
+                          ])
+                        : null,
+                  );
+                },
               ),
             ),
             Positioned(
@@ -718,16 +764,16 @@ class _RegisterState extends State<Register>
     );
   }
 
-  Widget _buildRoleDropdown(RoleThemeData t) {
+  Widget _buildDepartmentDropdown(RoleThemeData t) {
     return DropdownButtonFormField<String>(
-      initialValue: _selectedRole,
+      value: _selectedDepartment,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
       hint: Row(children: [
-        Icon(Icons.badge_outlined, color: t.textTertiary, size: 20),
+        Icon(Icons.category_outlined, color: t.textTertiary, size: 20),
         const SizedBox(width: 10),
-        Text('Select Role *', style: TextStyle(color: t.textTertiary, fontSize: 13)),
+        Text('Select Department / Category *', style: TextStyle(color: t.textTertiary, fontSize: 13)),
       ]),
       decoration: InputDecoration(
         filled: true,
@@ -740,7 +786,87 @@ class _RegisterState extends State<Register>
         focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
         errorStyle: const TextStyle(fontSize: 11),
       ),
-      selectedItemBuilder: (context) => _roleItems.map((role) {
+      items: _departments.map((dept) {
+        return DropdownMenuItem<String>(
+          value: dept['name'] as String,
+          child: Row(children: [
+            Icon(dept['icon'] as IconData, color: t.accent, size: 18),
+            const SizedBox(width: 10),
+            Text(dept['name'] as String,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.textPrimary)),
+          ]),
+        );
+      }).toList(),
+      onChanged: (val) => setState(() {
+        _selectedDepartment = val;
+        _selectedRole = null;
+        _selectedDegree = null;
+        _customDegreeController.clear();
+        _degreeFile = null;
+        if (!_requiresBranch()) _selectedBranch = null;
+      }),
+      validator: (val) => val == null ? 'Please select a department' : null,
+    );
+  }
+
+  String _getCurrentUserRole() {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final curUid = currentUser?.uid ?? '';
+      if (curUid.isNotEmpty && Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final curMap = Hive.box(LocalStorageService.usersBox).get(curUid);
+        if (curMap is Map && curMap['role'] != null) {
+          return (curMap['role'] as String).toLowerCase().trim();
+        }
+      }
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final currentMap = box.get('user_data') ?? box.get('currentUser');
+        if (currentMap is Map && currentMap['role'] != null) {
+          return (currentMap['role'] as String).toLowerCase().trim();
+        }
+      }
+      return RoleThemeScope.dataOf(context).roleLabel.toLowerCase().trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Widget _buildRoleDropdown(RoleThemeData t) {
+    List<Map<String, dynamic>> roles = _selectedDepartment == null
+        ? []
+        : List<Map<String, dynamic>>.from(_departments.firstWhere((d) => d['name'] == _selectedDepartment)['roles'] as List);
+
+    if (_getCurrentUserRole() != 'chairman') {
+      roles = roles.where((r) => (r['value'] as String).toLowerCase().trim() != 'chairman').toList();
+    }
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey(_selectedDepartment),
+      value: _selectedRole,
+      isExpanded: true,
+      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
+      dropdownColor: t.bgCard,
+      hint: Row(children: [
+        Icon(Icons.badge_outlined, color: t.textTertiary, size: 20),
+        const SizedBox(width: 10),
+        Text(
+          _selectedDepartment == null ? 'Select Department first *' : 'Select Role *',
+          style: TextStyle(color: t.textTertiary, fontSize: 13),
+        ),
+      ]),
+      decoration: InputDecoration(
+        filled: true,
+        fillColor: t.bgCardAlt,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
+        errorStyle: const TextStyle(fontSize: 11),
+      ),
+      selectedItemBuilder: (context) => roles.map((role) {
         final type = role['type'] as String;
         final Color iconColor = type == 'crown'
             ? t.accent
@@ -748,7 +874,9 @@ class _RegisterState extends State<Register>
                 ? t.accentLight
                 : type == 'madrassa'
                     ? const Color(0xFF5C6BC0)
-                    : t.textSecondary;
+                    : type == 'hybrid'
+                        ? const Color(0xFF00796B)
+                        : t.textSecondary;
         return Row(children: [
           Icon(role['icon'] as IconData, color: iconColor, size: 18),
           const SizedBox(width: 10),
@@ -756,34 +884,42 @@ class _RegisterState extends State<Register>
               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.textPrimary)),
         ]);
       }).toList(),
-      items: _roleItems.map((role) {
+      items: roles.map((role) {
         final type = role['type'] as String;
         final isCrown    = type == 'crown';
         final isShield   = type == 'shield';
         final isMadrassa = type == 'madrassa';
-        const madrassaColor = Color(0xFF5C6BC0); // indigo-ish
+        final isHybrid   = type == 'hybrid';
+        const madrassaColor = Color(0xFF5C6BC0);
+        const hybridColor = Color(0xFF00796B);
         final Color iconColor = isCrown
             ? t.accent
             : isShield
                 ? t.accentLight
                 : isMadrassa
                     ? madrassaColor
-                    : t.textSecondary;
+                    : isHybrid
+                        ? hybridColor
+                        : t.textSecondary;
         final Color textColor = isCrown
             ? t.accent
             : isShield
                 ? t.accentLight
                 : isMadrassa
                     ? madrassaColor
-                    : t.textPrimary;
+                    : isHybrid
+                        ? hybridColor
+                        : t.textPrimary;
         final Color bgColor = (isCrown || isShield)
             ? t.accentMuted
             : isMadrassa
                 ? madrassaColor.withValues(alpha: 0.07)
-                : t.bgCardAlt;
+                : isHybrid
+                    ? hybridColor.withValues(alpha: 0.07)
+                    : t.bgCardAlt;
 
         return DropdownMenuItem<String>(
-          value: role['label'] as String,
+          value: role['value'] as String,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
@@ -798,26 +934,29 @@ class _RegisterState extends State<Register>
                 child: Text(role['label'] as String,
                     style: TextStyle(
                         fontSize: 14,
-                        fontWeight: (isCrown || isShield || isMadrassa) ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: (isCrown || isShield || isMadrassa || isHybrid) ? FontWeight.w700 : FontWeight.w500,
                         color: textColor)),
               ),
               if (isCrown)    _roleBadge('Authority', t.accent),
               if (isShield)   _roleBadge('Server', t.accentLight),
               if (isMadrassa) _roleBadge('Madrassa', madrassaColor),
+              if (isHybrid)   _roleBadge('Hybrid', hybridColor),
             ]),
           ),
         );
       }).toList(),
-      onChanged: (val) => setState(() {
-        _selectedRole = val;
-        if (val != 'Doctor') {
-          _selectedDegree = null;
-          _customDegreeController.clear();
-          _degreeFile = null;
-        }
-        if (!_requiresBranch()) _selectedBranch = null;
-      }),
-      validator: (val) => val == null ? 'Please select a role' : null,
+      onChanged: roles.isEmpty
+          ? null
+          : (val) => setState(() {
+                _selectedRole = val;
+                if (val != 'Doctor' && val != 'doc+rec' && val != 'doc+dis' && val != 'doc+rec+dis') {
+                  _selectedDegree = null;
+                  _customDegreeController.clear();
+                  _degreeFile = null;
+                }
+                if (!_requiresBranch()) _selectedBranch = null;
+              }),
+      validator: (val) => val == null ? 'Role is mandatory' : null,
     );
   }
 
@@ -826,6 +965,108 @@ class _RegisterState extends State<Register>
         decoration: BoxDecoration(color: color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(20)),
         child: Text(text, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9), fontWeight: FontWeight.w700)),
       );
+
+  Widget _buildBranchDropdown(RoleThemeData t) {
+    final requiresBranch = _requiresBranch();
+    final isBranchLoading = _branches.isEmpty;
+    final hintText = !requiresBranch
+        ? 'Global Access (No branch required)'
+        : (isBranchLoading ? 'Loading branches...' : 'Select Branch *');
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey('branch_${requiresBranch}_${_selectedBranch}'),
+      value: _selectedBranch,
+      isExpanded: true,
+      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
+      dropdownColor: t.bgCard,
+      decoration: InputDecoration(
+        prefixIcon: Icon(Icons.location_city_rounded, color: t.textTertiary, size: 20),
+        filled: true,
+        fillColor: t.bgCardAlt,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
+        errorStyle: const TextStyle(fontSize: 11),
+      ),
+      hint: Text(hintText, style: TextStyle(color: t.textTertiary, fontSize: 13)),
+      items: !requiresBranch
+          ? []
+          : _branches.map((b) {
+              final name = b['name'] as String;
+              return DropdownMenuItem(
+                value: name,
+                child: Text(name, style: TextStyle(fontSize: 14, color: t.textPrimary)),
+              );
+            }).toList(),
+      onChanged: !requiresBranch
+          ? null
+          : (v) {
+              setState(() {
+                _selectedBranch = v;
+                _selectedStudentId = null;
+                if (_selectedRole == 'Madrassa Parent') {
+                  final bId = _getBranchId();
+                  _loadStudentsForBranch(bId);
+                }
+              });
+            },
+      validator: (v) {
+        if (requiresBranch && v == null) {
+          return 'Branch is mandatory';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildChildDropdown(RoleThemeData t) {
+    final hasBranch = _selectedBranch != null;
+    final hintText = !hasBranch
+        ? 'Select Branch first *'
+        : (_branchStudents.isEmpty ? 'No students found' : 'Select Child (Student) *');
+
+    final studentExists = _branchStudents.any((s) => s['id'] == _selectedStudentId);
+    final selectedId = studentExists ? _selectedStudentId : null;
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey('child_${_selectedBranch}_${selectedId}'),
+      value: selectedId,
+      isExpanded: true,
+      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
+      dropdownColor: t.bgCard,
+      decoration: InputDecoration(
+        prefixIcon: Icon(Icons.child_care_rounded, color: t.textTertiary, size: 20),
+        filled: true,
+        fillColor: t.bgCardAlt,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
+        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
+        errorStyle: const TextStyle(fontSize: 11),
+      ),
+      hint: Text(hintText, style: TextStyle(color: t.textTertiary, fontSize: 13)),
+      items: !hasBranch
+          ? []
+          : _branchStudents.map((s) {
+              final id = s['id'] as String;
+              final name = s['name'] as String? ?? 'Unknown';
+              final roll = s['rollNumber'] as String? ?? '';
+              return DropdownMenuItem(
+                value: id,
+                child: Text('$name (Roll: $roll)', style: TextStyle(fontSize: 14, color: t.textPrimary)),
+              );
+            }).toList(),
+      onChanged: !hasBranch
+          ? null
+          : (v) => setState(() => _selectedStudentId = v),
+      validator: (v) => v == null ? 'Child selection is mandatory' : null,
+    );
+  }
 
   Widget _buildGlobalBadge(RoleThemeData t) {
     return Container(
@@ -941,12 +1182,12 @@ class _RegisterState extends State<Register>
     required List<String> items,
     required String hint,
     required IconData icon,
-    required Function(String?) onChanged,
+    required Function(String?)? onChanged,
     String? Function(String?)? validator,
     String Function(String)? itemLabel,
   }) {
     return DropdownButtonFormField<String>(
-      initialValue: value,
+      value: value,
       hint: Text(hint, style: TextStyle(color: t.textTertiary, fontSize: 13)),
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
@@ -964,7 +1205,10 @@ class _RegisterState extends State<Register>
       ),
       items: items.map((e) => DropdownMenuItem(
           value: e,
-          child: Text(e, style: TextStyle(fontSize: 14, color: t.textPrimary)))).toList(),
+          child: Text(
+            itemLabel != null ? itemLabel(e) : e,
+            style: TextStyle(fontSize: 14, color: t.textPrimary),
+          ))).toList(),
       onChanged: onChanged,
       validator: validator,
     );
@@ -1048,6 +1292,99 @@ class _RegisterState extends State<Register>
                   Text('Create Account', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 ],
               ),
+      ),
+    );
+  }
+
+  Widget _buildLinkedEmployeeCard(RoleThemeData t) {
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return const SizedBox.shrink();
+    final empBox = Hive.box(LocalStorageService.employeesBox);
+    final employees = empBox.values
+        .whereType<Map>()
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+
+    return _buildCard(t,
+      title: 'Linked Employee Profile',
+      icon: Icons.badge_outlined,
+      accent: const Color(0xFF6366F1),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String?>(
+                  value: _selectedLinkedEmployeeId,
+                  decoration: roleInputDecoration(
+                    context,
+                    label: 'Select Employee Profile',
+                    icon: Icons.person_search_rounded,
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('No Employee Linked (Standalone Account)'),
+                    ),
+                    ...employees.map((emp) {
+                      final empId = emp['id']?.toString() ?? emp['localId']?.toString() ?? '';
+                      final empName = emp['name']?.toString() ?? 'Employee';
+                      final empDept = emp['department']?.toString() ?? '';
+                      final empCnic = emp['cnic']?.toString() ?? '';
+                      return DropdownMenuItem<String?>(
+                        value: empId,
+                        child: Text('$empName ${empDept.isNotEmpty ? "($empDept)" : ""} ${empCnic.isNotEmpty ? "- $empCnic" : ""}'),
+                      );
+                    }),
+                  ],
+                  onChanged: (val) {
+                    setState(() {
+                      _selectedLinkedEmployeeId = val;
+                      _matchedReasonText = 'Manually Linked by Admin';
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Auto-Match by CNIC, Email, Name & Role',
+                child: ElevatedButton.icon(
+                  onPressed: _autoDetectEmployeeMatch,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+                  label: const Text('Auto-Match'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF6366F1),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_matchedReasonText != null) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEEF2FF),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: Color(0xFF4F46E5), size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Status: $_matchedReasonText',
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF3730A3)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

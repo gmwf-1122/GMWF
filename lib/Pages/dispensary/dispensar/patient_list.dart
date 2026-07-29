@@ -92,20 +92,21 @@ class _PatientListState extends State<PatientList>
         .where((e) {
           final dateKey = e['dateKey']?.toString() ?? '';
           final status  = (e['status'] ?? '').toString().toLowerCase();
-          // Include 'completed' and 'dispensed' statuses — older sync paths
-          // may save entries with status='dispensed' directly.
           return dateKey == _todayKey &&
               (status == 'completed' || status == 'dispensed');
         })
         .toList();
 
     final pending   = <Map<String, dynamic>>[];
+    final onHold    = <Map<String, dynamic>>[];
     final dispensed = <Map<String, dynamic>>[];
 
     for (final e in all) {
       final ds = (e['dispenseStatus'] ?? '').toString().toLowerCase();
       if (ds == 'dispensed') {
         dispensed.add(e);
+      } else if (ds == 'on_hold' || ds == 'hold') {
+        onHold.add(e);
       } else {
         pending.add(e);
       }
@@ -113,22 +114,26 @@ class _PatientListState extends State<PatientList>
 
     pending.sort(
         (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
+    onHold.sort(
+        (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
     dispensed.sort(
         (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
 
-    return [...pending, ...dispensed];
+    return [...pending, ...onHold, ...dispensed];
   }
 
-  // ─── Auto-select smallest pending ─────────────────────────────────────────
+  // ─── Auto-select smallest active pending ─────────────────────────────────
   void _tryAutoSelectSmallestPending() {
     if (!mounted) return;
     final queue = _getSortedQueue();
-    final pending = queue
-        .where((p) =>
-            (p['dispenseStatus'] ?? '').toString().toLowerCase() != 'dispensed')
+    final activePending = queue
+        .where((p) {
+          final ds = (p['dispenseStatus'] ?? '').toString().toLowerCase();
+          return ds != 'dispensed' && ds != 'on_hold' && ds != 'hold';
+        })
         .toList();
 
-    if (pending.isEmpty) {
+    if (activePending.isEmpty) {
       if (widget.selectedPatient != null &&
           (widget.selectedPatient?['serial']?.toString() ?? '').isNotEmpty) {
         widget.onPatientSelected({});
@@ -139,15 +144,14 @@ class _PatientListState extends State<PatientList>
     final currentSerial = widget.selectedPatient?['serial']?.toString() ?? '';
 
     // Only auto-select if nothing is currently selected, or the current
-    // selection is no longer pending (just got dispensed).
-    // Do NOT jump away from a valid pending selection the dispenser chose.
-    final currentIsStillPending = pending
+    // selection is no longer active (just got dispensed or put on hold).
+    final currentIsStillActive = activePending
         .any((p) => (p['serial']?.toString() ?? '') == currentSerial);
 
-    if (currentSerial.isEmpty || !currentIsStillPending) {
-      final smallest = pending.first;
+    if (currentSerial.isEmpty || !currentIsStillActive) {
+      final smallest = activePending.first;
       debugPrint(
-          '[PatientList] Auto-selecting: ${smallest['serial']}');
+          '[PatientList] Auto-selecting active: ${smallest['serial']}');
       widget.onPatientSelected(smallest);
     }
   }

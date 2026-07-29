@@ -1,11 +1,14 @@
 // lib/pages/office/shared_widgets.dart
 
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../services/image_upload_service.dart';
 
 Widget buildFormField({
   required TextEditingController controller,
@@ -364,13 +367,61 @@ Widget buildInitialsAvatar({
   required String name,
   required RoleThemeData theme,
   double radius = 20,
+  String? imageUrl,
+  String? imagePath,
 }) {
+  bool hasLocal = false;
+  if (!kIsWeb && imagePath != null && imagePath.isNotEmpty) {
+    try {
+      hasLocal = File(imagePath).existsSync();
+    } catch (_) {
+      hasLocal = false;
+    }
+  }
+  final hasRemote = imageUrl != null && imageUrl.isNotEmpty;
+  Uint8List? base64Bytes;
+  if (hasRemote) {
+    base64Bytes = ImageUploadService.decodeBase64ToBytes(imageUrl);
+  }
+
+  if (hasLocal || hasRemote) {
+    ImageProvider imageProvider;
+    if (hasLocal && !kIsWeb) {
+      imageProvider = FileImage(File(imagePath!));
+    } else if (base64Bytes != null) {
+      imageProvider = MemoryImage(base64Bytes);
+    } else {
+      imageProvider = NetworkImage(imageUrl!);
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Container(
+        width: radius * 2,
+        height: radius * 2,
+        color: theme.accentMuted,
+        child: Image(
+          image: imageProvider,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Center(
+              child: Text(
+                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   return CircleAvatar(
     radius: radius,
     backgroundColor: theme.accentMuted,
     child: Text(
       name.isNotEmpty ? name[0].toUpperCase() : '?',
-      style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.62),
+      style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
     ),
   );
 }

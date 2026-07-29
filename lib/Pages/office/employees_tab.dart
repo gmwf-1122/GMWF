@@ -8,6 +8,7 @@ import 'package:collection/collection.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/local_storage_service.dart';
 import '../../services/permission_service.dart';
 import 'shared_widgets.dart';
 import 'employee_form_sheet.dart';
@@ -59,6 +60,35 @@ class _EmployeesTabState extends State<EmployeesTab> {
     return count;
   }
 
+  String _normalizeBranchKey(Map<String, dynamic> emp) {
+    final raw = emp['branchId']?.toString().trim() ?? '';
+    if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null') {
+      return 'Unassigned';
+    }
+    return raw;
+  }
+
+  String _normalizeDepartmentKey(Map<String, dynamic> emp) {
+    final raw = emp['department']?.toString().trim() ?? '';
+    if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null') {
+      return 'Unassigned';
+    }
+    return raw;
+  }
+
+  String _displayBranchName(String branchKey) {
+    if (branchKey == 'Unassigned') return 'Unassigned';
+    return _getBranchName(branchKey);
+  }
+
+  Color _mutedColorForKey(String key) {
+    final seed = key.hashCode;
+    final hue = (seed % 360).toDouble();
+    final h = (hue + 360) % 360;
+    final col = HSLColor.fromAHSL(1.0, h, 0.28, 0.88).toColor();
+    return col;
+  }
+
   @override
   void dispose() {
     _searchCtrl.dispose();
@@ -67,10 +97,37 @@ class _EmployeesTabState extends State<EmployeesTab> {
 
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
+    final tOriginal = RoleThemeScope.dataOf(context);
+    final t = RoleThemeData(
+        roleLabel: tOriginal.roleLabel,
+      isDarkCanvas: false,
+        bg: const Color(0xFFFBFDFF),
+        bgCard: Colors.white,
+        bgCardAlt: const Color(0xFFF6F9F8),
+        bgRule: const Color(0xFFF1F5F9),
+        accent: const Color(0xFF0F9A7A),
+        accentLight: const Color(0xFF4CB79A),
+        accentMuted: const Color(0xFFE8F6F0),
+      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+      glassTint: const Color(0x1A10B981),
+      textPrimary: const Color(0xFF111827),
+      textSecondary: const Color(0xFF6B7280),
+      textTertiary: const Color(0xFF9CA3AF),
+      danger: const Color(0xFFEF4444),
+      zakat: tOriginal.zakat,
+      nonZakat: tOriginal.nonZakat,
+      gmwf: tOriginal.gmwf,
+      cardFillTokens: tOriginal.cardFillTokens,
+      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+      cardFillDispensary: tOriginal.cardFillDispensary,
+      chartBar1: tOriginal.chartBar1,
+      chartBar2: tOriginal.chartBar2,
+      chartBar3: tOriginal.chartBar3,
+      chartGrid: tOriginal.chartGrid,
+    );
 
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFFF8FAFC),
       body: ValueListenableBuilder(
         valueListenable: FinanceLocalStorage.employeesBox.listenable(),
         builder: (context, Box box, _) {
@@ -81,7 +138,15 @@ class _EmployeesTabState extends State<EmployeesTab> {
             // Apply dept
             if (_deptFilter != 'All' && emp['department'] != _deptFilter) return false;
             // Apply branch
-            if (_branchFilter != 'All' && emp['branchId'] != _branchFilter) return false;
+            if (_branchFilter != 'All') {
+              final String empBranch = (emp['branchId']?.toString() ?? '').toLowerCase();
+              final String selectedB = _branchFilter.toLowerCase();
+              if (selectedB.contains('karachi')) {
+                if (!empBranch.contains('karachi')) return false;
+              } else {
+                if (emp['branchId'] != _branchFilter) return false;
+              }
+            }
             // Apply status
             final isActive = emp['isActive'] as bool? ?? true;
             final status = emp['status'] as String? ?? (isActive ? 'Active' : 'Left');
@@ -106,22 +171,11 @@ class _EmployeesTabState extends State<EmployeesTab> {
               Expanded(
                 child: list.isEmpty
                     ? _buildEmptyState(t)
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                        itemCount: list.length,
-                        itemBuilder: (ctx, i) => _buildEmployeeRow(t, list[i]),
-                      ),
+                    : _buildGroupedEmployeeList(t, list),
               ),
             ],
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => widget.openEmployeeForm(context, null),
-        backgroundColor: t.accent,
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Add Employee', style: TextStyle(fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -133,8 +187,11 @@ class _EmployeesTabState extends State<EmployeesTab> {
   // instead of eating a full row even when nothing's selected.
   Widget _buildFilterBar(RoleThemeData t) {
     return Container(
-      color: t.bgCard,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -142,7 +199,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
             children: [
               Expanded(
                 child: Container(
-                  height: 44,
+                      height: 40,
                   decoration: BoxDecoration(
                     color: t.bgCardAlt,
                     borderRadius: BorderRadius.circular(12),
@@ -193,7 +250,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 ),
               ),
               const SizedBox(width: 8),
-              Tooltip(
+               Tooltip(
                 message: 'Apply Annual Increments',
                 child: Container(
                   height: 44,
@@ -208,6 +265,20 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     onPressed: () => _openAnnualIncrementsDialog(context),
                   ),
                 ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 0,
+                ),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                onPressed: () => widget.openEmployeeForm(context, null),
               ),
             ],
           ),
@@ -259,14 +330,6 @@ class _EmployeesTabState extends State<EmployeesTab> {
   }
 
   void _openFiltersSheet(BuildContext context, RoleThemeData t) {
-    final filterRoles = ['All', 'Branch Manager', 'Doctor', 'Receptionist', 'Dispenser', 'Supervisor', 'Office Boy', 'Kitchen', 'Madrassa Admin', 'Madrassa Teacher']
-      ..addAll(FinanceLocalStorage.getCustomRoles());
-    if (!filterRoles.contains(_roleFilter)) _roleFilter = 'All';
-
-    final filterDepts = ['All', 'Dispensary', 'Dasterkhwaan', 'Madrassa', 'Office', 'Administration']
-      ..addAll(FinanceLocalStorage.getCustomDepartments());
-    if (!filterDepts.contains(_deptFilter)) _deptFilter = 'All';
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -275,6 +338,26 @@ class _EmployeesTabState extends State<EmployeesTab> {
       builder: (sheetCtx) {
         return StatefulBuilder(
           builder: (innerCtx, setSheetState) {
+            final List<String> filterDepts = ['All', 'Administration', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
+              ..addAll(FinanceLocalStorage.getCustomDepartments());
+            if (!filterDepts.contains(_deptFilter)) _deptFilter = 'All';
+
+            final List<String> filterRoles = ['All'];
+            if (_deptFilter == 'All') {
+              final allRoles = <String>{};
+              for (final d in ['Administration', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']) {
+                allRoles.addAll(FinanceLocalStorage.getRolesForDepartment(d));
+              }
+              for (final cd in FinanceLocalStorage.getCustomDepartments()) {
+                allRoles.addAll(FinanceLocalStorage.getRolesForDepartment(cd));
+              }
+              allRoles.addAll(FinanceLocalStorage.getCustomRoles());
+              filterRoles.addAll(allRoles);
+            } else {
+              filterRoles.addAll(FinanceLocalStorage.getRolesForDepartment(_deptFilter));
+            }
+            if (!filterRoles.contains(_roleFilter)) _roleFilter = 'All';
+
             return Padding(
               padding: EdgeInsets.only(
                 top: 20,
@@ -320,21 +403,87 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     value: _deptFilter,
                     items: filterDepts,
                     onChanged: (val) {
-                      setSheetState(() => _deptFilter = val!);
+                      setSheetState(() {
+                        _deptFilter = val!;
+                        _roleFilter = 'All';
+                      });
                       setState(() {});
                     },
                     theme: t,
                   ),
                   if (widget.branches.length > 1)
-                    buildDropdownField(
-                      label: 'Branch',
-                      value: _branchFilter,
-                      items: ['All', ...widget.branches.map((b) => b['id']?.toString() ?? '')],
-                      onChanged: (val) {
-                        setSheetState(() => _branchFilter = val!);
-                        setState(() {});
+                    StatefulBuilder(
+                      builder: (filterBranchCtx, setFilterBranchState) {
+                        final allBranches = FinanceLocalStorage.getAllBranches(widget.branches)
+                            .where((b) {
+                              final id = b['id']?.toString() ?? '';
+                              return id != 'karachi-2' && id != 'karachi2';
+                            }).toList();
+                        
+                        final List<String> dropdownItems = ['All', ...allBranches.map((b) => b['id']?.toString() ?? '')];
+                        if (!dropdownItems.contains('+ Add Custom Branch...')) {
+                          dropdownItems.add('+ Add Custom Branch...');
+                        }
+
+                        if (!dropdownItems.contains(_branchFilter)) {
+                          _branchFilter = 'All';
+                        }
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: t.bgCardAlt,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: t.bgRule),
+                          ),
+                          child: DropdownButtonFormField<String>(
+                            value: _branchFilter,
+                            dropdownColor: t.bgCard,
+                            decoration: InputDecoration(
+                              labelText: 'Branch',
+                              labelStyle: TextStyle(color: t.textSecondary, fontSize: 11),
+                              border: InputBorder.none,
+                              filled: false,
+                            ),
+                            style: TextStyle(color: t.textPrimary, fontSize: 13),
+                            items: dropdownItems.map((id) {
+                              if (id == 'All') {
+                                return const DropdownMenuItem(value: 'All', child: Text('All Branches'));
+                              }
+                              if (id == '+ Add Custom Branch...') {
+                                return const DropdownMenuItem(
+                                  value: '+ Add Custom Branch...',
+                                  child: Text('+ Add Custom Branch...', style: TextStyle(fontWeight: FontWeight.bold)),
+                                );
+                              }
+                              final b = allBranches.firstWhereOrNull((x) => x['id'] == id);
+                              String name = b?['name']?.toString() ?? id;
+                              if (id == 'karachi-1' || id == 'karachi1') {
+                                name = 'Karachi';
+                              }
+                              return DropdownMenuItem(value: id, child: Text('$name ($id)'));
+                            }).toList(),
+                            onChanged: (val) {
+                              if (val == '+ Add Custom Branch...') {
+                                showCustomBranchDialog(
+                                  context: sheetCtx,
+                                  theme: t,
+                                  onAdded: (newId, newName) {
+                                    setSheetState(() {
+                                      _branchFilter = newId;
+                                    });
+                                    setState(() {});
+                                  },
+                                );
+                              } else {
+                                setSheetState(() => _branchFilter = val!);
+                                setState(() {});
+                              }
+                            },
+                          ),
+                        );
                       },
-                      theme: t,
                     ),
                   buildDropdownField(
                     label: 'Status',
@@ -366,6 +515,153 @@ class _EmployeesTabState extends State<EmployeesTab> {
     );
   }
 
+  Widget _buildGroupedEmployeeList(RoleThemeData t, List<Map<String, dynamic>> list) {
+    final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
+    for (final emp in list) {
+      final branchKey = _normalizeBranchKey(emp);
+      final deptKey = _normalizeDepartmentKey(emp);
+      grouped.putIfAbsent(branchKey, () => {});
+      grouped[branchKey]!.putIfAbsent(deptKey, () => []);
+      grouped[branchKey]![deptKey]!.add(emp);
+    }
+
+    final sortedBranches = grouped.keys.toList()..sort((a, b) {
+      if (a == 'Unassigned') return 1;
+      if (b == 'Unassigned') return -1;
+      return a.compareTo(b);
+    });
+
+    final displayItems = <Map<String, dynamic>>[];
+    for (final branchKey in sortedBranches) {
+      final branchDepts = grouped[branchKey]!;
+      final sortedDepartments = branchDepts.keys.toList()..sort((a, b) {
+        if (a == 'Unassigned') return 1;
+        if (b == 'Unassigned') return -1;
+        return a.compareTo(b);
+      });
+
+      final branchCount = sortedDepartments.fold<int>(0, (count, deptKey) => count + branchDepts[deptKey]!.length);
+      displayItems.add({'type': 'branchHeader', 'branchName': _displayBranchName(branchKey), 'count': branchCount});
+
+      for (final deptKey in sortedDepartments) {
+        final deptItems = List<Map<String, dynamic>>.from(branchDepts[deptKey]!..sort((a, b) {
+          final aName = (a['name'] ?? '').toString().toLowerCase();
+          final bName = (b['name'] ?? '').toString().toLowerCase();
+          return aName.compareTo(bName);
+        }));
+        displayItems.add({'type': 'departmentHeader', 'departmentName': deptKey, 'count': deptItems.length});
+        for (final emp in deptItems) {
+          displayItems.add({'type': 'employee', 'employee': emp});
+        }
+      }
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      itemCount: displayItems.length,
+      itemBuilder: (ctx, i) {
+        final item = displayItems[i];
+        switch (item['type']) {
+          case 'branchHeader':
+            return _buildBranchHeader(item['branchName'] as String, item['count'] as int, t);
+          case 'departmentHeader':
+            return _buildDepartmentHeader(item['departmentName'] as String, item['count'] as int, t);
+          default:
+            return _buildEmployeeRow(t, item['employee'] as Map<String, dynamic>);
+        }
+      },
+    );
+  }
+
+  Widget _buildBranchHeader(String branchName, int count, RoleThemeData t) {
+    final col = _mutedColorForKey(branchName);
+    return Container(
+      margin: const EdgeInsets.only(top: 8, bottom: 6),
+      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: col.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: col.withOpacity(0.12)),
+      ),
+      child: Row(
+        children: [
+          Container(width: 6, height: 24, decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(width: 8),
+          Text(
+            branchName.toUpperCase(),
+            style: TextStyle(
+              color: col.withOpacity(0.95),
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.0,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: col.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '$count EMPLOYEES',
+              style: TextStyle(
+                color: col.withOpacity(0.95),
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDepartmentHeader(String departmentName, int count, RoleThemeData t) {
+    final col = _mutedColorForKey(departmentName);
+    return Container(
+      margin: const EdgeInsets.only(top: 6, bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: t.bgCardAlt,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: t.bgRule),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.label_outline_rounded, color: col.withOpacity(0.95), size: 16),
+          const SizedBox(width: 8),
+          Text(
+            departmentName.toUpperCase(),
+            style: TextStyle(
+              color: t.textPrimary,
+              fontWeight: FontWeight.w900,
+              fontSize: 11,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: col.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '$count EMPLOYEES',
+              style: TextStyle(
+                color: col.withOpacity(0.95),
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ── Employee row ───────────────────────────────────────────────────────────
   // Redesign plan §3.C + §4: dense list row, not a boxed/shadowed card.
   // Salary rate stays as muted secondary text; "Advance" only renders as a
@@ -375,99 +671,79 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final name = emp['name']?.toString() ?? '';
     final role = emp['role']?.toString() ?? '';
     final dept = emp['department']?.toString() ?? '';
-    final cnic = emp['cnic']?.toString() ?? '';
-    final phone = emp['phone']?.toString() ?? '';
-    final salary = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
-    final advance = (emp['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
     final empId = emp['localId']?.toString() ?? '';
     final isActive = emp['isActive'] as bool? ?? true;
     final status = emp['status'] as String? ?? (isActive ? 'Active' : 'Left');
+    final branchName = _getBranchName(emp['branchId']?.toString() ?? '');
 
-    String durationStr = '';
-    final joinStr = emp['joiningDate']?.toString();
-    if (joinStr != null && joinStr.isNotEmpty) {
-      try {
-        final joinDate = DateTime.parse(joinStr);
-        final diff = DateTime.now().difference(joinDate);
-        final years = (diff.inDays / 365).floor();
-        final months = ((diff.inDays % 365) / 30).floor();
-        if (years > 0) {
-          durationStr = ' • ${years}y ${months}m';
-        } else if (months > 0) {
-          durationStr = ' • ${months}m';
-        } else {
-          durationStr = ' • < 1m';
-        }
-      } catch (_) {}
-    }
-
-    return InkWell(
-      onTap: () => _showEmployeeDetailDrawer(context, empId),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: t.bgRule, width: 0.5)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            buildInitialsAvatar(name: name, theme: t, radius: 22),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary), overflow: TextOverflow.ellipsis),
-                      ),
-                      if (!isActive) ...[
-                        const SizedBox(width: 6),
-                        buildStatusPill(theme: t, label: status.toUpperCase(), variant: StatusPillVariant.danger),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 3),
-                  Text('$role$durationStr • $dept', style: TextStyle(fontSize: 12, color: t.textSecondary)),
-                  if ((emp['branchId']?.toString() ?? '').isNotEmpty && widget.branches.length > 1) ...[
-                    const SizedBox(height: 4),
-                    _buildInfoChip(Icons.location_on_outlined, _getBranchName(emp['branchId']?.toString() ?? ''), t),
+    return Card(
+      color: Colors.white,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: t.bgRule, width: 0.75),
+      ),
+      margin: const EdgeInsets.only(bottom: 6),
+      child: InkWell(
+        onTap: () => _showEmployeeDetailDrawer(context, empId),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                margin: const EdgeInsets.only(right: 8),
+                child: Column(
+                  children: [
+                    Container(width: 4, height: 36, decoration: BoxDecoration(color: _mutedColorForKey(branchName), borderRadius: BorderRadius.circular(2))),
                   ],
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Icon(Icons.badge_outlined, size: 11, color: t.textTertiary),
-                      const SizedBox(width: 4),
-                      Text(cnic.isNotEmpty ? cnic : 'N/A', style: TextStyle(fontSize: 11, color: t.textTertiary)),
-                      const SizedBox(width: 12),
-                      Icon(Icons.phone_android_outlined, size: 11, color: t.textTertiary),
-                      const SizedBox(width: 4),
-                      Text(phone.isNotEmpty ? phone : 'N/A', style: TextStyle(fontSize: 11, color: t.textTertiary)),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Text('PKR ${NumberFormat('#,###').format(salary)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textSecondary)),
-                      Text(' / month', style: TextStyle(fontSize: 10, color: t.textTertiary)),
-                      if (advance > 0) ...[
-                        const SizedBox(width: 8),
-                        buildStatusPill(
-                          theme: t,
-                          label: 'Advance: PKR ${NumberFormat('#,###').format(advance)}',
-                          variant: StatusPillVariant.warning,
-                          icon: Icons.money_off_rounded,
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded, size: 18, color: t.textTertiary),
-          ],
+              buildInitialsAvatar(
+                name: name,
+                theme: t,
+                radius: 16,
+                imageUrl: emp['profilePictureUrl']?.toString(),
+                imagePath: emp['profilePicturePath']?.toString(),
+              ),
+                  const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary), overflow: TextOverflow.ellipsis),
+                        ),
+                        if (!isActive) ...[
+                          const SizedBox(width: 6),
+                          buildStatusPill(theme: t, label: status.toUpperCase(), variant: StatusPillVariant.danger),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$role • $dept',
+                      style: TextStyle(fontSize: 12, color: t.textSecondary),
+                    ),
+                    if (branchName.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on_outlined, size: 11, color: t.textTertiary),
+                          const SizedBox(width: 4),
+                          Text(branchName, style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, size: 18, color: t.textTertiary),
+            ],
+          ),
         ),
       ),
     );
@@ -488,20 +764,48 @@ class _EmployeesTabState extends State<EmployeesTab> {
     );
   }
 
-  // ── Employee Details Drawer ───────────────────────────────────────────────
   void _showEmployeeDetailDrawer(BuildContext context, String employeeId) {
-    final t = RoleThemeScope.dataOf(context);
+    final tOriginal = RoleThemeScope.dataOf(context);
+    final t = RoleThemeData(
+      roleLabel: tOriginal.roleLabel,
+      isDarkCanvas: false,
+      bg: const Color(0xFFF8FAFC),
+      bgCard: Colors.white,
+      bgCardAlt: const Color(0xFFF1F5F9),
+      bgRule: const Color(0xFFE2E8F0),
+      accent: const Color(0xFF10B981),
+      accentLight: const Color(0xFF34D399),
+      accentMuted: const Color(0xFFD1FAE5),
+      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+      glassTint: const Color(0x1A10B981),
+      textPrimary: const Color(0xFF111827),
+      textSecondary: const Color(0xFF6B7280),
+      textTertiary: const Color(0xFF9CA3AF),
+      danger: const Color(0xFFEF4444),
+      zakat: tOriginal.zakat,
+      nonZakat: tOriginal.nonZakat,
+      gmwf: tOriginal.gmwf,
+      cardFillTokens: tOriginal.cardFillTokens,
+      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+      cardFillDispensary: tOriginal.cardFillDispensary,
+      chartBar1: tOriginal.chartBar1,
+      chartBar2: tOriginal.chartBar2,
+      chartBar3: tOriginal.chartBar3,
+      chartGrid: tOriginal.chartGrid,
+    );
     final ps = PermissionService();
     DateTime calendarMonth = DateTime.now();
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: t.bgCard,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (ctx) {
-        return StatefulBuilder(
-          builder: (drawerCtx, setDrawerState) {
+        return RoleThemeScope(
+          role: RoleTheme.admin,
+          child: StatefulBuilder(
+            builder: (drawerCtx, setDrawerState) {
             final emp = FinanceLocalStorage.getEmployee(employeeId);
             if (emp == null) return const Center(child: Text('Employee profile deleted.'));
 
@@ -518,6 +822,17 @@ class _EmployeesTabState extends State<EmployeesTab> {
             final transfers = FinanceLocalStorage.getTransfersForEmployee(employeeId);
             final auditLogs = FinanceLocalStorage.getAuditLogsForEmployee(employeeId);
 
+            final curRole = widget.userRole.toLowerCase().trim();
+            final empRole = (emp['role']?.toString() ?? emp['designation']?.toString() ?? '').toLowerCase().trim();
+            final empDept = (emp['department']?.toString() ?? '').toLowerCase().trim();
+            final isExecOrAdmin = empRole == 'ceo' ||
+                empRole == 'hq manager' ||
+                empRole == 'hq_manager' ||
+                empRole == 'admin' ||
+                empRole == 'chairman' ||
+                empDept == 'administration';
+            final canEditEmp = curRole == 'chairman' || (!isExecOrAdmin);
+
             return DefaultTabController(
               length: 4,
               child: Container(
@@ -532,7 +847,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       Text('Employee Detail Card', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
                       Row(
                         children: [
-                          if (isActive) ...[
+                          if (isActive && canEditEmp) ...[
                             Tooltip(
                               message: 'Edit Profile',
                               child: IconButton(
@@ -563,10 +878,17 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             ),
                           ),
                           Tooltip(
-                            message: 'Download PDF Report',
+                            message: 'Download Profile PDF',
                             child: IconButton(
                               icon: Icon(Icons.download_outlined, color: t.accent),
                               onPressed: () => FinanceReportHelper.exportIndividualPdf(employeeId),
+                            ),
+                          ),
+                          Tooltip(
+                            message: 'Download Payment History PDF',
+                            child: IconButton(
+                              icon: Icon(Icons.receipt_long_outlined, color: t.accent),
+                              onPressed: () => FinanceReportHelper.exportPaymentReportPdf(employeeId),
                             ),
                           ),
                           IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(drawerCtx)),
@@ -598,10 +920,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                 Center(
                                   child: Column(
                                     children: [
-                                      CircleAvatar(
+                                      buildInitialsAvatar(
+                                        name: name,
+                                        theme: t,
                                         radius: 36,
-                                        backgroundColor: t.accentMuted,
-                                        child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: TextStyle(color: t.accent, fontSize: 28, fontWeight: FontWeight.bold)),
+                                        imageUrl: emp['profilePictureUrl']?.toString(),
+                                        imagePath: emp['profilePicturePath']?.toString(),
                                       ),
                                       const SizedBox(height: 8),
                                       Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
@@ -1083,10 +1407,11 @@ class _EmployeesTabState extends State<EmployeesTab> {
               ),
             );
           },
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   Map<String, dynamic> _previewProjectedArrears({
     required String employeeId,
@@ -2260,4 +2585,326 @@ class _EmployeesTabState extends State<EmployeesTab> {
       ],
     );
   }
+
+  void _openBulkBackfillDialog(BuildContext context, String employeeId, String employeeName) {
+    final t = RoleThemeScope.dataOf(context);
+    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+
+    int startMonthsAgo = 3;
+    final salaryCtrl = TextEditingController();
+    final approvedByCtrl = TextEditingController(text: curUser);
+    String defaultStatus = 'present'; // present, absent, off
+
+    final emp = FinanceLocalStorage.getEmployee(employeeId);
+    if (emp != null) {
+      final double s = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
+      salaryCtrl.text = s.toStringAsFixed(0);
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: t.bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final now = DateTime.now();
+            final months = <Map<String, dynamic>>[];
+            for (int i = startMonthsAgo; i >= 1; i--) {
+              final d = DateTime(now.year, now.month - i, 15);
+              final mKey = DateFormat('yyyy-MM').format(d);
+              final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$mKey') == true;
+              months.add({
+                'key': mKey,
+                'label': DateFormat('MMMM yyyy').format(d),
+                'isLocked': isLocked,
+              });
+            }
+
+            final hasLockedMonths = months.any((m) => m['isLocked'] == true);
+
+            return Container(
+              height: MediaQuery.of(sheetCtx).size.height * 0.75,
+              padding: EdgeInsets.only(
+                top: 20,
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(sheetCtx).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Bulk Historical Backfill', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: t.textPrimary)),
+                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(sheetCtx)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Bulk initialize attendance and salary rates for $employeeName. Active month locks are strictly enforced.',
+                      style: TextStyle(color: t.textSecondary, fontSize: 11),
+                    ),
+                    const SizedBox(height: 14),
+
+                    if (hasLockedMonths)
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.warning_amber_rounded, color: Colors.red, size: 16),
+                                SizedBox(width: 6),
+                                Text('Locked Periods Detected', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Some months in the selected window are closed and locked. Backfill is blocked.',
+                              style: TextStyle(color: Colors.red, fontSize: 11),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: months.map((m) {
+                                final isL = m['isLocked'] == true;
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isL ? Colors.red.withOpacity(0.12) : Colors.green.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '${m['key']} ${isL ? "🔒" : "🔓"}',
+                                    style: TextStyle(
+                                      color: isL ? Colors.red : Colors.green,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            )
+                          ],
+                        ),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.green.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.check_circle_outline_rounded, color: t.accent, size: 16),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'All periods in this backfill window (${months.isEmpty ? "none" : months.last['key']} to ${months.isEmpty ? "none" : months.first['key']}) are unlocked and safe.',
+                                style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    const SizedBox(height: 16),
+
+                    buildDropdownField(
+                      label: 'Backfill Window Depth (Months)',
+                      value: startMonthsAgo.toString(),
+                      items: const ['1', '2', '3', '4', '5', '6'],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setSheetState(() => startMonthsAgo = int.parse(val));
+                        }
+                      },
+                      theme: t,
+                    ),
+
+                    buildFormField(
+                      controller: salaryCtrl,
+                      label: 'Base Salary (PKR / Month) *',
+                      icon: Icons.payments_outlined,
+                      theme: t,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    ),
+
+                    buildDropdownField(
+                      label: 'Default Daily Attendance Status',
+                      value: defaultStatus,
+                      items: const ['present', 'absent', 'off'],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setSheetState(() => defaultStatus = val);
+                        }
+                      },
+                      theme: t,
+                    ),
+
+                    buildFormField(
+                      controller: approvedByCtrl,
+                      label: 'Approved By (CEO / Admin) *',
+                      icon: Icons.verified_user_outlined,
+                      theme: t,
+                    ),
+                    const SizedBox(height: 20),
+
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: hasLockedMonths ? Colors.grey : t.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: hasLockedMonths
+                          ? null
+                          : () async {
+                              final double sVal = double.tryParse(salaryCtrl.text) ?? 0.0;
+                              if (sVal <= 0) {
+                                showCustomSnackBar(sheetCtx, 'Please enter a valid salary amount.', error: true);
+                                return;
+                              }
+                              final approver = approvedByCtrl.text.trim();
+                              if (approver.isEmpty) {
+                                showCustomSnackBar(sheetCtx, 'Please specify who approved this backfill.', error: true);
+                                return;
+                              }
+
+                              try {
+                                showCustomSnackBar(sheetCtx, 'Starting backfill process...');
+                                
+                                for (final monthInfo in months) {
+                                  final mKey = monthInfo['key'] as String;
+                                  final parts = mKey.split('-');
+                                  final year = int.parse(parts[0]);
+                                  final month = int.parse(parts[1]);
+
+                                  final effective = DateTime(year, month, 1);
+                                  await FinanceLocalStorage.saveSalaryHistory(
+                                    branchId: widget.branchId,
+                                    employeeId: employeeId,
+                                    amount: sVal,
+                                    effectiveDate: effective,
+                                    reason: 'Bulk Historical Backfill Initialization',
+                                    approvedBy: approver,
+                                    performedBy: curUser,
+                                  );
+
+                                  final days = FinanceLocalStorage.getDaysInMonth(mKey);
+                                  for (int d = 1; d <= days; d++) {
+                                    final dateStr = '$mKey-${d.toString().padLeft(2, '0')}';
+                                    final date = DateTime(year, month, d);
+                                    final status = date.weekday == DateTime.sunday ? 'off' : defaultStatus;
+
+                                    await FinanceLocalStorage.saveAttendanceRecord(
+                                      branchId: widget.branchId,
+                                      data: {
+                                        'employeeId': employeeId,
+                                        'date': dateStr,
+                                        'status': status,
+                                        'leaveType': null,
+                                        'arrivalTime': null,
+                                        'departureTime': null,
+                                        'note': 'Backfill Default',
+                                      },
+                                      performedBy: curUser,
+                                    );
+                                  }
+                                }
+
+                                Navigator.pop(sheetCtx);
+                                showCustomSnackBar(context, 'Historical backfill completed successfully!');
+                              } catch (e) {
+                                showCustomSnackBar(sheetCtx, 'Error during backfill: $e', error: true);
+                              }
+                            },
+                      child: const Text('Execute Historical Backfill', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+void showCustomBranchDialog({
+  required BuildContext context,
+  required RoleThemeData theme,
+  required void Function(String id, String name) onAdded,
+}) {
+  final idController = TextEditingController();
+  final nameController = TextEditingController();
+  showDialog(
+    context: context,
+    builder: (ctx) {
+      return AlertDialog(
+        backgroundColor: theme.bgCard,
+        title: Text('Add Custom Branch', style: TextStyle(color: theme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: idController,
+              autofocus: true,
+              style: TextStyle(color: theme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Enter Branch ID (e.g. lahore)',
+                hintStyle: TextStyle(color: theme.textTertiary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.bgRule)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.accent)),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: nameController,
+              style: TextStyle(color: theme.textPrimary),
+              decoration: InputDecoration(
+                hintText: 'Enter Branch Name (e.g. Lahore)',
+                hintStyle: TextStyle(color: theme.textTertiary),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.bgRule)),
+                focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: theme.accent)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: TextStyle(color: theme.textSecondary)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: theme.accent),
+            onPressed: () async {
+              final id = idController.text.trim().toLowerCase();
+              final name = nameController.text.trim();
+              if (id.isNotEmpty && name.isNotEmpty) {
+                await FinanceLocalStorage.addCustomBranch(id, name);
+                Navigator.pop(ctx);
+                onAdded(id, name);
+              }
+            },
+            child: const Text('Add Branch', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      );
+    },
+  );
 }

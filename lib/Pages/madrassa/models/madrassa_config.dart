@@ -11,6 +11,7 @@ class MadrassaConfig {
   final double attendanceMaxDeduction;
   final double uniformMaxDeduction;
   final int ptmDay; // Day of the month (1-31)
+  final bool allowStudentLeave;
   final List<Map<String, dynamic>> auditLog;
 
   MadrassaConfig({
@@ -23,6 +24,7 @@ class MadrassaConfig {
     this.attendanceMaxDeduction = 500,
     this.uniformMaxDeduction = 500,
     this.ptmDay = 0,
+    this.allowStudentLeave = false,
     this.auditLog = const [],
   });
 
@@ -39,6 +41,7 @@ class MadrassaConfig {
       attendanceMaxDeduction: (data['attendanceMaxDeduction'] ?? 500).toDouble(),
       uniformMaxDeduction: (data['uniformMaxDeduction'] ?? 500).toDouble(),
       ptmDay: data['ptmDay'] ?? 0,
+      allowStudentLeave: data['allowStudentLeave'] == true,
       auditLog: List<Map<String, dynamic>>.from(data['auditLog'] ?? []),
     );
   }
@@ -53,6 +56,7 @@ class MadrassaConfig {
       'attendanceMaxDeduction': attendanceMaxDeduction,
       'uniformMaxDeduction': uniformMaxDeduction,
       'ptmDay': ptmDay,
+      'allowStudentLeave': allowStudentLeave,
       'auditLog': auditLog,
     };
   }

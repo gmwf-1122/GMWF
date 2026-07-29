@@ -5,6 +5,7 @@ import '../madrassa_strings.dart';
 import 'madrassa_common_widgets.dart';
 import '../../../theme/app_theme.dart';
 import '../dialogs/enrollment_dialog.dart';
+import '../utils/madrassa_local_storage.dart';
 
 class StatusActionMenu extends StatelessWidget {
   final dynamic student;
@@ -39,7 +40,6 @@ class StatusActionMenu extends StatelessWidget {
     if (newStatus == currentStatus) return;
 
     String statusLabelEn = '';
-    
     if (newStatus == 'active') {
       statusLabelEn = context.l.statusActive;
     } else if (newStatus == 'archived') {
@@ -48,59 +48,170 @@ class StatusActionMenu extends StatelessWidget {
       statusLabelEn = context.l.statusHifzCompleted;
     } else if (newStatus == 'left') {
       statusLabelEn = context.l.statusLeft;
+    } else if (newStatus == 'dropped') {
+      statusLabelEn = context.isUrdu ? 'خارج' : 'Dropped Out';
+    }
+
+    // Statuses that carry their own event date, and the Firestore field it's stored in
+    const dateFieldForStatus = {
+      'archived': 'archivedDate',
+      'hifz_completed': 'hifzCompletionDate',
+      'left': 'leftDate',
+      'dropped': 'droppedDate',
+    };
+    final isUnarchive = newStatus == 'active';
+    final requiresDate = dateFieldForStatus.containsKey(newStatus);
+    final dateFieldName = dateFieldForStatus[newStatus];
+
+    String dialogTitle;
+    if (isUnarchive) {
+      dialogTitle = context.l.unarchiveStudent;
+    } else if (newStatus == 'hifz_completed') {
+      dialogTitle = context.isUrdu ? 'حفظ کی تکمیل' : 'Mark Hifz Completed';
+    } else if (newStatus == 'left') {
+      dialogTitle = context.isUrdu ? 'طالب علم چھوڑ گیا' : 'Mark as Left';
+    } else if (newStatus == 'dropped') {
+      dialogTitle = context.isUrdu ? 'طالب علم خارج' : 'Mark as Dropped Out';
+    } else {
+      dialogTitle = context.l.archiveStudent;
+    }
+
+    Color confirmColor;
+    if (isUnarchive) {
+      confirmColor = Colors.green;
+    } else if (newStatus == 'hifz_completed') {
+      confirmColor = const Color(0xFF4C4DDC);
+    } else if (newStatus == 'left') {
+      confirmColor = Colors.redAccent;
+    } else if (newStatus == 'dropped') {
+      confirmColor = Colors.red;
+    } else {
+      confirmColor = Colors.orange;
     }
 
     final reasonCtrl = TextEditingController();
+    // Required statuses default to today; unarchive starts empty (optional, opt-in)
+    DateTime? selectedDate = requiresDate ? DateTime.now() : null;
+
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          newStatus == 'active' ? context.l.unarchiveStudent : context.l.archiveStudent,
-          style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              context.l.confirmAction.replaceAll('{action}', statusLabelEn).replaceAll('{name}', sData['name'] ?? ''),
-              style: context.urduStyle(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Text(
+              dialogTitle,
+              style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
-            const SizedBox(height: 20),
-            buildTf(
-              reasonCtrl,
-              'Custom Reason / Additional Notes',
-              Icons.comment,
-              context,
-              hint: 'e.g. Moved to another city',
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  context.l.confirmAction.replaceAll('{action}', statusLabelEn).replaceAll('{name}', sData['name'] ?? ''),
+                  style: context.urduStyle(),
+                ),
+                if (requiresDate || isUnarchive) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    isUnarchive
+                        ? (ctx.isUrdu ? 'دوبارہ فعال ہونے کی تاریخ (اختیاری)' : 'Reactivation Date (optional)')
+                        : (ctx.isUrdu ? 'واقعہ کی تاریخ' : 'Event Date'),
+                    style: context.urduStyle(
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: selectedDate ?? DateTime.now(),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime.now(),
+                            );
+                            if (picked != null) {
+                              setDs(() => selectedDate = picked);
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: const Color(0xFFE0E2E7)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.calendar_today_outlined, size: 16, color: Color(0xFF008080)),
+                                const SizedBox(width: 10),
+                                Text(
+                                  selectedDate != null
+                                      ? DateFormat('d MMM yyyy').format(selectedDate!)
+                                      : (ctx.isUrdu ? 'کوئی تاریخ منتخب نہیں' : 'No date selected'),
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Only unarchive can clear back to "no date" — required statuses always keep one
+                      if (isUnarchive && selectedDate != null) ...[
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.clear, size: 18, color: Colors.grey),
+                          tooltip: 'Clear',
+                          onPressed: () => setDs(() => selectedDate = null),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 20),
+                buildTf(
+                  reasonCtrl,
+                  'Custom Reason / Additional Notes',
+                  Icons.comment,
+                  context,
+                  hint: 'e.g. Moved to another city',
+                ),
+              ],
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(context.l.cancel, style: context.urduStyle())),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: newStatus == 'active' ? Colors.green : Colors.orange,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            child: Text(context.l.confirm, style: context.urduStyle()),
-          ),
-        ],
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(context.l.cancel, style: context.urduStyle())),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: confirmColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: Text(context.l.confirm, style: context.urduStyle()),
+              ),
+            ],
+          );
+        },
       ),
     );
 
     if (confirm == true) {
       final now = Timestamp.now();
       final customReason = reasonCtrl.text.trim();
-      final finalReason = customReason.isEmpty ? statusLabelEn : '$statusLabelEn: $customReason';
+      String baseReason = statusLabelEn;
+      if (requiresDate && selectedDate != null) {
+        baseReason = '$statusLabelEn on ${DateFormat('d MMM yyyy').format(selectedDate!)}';
+      }
+      final finalReason = customReason.isEmpty ? baseReason : '$baseReason: $customReason';
 
       final updates = <String, dynamic>{
         'status': newStatus,
+        'batch': newStatus,
         'auditLog': FieldValue.arrayUnion([
           {
             'status': newStatus,
@@ -110,15 +221,33 @@ class StatusActionMenu extends StatelessWidget {
           }
         ]),
       };
-      if (newStatus == 'hifz_completed') {
-        updates['hifzCompletionDate'] = now;
+
+      if (requiresDate && dateFieldName != null && selectedDate != null) {
+        updates[dateFieldName] = Timestamp.fromDate(selectedDate!);
       }
+      // Unarchive: only write a reactivation date if the admin actually picked one.
+      // Leaving it empty does nothing extra — status just flips back to active.
+      if (isUnarchive && selectedDate != null) {
+        updates['reactivatedDate'] = Timestamp.fromDate(selectedDate!);
+      }
+
       final docRef = FirebaseFirestore.instance
           .collection('branches')
           .doc(branchId)
           .collection('madrassa_students')
           .doc(studentId);
       await docRef.update(updates);
+
+      // Instant Hive cache sync
+      final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId);
+      if (studentCache != null) {
+        studentCache['status'] = newStatus;
+        studentCache['batch'] = newStatus;
+        if (requiresDate && dateFieldName != null && selectedDate != null) {
+          studentCache[dateFieldName] = selectedDate!.toIso8601String();
+        }
+        await MadrassaLocalStorage.cacheStudent(branchId, studentId, studentCache);
+      }
 
       // Centralized Audit Log
       await MadrassaAuditService.logAction(
@@ -159,20 +288,20 @@ class StatusActionMenu extends StatelessWidget {
     final sData = _getStudentData();
     final name = sData['name'] ?? '';
     final joinDate = _parseDateTime(sData['joinDate']);
-    
+
     final rawAudit = sData['auditLog'];
     final auditListRaw = rawAudit is List ? rawAudit : [];
     final auditList = List<Map<String, dynamic>>.from(
       auditListRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
     );
-    
+
     // Sort audit list chronologically (oldest first for a sequential timeline)
     auditList.sort((a, b) {
       final aDate = _parseDateTime(a['date']);
       final bDate = _parseDateTime(b['date']);
       return aDate.compareTo(bDate);
     });
-    
+
     final durationStr = _formatDuration(joinDate, DateTime.now());
 
     showDialog(
@@ -236,6 +365,9 @@ class StatusActionMenu extends StatelessWidget {
                         } else if (logStatus == 'hifz_completed') {
                           dotColor = const Color(0xFF4C4DDC); // Purple
                           icon = Icons.stars_outlined;
+                        } else if (logStatus == 'dropped') {
+                          dotColor = Colors.red;
+                          icon = Icons.remove_circle_outline;
                         }
 
                         return IntrinsicHeight(
@@ -331,28 +463,113 @@ class StatusActionMenu extends StatelessWidget {
         }
       },
       itemBuilder: (ctx) => [
-        const PopupMenuItem(
+        PopupMenuItem(
           value: 'edit',
-          child: Text('Edit Student Data', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4C4DDC))),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF4C4DDC)),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Edit Student Profile',
+                style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4C4DDC), fontSize: 13)),
+              ),
+            ],
+          ),
         ),
         const PopupMenuDivider(),
         if (status != 'active')
           PopupMenuItem(
             value: 'active',
-            child: Text(context.l.statusActive, style: context.urduStyle()),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.check_circle_rounded, size: 16, color: Colors.green),
+                ),
+                const SizedBox(width: 10),
+                Text(context.l.statusActive, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              ],
+            ),
           ),
         if (status == 'active') ...[
           PopupMenuItem(
-            value: 'archived',
-            child: Text(context.l.statusArchived, style: context.urduStyle()),
-          ),
-          PopupMenuItem(
             value: 'hifz_completed',
-            child: Text(context.l.statusHifzCompleted, style: context.urduStyle()),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.workspace_premium_rounded, size: 16, color: Color(0xFF4C4DDC)),
+                ),
+                const SizedBox(width: 10),
+                Text(context.l.statusHifzCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              ],
+            ),
           ),
           PopupMenuItem(
             value: 'left',
-            child: Text(context.l.statusLeft, style: context.urduStyle()),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.exit_to_app_rounded, size: 16, color: Colors.redAccent),
+                ),
+                const SizedBox(width: 10),
+                Text(context.l.statusLeft, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'dropped',
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.person_off_rounded, size: 16, color: Colors.red),
+                ),
+                const SizedBox(width: 10),
+                Text(context.isUrdu ? 'خارج' : 'Dropped Out', style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              ],
+            ),
+          ),
+          PopupMenuItem(
+            value: 'archived',
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.archive_rounded, size: 16, color: Colors.orange),
+                ),
+                const SizedBox(width: 10),
+                Text(context.l.statusArchived, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+              ],
+            ),
           ),
         ],
         const PopupMenuDivider(),
@@ -360,9 +577,16 @@ class StatusActionMenu extends StatelessWidget {
           value: 'history',
           child: Row(
             children: [
-              const Icon(Icons.history, size: 18, color: Colors.grey),
-              const SizedBox(width: 8),
-              Text('View Status History', style: context.urduStyle()),
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.history_rounded, size: 16, color: Colors.grey),
+              ),
+              const SizedBox(width: 10),
+              Text('Audit & Status History', style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13))),
             ],
           ),
         ),

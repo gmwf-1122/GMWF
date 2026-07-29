@@ -19,6 +19,15 @@ import '../pages/madrassa/utils/madrassa_local_storage.dart';
 /// Indefinite cache for historical (non-today) BranchStats.
 /// Keyed by "branchId|yyyy-MM-dd".
 final Map<String, BranchStats> _historicalStatsCache = {};
+final Map<String, _CachedLocalBranchStats> _localStatsTTLCache = {};
+
+class _CachedLocalBranchStats {
+  final BranchStats stats;
+  final DateTime cachedAt;
+  _CachedLocalBranchStats(this.stats) : cachedAt = DateTime.now();
+
+  bool get isValid => DateTime.now().difference(cachedAt).inSeconds < 5;
+}
 
 String _dayKey(String branchId, DateTime day) =>
     '${branchId.toLowerCase().trim()}|${DateFormat('yyyy-MM-dd').format(day)}';
@@ -28,6 +37,12 @@ String _dayKey(String branchId, DateTime day) =>
 Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async {
   final bId = branchId.toLowerCase().trim();
   final dateKeyYmd = DateFormat('yyyy-MM-dd').format(date);
+  final cacheTTLKey = '$bId|$dateKeyYmd';
+
+  if (_localStatsTTLCache.containsKey(cacheTTLKey) && _localStatsTTLCache[cacheTTLKey]!.isValid) {
+    return _localStatsTTLCache[cacheTTLKey]!.stats;
+  }
+
   final dateKeyDmyy = DateFormat('ddMMyy').format(date);
 
   // 1. Calculate donations from DonationsLocalStorage
@@ -146,33 +161,32 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
     debugPrint('Error loading madrassa stats: $e');
   }
 
-  // 3. Fallback to Firestore with a short timeout if local data yields empty stats
-  if (z == 0 && nz == 0 && donTotal == 0) {
-    try {
-      final remoteStats = await fetchBranchStats(branchId, filter: DashboardFilter(
-        timeRange: TimeRange.custom,
-        customRange: DateTimeRange(start: date, end: date),
-      )).timeout(const Duration(milliseconds: 1500));
-      return BranchStats(
-        zakat: remoteStats.zakat,
-        nonZakat: remoteStats.nonZakat,
-        gmwf: remoteStats.gmwf,
-        dispensed: remoteStats.dispensed,
-        prescribed: madrassaAttendance,
-        dasterkhwaan: remoteStats.dasterkhwaan,
-        dasterkhwaanServed: remoteStats.dasterkhwaanServed,
-        donations: remoteStats.donations,
-        dispensaryRevenue: remoteStats.dispensaryRevenue,
-        zakatRevenue: remoteStats.zakatRevenue,
-        nonZakatRevenue: remoteStats.nonZakatRevenue,
-        gmwfRevenue: remoteStats.gmwfRevenue,
-      );
-    } catch (_) {
-      // Ignore timeout/error and return whatever local metrics we gathered
+  int empAttendance = 0;
+  try {
+    final dateKeyEmp = DateFormat('yyyy-MM-dd').format(date);
+    if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+      final box = Hive.box(LocalStorageService.attendanceBox);
+      for (final key in box.keys) {
+        final keyStr = key.toString();
+        if (keyStr.endsWith('_$dateKeyEmp') || keyStr.endsWith(dateKeyEmp)) {
+          final val = box.get(key);
+          if (val is Map) {
+            final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+            if (bId == 'all' || b == bId || b.isEmpty) {
+              final status = val['status']?.toString().toLowerCase();
+              if (status == 'present' || status == 'late' || status == 'overtime') {
+                empAttendance++;
+              }
+            }
+          }
+        }
+      }
     }
+  } catch (e) {
+    debugPrint('Error loading employee attendance stats: $e');
   }
 
-  return BranchStats(
+  final res = BranchStats(
     zakat: z,
     nonZakat: nz,
     gmwf: gm,
@@ -185,7 +199,10 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
     zakatRevenue: zRev,
     nonZakatRevenue: nzRev,
     gmwfRevenue: gmRev,
+    employeeAttendance: empAttendance,
   );
+  _localStatsTTLCache[cacheTTLKey] = _CachedLocalBranchStats(res);
+  return res;
 }
 
 /// Fetches stats for a single historical day (e.g. yesterday) for one
@@ -206,12 +223,14 @@ Future<BranchStats> fetchHistoricalDayStats(String branchId, DateTime day) async
 BranchStats combineBranchStats(List<BranchStats> results) {
   int z = 0, nz = 0, gm = 0, das = 0, dasServed = 0, don = 0, disp = 0, presc = 0, dispRev = 0;
   int zRev = 0, nzRev = 0, gmRev = 0;
+  int empAtt = 0;
   for (final r in results) {
     z += r.zakat; nz += r.nonZakat; gm += r.gmwf;
     das += r.dasterkhwaan; dasServed += r.dasterkhwaanServed;
     don += r.donations; disp += r.dispensed; presc += r.prescribed;
     dispRev += r.dispensaryRevenue;
     zRev += r.zakatRevenue; nzRev += r.nonZakatRevenue; gmRev += r.gmwfRevenue;
+    empAtt += r.employeeAttendance;
   }
   return BranchStats(
     zakat: z, nonZakat: nz, gmwf: gm,
@@ -219,6 +238,7 @@ BranchStats combineBranchStats(List<BranchStats> results) {
     donations: don, dispensed: disp, prescribed: presc,
     dispensaryRevenue: dispRev,
     zakatRevenue: zRev, nonZakatRevenue: nzRev, gmwfRevenue: gmRev,
+    employeeAttendance: empAtt,
   );
 }
 
@@ -329,7 +349,7 @@ class RecentActivityService {
         dt = DateTime.tryParse(dtStr.toString()) ?? DateTime.now();
       }
       
-      final donor = data['donorName']?.toString() ?? 'Valued Donor';
+      final donor = data['donorName']?.toString() ?? 'Walk-in Donor';
       final amt = (data['amount'] as num?)?.toDouble() ?? 0.0;
       final rcpt = data['receiptNo']?.toString() ?? '';
       

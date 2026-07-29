@@ -134,7 +134,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                     );
                   },
                   child: Image.asset(
-                    'assets/logo/gmwf.png',
+                    'assets/logo/gmwf-1.png',
                     width: logoSize,
                     height: logoSize,
                     fit: BoxFit.contain,

@@ -118,6 +118,13 @@ class DonationRecord {
           .toList();
     }
 
+    // Normalize legacy anonymous/valued donor names to 'Walk-in Donor'
+    String normalizeDonorName(String raw) {
+      final lower = raw.trim().toLowerCase();
+      const legacyNames = {'anonymous', 'valued donor', ''};
+      return legacyNames.contains(lower) ? 'Walk-in Donor' : raw;
+    }
+
     return DonationRecord(
       hiveKey:            key,
       localId:            map['localId']            ?? '',
@@ -125,7 +132,7 @@ class DonationRecord {
       branchId:           map['branchId']            ?? '',
       branchName:         map['branchName']           ?? '',
       donorId:            map['donorId']             ?? '',
-      donorName:          map['donorName']            ?? '',
+      donorName:          normalizeDonorName(map['donorName'] ?? ''),
       phone:              map['phone']               ?? '',
       date:               map['date']                ?? '',
       timestamp:          map['timestamp'],
@@ -228,6 +235,8 @@ class DonationRecord {
     List<Map<String, dynamic>>? editHistory,
     String? date,
     String? bookReceiptNo,
+    String? donorName,
+    String? phone,
   }) {
     return DonationRecord(
       hiveKey:            hiveKey,
@@ -236,8 +245,8 @@ class DonationRecord {
       branchId:           branchId,
       branchName:         branchName,
       donorId:            donorId,
-      donorName:          donorName,
-      phone:              phone,
+      donorName:          donorName              ?? this.donorName,
+      phone:              phone                  ?? this.phone,
       date:               date                   ?? this.date,
       timestamp:          this.timestamp,
       lastUpdatedAt:      lastUpdatedAt          ?? this.lastUpdatedAt,

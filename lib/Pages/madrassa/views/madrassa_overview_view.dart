@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../models/madrassa_config.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../../../services/local_storage_service.dart';
+import '../widgets/student_progress_dialog.dart';
 import 'audit_log_view.dart';
 import '../madrassa_strings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,38 +26,637 @@ class MadrassaOverviewView extends ConsumerWidget {
     this.onAction,
   });
 
+  double _calculateRecentPace(String studentId, String branchId, double overallAvg) {
+    try {
+      final box = Hive.box(LocalStorageService.madrassaLogsBox);
+      final prefix = '${branchId.toLowerCase().trim()}__log__';
+      
+      final logsList = <MapEntry<DateTime, int>>[];
+      for (final key in box.keys) {
+        if (key.toString().startsWith(prefix)) {
+          final datePart = key.toString().substring(prefix.length);
+          final date = DateTime.tryParse(datePart);
+          if (date == null) continue;
+          
+          final logVal = box.get(key);
+          if (logVal is Map && logVal.containsKey(studentId)) {
+            final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
+            final currentLines = studentLog['currentLines'] as int?;
+            if (currentLines != null && currentLines > 0) {
+              logsList.add(MapEntry(date, currentLines));
+            }
+          }
+        }
+      }
+      
+      if (logsList.length < 2) {
+        return overallAvg;
+      }
+      
+      // Sort chronologically
+      logsList.sort((a, b) => a.key.compareTo(b.key));
+      
+      final latest = logsList.last;
+      
+      // Find reference log from 7 to 30 days ago
+      MapEntry<DateTime, int>? bestRef;
+      for (int i = logsList.length - 2; i >= 0; i--) {
+        final ref = logsList[i];
+        final daysDiff = latest.key.difference(ref.key).inDays;
+        if (daysDiff >= 7 && daysDiff <= 30) {
+          bestRef = ref;
+          if (daysDiff >= 14) break;
+        }
+      }
+      
+      // Fallback
+      if (bestRef == null) {
+        for (final ref in logsList) {
+          if (ref.key != latest.key) {
+            bestRef = ref;
+            break;
+          }
+        }
+      }
+      
+      if (bestRef != null) {
+        final daysDiff = latest.key.difference(bestRef.key).inDays;
+        final linesDiff = latest.value - bestRef.value;
+        if (daysDiff > 0 && linesDiff >= 0) {
+          final pace = linesDiff / daysDiff;
+          return pace >= 0.8 ? pace : overallAvg;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error calculating recent pace: $e');
+    }
+    return overallAvg;
+  }
+
+  void _showStudentProgressDialog(BuildContext context, Map<String, dynamic> studentData) {
+    final studentId = studentData['id']?.toString() ?? '';
+    final totalLines = 8640;
+    final currentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
+    final prevLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
+    
+    final dynamic joinField = studentData['joinDate'];
+    Timestamp? joinTimestamp;
+    if (joinField is Timestamp) {
+      joinTimestamp = joinField;
+    } else if (joinField is String) {
+      try {
+        final parsed = DateTime.parse(joinField);
+        joinTimestamp = Timestamp.fromDate(parsed);
+      } catch (_) {}
+    }
+    final joinDate = joinTimestamp?.toDate();
+    final daysSinceJoin = (joinDate != null) ? DateTime.now().difference(joinDate).inDays : 0;
+    final totalMemorized = currentLines + prevLines;
+    final avgPerDay = daysSinceJoin > 0 ? totalMemorized / daysSinceJoin : 0.0;
+    
+    final recentDailyRate = _calculateRecentPace(studentId, branchId, avgPerDay);
+    final remainingLines = (totalLines - totalMemorized).clamp(0, totalLines);
+    final estimatedDays = recentDailyRate > 0.3 ? (remainingLines / recentDailyRate).ceil() : null;
+    final pct = ((totalMemorized / totalLines) * 100).clamp(0.0, 100.0).toStringAsFixed(1);
+
+    showDialog(
+      context: context,
+      builder: (_) => StudentProgressDialog(
+        studentName: studentData['name'] ?? 'Student',
+        photoUrl: studentData['photoUrl'],
+        className: studentData['class']?.toString() ?? 'Hifz',
+        rollNumber: studentData['rollNumber']?.toString() ?? '?',
+        joinDate: joinDate,
+        totalLines: totalLines,
+        currentLines: currentLines,
+        prevHifzLines: prevLines,
+        percentage: pct,
+        estimatedDays: estimatedDays,
+        recentDailyRate: recentDailyRate,
+      ),
+    );
+  }
+
+  Widget _buildDailyProgressSummary(BuildContext context, List<Map<String, dynamic>> activeStudents, Map<String, dynamic> logData) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    int present = 0;
+    int absent = 0;
+    int leave = 0;
+    int totalLinesToday = 0;
+
+    final progressList = <Map<String, dynamic>>[];
+
+    for (final s in activeStudents) {
+      final sId = s['id']?.toString() ?? '';
+      if (logData.containsKey(sId)) {
+        final entry = Map<String, dynamic>.from(logData[sId] as Map);
+        final att = entry['attendance']?.toString() ?? 'absent';
+        if (att == 'present') {
+          present++;
+          final currentLines = entry['currentLines'] as int? ?? 0;
+          if (currentLines > 0) {
+            final prevLines = _getPreviousLines(sId, DateTime.now(), currentLines);
+            final diff = currentLines - prevLines;
+            if (diff > 0) {
+              totalLinesToday += diff;
+              progressList.add({
+                'name': s['name'] ?? 'Student',
+                'rollNumber': s['rollNumber']?.toString() ?? '?',
+                'diff': diff,
+                'currentLines': currentLines,
+              });
+            }
+          }
+        } else if (att == 'leave') {
+          leave++;
+        } else {
+          absent++;
+        }
+      } else {
+        absent++;
+      }
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.grey.withOpacity(0.12)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF1A1C1E).withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                context.isUrdu ? 'روزانہ کی کارکردگی کا خلاصہ' : 'Daily Progress Summary',
+                style: context.urduStyle(
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.indigo.shade900,
+                  ),
+                ),
+              ),
+              const Icon(Icons.auto_graph_rounded, color: Color(0xFF10B981)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _pillIndicator(context, context.isUrdu ? 'حاضر: $present' : 'Present: $present', const Color(0xFF10B981), const Color(0xFFD1FAE5)),
+              const SizedBox(width: 8),
+              _pillIndicator(context, context.isUrdu ? 'غیر حاضر: $absent' : 'Absent: $absent', const Color(0xFFEF4444), const Color(0xFFFEE2E2)),
+              const SizedBox(width: 8),
+              _pillIndicator(context, context.isUrdu ? 'رخصت: $leave' : 'Leave: $leave', const Color(0xFFF59E0B), const Color(0xFFFEF3C7)),
+            ],
+          ),
+          const SizedBox(height: 20),
+          const Divider(height: 1, color: Color(0xFFE2E8F0)),
+          const SizedBox(height: 16),
+          Text(
+            context.isUrdu ? 'آج کی حفظ کی تفصیلات' : 'Today\'s Memorization Updates',
+            style: context.urduStyle(
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white70 : Colors.grey[800],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (progressList.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12.0),
+              child: Center(
+                child: Text(
+                  context.isUrdu ? 'آج ابھی تک کوئی کارکردگی درج نہیں ہوئی۔' : 'No daily progress updates recorded yet today.',
+                  style: context.urduStyle(style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                ),
+              ),
+            )
+          else ...[
+            Text(
+              context.isUrdu ? 'مجموعی لائنیں: +$totalLinesToday لائنیں' : 'Total lines memorized today: +$totalLinesToday lines',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+            ),
+            const SizedBox(height: 8),
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: progressList.length,
+              itemBuilder: (context, idx) {
+                final p = progressList[idx];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${p['name']} (${p['rollNumber']})',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFD1FAE5),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '+${p['diff']} lines',
+                              style: const TextStyle(color: Color(0xFF065F46), fontWeight: FontWeight.bold, fontSize: 11),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Total: ${p['currentLines']} lines',
+                            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _pillIndicator(BuildContext context, String text, Color color, Color bg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        text,
+        style: context.urduStyle(
+          style: TextStyle(
+            color: color,
+            fontSize: 11.5,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  int _getPreviousLines(String studentId, DateTime today, int currentLinesToday) {
+    try {
+      final box = Hive.box(LocalStorageService.madrassaLogsBox);
+      for (int i = 1; i <= 7; i++) {
+        final date = today.subtract(Duration(days: i));
+        final dateStr = DateFormat('yyyy-MM-dd').format(date);
+        final key = '${branchId.toLowerCase().trim()}__log__$dateStr';
+        final val = box.get(key);
+        if (val is Map && val.containsKey(studentId)) {
+          final studentLog = Map<String, dynamic>.from(val[studentId] as Map);
+          final prevLines = studentLog['currentLines'] as int?;
+          if (prevLines != null && prevLines > 0) {
+            return prevLines;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting previous lines: $e');
+    }
+    return currentLinesToday;
+  }
+
+  int _calculateProgress(Map<String, dynamic> student, List<Map<String, dynamic>> allLogs, String timeframe) {
+    final sId = student['id'] ?? '';
+    final prevHifzLines = int.tryParse(student['prevHifzLines']?.toString() ?? '0') ?? 0;
+
+    if (allLogs.isEmpty) {
+      if (timeframe == 'Overall') {
+        return prevHifzLines;
+      }
+      return 0;
+    }
+
+    final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
+      ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+
+    final latestDateKey = sortedLogs.last['dateKey']?.toString() ?? '';
+    final latestDate = DateTime.tryParse(latestDateKey) ?? DateTime.now();
+
+    if (timeframe == 'Daily') {
+      final latestLog = sortedLogs.last;
+      final studentLog = latestLog[sId];
+      if (studentLog is Map && studentLog.containsKey('currentLines')) {
+        return int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+      }
+      return 0;
+    }
+
+    DateTime startDate;
+    if (timeframe == 'Weekly') {
+      startDate = latestDate.subtract(const Duration(days: 6));
+    } else if (timeframe == 'Monthly') {
+      startDate = latestDate.subtract(const Duration(days: 29));
+    } else {
+      startDate = DateTime(2000, 1, 1);
+    }
+
+    int sum = 0;
+    for (final log in sortedLogs) {
+      final dateKey = log['dateKey']?.toString() ?? '';
+      final parsedDate = DateTime.tryParse(dateKey);
+      if (parsedDate == null) continue;
+
+      if (timeframe == 'Weekly' || timeframe == 'Monthly') {
+        if (parsedDate.isBefore(startDate) || parsedDate.isAfter(latestDate)) {
+          continue;
+        }
+      }
+
+      final studentLog = log[sId];
+      if (studentLog is Map && studentLog.containsKey('currentLines')) {
+        sum += int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+      }
+    }
+
+    if (timeframe == 'Overall') {
+      sum += prevHifzLines;
+    }
+
+    return sum;
+  }
+
+  Widget _buildInsightsGrid(BuildContext context, List<Map<String, dynamic>> best, List<Map<String, dynamic>> worst) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 600;
+        final topPerformers = best.take(5).toList();
+        final struggling = worst.take(5).toList();
+
+        final bestCard = _buildInsightsCard(
+          context: context,
+          title: context.isUrdu ? 'بہترین کارکردگی (ٹاپ 5)' : 'Top Performers (Best 5)',
+          students: topPerformers,
+          isGood: true,
+          gradient: const [Color(0xFF0F766E), Color(0xFF115E59)],
+        );
+
+        final worstCard = _buildInsightsCard(
+          context: context,
+          title: context.isUrdu ? 'توجہ طلب طالب علم (آخری 5)' : 'Needs Attention (Worst 5)',
+          students: struggling,
+          isGood: false,
+          gradient: const [Color(0xFFBE123C), Color(0xFF9F1239)],
+        );
+
+        if (isMobile) {
+          return Column(
+            children: [
+              bestCard,
+              const SizedBox(height: 16),
+              worstCard,
+            ],
+          );
+        } else {
+          return Row(
+            children: [
+              Expanded(child: bestCard),
+              const SizedBox(width: 24),
+              Expanded(child: worstCard),
+            ],
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildInsightsCard({
+    required BuildContext context,
+    required String title,
+    required List<Map<String, dynamic>> students,
+    required bool isGood,
+    required List<Color> gradient,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradient,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: gradient.first.withOpacity(0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isGood ? Icons.stars_rounded : Icons.warning_amber_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (students.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Text(
+                  context.isUrdu ? 'کوئی ڈیٹا موجود نہیں' : 'No data available',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+            )
+          else
+            ...students.asMap().entries.map((e) {
+              final idx = e.key;
+              final std = e.value;
+              final progress = std['calculatedProgress'] as int;
+
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _showStudentProgressDialog(context, std),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    '${idx + 1}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  std['name']?.toString() ?? '',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.25),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '+$progress ${context.isUrdu ? 'لائنیں' : 'lines'}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // TODO: Full dark mode theme support integration
     final configAsync = ref.watch(madrassaConfigProvider(branchId));
     final studentsAsync = ref.watch(madrassaStudentsProvider(branchId));
+    final logsAsync = ref.watch(madrassaAllLogsProvider(branchId));
+    final dateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final dailyLogAsync = ref.watch(madrassaDailyLogProvider((branchId: branchId, dateKey: dateKey)));
 
     return configAsync.when(
       loading: () => const Center(
-        child: CircularProgressIndicator(color: Color(0xFF4C4DDC)),
+        child: CircularProgressIndicator(color: Color(0xFF0F766E)),
       ),
       error: (e, st) => Center(child: Text('Error loading config: $e')),
       data: (config) {
         return studentsAsync.when(
           loading: () => const Center(
-            child: CircularProgressIndicator(color: Color(0xFF4C4DDC)),
+            child: CircularProgressIndicator(color: Color(0xFF0F766E)),
           ),
           error: (e, st) => Center(child: Text('Error loading students: $e')),
           data: (allStudents) {
-            return SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildWelcomeHeader(context),
-                  const SizedBox(height: 32),
-                  _buildRealtimeStatGrid(context, ref),
-                  const SizedBox(height: 32),
-                  _buildQuickActions(context),
-                  const SizedBox(height: 32),
-                  _buildRecentActivity(context),
-                ],
+            return logsAsync.when(
+              loading: () => const Center(
+                child: CircularProgressIndicator(color: Color(0xFF0F766E)),
               ),
+              error: (e, st) => Center(child: Text('Error loading logs: $e')),
+              data: (allLogs) {
+                return dailyLogAsync.when(
+                  loading: () => const Center(
+                    child: CircularProgressIndicator(color: Color(0xFF0F766E)),
+                  ),
+                  error: (e, st) => Center(child: Text('Error loading daily log: $e')),
+                  data: (logData) {
+                    final activeStudents = allStudents.where((d) {
+                      final statusVal = d['status'];
+                      return (statusVal == null || statusVal == '')
+                          ? (d['active'] == true)
+                          : (statusVal == 'active');
+                    }).toList();
+
+                    // Calculate progress for each active student (Weekly timeframe)
+                    final List<Map<String, dynamic>> processedStudents = [];
+                    for (final std in activeStudents) {
+                      final progress = _calculateProgress(std, allLogs, 'Weekly');
+                      processedStudents.add({
+                        ...std,
+                        'calculatedProgress': progress,
+                      });
+                    }
+
+                    // Sort lists for best (descending) and worst (ascending)
+                    final bestStudents = List<Map<String, dynamic>>.from(processedStudents)
+                      ..sort((a, b) => (b['calculatedProgress'] as int).compareTo(a['calculatedProgress'] as int));
+
+                    final worstStudents = List<Map<String, dynamic>>.from(processedStudents)
+                      ..sort((a, b) => (a['calculatedProgress'] as int).compareTo(b['calculatedProgress'] as int));
+
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildWelcomeHeader(context),
+                          const SizedBox(height: 24),
+                          _buildRealtimeStatGrid(context, ref),
+                          const SizedBox(height: 24),
+                          _buildDailyProgressSummary(context, activeStudents, logData),
+                          const SizedBox(height: 24),
+                          _buildInsightsGrid(context, bestStudents, worstStudents),
+                          const SizedBox(height: 24),
+                          _buildQuickActions(context),
+                          const SizedBox(height: 24),
+                          _buildRecentActivity(context),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
             );
           },
         );

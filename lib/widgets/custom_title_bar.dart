@@ -35,7 +35,7 @@ class CustomTitleBar extends StatelessWidget {
                       child: Row(
                         children: [
                           Image.asset(
-                            'assets/logo/gmwf.png',
+                            'assets/logo/gmwf-1.png',
                             height: 20,
                             errorBuilder: (context, error, stackTrace) =>
                                 const Icon(Icons.business, color: Colors.white, size: 20),

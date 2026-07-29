@@ -36,7 +36,9 @@
 
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -140,23 +142,54 @@ class ConnectionManager {
     // Skip all discovery when a fixed server IP is configured OR if running on Web.
     // Web browsers cannot perform UDP/mDNS network discovery due to security limits.
     if (AppNetwork.useDedicatedServer || kIsWeb) {
-      String targetIp = AppNetwork.dedicatedServerIp;
+      String? targetIp;
       
-      if (kIsWeb && !AppNetwork.useDedicatedServer) {
-        targetIp = Uri.base.host;
-        if (targetIp.isEmpty || targetIp == 'localhost') {
-          targetIp = '127.0.0.1';
+      if (AppNetwork.useDedicatedServer) {
+        targetIp = AppNetwork.dedicatedServerIp;
+      } else if (kIsWeb) {
+        // 1. Check local Hive storage for saved server IP
+        final saved = _getSavedServer();
+        if (saved != null && saved.$1.isNotEmpty) {
+          targetIp = saved.$1;
+        }
+
+        // 2. Query Firestore for activeServerIp published by server/windows app for this branch
+        if ((targetIp == null || targetIp.isEmpty || targetIp == '127.0.0.1' || targetIp == 'localhost') && _isFirebaseReady) {
+          if (_branchId != null && _branchId!.isNotEmpty) {
+            try {
+              final doc = await FirebaseFirestore.instance
+                  .collection('branches').doc(_branchId).get()
+                  .timeout(const Duration(seconds: 4));
+              final fsIp = doc.data()?['activeServerIp']?.toString().trim();
+              if (fsIp != null && fsIp.isNotEmpty) {
+                targetIp = fsIp;
+                debugPrint('[ConnectionManager] Discovered activeServerIp from Firestore: $targetIp');
+              }
+            } catch (e) {
+              debugPrint('[ConnectionManager] Could not fetch activeServerIp from Firestore: $e');
+            }
+          }
+        }
+
+        // 3. Fallback to Uri.base.host / 127.0.0.1
+        if (targetIp == null || targetIp.isEmpty) {
+          targetIp = Uri.base.host;
+          if (targetIp.isEmpty || targetIp == 'localhost') {
+            targetIp = '127.0.0.1';
+          }
         }
       }
 
+      final resolvedIp = targetIp ?? '127.0.0.1';
+
       _emit(ConnectionStatus(
         state: LanConnectionState.connecting,
-        ip: targetIp,
+        ip: resolvedIp,
         port: AppNetwork.websocketPort,
-        message: 'Connecting to $targetIp...',
+        message: 'Connecting to $resolvedIp...',
       ));
       final ok = await _connectTo(
-        targetIp,
+        resolvedIp,
         AppNetwork.websocketPort,
       );
       if (!ok) {
@@ -263,6 +296,19 @@ class ConnectionManager {
       }
 
       _saveServer(ip, port);
+      
+      // Publish active server IP to Firestore for Web clients in this branch
+      if (_isFirebaseReady && _branchId != null && _branchId!.isNotEmpty && ip != '127.0.0.1' && ip != 'localhost') {
+        try {
+          FirebaseFirestore.instance
+              .collection('branches').doc(_branchId)
+              .set({'activeServerIp': ip, 'serverLastSeen': FieldValue.serverTimestamp()}, SetOptions(merge: true))
+              .catchError((e) => debugPrint('[ConnectionManager] Could not publish activeServerIp: $e'));
+        } catch (e) {
+          debugPrint('[ConnectionManager] Exception publishing activeServerIp: $e');
+        }
+      }
+
       _reconnectAttempts = 0;
 
       _emit(ConnectionStatus(
@@ -324,6 +370,14 @@ class ConnectionManager {
     });
 
     return completer.future;
+  }
+
+  bool get _isFirebaseReady {
+    try {
+      return Firebase.apps.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ── Heartbeat ──────────────────────────────────────────────────────────────

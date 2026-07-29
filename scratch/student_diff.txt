@@ -1,0 +1,665 @@
+﻿diff --git a/lib/Pages/madrassa/views/student_management_view.dart b/lib/Pages/madrassa/views/student_management_view.dart
+index 0267d7e..5aba11d 100644
+--- a/lib/Pages/madrassa/views/student_management_view.dart
++++ b/lib/Pages/madrassa/views/student_management_view.dart
+@@ -4,8 +4,10 @@ import 'package:image_picker/image_picker.dart';
+ import 'dart:convert';
+ import 'package:file_picker/file_picker.dart';
+ 
+-import '../utils/photo_upload_helper.dart';
+ import 'package:intl/intl.dart';
++import '../widgets/student_progress_dialog.dart';
++import '../utils/photo_upload_helper.dart';
++
+ import '../widgets/madrassa_status_menu.dart';
+ import '../../../theme/role_theme_provider.dart';
+ import '../dialogs/enrollment_dialog.dart';
+@@ -33,6 +35,8 @@ class StudentManagementView extends ConsumerStatefulWidget {
+ 
+ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+   String _searchQuery = '';
++  String _statusFilter = 'all';
++  String _sortBy = 'rollNumber';
+   final Map<String, PhotoUploadStatus> _uploadStates = {};
+ 
+   Future<void> _importStudentsFile() async {
+@@ -301,6 +305,166 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+     return result;
+   }
+ 
++  void _showStudentProgressDialog(BuildContext context, Map<String, dynamic> studentData) {
++    final totalLines = 8640;
++    final currentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
++    final prevLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
++    // joinDate may be stored as Timestamp or ISO string
++    final dynamic joinField = studentData['joinDate'];
++    Timestamp? joinTimestamp;
++    if (joinField is Timestamp) {
++      joinTimestamp = joinField;
++    } else if (joinField is String) {
++      try {
++        final parsed = DateTime.parse(joinField);
++        joinTimestamp = Timestamp.fromDate(parsed);
++      } catch (_) {}
++    }
++    final joinDate = joinTimestamp?.toDate();
++    final daysSinceJoin = (joinDate != null) ? DateTime.now().difference(joinDate).inDays : 0;
++    // totalMemorized = lines at this madrassa + prior hifz
++    final totalMemorized = currentLines + prevLines;
++    // Use totalMemorized for rate so prior hifz is reflected in the student's real pace
++    final avgPerDay = daysSinceJoin > 0 ? totalMemorized / daysSinceJoin : 0.0;
++    final remainingLines = (totalLines - totalMemorized).clamp(0, totalLines);
++    final estimatedDays = avgPerDay > 0 ? (remainingLines / avgPerDay).ceil() : null;
++    final pct = ((totalMemorized / totalLines) * 100).clamp(0.0, 100.0).toStringAsFixed(1);
++
++    showDialog(
++      context: context,
++      builder: (_) => StudentProgressDialog(
++        studentName: studentData['name'] ?? 'Student',
++        photoUrl: studentData['photoUrl'],
++        className: studentData['class'] ?? 'Hifz',
++        rollNumber: studentData['rollNumber'] ?? '?',
++        joinDate: joinDate,
++        totalLines: totalLines,
++        currentLines: currentLines,
++        prevHifzLines: prevLines,
++        percentage: pct,
++        estimatedDays: estimatedDays,
++      ),
++    );
++  }
++
++  Widget _buildStatusChip(BuildContext context, Map<String, dynamic> d) {
++    final status = d['status'] ?? 'active';
++    String statusLabel;
++    Color color;
++
++    switch (status) {
++      case 'active':
++        statusLabel = context.l.statusActive;
++        color = const Color(0xFF008080); // Teal
++        break;
++      case 'archived':
++        statusLabel = context.l.statusArchived;
++        color = const Color(0xFFF59E0B); // Amber
++        break;
++      case 'hifz_completed':
++        statusLabel = context.l.statusHifzCompleted;
++        color = const Color(0xFF4C4DDC); // Purple
++        break;
++      case 'left':
++        statusLabel = context.l.statusLeft;
++        color = const Color(0xFFEF4444); // Red/Rose
++        break;
++      case 'inactive':
++        statusLabel = context.isUrdu ? '╪║█î╪▒ ┘ü╪╣╪º┘ä' : 'Inactive';
++        color = const Color(0xFF6B7280); // Slate Gray
++        break;
++      default:
++        statusLabel = status.toString().toUpperCase();
++        color = const Color(0xFF6B7280);
++    }
++
++    // Extract the latest reason for this status from auditLog
++    String reason = '';
++    final auditListRaw = d['auditLog'] as List<dynamic>? ?? [];
++    if (auditListRaw.isNotEmpty) {
++      final auditList = List<Map<String, dynamic>>.from(
++        auditListRaw.map((e) => Map<String, dynamic>.from(e as Map)),
++      );
++      // Sort in descending order to get the latest first
++      auditList.sort((a, b) {
++        final dynamic aRaw = a['date'];
++        final dynamic bRaw = b['date'];
++        
++        DateTime aDate;
++        if (aRaw is Timestamp) {
++          aDate = aRaw.toDate();
++        } else if (aRaw is String) {
++          aDate = DateTime.tryParse(aRaw) ?? DateTime.fromMillisecondsSinceEpoch(0);
++        } else {
++          aDate = DateTime.fromMillisecondsSinceEpoch(0);
++        }
++
++        DateTime bDate;
++        if (bRaw is Timestamp) {
++          bDate = bRaw.toDate();
++        } else if (bRaw is String) {
++          bDate = DateTime.tryParse(bRaw) ?? DateTime.fromMillisecondsSinceEpoch(0);
++        } else {
++          bDate = DateTime.fromMillisecondsSinceEpoch(0);
++        }
++
++        return bDate.compareTo(aDate);
++      });
++      final matchingEntry = auditList.firstWhere(
++        (entry) => entry['status'] == status,
++        orElse: () => <String, dynamic>{},
++      );
++      if (matchingEntry.isNotEmpty) {
++        reason = matchingEntry['reason'] ?? '';
++      }
++    }
++
++    return Column(
++      mainAxisSize: MainAxisSize.min,
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Container(
++          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
++          decoration: BoxDecoration(
++            color: color.withOpacity(0.08),
++            borderRadius: BorderRadius.circular(12),
++            border: Border.all(color: color.withOpacity(0.25), width: 1),
++          ),
++          child: Text(
++            statusLabel,
++            style: context.urduStyle(
++              style: TextStyle(
++                color: color,
++                fontSize: 11,
++                fontWeight: FontWeight.bold,
++              ),
++            ),
++          ),
++        ),
++        if (reason.isNotEmpty && reason != statusLabel && reason != '$statusLabel:') ...[
++          const SizedBox(height: 4),
++          Tooltip(
++            message: reason,
++            child: Container(
++              constraints: const BoxConstraints(maxWidth: 130),
++              child: Text(
++                reason,
++                maxLines: 1,
++                overflow: TextOverflow.ellipsis,
++                style: context.urduStyle(
++                  style: TextStyle(
++                    color: Colors.grey[600],
++                    fontSize: 10,
++                  ),
++                ),
++              ),
++            ),
++          ),
++        ],
++      ],
++    );
++  }
++
+   Widget _buildMobileStudentCard(dynamic s, Map<String, dynamic> d) {
+     final studentId = s is DocumentSnapshot ? s.id : s['id'].toString();
+     return Container(
+@@ -351,6 +515,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+                       '${context.l.rollNumber}: ${d['rollNumber'] ?? '?'} ΓÇó Class: ${d['class'] ?? 'Hifz'}',
+                       style: context.urduStyle(style: TextStyle(color: Colors.grey[600], fontSize: 12)),
+                     ),
++                    const SizedBox(height: 6),
++                    _buildStatusChip(context, d),
+                   ],
+                 ),
+               ),
+@@ -362,6 +528,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+                 username: widget.username,
+                 role: widget.role,
+               ),
++              IconButton(
++                icon: const Icon(Icons.info_outline, color: Color(0xFF008080)),
++                tooltip: context.l.moreInfo,
++                onPressed: () => _showStudentProgressDialog(context, d),
++              ),
+             ],
+           ),
+           const SizedBox(height: 12),
+@@ -395,6 +566,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+     );
+   }
+ 
++
++  
++
+   Widget _buildProgressBar(BuildContext context, int currentLines) {
+     const int totalLines = 8640;
+     final double pct = (currentLines / totalLines).clamp(0.0, 1.0);
+@@ -446,11 +620,55 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+                   final name = (d['name'] ?? '').toString().toLowerCase();
+                   final roll = (d['rollNumber'] ?? '').toString().toLowerCase();
+                   final query = _searchQuery.toLowerCase();
+-                  return name.contains(query) || roll.contains(query);
++                  
++                  final matchesSearch = name.contains(query) || roll.contains(query);
++                  if (!matchesSearch) return false;
++
++                  if (_statusFilter != 'all') {
++                    final status = d['status'] ?? 'active';
++                    return status == _statusFilter;
++                  }
++                  return true;
+                 }).toList()..sort((a, b) {
+-                  final aVal = int.tryParse(a['rollNumber']?.toString() ?? '') ?? 999999;
+-                  final bVal = int.tryParse(b['rollNumber']?.toString() ?? '') ?? 999999;
+-                  return aVal.compareTo(bVal);
++                  if (_sortBy == 'rollNumber') {
++                    final aVal = int.tryParse(a['rollNumber']?.toString() ?? '') ?? 999999;
++                    final bVal = int.tryParse(b['rollNumber']?.toString() ?? '') ?? 999999;
++                    return aVal.compareTo(bVal);
++                  } else if (_sortBy == 'progress') {
++                    final aLines = (a['currentLines'] as num?)?.toInt() ?? 0;
++                    final aPrev = int.tryParse(a['prevHifzLines']?.toString() ?? '0') ?? 0;
++                    final aTotal = aLines + aPrev;
++
++                    final bLines = (b['currentLines'] as num?)?.toInt() ?? 0;
++                    final bPrev = int.tryParse(b['prevHifzLines']?.toString() ?? '0') ?? 0;
++                    final bTotal = bLines + bPrev;
++
++                    return bTotal.compareTo(aTotal);
++                  } else if (_sortBy == 'joinDate') {
++                    final dynamic aJoinRaw = a['joinDate'];
++                    final dynamic bJoinRaw = b['joinDate'];
++                    
++                    DateTime aJoin;
++                    if (aJoinRaw is Timestamp) {
++                      aJoin = aJoinRaw.toDate();
++                    } else if (aJoinRaw is String) {
++                      aJoin = DateTime.tryParse(aJoinRaw) ?? DateTime.fromMillisecondsSinceEpoch(0);
++                    } else {
++                      aJoin = DateTime.fromMillisecondsSinceEpoch(0);
++                    }
++
++                    DateTime bJoin;
++                    if (bJoinRaw is Timestamp) {
++                      bJoin = bJoinRaw.toDate();
++                    } else if (bJoinRaw is String) {
++                      bJoin = DateTime.tryParse(bJoinRaw) ?? DateTime.fromMillisecondsSinceEpoch(0);
++                    } else {
++                      bJoin = DateTime.fromMillisecondsSinceEpoch(0);
++                    }
++
++                    return bJoin.compareTo(aJoin);
++                  }
++                  return 0;
+                 });
+ 
+                 if (filteredStudents.isEmpty) {
+@@ -462,99 +680,139 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+                   );
+                 }
+ 
++                // Group students by batch
++                final Map<String, List<Map<String, dynamic>>> studentsByBatch = {};
++                for (final student in filteredStudents) {
++                  final batch = student['batch'] ?? 'active';
++                  studentsByBatch.putIfAbsent(batch, () => []).add(student);
++                }
++
++                // Define batch order
++                const batchOrder = ['active', 'left', 'dropped', 'hifz_complete'];
++
+                 if (isMobile) {
+-                  return ListView.builder(
++                  return ListView(
+                     padding: const EdgeInsets.only(bottom: 24),
+-                    itemCount: filteredStudents.length,
+-                    itemBuilder: (context, i) {
+-                      final s = filteredStudents[i];
+-                      final d = s;
+-                      return _buildMobileStudentCard(s, d);
+-                    },
++                    children: [
++                      for (final batch in batchOrder)
++                        if (studentsByBatch.containsKey(batch))
++                          ...[
++                            _buildBatchHeader(context, batch),
++                            ...studentsByBatch[batch]!.map((s) => _buildMobileStudentCard(s, s)),
++                          ]
++                    ],
+                   );
+                 }
+ 
+                 return SingleChildScrollView(
+                   child: Padding(
+                     padding: const EdgeInsets.symmetric(horizontal: 24),
+-                    child: Container(
+-                      width: double.infinity,
+-                      decoration: BoxDecoration(
+-                        color: Colors.white,
+-                        borderRadius: BorderRadius.circular(16),
+-                        border: Border.all(color: const Color(0xFFE0E2E7)),
+-                      ),
+-                      child: DataTable(
+-                        columnSpacing: 12,
+-                        horizontalMargin: 12,
+-                        headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F4F9)),
+-                        dataRowMinHeight: 60,
+-                        dataRowMaxHeight: 60,
+-                        columns: [
+-                          const DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
+-                          DataColumn(label: Text(context.l.students, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                          DataColumn(label: Text(context.l.rollNumber, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                          const DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold))),
+-                          DataColumn(label: Text(context.l.guardianFullName, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                          DataColumn(label: Text(context.l.contactPhone, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                          DataColumn(label: Text(context.l.overallProgress, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                          DataColumn(label: Text(context.l.todayActions, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+-                        ],
+-                        rows: List.generate(filteredStudents.length, (i) {
+-                          final s = filteredStudents[i];
+-                          final d = s;
+-                          final studentId = s['id'].toString();
+-                          final lines = d['currentLines'] ?? 0;
+-                          final pct = (lines / 8640 * 100).toStringAsFixed(1);
+-
+-                          return DataRow(cells: [
+-                            DataCell(Text('${i + 1}')),
+-                            DataCell(Row(
+-                              children: [
+-                                GestureDetector(
+-                                  onTap: () => _pickAndUploadPhoto(studentId),
+-                                  child: Container(
+-                                    width: 24,
+-                                    height: 24,
+-                                    decoration: const BoxDecoration(color: Color(0xFFF0F2F5), shape: BoxShape.circle),
+-                                    child: _uploadStates[studentId] == PhotoUploadStatus.uploading
+-                                        ? const Padding(
+-                                            padding: EdgeInsets.all(4.0),
+-                                            child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
+-                                          )
+-                                        : (d['photoUrl'] != null && d['photoUrl'].toString().isNotEmpty
+-                                            ? ClipOval(
+-                                                child: Image.network(
+-                                                  d['photoUrl'],
+-                                                  fit: BoxFit.cover,
+-                                                  width: 24,
+-                                                  height: 24,
+-                                                  errorBuilder: (context, error, stackTrace) => _buildAvatarFallback(d['name'], fontSize: 10),
+-                                                ),
+-                                              )
+-                                            : _buildAvatarFallback(d['name'], fontSize: 10)),
+-                                  ),
++                    child: Column(
++                      crossAxisAlignment: CrossAxisAlignment.start,
++                      children: [
++                        for (final batch in batchOrder)
++                          if (studentsByBatch.containsKey(batch))
++                            ...[
++                              _buildBatchHeader(context, batch),
++                              const SizedBox(height: 12),
++                              Container(
++                                width: double.infinity,
++                                decoration: BoxDecoration(
++                                  color: Colors.white,
++                                  borderRadius: BorderRadius.circular(16),
++                                  border: Border.all(color: const Color(0xFFE0E2E7)),
+                                 ),
+-                                const SizedBox(width: 8),
+-                                Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+-                              ],
+-                            )),
+-                            DataCell(Text(d['rollNumber'] ?? '?')),
+-                            DataCell(Text(d['class'] ?? 'Hifz')),
+-                            DataCell(Text(d['guardianName'] ?? 'ΓÇö')),
+-                            DataCell(Text(d['contactPhone'] ?? d['phone'] ?? 'ΓÇö')),
+-                            DataCell(Text('$lines lines ($pct%)', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF008080)))),
+-                            DataCell(StatusActionMenu(
+-                              student: s,
+-                              branchId: widget.branchId,
+-                              isAdmin: widget.isAdmin,
+-                              t: RoleThemeScope.dataOf(context),
+-                              username: widget.username,
+-                              role: widget.role,
+-                            )),
+-                          ]);
+-                        }),
+-                      ),
++                                child: SingleChildScrollView(
++                                  scrollDirection: Axis.horizontal,
++                                  child: DataTable(
++                                  columnSpacing: 12,
++                                  horizontalMargin: 12,
++                                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F4F9)),
++                                  dataRowMinHeight: 60,
++                                  dataRowMaxHeight: 60,
++                                  columns: [
++                                    const DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
++                                    DataColumn(label: Text(context.l.students, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                    DataColumn(label: Text(context.l.rollNumber, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                    const DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold))),
++                                    DataColumn(label: Text(context.l.guardianFullName, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                    DataColumn(label: Text(context.l.contactPhone, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                    DataColumn(label: Text(context.l.overallProgress, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                    const DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
++                                    DataColumn(label: Text(context.l.todayActions, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
++                                  ],
++                                  rows: List.generate(studentsByBatch[batch]!.length, (i) {
++                                    final s = studentsByBatch[batch]![i];
++                                    final d = s;
++                                    final studentId = s['id'].toString();
++                                    final lines = d['currentLines'] ?? 0;
++                                    final prevL = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
++                                    final totalL = lines + prevL;
++                                    final pct = (totalL / 8640 * 100).clamp(0.0, 100.0).toStringAsFixed(1);
++
++                                    return DataRow(cells: [
++                                      DataCell(Text('${i + 1}')),
++                                      DataCell(Row(
++                                        children: [
++                                          GestureDetector(
++                                            onTap: () => _pickAndUploadPhoto(studentId),
++                                            child: Container(
++                                              width: 24,
++                                              height: 24,
++                                              decoration: const BoxDecoration(color: Color(0xFFF0F2F5), shape: BoxShape.circle),
++                                              child: _uploadStates[studentId] == PhotoUploadStatus.uploading
++                                                  ? const Padding(
++                                                      padding: EdgeInsets.all(4.0),
++                                                      child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
++                                                    )
++                                                  : (d['photoUrl'] != null && d['photoUrl'].toString().isNotEmpty
++                                                      ? ClipOval(
++                                                          child: Image.network(
++                                                            d['photoUrl'],
++                                                            fit: BoxFit.cover,
++                                                            width: 24,
++                                                            height: 24,
++                                                            errorBuilder: (context, error, stackTrace) => _buildAvatarFallback(d['name'], fontSize: 10),
++                                                          ),
++                                                        )
++                                                      : _buildAvatarFallback(d['name'], fontSize: 10)),
++                                            ),
++                                          ),
++                                          const SizedBox(width: 8),
++                                          Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
++                                        ],
++                                      )),
++                                      DataCell(Text(d['rollNumber'] ?? '?')),
++                                      DataCell(Text(d['class'] ?? 'Hifz')),
++                                      DataCell(Text(d['guardianName'] ?? 'ΓÇö')),
++                                      DataCell(Text(d['contactPhone'] ?? d['phone'] ?? 'ΓÇö')),
++                                      DataCell(Row(
++                                        children: [
++                                          Text('$totalL lines ($pct%)', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF008080))),
++                                          IconButton(
++                                            icon: const Icon(Icons.info_outline, size: 14, color: Color(0xFF008080)),
++                                            tooltip: context.l.moreInfo,
++                                            onPressed: () => _showStudentProgressDialog(context, d),
++                                          ),
++                                        ],
++                                      )),
++                                      DataCell(_buildStatusChip(context, d)),
++                                      DataCell(StatusActionMenu(
++                                        student: s,
++                                        branchId: widget.branchId,
++                                        isAdmin: widget.isAdmin,
++                                        t: RoleThemeScope.dataOf(context),
++                                        username: widget.username,
++                                        role: widget.role,
++                                      )),
++                                    ]);
++                                  }),
++                                ),
++                              ),
++                              ),
++                              const SizedBox(height: 24),
++                            ]
++                      ],
+                     ),
+                   ),
+                 );
+@@ -566,6 +824,59 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+     );
+   }
+ 
++  Widget _buildBatchHeader(BuildContext context, String batch) {
++    String displayName;
++    Color batchColor;
++    IconData batchIcon;
++    
++    switch (batch) {
++      case 'active':
++        displayName = 'Active Students';
++        batchColor = Colors.green;
++        batchIcon = Icons.check_circle;
++        break;
++      case 'left':
++        displayName = 'Students Left';
++        batchColor = Colors.orange;
++        batchIcon = Icons.exit_to_app;
++        break;
++      case 'dropped':
++        displayName = 'Dropped Students';
++        batchColor = Colors.red;
++        batchIcon = Icons.cancel;
++        break;
++      case 'hifz_complete':
++        displayName = 'Hifz Complete';
++        batchColor = Colors.blue;
++        batchIcon = Icons.auto_stories;
++        break;
++      default:
++        displayName = batch;
++        batchColor = Colors.grey;
++        batchIcon = Icons.people;
++    }
++
++    return Padding(
++      padding: const EdgeInsets.only(top: 20, bottom: 12),
++      child: Row(
++        children: [
++          Icon(batchIcon, color: batchColor, size: 24),
++          const SizedBox(width: 12),
++          Text(
++            displayName,
++            style: context.urduStyle(
++              style: TextStyle(
++                fontSize: 18,
++                fontWeight: FontWeight.bold,
++                color: batchColor,
++              ),
++            ),
++          ),
++        ],
++      ),
++    );
++  }
++
+   Widget _buildHeader(BuildContext context) {
+     return Padding(
+       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+@@ -642,6 +953,97 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+               });
+             },
+           ),
++          const SizedBox(height: 12),
++          Builder(
++            builder: (context) {
++              final isSmallScreen = MediaQuery.of(context).size.width < 600;
++
++              final statusFilterDropdown = DropdownButtonFormField<String>(
++                value: _statusFilter,
++                decoration: InputDecoration(
++                  labelText: context.isUrdu ? '╪¡█î╪½█î╪¬ ┌⌐█Æ ┘ä╪¡╪º╪╕ ╪│█Æ ┘ü┘ä┘╣╪▒ ┌⌐╪▒█î┌║' : 'Filter by Status',
++                  labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
++                  filled: true,
++                  fillColor: Colors.white,
++                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
++                  border: OutlineInputBorder(
++                    borderRadius: BorderRadius.circular(12),
++                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
++                  ),
++                  enabledBorder: OutlineInputBorder(
++                    borderRadius: BorderRadius.circular(12),
++                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
++                  ),
++                ),
++                dropdownColor: Colors.white,
++                style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
++                items: [
++                  DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? '╪¬┘à╪º┘à' : 'All Statuses')),
++                  DropdownMenuItem(value: 'active', child: Text(context.l.statusActive)),
++                  DropdownMenuItem(value: 'inactive', child: Text(context.isUrdu ? '╪║█î╪▒ ┘ü╪╣╪º┘ä' : 'Inactive')),
++                  DropdownMenuItem(value: 'archived', child: Text(context.l.statusArchived)),
++                  DropdownMenuItem(value: 'hifz_completed', child: Text(context.l.statusHifzCompleted)),
++                  DropdownMenuItem(value: 'left', child: Text(context.l.statusLeft)),
++                ],
++                onChanged: (val) {
++                  if (val != null) {
++                    setState(() {
++                      _statusFilter = val;
++                    });
++                  }
++                },
++              );
++
++              final sortByDropdown = DropdownButtonFormField<String>(
++                value: _sortBy,
++                decoration: InputDecoration(
++                  labelText: context.isUrdu ? '╪¬╪▒╪¬█î╪¿ ╪»█î┌║' : 'Sort By',
++                  labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
++                  filled: true,
++                  fillColor: Colors.white,
++                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
++                  border: OutlineInputBorder(
++                    borderRadius: BorderRadius.circular(12),
++                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
++                  ),
++                  enabledBorder: OutlineInputBorder(
++                    borderRadius: BorderRadius.circular(12),
++                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
++                  ),
++                ),
++                dropdownColor: Colors.white,
++                style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
++                items: [
++                  DropdownMenuItem(value: 'rollNumber', child: Text(context.isUrdu ? '╪▒┘ê┘ä ┘å┘à╪¿╪▒' : 'Roll Number')),
++                  DropdownMenuItem(value: 'progress', child: Text(context.isUrdu ? '╪¡┘ü╪╕ ┌⌐█î ╪¬╪▒┘é█î' : 'Progress')),
++                  DropdownMenuItem(value: 'joinDate', child: Text(context.isUrdu ? '╪┤┘à┘ê┘ä█î╪¬ ┌⌐█î ╪¬╪º╪▒█î╪«' : 'Joining Date')),
++                ],
++                onChanged: (val) {
++                  if (val != null) {
++                    setState(() {
++                      _sortBy = val;
++                    });
++                  }
++                },
++              );
++
++              return isSmallScreen
++                  ? Column(
++                      children: [
++                        statusFilterDropdown,
++                        const SizedBox(height: 12),
++                        sortByDropdown,
++                      ],
++                    )
++                  : Row(
++                      children: [
++                        Expanded(child: statusFilterDropdown),
++                        const SizedBox(width: 12),
++                        Expanded(child: sortByDropdown),
++                      ],
++                    );
++            },
++          ),
+         ],
+       ),
+     );

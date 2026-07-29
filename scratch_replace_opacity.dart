@@ -1,9 +1,10 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 
 void main() {
   final dir = Directory('lib');
   if (!dir.existsSync()) {
-    print('lib directory not found.');
+    debugPrint('lib directory not found.');
     return;
   }
 
@@ -28,5 +29,5 @@ void main() {
     }
   }
 
-  print('Updated $updatedFiles files, made $replacedCount replacements.');
+  debugPrint('Updated $updatedFiles files, made $replacedCount replacements.');
 }

@@ -107,6 +107,21 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   final _qtyCtrl = TextEditingController(text: '1');
   final double _pricePerToken = 10.0;
 
+  bool get _isOfficeBoy {
+    final r = (widget.role ?? '').toLowerCase().trim();
+    if (r.isEmpty) return true;
+    final isExecutive = r.contains('admin') ||
+        r.contains('chairman') ||
+        r.contains('ceo') ||
+        r.contains('manager') ||
+        r.contains('supervisor') ||
+        r.contains('principal');
+    if (isExecutive && !r.contains('office boy') && !r.contains('officeboy')) {
+      return false;
+    }
+    return true;
+  }
+
   late AnimationController _fadeCtrl;
   late Animation<double> _fadeAnim;
   late AnimationController _pulseCtrl;
@@ -307,10 +322,13 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
   @override
   Widget build(BuildContext context) {
+    final showDonations = _isOfficeBoy;
+    final activeNav = showDonations ? _currentNav : _currentNav.clamp(0, 2);
+
     return Scaffold(
       backgroundColor: _DS.bg,
       body: IndexedStack(
-        index: _currentNav,
+        index: activeNav,
         children: [
           _HomeScreen(
             userName:     _userName,
@@ -324,6 +342,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             onLogout:     _logout,
             heroFade:     _fadeAnim,
             pricePerToken: _pricePerToken,
+            isOfficeBoy:  showDonations,
           ),
           _TokensScreen(
             userName:           _userName,
@@ -336,6 +355,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             pulseAnim:          _pulseAnim,
             getTodayStats:      _getTodayStats,
             onLogout:           _logout,
+            showLogout:         showDonations,
             onSelectQty: (qty) {
               _qtyCtrl.text = qty.toString();
               setState(() {});
@@ -347,20 +367,22 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   branchId:     _branchId!,
                   dateFmt:      _dateFmt,
                   onLogout:     _logout,
+                  showLogout:   showDonations,
                   pricePerToken: _pricePerToken,
                 ),
-          // 3 – Donations
-          _branchId == null
-              ? const GmwfLoadingView()
-              : DonationsScreen.embedded(
-                  branchId: _branchId!,
-                  username: _userName,
-                  userId:   FirebaseAuth.instance.currentUser?.uid ?? '',
-                  role:     UserRole.officeBoy,
-                ),
+          if (showDonations)
+            // 3 – Donations
+            _branchId == null
+                ? const GmwfLoadingView()
+                : DonationsScreen.embedded(
+                    branchId: _branchId!,
+                    username: _userName,
+                    userId:   FirebaseAuth.instance.currentUser?.uid ?? '',
+                    role:     UserRole.officeBoy,
+                  ),
         ],
       ),
-      bottomNavigationBar: _buildBottomNav(),
+      bottomNavigationBar: _buildBottomNav(showDonations: showDonations, currentIndex: activeNav),
     );
   }
 
@@ -371,14 +393,22 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     }
   }
 
-  Widget _buildBottomNav() {
-    const labels = ['Home', 'Tokens', 'History', 'Donation'];
-    const icons  = [
-      Icons.home_rounded,
-      Icons.credit_card_rounded,
-      Icons.access_time_rounded,
-      Icons.volunteer_activism_rounded,
-    ];
+  Widget _buildBottomNav({required bool showDonations, required int currentIndex}) {
+    final labels = showDonations
+        ? ['Home', 'Tokens', 'History', 'Donation']
+        : ['Home', 'Tokens', 'History'];
+    final icons = showDonations
+        ? [
+            Icons.home_rounded,
+            Icons.credit_card_rounded,
+            Icons.access_time_rounded,
+            Icons.volunteer_activism_rounded,
+          ]
+        : [
+            Icons.home_rounded,
+            Icons.credit_card_rounded,
+            Icons.access_time_rounded,
+          ];
 
     return Container(
       decoration: BoxDecoration(
@@ -391,8 +421,8 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(4, (idx) {
-              final sel = _currentNav == idx;
+            children: List.generate(labels.length, (idx) {
+              final sel = currentIndex == idx;
               return GestureDetector(
                 onTap: () {
                   HapticFeedback.selectionClick();
@@ -444,6 +474,7 @@ class _HomeScreen extends StatelessWidget {
   final VoidCallback onGoTokens, onGoHistory, onGoDonation, onLogout;
   final Animation<double> heroFade;
   final double pricePerToken;
+  final bool isOfficeBoy;
 
   const _HomeScreen({
     required this.userName,
@@ -457,6 +488,7 @@ class _HomeScreen extends StatelessWidget {
     required this.onLogout,
     required this.heroFade,
     required this.pricePerToken,
+    this.isOfficeBoy = true,
   });
 
   String _greeting() {
@@ -478,7 +510,8 @@ class _HomeScreen extends StatelessWidget {
               greeting:  _greeting(),
               userName:  userName,
               onLogout:  onLogout,
-              badgeLabel: 'Office Boy',
+              badgeLabel: isOfficeBoy ? 'Office Boy' : (role ?? 'Office'),
+              showLogout: isOfficeBoy,
             ),
           ),
 
@@ -540,16 +573,18 @@ class _HomeScreen extends StatelessWidget {
                   urdu:      'کھانے کا ٹوکن جاری کریں',
                   onTap:     onGoTokens,
                 ),
-                const SizedBox(height: 10),
-                _ActionCardWide(
-                  icon:      Icons.volunteer_activism_rounded,
-                  iconColor: _DS.amber,
-                  iconBg:    _DS.amberBg,
-                  title:     'Record Donation',
-                  subtitle:  'Collect and save new contributions',
-                  urdu:      'عطیہ جمع کریں',
-                  onTap:     onGoDonation,
-                ),
+                if (isOfficeBoy) ...[
+                  const SizedBox(height: 10),
+                  _ActionCardWide(
+                    icon:      Icons.volunteer_activism_rounded,
+                    iconColor: _DS.amber,
+                    iconBg:    _DS.amberBg,
+                    title:     'Record Donation',
+                    subtitle:  'Collect and save new contributions',
+                    urdu:      'عطیہ جمع کریں',
+                    onTap:     onGoDonation,
+                  ),
+                ],
                 const SizedBox(height: 10),
                 _ActionCardWide(
                   icon:      Icons.calendar_month_rounded,
@@ -565,23 +600,24 @@ class _HomeScreen extends StatelessWidget {
           ),
         ),
 
-        // ── Today's Donation summary ─────────────────────────────────────────
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
-          sliver: SliverToBoxAdapter(
-            child: FutureBuilder<Map<String, dynamic>>(
-              future: getTodayStats(),
-              builder: (_, snap) {
-                final count  = snap.data?['donations'] ?? 0;
-                final amount = snap.data?['donationAmount'] ?? 0.0;
-                return _DonationSummaryCard(
-                  count: count,
-                  amount: amount,
-                );
-              },
+        // ── Today's Donation summary (Office Boy role only) ────────────────
+        if (isOfficeBoy)
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+            sliver: SliverToBoxAdapter(
+              child: FutureBuilder<Map<String, dynamic>>(
+                future: getTodayStats(),
+                builder: (_, snap) {
+                  final count  = snap.data?['donations'] ?? 0;
+                  final amount = snap.data?['donationAmount'] ?? 0.0;
+                  return _DonationSummaryCard(
+                    count: count,
+                    amount: amount,
+                  );
+                },
+              ),
             ),
           ),
-        ),
 
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
       ]),
@@ -599,6 +635,7 @@ class _HeroHeader extends StatelessWidget {
   final VoidCallback onLogout;
   final String badgeLabel;
   final List<Color> gradientColors;
+  final bool showLogout;
 
   const _HeroHeader({
     required this.greeting,
@@ -606,6 +643,7 @@ class _HeroHeader extends StatelessWidget {
     required this.onLogout,
     required this.badgeLabel,
     this.gradientColors = const [_DS.sage, _DS.sage2],
+    this.showLogout = true,
   });
 
   @override
@@ -666,7 +704,7 @@ class _HeroHeader extends StatelessWidget {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.asset(
-                            'assets/logo/gmwf.png',
+                            'assets/logo/gmwf-1.png',
                             width: 42, height: 42,
                             fit: BoxFit.contain,
                             errorBuilder: (_, _, _) => const Icon(
@@ -683,7 +721,7 @@ class _HeroHeader extends StatelessWidget {
                       ]),
                     ),
                     // Logout
-                    _LogoutButton(onTap: onLogout),
+                    if (showLogout) _LogoutButton(onTap: onLogout),
                   ],
                 ),
                 const SizedBox(height: 28),
@@ -1022,6 +1060,7 @@ class _TokensScreen extends StatelessWidget {
   final Animation<double> pulseAnim;
   final Future<Map<String, dynamic>> Function() getTodayStats;
   final void Function(int) onSelectQty;
+  final bool showLogout;
 
   const _TokensScreen({
     required this.userName,
@@ -1035,6 +1074,7 @@ class _TokensScreen extends StatelessWidget {
     required this.getTodayStats,
     required this.onSelectQty,
     required this.onLogout,
+    this.showLogout = true,
   });
 
   @override
@@ -1084,7 +1124,7 @@ class _TokensScreen extends StatelessWidget {
                             ),
                           ],
                         ),
-                        _LogoutButton(onTap: onLogout),
+                        if (showLogout) _LogoutButton(onTap: onLogout),
                       ],
                     ),
                     const SizedBox(height: 20),
@@ -1407,12 +1447,14 @@ class _HistoryScreen extends StatefulWidget {
   final DateFormat dateFmt;
   final VoidCallback onLogout;
   final double pricePerToken;
+  final bool showLogout;
 
   const _HistoryScreen({
     required this.branchId,
     required this.dateFmt,
     required this.onLogout,
     required this.pricePerToken,
+    this.showLogout = true,
   });
 
   @override
@@ -1469,7 +1511,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
       if (!seenIds.contains(lid)) {
         mergedDonations.add({
           ...data,
-          'donorName':  data['donorName']  ?? 'Valued Donor',
+          'donorName':  data['donorName']  ?? 'Walk-in Donor',
           'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
           'type':       data['categoryId'] ?? 'GMWF',
           'status':     data['status']     ?? 'pending',
@@ -1551,7 +1593,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                   fontSize: 11)),
                         ],
                       ),
-                      _LogoutButton(onTap: widget.onLogout),
+                      if (widget.showLogout) _LogoutButton(onTap: widget.onLogout),
                     ],
                   ),
                   const SizedBox(height: 18),
@@ -1901,7 +1943,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        don['donorName']?.toString() ?? 'Valued Donor',
+                                        don['donorName']?.toString() ?? 'Walk-in Donor',
                                         style: GoogleFonts.dmSans(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600,

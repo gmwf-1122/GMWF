@@ -289,14 +289,15 @@ class DonationsLocalStorage {
     // ── DONOR AUTO-REGISTRATION & ENRICHMENT ─────────────────────────────────
     final phone       = (data['phone'] as String? ?? '').trim();
     final donorId     = (data['donorId'] as String? ?? '').trim();
-    final donorName   = (data['donorName'] as String? ?? 'Valued Donor').trim();
+    final donorName   = (data['donorName'] as String? ?? 'Walk-in Donor').trim();
     final isAnonymous = data['isAnonymous'] as bool? ?? false;
     final bankAcc     = (data['bankAccountNumber'] as String? ?? '').trim();
 
     final donorNameNorm = donorName.toLowerCase().trim();
     final bool isAnonymousEffective = isAnonymous ||
         donorNameNorm == 'valued donor' ||
-        donorNameNorm == 'anonymous';
+        donorNameNorm == 'anonymous' ||
+        donorNameNorm == 'walk-in donor';
 
     recordMap['isAnonymous'] = isAnonymousEffective;
 
@@ -361,7 +362,7 @@ class DonationsLocalStorage {
           updated = updated.copyWith(accountNumbers: [...active.accountNumbers, bankAcc]);
           changed = true;
         }
-        if (active.name != donorName && donorName != 'Valued Donor') {
+        if (active.name != donorName && donorName != 'Walk-in Donor') {
           updated = updated.copyWith(name: donorName);
           changed = true;
         }
@@ -442,6 +443,9 @@ class DonationsLocalStorage {
     }
     final now = DateTime.now().toUtc().toIso8601String();
 
+    final String lastSegment = hiveKey.split('__').last;
+    final String resolvedLocalId = (raw as Map)['localId']?.toString() ?? lastSegment;
+
     // Check if the date has changed to update the Hive key accordingly
     final String oldDate = (raw as Map)['date']?.toString() ?? '';
     final String newDate = fields['date']?.toString() ?? oldDate;
@@ -450,11 +454,11 @@ class DonationsLocalStorage {
     final updated = Map<String, dynamic>.from(raw as Map)
       ..addAll(_sanitize(fields))
       ..['lastUpdatedAt'] = now
-      ..['isEdited'] = true;
+      ..['isEdited'] = true
+      ..['localId'] = resolvedLocalId;
 
     if (newDate != oldDate && newDate.isNotEmpty) {
-      final localId = (raw as Map)['localId']?.toString() ?? hiveKey.split('__').last;
-      finalKey = _donationKey(branchId.toLowerCase().trim(), newDate, localId);
+      finalKey = _donationKey(branchId.toLowerCase().trim(), newDate, resolvedLocalId);
       updated['hiveKey'] = finalKey;
 
       // Save under new key and delete old key
@@ -473,7 +477,7 @@ class DonationsLocalStorage {
     await enqueueAuditLog(
       branchId: branchId,
       collection: 'donations',
-      documentId: (updated['firestoreId'] as String?) ?? (updated['localId'] as String?) ?? finalKey,
+      documentId: (updated['firestoreId'] as String?) ?? resolvedLocalId,
       action: 'update',
       userId: userId,
       username: user,
@@ -495,7 +499,7 @@ class DonationsLocalStorage {
       await LocalStorageService.enqueueSync({
         'type':     'save_donation',
         'branchId': branchId,
-        'localId':  (updated['localId'] as String?) ?? finalKey,
+        'localId':  resolvedLocalId,
         'hiveKey':  finalKey,
         'data':     updated,
       });
@@ -1238,10 +1242,12 @@ class DonationsLocalStorage {
 
     // 2. Audit Log for security/financial tracking
     final fsId = data['firestoreId']?.toString() ?? data['localId']?.toString();
+    final resolvedDocId = fsId ?? hiveKey.split('__').last;
+
     await enqueueAuditLog(
       branchId: branchId,
       collection: 'donations',
-      documentId: fsId ?? hiveKey,
+      documentId: resolvedDocId,
       action: 'delete_donation',
       userId: userId,
       username: username,
@@ -1250,12 +1256,19 @@ class DonationsLocalStorage {
       reason: reason,
     );
 
-    // 3. Queue for Firestore removal
-    if (fsId != null && fsId.isNotEmpty) {
+    // 3. Queue for Firestore removal (Enqueue all possible ID candidates to ensure complete deletion)
+    final candidates = <String>{};
+    if (fsId != null && fsId.isNotEmpty) candidates.add(fsId);
+    if (data['localId']?.toString().isNotEmpty == true) candidates.add(data['localId'].toString());
+    final lastSegment = hiveKey.split('__').last;
+    candidates.add(lastSegment);
+    candidates.add(hiveKey); // In case it was uploaded as full key string
+
+    for (final id in candidates) {
       await LocalStorageService.enqueueSync({
         'type': 'delete_donation',
         'branchId': branchId,
-        'firestoreId': fsId,
+        'firestoreId': id,
       });
     }
     

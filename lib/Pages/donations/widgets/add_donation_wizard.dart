@@ -199,7 +199,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
 
     try {
       final data = {
-        'donorName': _isAnonymous ? 'Anonymous' : _nameCtrl.text.trim(),
+        'donorName': _isAnonymous ? 'Walk-in Donor' : _nameCtrl.text.trim(),
         'phone': _isAnonymous ? '' : _phoneCtrl.text.trim(),
         'donorId': _isAnonymous ? '' : _donorIdCtrl.text.trim(),
         'isAnonymous': _isAnonymous,
@@ -456,7 +456,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
             const SizedBox(height: 24),
             
             _buildSelectionCard(
-              title: 'Anonymous Donor',
+              title: 'Walk-in Donor',
               subtitle: 'Do not record any personal identification',
               icon: Icons.no_accounts_rounded,
               isSelected: _isAnonymous,
@@ -767,7 +767,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
             ),
             child: Column(
               children: [
-                _confirmRow('Donor', _isAnonymous ? 'Anonymous' : _nameCtrl.text),
+                _confirmRow('Donor', _isAnonymous ? 'Walk-in Donor' : _nameCtrl.text),
                 if (!_isAnonymous && _phoneCtrl.text.isNotEmpty) _confirmRow('Contact', _phoneCtrl.text),
                 _confirmRow('Branch', widget.branchName),
                 const Divider(height: 32),

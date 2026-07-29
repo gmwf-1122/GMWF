@@ -48,3 +48,31 @@ class DateInputFormatter extends TextInputFormatter {
     );
   }
 }
+
+/// Resolves a user's display name prioritizing username unless a custom name is explicitly provided.
+String resolveUserDisplayName(Map<String, dynamic>? data, {String fallback = 'User'}) {
+  if (data == null) return fallback;
+  final username = (data['username'] ?? '').toString().trim();
+  final name = (data['name'] ?? '').toString().trim();
+  final role = (data['role'] ?? '').toString().trim();
+
+  final isGenericOrRoleName = name.isEmpty ||
+      name.toLowerCase() == username.toLowerCase() ||
+      name.toLowerCase() == role.toLowerCase() ||
+      ['user', 'admin', 'ceo', 'chairman', 'hq manager', 'branch manager', 'manager', 'supervisor', 'doctor', 'dispenser', 'receptionist', 'madrassa admin', 'school admin', 'global user', 'office boy', 'kitchen staff', 'staff'].contains(name.toLowerCase());
+
+  if (!isGenericOrRoleName) {
+    return name;
+  }
+  if (username.isNotEmpty) {
+    return username;
+  }
+  if (name.isNotEmpty) {
+    return name;
+  }
+  final email = (data['email'] ?? '').toString().trim();
+  if (email.contains('@')) {
+    return email.split('@').first;
+  }
+  return fallback;
+}

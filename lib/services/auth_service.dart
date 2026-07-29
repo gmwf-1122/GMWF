@@ -13,6 +13,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/lan_host_manager.dart';
 import '../services/local_storage_service.dart';
+import '../services/finance_local_storage.dart';
+import '../services/device_info_service.dart';
 import '../config/constants.dart';
 
 class AuthService {
@@ -47,6 +49,9 @@ class AuthService {
     Uint8List? profileImageBytes,
     PlatformFile? identificationFile,
     PlatformFile? degreeFile,
+    String? profilePictureBase64,
+    String? identificationBase64,
+    String? degreeBase64,
     String? studentId, 
     List<String> studentIds = const [], // NEW — default empty
     String name = '',        // NEW
@@ -96,18 +101,27 @@ class AuthService {
       if (salary != null)                      userData['baseSalary']      = salary;
       if (studentId?.isNotEmpty ?? false)      userData['studentId']       = studentId!.trim();
 
-      if (profileImageXFile != null || profileImageBytes != null) {
+      // Base64 strings (offline & storage-free) with storage upload fallback
+      if (profilePictureBase64 != null && profilePictureBase64.isNotEmpty) {
+        userData['profilePictureUrl'] = profilePictureBase64;
+      } else if (profileImageXFile != null || profileImageBytes != null) {
         final url = await _uploadFile(
             folder: 'profile', uid: uid,
             xFile: profileImageXFile, webBytes: profileImageBytes);
         if (url != null) userData['profilePictureUrl'] = url;
       }
-      if (identificationFile != null) {
+
+      if (identificationBase64 != null && identificationBase64.isNotEmpty) {
+        userData['identificationUrl'] = identificationBase64;
+      } else if (identificationFile != null) {
         final url = await _uploadFile(
             folder: 'identification', uid: uid, platformFile: identificationFile);
         if (url != null) userData['identificationUrl'] = url;
       }
-      if (role.toLowerCase() == 'doctor' && degreeFile != null) {
+
+      if (degreeBase64 != null && degreeBase64.isNotEmpty) {
+        userData['degreeCertificateUrl'] = degreeBase64;
+      } else if (role.toLowerCase() == 'doctor' && degreeFile != null) {
         final url = await _uploadFile(
             folder: 'degree', uid: uid, platformFile: degreeFile);
         if (url != null) userData['degreeCertificateUrl'] = url;
@@ -115,7 +129,7 @@ class AuthService {
 
       await _firestore.collection('users').doc(uid).set(userData);
 
-      const globalRoles = ['ceo', 'chairman', 'admin'];
+      const globalRoles = ['ceo', 'chairman', 'admin', 'hq manager'];
       if (!globalRoles.contains(role.toLowerCase())) {
         await _firestore
             .collection('branches')
@@ -126,6 +140,26 @@ class AuthService {
       }
 
       await _cacheUserDataLocally(userData);
+
+      // Automatic Unified Employee Sync:
+      // If user role is an employee/staff role, automatically create/sync Employee profile in Finance & HR
+      final isStudentOrParent = role.toLowerCase().contains('student') || role.toLowerCase().contains('parent');
+      if (!isStudentOrParent) {
+        final cnicVal = (cnic.isNotEmpty ? cnic : (identification ?? '')).trim();
+        await FinanceLocalStorage.createOrUpdateUnifiedEmployeeProfile(
+          userId: uid,
+          username: username,
+          email: email,
+          role: role,
+          branchId: branchId,
+          cnic: cnicVal,
+          phone: phone,
+          baseSalary: salary,
+          bankName: bankName,
+          bankAccount: bankAccount,
+          profilePictureUrl: userData['profilePictureUrl']?.toString(),
+        );
+      }
       return uid;
     } catch (e) {
       debugPrint('[AuthService] signUp failed: $e');
@@ -194,7 +228,7 @@ class AuthService {
         } catch (e) {
           debugPrint('[AuthService] LanHostManager.startHost failed (non-fatal): $e');
         }
-      } else if (role != 'admin' && role != 'chairman' && role != 'ceo' && role != 'server') {
+      } else if (role != 'admin' && role != 'chairman' && role != 'ceo' && role != 'hq manager' && role != 'server') {
         // Try to initialise realtime — but missing IP is NOT a fatal error.
         String? ip = serverIp?.trim();
         if (ip == null || ip.isEmpty) {
@@ -219,6 +253,13 @@ class AuthService {
         }
       }
 
+      // Record device & browser session info
+      try {
+        await DeviceInfoService.recordUserSession(userId: user.uid, email: user.email);
+      } catch (e) {
+        debugPrint('[AuthService] Non-fatal device info logging failed: $e');
+      }
+
       return user;
     } catch (e) {
       debugPrint('[AuthService] signIn error: $e');
@@ -231,6 +272,31 @@ class AuthService {
   /// the others.
   Future<void> signOut() async {
     debugPrint('[AuthService] Starting sign out');
+
+    try {
+      final user = _auth.currentUser;
+      if (user != null) {
+        final uid = user.uid;
+        await _firestore.collection('users').doc(uid).set({
+          'isOnline': false,
+          'lastLogoutAt': FieldValue.serverTimestamp(),
+          'lastOnlineAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await DeviceInfoService.markUserOffline(userId: uid);
+
+        try {
+          final box = Hive.box('app_settings');
+          final userData = box.get('user_data') ?? box.get('currentUser');
+          if (userData != null && userData is Map) {
+            userData['isOnline'] = false;
+            await box.put('user_data', userData);
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Reset isOnline error (ignored): $e');
+    }
 
     try { await FirebaseAuth.instance.signOut(); }
     catch (e) { debugPrint('[AuthService] Firebase signOut error (ignored): $e'); }
@@ -260,7 +326,7 @@ class AuthService {
       // 2. Check all branches via collection group
       final querySnap = await _firestore
           .collectionGroup('users')
-          .where(FieldPath.documentId, isEqualTo: uid)
+          .where('uid', isEqualTo: uid)
           .limit(1)
           .get();
       if (querySnap.docs.isNotEmpty) {

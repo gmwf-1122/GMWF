@@ -6,6 +6,8 @@ import 'package:crypto/crypto.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
+import 'package:gmwf/services/sync_service.dart';
 
 class LocalStorageService {
   // ── Box names ──────────────────────────────────────────────────────────────
@@ -34,8 +36,24 @@ class LocalStorageService {
   static const String madrassaStudentsBox = 'local_madrassa_students';
   static const String madrassaLogsBox     = 'local_madrassa_logs';
   static const String madrassaHolidaysBox = 'local_madrassa_holidays';
+  static const String schoolStudentsBox   = 'local_school_students';
+  static const String schoolLogsBox       = 'local_school_logs';
+  static const String schoolTeachersBox   = 'local_school_teachers';
+  static const String schoolBooksBox      = 'local_school_books';
+  static const String schoolBookLoansBox  = 'local_school_book_loans';
+  static const String schoolAuditLogsBox  = 'local_school_audit_logs';
+  static const String schoolGradesBox     = 'local_school_grades';
+  static const String schoolFeesBox       = 'local_school_fees';
+  static const String schoolHomeroomBox   = 'local_school_homeroom';
   static const String financeHolidaysBox = 'local_finance_holidays';
   static const String financeLoansBox    = 'local_finance_loans';
+  static const String expensesBox        = 'local_expenses';
+  static const String syncMetaBox        = 'local_sync_meta';
+
+  static const String biometricDevicesBox = 'local_biometric_devices';
+  static const String biometricCredentialsBox = 'local_biometric_credentials';
+  static const String unmappedPunchesBox = 'local_unmapped_punches';
+
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -89,8 +107,20 @@ class LocalStorageService {
       madrassaStudentsBox,
       madrassaLogsBox,
       madrassaHolidaysBox,
+      schoolStudentsBox,
+      schoolLogsBox,
+      schoolTeachersBox,
+      schoolBooksBox,
+      schoolBookLoansBox,
+      schoolAuditLogsBox,
+      schoolGradesBox,
       financeHolidaysBox,
       financeLoansBox,
+      expensesBox,
+      syncMetaBox,
+      biometricDevicesBox,
+      biometricCredentialsBox,
+      unmappedPunchesBox,
     ];
 
     for (final name in boxNames) {
@@ -119,7 +149,7 @@ class LocalStorageService {
       employeesBox, salaryHistoryBox, attendanceBox, salaryLedgerBox,
       financeSettingsBox, branchTransfersBox, auditLogsBox,
       madrassaStudentsBox, madrassaLogsBox, madrassaHolidaysBox, financeHolidaysBox,
-      financeLoansBox,
+      financeLoansBox, expensesBox,
     ];
 
     for (final name in boxNames) {
@@ -138,6 +168,20 @@ class LocalStorageService {
 
   static String hashPassword(String password) =>
       sha256.convert(utf8.encode(password)).toString();
+
+  // ── Sync Timestamp Tracking ────────────────────────────────────────────────
+  static String? getLastSyncTimestamp(String collectionKey) {
+    if (!Hive.isBoxOpen(syncMetaBox)) return null;
+    final box = Hive.box(syncMetaBox);
+    return box.get('sync_ts_$collectionKey')?.toString();
+  }
+
+  static Future<void> setLastSyncTimestamp(String collectionKey, String timestamp) async {
+    if (!Hive.isBoxOpen(syncMetaBox)) return;
+    final box = Hive.box(syncMetaBox);
+    await box.put('sync_ts_$collectionKey', timestamp);
+    await box.flush();
+  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // BRANCH DAY CACHE (local-first historic data cache)
@@ -278,8 +322,12 @@ class LocalStorageService {
   static Future<void> enqueueSync(Map<String, dynamic> action) async {
     final box = Hive.box(syncBox);
     final key = 'sync_${DateTime.now().millisecondsSinceEpoch}_${action['type'] ?? 'unknown'}';
+    final actionCopy = Map<String, dynamic>.from(action);
+    if (['update_inventory', 'add_inventory_stock', 'register_medicine', 'save_token_exception_request', 'approve_token_exception'].contains(actionCopy['type'])) {
+      actionCopy['txId'] ??= const Uuid().v4();
+    }
     final enriched = {
-      ...action,
+      ...actionCopy,
       'attempts':    0,
       'createdAt':   _nowIso(),
       'lastAttempt': null,
@@ -287,7 +335,10 @@ class LocalStorageService {
       'status':      'pending',
     };
     await box.put(key, sanitize(enriched));
-    debugPrint('[SyncQueue] Enqueued: ${action['type']} | key: $key | total: ${box.length}');
+    debugPrint('[SyncQueue] Enqueued: ${actionCopy['type']} | key: $key | txId: ${actionCopy['txId']} | total: ${box.length}');
+    
+    // Trigger sync upload immediately in background
+    SyncService().triggerUpload();
   }
 
   static Map<String, Map<String, dynamic>> getAllSync() {
@@ -616,6 +667,39 @@ class LocalStorageService {
     await Hive.box(usersBox).delete('user:$email');
   }
 
+  static Future<void> saveUserOffline({
+    required String uid,
+    required String branchId,
+    required Map<String, dynamic> userData,
+  }) async {
+    final sanitized = sanitize(userData);
+    await Hive.box(usersBox).put('user:${sanitized['email']}', sanitized);
+    await Hive.box(usersBox).flush();
+
+    await enqueueSync({
+      'type': 'save_user',
+      'uid': uid,
+      'branchId': branchId,
+      'data': sanitized,
+    });
+  }
+
+  static Future<void> deleteUserOffline({
+    required String uid,
+    required String branchId,
+    required String email,
+  }) async {
+    await Hive.box(usersBox).delete('user:${email.toLowerCase()}');
+    await Hive.box(usersBox).flush();
+
+    await enqueueSync({
+      'type': 'delete_user',
+      'uid': uid,
+      'branchId': branchId,
+      'email': email.toLowerCase(),
+    });
+  }
+
   static Future<void> saveLocalPatient(Map<String, dynamic> patient) async {
     var sanitized      = sanitize(patient);
     final key          = getPatientKey(sanitized);
@@ -832,7 +916,36 @@ class LocalStorageService {
     sanitized['patientCnic'] = cleanCnic;
     sanitized['cnic']        = cleanCnic;
     sanitized['serial']      = serial;
-    await Hive.box(prescriptionsBox).put(key, sanitized);
+    final box = Hive.box(prescriptionsBox);
+    await box.put(key, sanitized);
+    await box.put(serial, sanitized);
+
+    // Also update embedded prescription in entriesBox for immediate dispenser access
+    final entriesBoxRef = Hive.box(entriesBox);
+    for (final entryKey in entriesBoxRef.keys) {
+      if (entryKey is String && entryKey.endsWith('-$serial')) {
+        final entry = entriesBoxRef.get(entryKey);
+        if (entry is Map) {
+          final updatedEntry = Map<String, dynamic>.from(entry);
+          updatedEntry['prescription'] = sanitized;
+          updatedEntry['status'] = 'completed';
+          await entriesBoxRef.put(entryKey, updatedEntry);
+        }
+      }
+    }
+  }
+
+  static Future<void> updateDispenseStatus(
+      String branchId, String serial, String status) async {
+    final key = '$branchId-$serial';
+    final box = Hive.box(entriesBox);
+    final entry = box.get(key);
+    if (entry is Map) {
+      final updated = Map<String, dynamic>.from(entry);
+      updated['dispenseStatus'] = status;
+      await box.put(key, updated);
+      await box.flush();
+    }
   }
 
   static Map<String, dynamic>? getLocalPrescription(String serial) {
@@ -904,16 +1017,95 @@ class LocalStorageService {
   static Future<void> saveAllLocalStockItems(
       List<Map<String, dynamic>> items) async {
     final box = Hive.box(stockBox);
+    final sBox = Hive.box(syncBox);
+
+    // Sum up pending deltas from the sync queue for each medicineId
+    final pendingDeltas = <String, double>{};
+    for (final key in sBox.keys) {
+      final val = sBox.get(key);
+      if (val is Map) {
+        final type = val['type'];
+        if (type == 'update_inventory') {
+          final medId = val['inventoryId']?.toString();
+          final delta = (val['delta'] as num?)?.toDouble() ?? 0.0;
+          if (medId != null && delta != 0) {
+            pendingDeltas[medId] = (pendingDeltas[medId] ?? 0.0) + delta;
+          }
+        } else if (type == 'add_inventory_stock') {
+          final medId = val['medicineId']?.toString();
+          final qty = (val['quantity'] as num?)?.toDouble() ?? 0.0;
+          if (medId != null && qty > 0) {
+            pendingDeltas[medId] = (pendingDeltas[medId] ?? 0.0) + qty;
+          }
+        }
+      }
+    }
+
+    // Get all pending register_medicine actions to protect them
+    final pendingRegistrations = sBox.values
+        .whereType<Map>()
+        .where((v) => v['type'] == 'register_medicine')
+        .map((v) {
+          final dataMap = v['data'] is Map ? Map<String, dynamic>.from(v['data'] as Map) : <String, dynamic>{};
+          return (dataMap['id'] ?? dataMap['medicineId'])?.toString();
+        })
+        .whereType<String>()
+        .toSet();
+
+    // Map downloaded items
+    final Map<String, dynamic> updatedMap = {};
+    final downloadedIds = <String>{};
+    for (final item in items) {
+      final id = item['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      downloadedIds.add(id);
+      final key = 'stock:$id';
+      
+      if (pendingDeltas.containsKey(id)) {
+        final downloadedQty = (item['quantity'] ?? 0) as num;
+        item['quantity'] = (downloadedQty.toDouble() + pendingDeltas[id]!).clamp(0.0, double.infinity);
+        debugPrint('[LocalStorage] Re-applied pending local delta of ${pendingDeltas[id]} to downloaded stock of $id');
+      } else {
+        final rawQty = (item['quantity'] as num?)?.toDouble() ?? 0.0;
+        item['quantity'] = rawQty.clamp(0.0, double.infinity);
+      }
+      updatedMap[key] = item;
+    }
+
+    // Capture currently stored stock items in Hive
+    final currentLocalItems = <String, dynamic>{};
+    for (final key in box.keys) {
+      final val = box.get(key);
+      if (val is Map) {
+        final itemMap = Map<String, dynamic>.from(val);
+        final id = (itemMap['id'] ?? itemMap['medicineId'])?.toString() ?? '';
+        if (id.isNotEmpty) {
+          currentLocalItems[id] = itemMap;
+        }
+      }
+    }
+
+    // Preserve pending registrations that haven't been downloaded yet
+    for (final regId in pendingRegistrations) {
+      if (!downloadedIds.contains(regId) && currentLocalItems.containsKey(regId)) {
+        final key = 'stock:$regId';
+        updatedMap[key] = currentLocalItems[regId];
+        debugPrint('[LocalStorage] Preserved locally-registered-but-unsynced medicine $regId in stock list');
+      }
+    }
+
     await box.clear();
-    await box.putAll(
-        {for (final item in items) 'stock:${item['id']}': item});
+    await box.putAll(updatedMap);
   }
 
   static Future<void> saveLocalStockItem(
       Map<String, dynamic> stockItem) async {
     final id = stockItem['id']?.toString();
     if (id == null) return;
-    await Hive.box(stockBox).put('stock:$id', sanitize(stockItem));
+    final item = Map<String, dynamic>.from(stockItem);
+    final rawQty = (item['quantity'] as num?)?.toDouble() ?? 0.0;
+    item['quantity'] = rawQty.clamp(0.0, double.infinity);
+    await Hive.box(stockBox).put('stock:$id', sanitize(item));
   }
 
   static void saveLocalInventoryItem(Map<String, dynamic> item) {
@@ -922,6 +1114,8 @@ class LocalStorageService {
     final normalised = Map<String, dynamic>.from(item);
     normalised['id']         = rawId;
     normalised['medicineId'] = rawId;
+    final rawQty = (normalised['quantity'] as num?)?.toDouble() ?? 0.0;
+    normalised['quantity']   = rawQty.clamp(0.0, double.infinity);
     Hive.box(stockBox).put('stock:$rawId', sanitize(normalised));
   }
 
@@ -938,7 +1132,7 @@ class LocalStorageService {
     if (raw == null) return;
     final item = Map<String, dynamic>.from(raw as Map);
     final currentQty = (item['quantity'] ?? 0) as num;
-    item['quantity'] = currentQty + delta;
+    item['quantity'] = (currentQty.toDouble() + delta).clamp(0.0, double.infinity);
     item['updatedAt'] = DateTime.now().toIso8601String();
     await box.put(key, sanitize(item));
   }
@@ -954,7 +1148,8 @@ class LocalStorageService {
         .map((v) => Map<String, dynamic>.from(v))
         .toList();
     if (branchId != null) {
-      items = items.where((i) => i['branchId'] == branchId).toList();
+      final norm = branchId.toLowerCase().trim();
+      items = items.where((i) => i['branchId']?.toString().toLowerCase().trim() == norm).toList();
     }
     return items;
   }

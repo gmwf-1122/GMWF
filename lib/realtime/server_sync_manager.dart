@@ -189,11 +189,11 @@ class ServerSyncManager {
       if (_running) _uploadQueue().ignore();
     });
 
-    _downloadTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+    _downloadTimer = Timer.periodic(const Duration(minutes: 30), (_) {
       if (_running) _downloadTodayTokens().ignore();
     });
 
-    _catchUpTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+    _catchUpTimer = Timer.periodic(const Duration(minutes: 15), (_) {
       if (_running) _periodicCatchUpAll();
     });
 

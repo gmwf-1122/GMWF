@@ -18,6 +18,8 @@ import '../theme/app_theme.dart';
 import '../services/sync_service.dart';
 import 'package:hive/hive.dart';
 import '../services/local_storage_service.dart';
+import 'app_back_button.dart';
+import '../services/auto_update_service.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -71,8 +73,13 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   void initState() {
     super.initState();
     final rawBranchId = widget.userData['branchId'] as String? ?? '';
-    _selectedBranchId =
-        rawBranchId == _kGlobalBranchId ? null : rawBranchId.trim();
+    if (widget.module.id == 'finance' && !_isBranchScoped) {
+      _selectedBranchId = 'all';
+      _selectedBranchName = 'All Branches (Consolidated)';
+    } else {
+      _selectedBranchId =
+          rawBranchId == _kGlobalBranchId ? null : rawBranchId.trim();
+    }
 
     _pillAnim = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 360));
@@ -324,53 +331,96 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
       backgroundColor: bgColor,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      leading: IconButton(
-        icon: Icon(Icons.arrow_back_rounded,
-            color: _isGlobal ? Colors.white : t.textPrimary),
+      leading: AppBackButton(
+        color: _isGlobal ? Colors.white : t.textPrimary,
+        bgColor: _isGlobal ? const Color(0xFF21262D) : t.accent.withValues(alpha: 0.08),
         onPressed: () => Navigator.pop(context),
       ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      leadingWidth: 52,
+      title: Row(
         children: [
-          // Title
-          Text(
-            widget.module.title,
-            style: TextStyle(
-                color: _isGlobal ? const Color(0xFFE6EDF3) : t.textPrimary,
-                fontWeight: FontWeight.w800,
-                fontSize: 16),
-          ),
-          // Animated branch pill
-          if (!_needsBranch && _selectedBranchName != null)
-            FadeTransition(
-              opacity: _pillFade,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                        color: t.accent, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 5),
-                  Text(
-                    _selectedBranchName!,
-                    style: TextStyle(
-                        color: t.accent,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ],
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.asset(
+                'assets/logo/gmwf-1.png',
+                width: 22,
+                height: 22,
+                fit: BoxFit.contain,
               ),
             ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.module.title,
+                  style: TextStyle(
+                    color: _isGlobal ? const Color(0xFFE6EDF3) : t.textPrimary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    letterSpacing: -0.3,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (!_needsBranch && _selectedBranchName != null)
+                  FadeTransition(
+                    opacity: _pillFade,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: BoxDecoration(
+                            color: t.accent,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _selectedBranchName!,
+                          style: TextStyle(
+                            color: t.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
       actions: [
-        // Branch-scoped roles see only a read-only branch label, no selector.
-        if (widget.module.isBranchDependent && _isBranchScoped)
+        // Version pill
+        Container(
+          margin: const EdgeInsets.only(right: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: t.accent.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text('v${AutoUpdateService.currentVersion}',
+              style: TextStyle(
+                  color: t.accent,
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold)),
+        ),
+        // Branch-scoped roles or finance module see only a read-only branch label, no selector.
+        if (widget.module.isBranchDependent && (_isBranchScoped || widget.module.id == 'finance'))
           _LockedBranchLabel(branchName: _selectedBranchName ?? '', t: t),
-        if (widget.module.isBranchDependent && !_isBranchScoped)
+        if (widget.module.isBranchDependent && !_isBranchScoped && widget.module.id != 'finance')
           isMobile
               ? _MobileBranchButton(state: this, t: t)
               : _DesktopBranchDropdown(state: this, t: t),

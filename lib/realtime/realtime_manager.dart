@@ -56,12 +56,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 
 import 'realtime_router.dart';
+import '../services/local_storage_service.dart';
 
 class RealtimeManager {
   static final RealtimeManager _instance = RealtimeManager._internal();
@@ -128,8 +129,8 @@ class RealtimeManager {
   String? get clientId    => _clientId;
 
   static Future<void> initOutbox() async {
-    await Hive.openBox(_outboxBox);
-    await Hive.openBox(_failedOutboxBox); // [FAIL-BOX]
+    await LocalStorageService.openBoxSafe(_outboxBox);
+    await LocalStorageService.openBoxSafe(_failedOutboxBox); // [FAIL-BOX]
   }
 
   // ── Initialize ─────────────────────────────────────────────────────────────
@@ -184,6 +185,16 @@ class RealtimeManager {
 
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      if (kIsWeb) {
+        try {
+          await _channel!.ready.timeout(const Duration(seconds: 4));
+        } catch (e) {
+          if (kDebugMode) print('[RealtimeManager] Web WebSocket connection error/timeout: $e');
+          _handleDisconnect();
+          return;
+        }
+      }
 
       final identifyMsg = {
         'event_type': 'identify',

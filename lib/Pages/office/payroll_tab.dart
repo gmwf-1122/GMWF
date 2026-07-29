@@ -8,7 +8,10 @@ import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_loans_storage.dart';
+import '../../services/local_storage_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/payroll_calculator_service.dart';
+import 'package:collection/collection.dart';
 import 'shared_widgets.dart';
 
 class PayrollTab extends StatefulWidget {
@@ -16,6 +19,7 @@ class PayrollTab extends StatefulWidget {
   final String monthKey;
   final ValueChanged<String> onMonthChanged;
   final String userRole;
+  final String departmentFilter;
 
   const PayrollTab({
     super.key,
@@ -23,6 +27,7 @@ class PayrollTab extends StatefulWidget {
     required this.monthKey,
     required this.onMonthChanged,
     required this.userRole,
+    this.departmentFilter = 'all',
   });
 
   @override
@@ -33,11 +38,53 @@ class _PayrollTabState extends State<PayrollTab> {
   final TextEditingController _ledgerSearchCtrl = TextEditingController();
   final TextEditingController _payrollSearchCtrl = TextEditingController();
   String _selectedLedgerEmployeeId = 'all';
+  String _selectedBranchFilter = 'all';
+  String _selectedDeptFilter = 'all';
   bool _showLedger = false;
+  List<Map<String, dynamic>>? _calculatedPayroll;
+  bool _isCalculating = false;
 
   // Tracks which payroll rows have their secondary breakdown expanded.
   // Progressive disclosure: collapsed by default, one tap away.
   final Set<String> _expandedRows = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDeptFilter = widget.departmentFilter;
+    _runPayrollCalculation();
+  }
+
+  @override
+  void didUpdateWidget(PayrollTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.monthKey != widget.monthKey || oldWidget.branchId != widget.branchId) {
+      _selectedBranchFilter = 'all';
+      _selectedDeptFilter = widget.departmentFilter;
+      _runPayrollCalculation();
+    } else if (oldWidget.departmentFilter != widget.departmentFilter) {
+      _selectedDeptFilter = widget.departmentFilter;
+    }
+  }
+
+  Future<void> _runPayrollCalculation() async {
+    if (!mounted) return;
+    setState(() => _isCalculating = true);
+    try {
+      final res = await PayrollCalculatorService().calculatePayroll(
+        branchId: widget.branchId,
+        monthKey: widget.monthKey,
+      );
+      if (!mounted) return;
+      setState(() {
+        _calculatedPayroll = res;
+        _isCalculating = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isCalculating = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -46,17 +93,54 @@ class _PayrollTabState extends State<PayrollTab> {
     super.dispose();
   }
 
+  Color _mutedColorForKey(String key) {
+    final seed = key.hashCode;
+    final hue = (seed % 360).toDouble();
+    final h = (hue + 360) % 360;
+    return HSLColor.fromAHSL(1.0, h, 0.28, 0.88).toColor();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
+    final tOriginal = RoleThemeScope.dataOf(context);
+    final t = RoleThemeData(
+      roleLabel: tOriginal.roleLabel,
+      isDarkCanvas: false,
+      bg: const Color(0xFFF8FAFC),
+      bgCard: Colors.white,
+      bgCardAlt: const Color(0xFFF1F5F9),
+      bgRule: const Color(0xFFE2E8F0),
+      accent: const Color(0xFF10B981),
+      accentLight: const Color(0xFF34D399),
+      accentMuted: const Color(0xFFD1FAE5),
+      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+      glassTint: const Color(0x1A10B981),
+      textPrimary: const Color(0xFF111827),
+      textSecondary: const Color(0xFF6B7280),
+      textTertiary: const Color(0xFF9CA3AF),
+      danger: const Color(0xFFEF4444),
+      zakat: tOriginal.zakat,
+      nonZakat: tOriginal.nonZakat,
+      gmwf: tOriginal.gmwf,
+      cardFillTokens: tOriginal.cardFillTokens,
+      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+      cardFillDispensary: tOriginal.cardFillDispensary,
+      chartBar1: tOriginal.chartBar1,
+      chartBar2: tOriginal.chartBar2,
+      chartBar3: tOriginal.chartBar3,
+      chartGrid: tOriginal.chartGrid,
+    );
 
-    return Column(
-      children: [
-        _buildMonthPickerBar(t),
-        Expanded(
-          child: _showLedger ? _buildLedgerTimelineView(t) : _buildPayrollBoard(t),
-        ),
-      ],
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: Column(
+        children: [
+          _buildMonthPickerBar(t),
+          Expanded(
+            child: _showLedger ? _buildLedgerTimelineView(t) : _buildPayrollBoard(t),
+          ),
+        ],
+      ),
     );
   }
 
@@ -169,218 +253,546 @@ class _PayrollTabState extends State<PayrollTab> {
     );
   }
 
-  Widget _buildPayrollBoard(RoleThemeData t) {
-    return Column(
-      children: [
-        Container(
-          color: t.bgCard,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          child: Container(
-            height: 40,
-            decoration: BoxDecoration(
-              color: t.bgCardAlt,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: t.bgRule),
-            ),
-            child: TextField(
-              controller: _payrollSearchCtrl,
-              style: TextStyle(color: t.textPrimary, fontSize: 13),
-              decoration: InputDecoration(
-                hintText: 'Search payroll by employee name...',
-                hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
-                prefixIcon: Icon(Icons.search, color: t.textTertiary, size: 18),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+  Widget _buildFilterBar(RoleThemeData t, List<Map<String, dynamic>> candidates) {
+    final branchesBox = Hive.box(LocalStorageService.branchesBox);
+    final branchesList = branchesBox.values.map((v) => Map<String, dynamic>.from(v as Map)).toList();
+    final branchNames = {
+      'all': 'All Branches',
+      for (final b in branchesList)
+        b['id']?.toString() ?? '': b['name']?.toString() ?? (b['id']?.toString() ?? '')
+    };
+
+    final depts = candidates
+        .map((item) {
+          final empId = item['employeeId'] as String;
+          final emp = FinanceLocalStorage.getEmployee(empId);
+          final dept = emp?['department']?.toString() ?? 'Other';
+          return dept.trim().isEmpty ? 'Other' : dept.trim();
+        })
+        .where((dept) => dept.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    final deptOptions = ['all', ...depts];
+    final hasBranchFilter = widget.branchId == 'all';
+
+    String safeDeptFilter = _selectedDeptFilter;
+    if (!deptOptions.contains(safeDeptFilter)) {
+      final matched = deptOptions.firstWhere(
+        (d) => d.toLowerCase() == safeDeptFilter.toLowerCase(),
+        orElse: () => 'all',
+      );
+      safeDeptFilter = matched;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      ),
+      child: Row(
+        children: [
+          if (hasBranchFilter) ...[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'BRANCH',
+                    style: TextStyle(
+                      color: t.textTertiary,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: branchNames.containsKey(_selectedBranchFilter) ? _selectedBranchFilter : 'all',
+                        isExpanded: true,
+                        icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
+                        style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() => _selectedBranchFilter = val);
+                          }
+                        },
+                        items: branchNames.entries.map((entry) {
+                          return DropdownMenuItem<String>(
+                            value: entry.key,
+                            child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'DEPARTMENT',
+                  style: TextStyle(
+                    color: t.textTertiary,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  height: 38,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: safeDeptFilter,
+                      isExpanded: true,
+                      icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
+                      style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() => _selectedDeptFilter = val);
+                        }
+                      },
+                      items: deptOptions.map((dept) {
+                        return DropdownMenuItem<String>(
+                          value: dept,
+                          child: Text(dept == 'all' ? 'All Departments' : dept, overflow: TextOverflow.ellipsis),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-        Expanded(
-          child: ValueListenableBuilder(
-            valueListenable: FinanceLocalStorage.employeesBox.listenable(),
-            builder: (ctx, Box box, _) {
-              final query = _payrollSearchCtrl.text.trim().toLowerCase();
-              final activeEmployees = FinanceLocalStorage.getEmployees(widget.branchId).where((e) {
-                if (e['isActive'] != true) return false;
-                if (query.isNotEmpty) {
-                  final name = e['name']?.toString().toLowerCase() ?? '';
-                  return name.contains(query);
-                }
-                return true;
-              }).toList();
+        ],
+      ),
+    );
+  }
 
-              if (activeEmployees.isEmpty) {
-                return Center(
+  String _formatDayCount(double value) => value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
+
+  Widget _buildPayrollBoard(RoleThemeData t) {
+    if (_isCalculating) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: t.accent),
+            const SizedBox(height: 12),
+            Text('Calculating payroll details...', style: TextStyle(color: t.textSecondary, fontSize: 13)),
+          ],
+        ),
+      );
+    }
+
+    if (_calculatedPayroll == null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ElevatedButton.icon(
+              onPressed: _runPayrollCalculation,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Calculate Payroll'),
+              style: ElevatedButton.styleFrom(backgroundColor: t.accent),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final query = _payrollSearchCtrl.text.trim().toLowerCase();
+    final filteredBySearch = _calculatedPayroll!.where((item) {
+      final name = item['employeeName']?.toString().toLowerCase() ?? '';
+      if (query.isNotEmpty && !name.contains(query)) return false;
+      return true;
+    }).toList();
+
+    final list = filteredBySearch.where((item) {
+      if (_selectedBranchFilter != 'all') {
+        final empId = item['employeeId'] as String;
+        final emp = FinanceLocalStorage.getEmployee(empId);
+        final branchId = emp?['branchId']?.toString() ?? 'unknown';
+        if (branchId != _selectedBranchFilter) return false;
+      }
+
+      if (_selectedDeptFilter != 'all') {
+        final empId = item['employeeId'] as String;
+        final emp = FinanceLocalStorage.getEmployee(empId);
+        final dept = emp?['department']?.toString() ?? 'Other';
+        final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
+        if (cleanDept.toLowerCase() != _selectedDeptFilter.toLowerCase()) return false;
+      }
+      return true;
+    }).toList();
+
+    return ValueListenableBuilder(
+      valueListenable: FinanceLocalStorage.salaryLedgerBox.listenable(),
+      builder: (c, Box ledgerBox, _) {
+        int paidCount = 0;
+        double disbursedTotal = 0.0;
+        double pendingTotal = 0.0;
+
+        for (final item in list) {
+          final empId = item['employeeId'] as String;
+          final netSalary = (item['netSalary'] as num?)?.toDouble() ?? 0.0;
+
+          final payouts = ledgerBox.values.where((val) {
+            if (val is! Map) return false;
+            final entry = Map<String, dynamic>.from(val);
+            return entry['employeeId'] == empId &&
+                   entry['monthKey'] == widget.monthKey &&
+                   entry['type'] == 'payout' &&
+                   entry['isVoided'] != true;
+          }).toList();
+
+          final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
+          final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
+          final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
+          final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
+
+          if (isPaid) {
+            paidCount++;
+            final double amt = payouts.isNotEmpty 
+                ? (payouts.first['amount'] as num).toDouble() 
+                : netSalary;
+            disbursedTotal += amt;
+          } else {
+            pendingTotal += netSalary;
+          }
+        }
+
+        int unpaidCount = list.length - paidCount;
+
+        return Column(
+          children: [
+            _buildMonthLockWarningIfNeeded(t),
+
+            Container(
+              color: t.bgCard,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Container(
+                height: 40,
+                decoration: BoxDecoration(
+                  color: t.bgCardAlt,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: t.bgRule),
+                ),
+                child: TextField(
+                  controller: _payrollSearchCtrl,
+                  style: TextStyle(color: t.textPrimary, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: 'Search payroll by employee name...',
+                    hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
+                    prefixIcon: Icon(Icons.search, color: t.textTertiary, size: 18),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ),
+
+            if (list.isEmpty)
+              Expanded(
+                child: Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(Icons.people_outline_rounded, size: 48, color: t.textTertiary),
                       const SizedBox(height: 12),
                       Text(
-                        query.isNotEmpty ? 'No matching employees found.' : 'No active employees registered.',
+                        query.isNotEmpty ? 'No matching employees found.' : 'No active employees registered for this month.',
                         style: TextStyle(color: t.textTertiary, fontSize: 13),
                       ),
                     ],
                   ),
-                );
-              }
+                ),
+              )
+            else ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                child: buildMetricCardRow(
+                  theme: t,
+                  cards: [
+                    buildMetricCard(
+                      theme: t,
+                      label: 'Month Disbursement',
+                      value: '$paidCount / ${list.length} PAID',
+                      valueColor: Colors.green[600],
+                      caption: '$unpaidCount pending payout',
+                    ),
+                    buildMetricCard(
+                      theme: t,
+                      label: 'Disbursed Total',
+                      value: 'PKR ${_fmtCurrency(disbursedTotal)}',
+                      valueColor: Colors.green[600],
+                      caption: 'Cleared payout',
+                    ),
+                    buildMetricCard(
+                      theme: t,
+                      label: 'Pending Total',
+                      value: 'PKR ${_fmtCurrency(pendingTotal)}',
+                      valueColor: Colors.green[600],
+                      caption: 'Est. required',
+                    ),
+                  ],
+                ),
+              ),
+              _buildFilterBar(t, filteredBySearch),
+              (() {
+                debugPrint('PAYROLL DEBUG: list.length = ${list.length}');
+                final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
+                for (final item in list) {
+                  try {
+                    final empId = item['employeeId'] as String;
+                    final emp = FinanceLocalStorage.getEmployee(empId);
+                    final branchId = emp?['branchId']?.toString() ?? 'unknown';
+                    final dept = emp?['department']?.toString() ?? 'Other';
+                    final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
 
-              return ValueListenableBuilder(
-                valueListenable: FinanceLocalStorage.salaryLedgerBox.listenable(),
-                builder: (c, Box ledgerBox, _) {
-                  return ValueListenableBuilder(
-                    valueListenable: FinanceLocalStorage.attendanceBox.listenable(),
-                    builder: (c2, Box attBox, _) {
-                      // Calculate Aggregate Summaries for the Dashboard Header
-                      int paidCount = 0;
-                      double disbursedTotal = 0.0;
-                      double pendingTotal = 0.0;
+                    debugPrint('PAYROLL DEBUG: item empId=$empId emp=${emp != null} branchId=$branchId dept=$cleanDept');
 
-                      for (final emp in activeEmployees) {
-                        final empId = emp['localId']?.toString() ?? '';
-                        final payrollSummary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
-                        final baseSalaryEarned = (payrollSummary['baseSalaryEarned'] as num).toDouble();
-                        final absenceDeductions = (payrollSummary['absenceDeductions'] as num).toDouble();
-                        final holidayBonus = (payrollSummary['holidayBonus'] as num).toDouble();
-                        final sundayOvertimeBonus = (payrollSummary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0;
-                        final overtimeBonusTotal = holidayBonus + sundayOvertimeBonus;
-                        final advance = FinanceLocalStorage.getAdvanceBalance(empId);
+                    grouped.putIfAbsent(branchId, () => {});
+                    grouped[branchId]!.putIfAbsent(cleanDept, () => []);
+                    grouped[branchId]![cleanDept]!.add(item);
+                  } catch (e, st) {
+                    debugPrint('PAYROLL DEBUG: EXCEPTION grouping item $item -> $e\n$st');
+                  }
+                }
 
-                        final payouts = ledgerBox.values.where((val) {
-                          if (val is! Map) return false;
-                          final entry = Map<String, dynamic>.from(val);
-                          return entry['employeeId'] == empId &&
-                                 entry['monthKey'] == widget.monthKey &&
-                                 entry['type'] == 'payout' &&
-                                 entry['isVoided'] != true;
-                        }).toList();
+                debugPrint('PAYROLL DEBUG: grouped.keys = ${grouped.keys.toList()}');
 
-                        if (payouts.isNotEmpty) {
-                          paidCount++;
-                          disbursedTotal += (payouts.first['amount'] as num).toDouble();
-                        } else {
-                          final estNet = (baseSalaryEarned - absenceDeductions + overtimeBonusTotal).clamp(0.0, double.infinity);
-                          pendingTotal += estNet;
-                        }
-                      }
+                final sortedBranches = grouped.keys.toList()..sort((a, b) {
+                  if (a == 'unknown') return 1;
+                  if (b == 'unknown') return -1;
+                  return a.compareTo(b);
+                });
 
-                      int unpaidCount = activeEmployees.length - paidCount;
+                debugPrint('PAYROLL DEBUG: sortedBranches = $sortedBranches');
 
+                return Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    itemCount: sortedBranches.length,
+                    itemBuilder: (ctx, bIdx) {
+                      final branchId = sortedBranches[bIdx];
+                      final depts = grouped[branchId]!;
+                      final sortedDepts = depts.keys.toList()..sort();
+
+                      final branchName = Hive.box(LocalStorageService.branchesBox).get(branchId)?['name'] ?? branchId;
+
+                      final branchCol = _mutedColorForKey(branchName.toString());
                       return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── PAYROLL DASHBOARD HEADER ──────────────────────
-                          // Flat metric cards, no gradient — see redesign plan §3.B.
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                            child: buildMetricCardRow(
-                              theme: t,
-                              cards: [
-                                buildMetricCard(
-                                  theme: t,
-                                  label: 'Month Disbursement',
-                                  value: '$paidCount / ${activeEmployees.length} PAID',
-                                  valueColor: Colors.green[600],
-                                  caption: '$unpaidCount pending payout',
-                                ),
-                                buildMetricCard(
-                                  theme: t,
-                                  label: 'Disbursed Total',
-                                  value: 'PKR ${_fmtCurrency(disbursedTotal)}',
-                                  valueColor: Colors.green[600],
-                                  caption: 'Cleared payout',
-                                ),
-                                buildMetricCard(
-                                  theme: t,
-                                  label: 'Pending Total',
-                                  value: 'PKR ${_fmtCurrency(pendingTotal)}',
-                                  caption: 'Est. required',
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+                            margin: const EdgeInsets.only(top: 12, bottom: 8),
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: branchCol.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: branchCol.withOpacity(0.12)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(width: 6, height: 24, decoration: BoxDecoration(color: branchCol, borderRadius: BorderRadius.circular(2))),
+                                const SizedBox(width: 8),
+                                Text(
+                                  branchName.toString().toUpperCase(),
+                                  style: TextStyle(
+                                    color: branchCol.withOpacity(0.95),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.0,
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          Expanded(
-                            child: ListView.builder(
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                              itemCount: activeEmployees.length,
-                              itemBuilder: (ctx, i) {
-                                final emp = activeEmployees[i];
-                                final empId = emp['localId']?.toString() ?? '';
-                                final ps = PermissionService();
+                          ...sortedDepts.map((deptName) {
+                            final deptItems = depts[deptName]!;
 
-                                // Lookup salary for this payroll month
-                                final payrollSummary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
-                                final baseSalary = (payrollSummary['fullMonthWeightedSalary'] as num).toDouble();
-                                final baseSalaryEarned = (payrollSummary['baseSalaryEarned'] as num).toDouble();
-                                final absentDays = (payrollSummary['absentDays'] as num).toDouble();
-                                final unpaidLeaves = (payrollSummary['unpaidLeaves'] as num).toDouble();
-                                final workingDays = (payrollSummary['workingDays'] as num).toDouble();
-                                final totalDays = (payrollSummary['totalDays'] as num).toInt();
-                                final totalEmployedDays = (payrollSummary['totalEmployedDays'] as num).toInt();
-                                final sundayOvertimeDays = (payrollSummary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0;
-                                final sundayOvertimeBonus = (payrollSummary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0;
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 8),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(color: t.bgRule),
+                              ),
+                              color: t.bgCard,
+                              clipBehavior: Clip.antiAlias,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: t.bgCardAlt,
+                                      border: Border(bottom: BorderSide(color: t.bgRule)),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.label_outline_rounded, color: branchCol.withOpacity(0.95), size: 16),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          deptName.toUpperCase(),
+                                          style: TextStyle(
+                                            color: t.textPrimary,
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 11,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: branchCol.withOpacity(0.14),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            '${deptItems.length} EMPLOYEES',
+                                            style: TextStyle(
+                                              color: branchCol.withOpacity(0.95),
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  ...deptItems.map((item) {
+                                    final empId = item['employeeId'] as String;
+                                    final emp = FinanceLocalStorage.getEmployee(empId) ?? {
+                                      'name': item['employeeName'],
+                                      'role': 'Employee',
+                                      'department': deptName,
+                                      'localId': empId,
+                                      'isActive': true,
+                                      'branchId': branchId,
+                                    };
+                                    final ps = PermissionService();
 
-                                final absenceDeductions = (payrollSummary['absenceDeductions'] as num).toDouble();
-                                final holidayBonus = (payrollSummary['holidayBonus'] as num).toDouble();
-                                final overtimeBonusTotal = holidayBonus + sundayOvertimeBonus;
+                                    final payouts = ledgerBox.values.where((val) {
+                                      if (val is! Map) return false;
+                                      final entry = Map<String, dynamic>.from(val);
+                                      return entry['employeeId'] == empId &&
+                                             entry['monthKey'] == widget.monthKey &&
+                                             entry['type'] == 'payout' &&
+                                             entry['isVoided'] != true;
+                                    }).toList();
 
-                                final paidDays = totalEmployedDays - absentDays - unpaidLeaves;
-                                final paidDaysStr = paidDays.toStringAsFixed(1).replaceAll('.0', '');
+                                    final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
+                                    final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
+                                    final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
+                                    final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
 
-                                // Fetch derived advance balance
-                                final advance = FinanceLocalStorage.getAdvanceBalance(empId);
+                                    final isExpanded = _expandedRows.contains(empId);
 
-                                // Query if payout already processed for this employee in this month
-                                final payouts = ledgerBox.values.where((val) {
-                                  if (val is! Map) return false;
-                                  final entry = Map<String, dynamic>.from(val);
-                                  return entry['employeeId'] == empId &&
-                                         entry['monthKey'] == widget.monthKey &&
-                                         entry['type'] == 'payout' &&
-                                         entry['isVoided'] != true;
-                                }).toList();
+                                    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
 
-                                final isPaid = payouts.isNotEmpty;
-                                final paidAmount = isPaid ? (payouts.first['amount'] as num).toDouble() : 0.0;
-                                final netEstimate = (baseSalaryEarned - absenceDeductions + overtimeBonusTotal).clamp(0.0, double.infinity);
-                                final netPayDisplay = isPaid ? paidAmount : netEstimate;
-                                final isExpanded = _expandedRows.contains(empId);
+                                    // Prefer authoritative values from calculated payroll item (service); fall back to attendance summary.
+                                    final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
+                                    final double baseSalary = (item['fullMonthWeightedSalary'] as num?)?.toDouble() ?? (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
+                                    final double baseSalaryEarned = (item['baseSalaryEarned'] as num?)?.toDouble() ?? (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
+                                    final double absenceDeductions = (item['absenceDeductions'] as num?)?.toDouble() ?? (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
+                                    final double overtimeBonusTotal = ((item['holidayBonus'] as num?)?.toDouble() ?? (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0) + ((item['sundayOvertimeBonus'] as num?)?.toDouble() ?? (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0);
+                                    final double netFromItem = (item['netSalary'] as num?)?.toDouble() ?? (summary['grossSalary'] as num?)?.toDouble() ?? 0.0;
+                                    final double netPayDisplay = isPaid
+                                        ? (payouts.isNotEmpty ? (payouts.first['amount'] as num).toDouble() : netFromItem)
+                                        : netFromItem;
 
-                                return _buildPayrollRow(
-                                  t: t,
-                                  ps: ps,
-                                  emp: emp,
-                                  empId: empId,
-                                  isPaid: isPaid,
-                                  netPayDisplay: netPayDisplay,
-                                  baseSalary: baseSalary,
-                                  baseSalaryEarned: baseSalaryEarned,
-                                  absenceDeductions: absenceDeductions,
-                                  overtimeBonusTotal: overtimeBonusTotal,
-                                  totalDays: totalDays,
-                                  totalEmployedDays: totalEmployedDays,
-                                  workingDays: workingDays,
-                                  absentDays: absentDays,
-                                  unpaidLeaves: unpaidLeaves,
-                                  paidDaysStr: paidDaysStr,
-                                  sundayOvertimeDays: sundayOvertimeDays,
-                                  advance: advance,
-                                  isExpanded: isExpanded,
-                                  payouts: payouts,
-                                );
-                              },
-                            ),
-                          ),
+                                    return _buildPayrollRow(
+                                      t: t,
+                                      ps: ps,
+                                      emp: emp,
+                                      empId: empId,
+                                      isPaid: isPaid,
+                                      isLocked: isLocked,
+                                      netPayDisplay: netPayDisplay,
+                                      baseSalary: baseSalary,
+                                      baseSalaryEarned: baseSalaryEarned,
+                                      absenceDeductions: absenceDeductions,
+                                      overtimeBonusTotal: overtimeBonusTotal,
+                                      totalDays: (summary['totalDays'] as num?)?.toInt() ?? 30,
+                                      totalEmployedDays: (summary['totalEmployedDays'] as num?)?.toInt() ?? 30,
+                                      workingDays: (summary['workingDays'] as num?)?.toDouble() ?? 0.0,
+                                      absentDays: (summary['absentDays'] as num?)?.toDouble() ?? 0.0,
+                                      unpaidLeaves: (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0,
+                                      paidDaysStr: (((summary['totalEmployedDays'] as num? ?? 0) - (summary['absentDays'] as num? ?? 0) - (summary['unpaidLeaves'] as num? ?? 0))).toStringAsFixed(1).replaceAll('.0', ''),
+                                      sundayOvertimeDays: (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0,
+                                      advance: (item['advanceInstallment'] as num?)?.toDouble() ?? 0.0,
+                                      isExpanded: isExpanded,
+                                      payouts: payouts,
+                                    );
+                                  }),
+                                ],
+                              ),
+                            );
+                          }),
                         ],
                       );
                     },
-                  );
-                },
-              );
-            },
+                  ),
+                );
+              })(),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildMonthLockWarningIfNeeded(RoleThemeData t) {
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
+    if (!isLocked) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.amber.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.amber.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.lock_outline, color: Colors.amber, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'This period is locked and closed. All calculations and payouts are strictly read-only.',
+              style: TextStyle(color: Colors.amber[800], fontSize: 11, fontWeight: FontWeight.bold),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -395,6 +807,7 @@ class _PayrollTabState extends State<PayrollTab> {
     required Map<String, dynamic> emp,
     required String empId,
     required bool isPaid,
+    required bool isLocked,
     required double netPayDisplay,
     required double baseSalary,
     required double baseSalaryEarned,
@@ -415,218 +828,228 @@ class _PayrollTabState extends State<PayrollTab> {
     final role = emp['role']?.toString() ?? '';
     final dept = emp['department']?.toString() ?? '';
 
+    final branchLabel = Hive.box(LocalStorageService.branchesBox).get(emp['branchId']?.toString() ?? '')?['name'] ?? emp['branchId']?.toString() ?? '';
+    final branchCol = _mutedColorForKey(branchLabel);
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 10),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: t.bgRule, width: 0.5),
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Top line: identity + status pill ──
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Row(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(width: 4, decoration: BoxDecoration(color: branchCol, borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)))),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Top line: identity + status pill ──
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      buildInitialsAvatar(name: name, theme: t, radius: 18),
-                      const SizedBox(width: 10),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Row(
                           children: [
-                            Text(name, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
-                            Text('$role • $dept', style: TextStyle(color: t.textSecondary, fontSize: 11), overflow: TextOverflow.ellipsis),
+                            buildInitialsAvatar(name: name, theme: t, radius: 18),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                                  Text('$role • $dept', style: TextStyle(color: t.textSecondary, fontSize: 11), overflow: TextOverflow.ellipsis),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                buildStatusPill(
-                  theme: t,
-                  label: isPaid ? 'PAID' : 'UNPAID',
-                  variant: isPaid ? StatusPillVariant.success : StatusPillVariant.warning,
-                  icon: isPaid ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-
-            // ── The one number that matters: Net Pay ──
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(isPaid ? 'NET PAID' : 'NET ESTIMATE', style: TextStyle(color: t.textTertiary, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.6)),
-                    const SizedBox(height: 3),
-                    Text(
-                      'PKR ${_fmtCurrency(netPayDisplay)}',
-                      style: TextStyle(color: isPaid ? Colors.green[600] : t.textPrimary, fontSize: 22, fontWeight: FontWeight.w500),
-                    ),
-                  ],
-                ),
-                InkWell(
-                  onTap: () => setState(() {
-                    if (isExpanded) {
-                      _expandedRows.remove(empId);
-                    } else {
-                      _expandedRows.add(empId);
-                    }
-                  }),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(isExpanded ? 'Hide details' : 'Details', style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.bold)),
-                        Icon(isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: t.accent, size: 16),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            // ── Secondary breakdown, one tap away (progressive disclosure) ──
-            if (isExpanded) ...[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: t.bgRule),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildBreakdownColumn('Base Salary', baseSalaryEarned, false, t),
-                        _buildBreakdownColumn('Deductions', absenceDeductions, true, t),
-                        _buildBreakdownColumn('Bonuses/OT', overtimeBonusTotal, false, t),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Divider(color: t.bgRule, height: 1),
-                    const SizedBox(height: 10),
-                    Text(
-                      '${totalEmployedDays < totalDays ? "Contract: $totalEmployedDays/$totalDays days" : "Full Month ($totalDays days)"} • Pay for $paidDaysStr days • worked $workingDays d • $absentDays abs • $unpaidLeaves unpaid lv${sundayOvertimeDays > 0 ? " • sun OT: $sundayOvertimeDays" : ""}',
-                      style: TextStyle(color: t.textTertiary, fontSize: 11),
-                    ),
-                    if (!isPaid && totalEmployedDays < totalDays) ...[
-                      const SizedBox(height: 4),
-                      Text('Salary Rate: PKR ${_fmtCurrency(baseSalary)}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-
-            // ── Advance pill, only when non-zero ──
-            if (advance > 0) ...[
-              const SizedBox(height: 10),
-              buildStatusPill(
-                theme: t,
-                label: 'Advance: PKR ${_fmtCurrency(advance)}',
-                variant: StatusPillVariant.warning,
-                icon: Icons.money_off_rounded,
-              ),
-            ],
-
-            const SizedBox(height: 12),
-
-            // ── One primary action + overflow for occasional actions ──
-            if (!isPaid) ...[
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      const SizedBox(width: 8),
+                      buildStatusPill(
+                        theme: t,
+                        label: isPaid ? 'PAID' : 'UNPAID',
+                        variant: isPaid ? StatusPillVariant.success : StatusPillVariant.warning,
+                        icon: isPaid ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
                       ),
-                      icon: const Icon(Icons.payment, size: 14),
-                      label: const Text('Process Salary', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      onPressed: () => _openPayoutDialog(context, empId, name, baseSalary, advance),
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border.all(color: t.bgRule),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: PopupMenuButton<String>(
-                      icon: Icon(Icons.more_vert, color: t.textSecondary, size: 18),
-                      color: t.bgCardAlt,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      onSelected: (val) {
-                        if (val == 'loan') {
-                          _openIssueLoanDialog(context, empId, name);
-                        } else if (val == 'repay') {
-                          _openLogRepaymentDialog(context, empId, name);
-                        }
-                      },
-                      itemBuilder: (menuCtx) => [
-                        PopupMenuItem(
-                          value: 'loan',
+                  const SizedBox(height: 14),
+
+                  // ── The one number that matters: Net Pay ──
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(isPaid ? 'NET PAID' : 'NET ESTIMATE', style: TextStyle(color: t.textTertiary, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.6)),
+                          const SizedBox(height: 3),
+                          Text(
+                            'PKR ${_fmtCurrency(netPayDisplay)}',
+                            style: TextStyle(color: isPaid ? Colors.green[600] : t.textPrimary, fontSize: 22, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                      InkWell(
+                        onTap: () => setState(() {
+                          if (isExpanded) {
+                            _expandedRows.remove(empId);
+                          } else {
+                            _expandedRows.add(empId);
+                          }
+                        }),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                           child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.add_card, size: 16, color: t.textSecondary),
-                              const SizedBox(width: 8),
-                              Text('Issue Loan', style: TextStyle(color: t.textPrimary, fontSize: 12)),
+                              Text(isExpanded ? 'Hide details' : 'Details', style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Icon(isExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, color: t.accent, size: 16),
                             ],
                           ),
                         ),
-                        if (advance > 0)
-                          PopupMenuItem(
-                            value: 'repay',
-                            child: Row(
-                              children: [
-                                Icon(Icons.payments_outlined, size: 16, color: t.textSecondary),
-                                const SizedBox(width: 8),
-                                Text('Log Repayment', style: TextStyle(color: t.textPrimary, fontSize: 12)),
+                      ),
+                    ],
+                  ),
+
+                  // ── Secondary breakdown, one tap away (progressive disclosure) ──
+                  if (isExpanded) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: t.bgCardAlt,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: t.bgRule),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _buildBreakdownColumn('Base Salary', baseSalaryEarned, false, t),
+                              _buildBreakdownColumn('Deductions', absenceDeductions, true, t),
+                              _buildBreakdownColumn('Bonuses/OT', overtimeBonusTotal, false, t),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Divider(color: t.bgRule, height: 1),
+                          const SizedBox(height: 10),
+                          Text(
+                            '${totalEmployedDays < totalDays ? "Contract: $totalEmployedDays/$totalDays days" : "Full Month ($totalDays days)"} • Pay for $paidDaysStr days • worked ${_formatDayCount(workingDays)} d • ${_formatDayCount(absentDays)} abs • ${_formatDayCount(unpaidLeaves)} unpaid lv${sundayOvertimeDays > 0 ? " • sun OT: ${_formatDayCount(sundayOvertimeDays)}" : ""}',
+                            style: TextStyle(color: t.textTertiary, fontSize: 11),
+                          ),
+                          if (!isPaid && totalEmployedDays < totalDays) ...[
+                            const SizedBox(height: 4),
+                            Text('Salary Rate: PKR ${_fmtCurrency((emp['currentSalary'] as num?)?.toDouble() ?? 0.0)}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+
+                  // ── Advance pill, only when non-zero ──
+                  if (advance > 0) ...[
+                    const SizedBox(height: 10),
+                    buildStatusPill(
+                      theme: t,
+                      label: 'Advance: PKR ${_fmtCurrency(advance)}',
+                      variant: StatusPillVariant.warning,
+                      icon: Icons.money_off_rounded,
+                    ),
+                  ],
+
+                  const SizedBox(height: 12),
+
+                  // ── One primary action + overflow for occasional actions ──
+                  if (!isPaid) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isLocked ? Colors.grey : t.accent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            icon: const Icon(Icons.payment, size: 14),
+                            label: const Text('Process Salary', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: isLocked ? null : () => _openPayoutDialog(context, empId, name, baseSalary, advance),
+                          ),
+                        ),
+                        if (!isLocked) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            decoration: BoxDecoration(
+                              border: Border.all(color: t.bgRule),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: PopupMenuButton<String>(
+                              icon: Icon(Icons.more_vert, color: t.textSecondary, size: 18),
+                              color: t.bgCardAlt,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              onSelected: (val) {
+                                if (val == 'loan') _openIssueLoanDialog(context, empId, name);
+                                if (val == 'repay') _openLogRepaymentDialog(context, empId, name);
+                              },
+                              itemBuilder: (menuCtx) => [
+                                PopupMenuItem(
+                                  value: 'loan',
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.add_card, size: 16, color: t.textSecondary),
+                                      const SizedBox(width: 8),
+                                      Text('Issue Loan', style: TextStyle(color: t.textPrimary, fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                if (advance > 0)
+                                  PopupMenuItem(
+                                    value: 'repay',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.payments_outlined, size: 16, color: t.textSecondary),
+                                        const SizedBox(width: 8),
+                                        Text('Log Repayment', style: TextStyle(color: t.textPrimary, fontSize: 12)),
+                                      ],
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
+                        ],
                       ],
                     ),
-                  ),
+                  ] else if (ps.hasPermission(widget.userRole, AppPermission.voidFinanceRecord)) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isLocked ? Colors.grey : t.danger,
+                          side: BorderSide(color: isLocked ? Colors.grey : t.danger, width: 0.5),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        icon: const Icon(Icons.undo, size: 14),
+                        label: const Text('Reverse Payout (Mark Unpaid)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        onPressed: isLocked ? null : () => _showVoidDialog(context, payouts.first['localId']),
+                      ),
+                    ),
+                  ],
                 ],
               ),
-            ] else if (ps.hasPermission(widget.userRole, AppPermission.voidFinanceRecord)) ...[
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: t.danger,
-                    side: BorderSide(color: t.danger, width: 0.5),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  icon: const Icon(Icons.undo, size: 14),
-                  label: const Text('Reverse Payout (Mark Unpaid)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                  onPressed: () => _showVoidDialog(context, payouts.first['localId']),
-                ),
-              ),
-            ],
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1148,16 +1571,31 @@ class _PayrollTabState extends State<PayrollTab> {
     final overtimeBonusTotal = holidayBonus + sundayOvertimeBonus;
 
     final emp = FinanceLocalStorage.getEmployee(employeeId);
+    final contractSalary = (emp?['currentSalary'] as num?)?.toDouble() ?? 0.0;
     final isCash = emp?['bankName'] == 'Cash' || emp?['bankName'] == null;
     String paymentMethod = isCash ? 'cash' : 'bank_transfer';
 
+    final activeLoans = FinanceLoansStorage.getActiveLoansForEmployee(employeeId);
+    final fixedLoan = activeLoans.firstWhereOrNull((l) => l['repaymentType'] == 'fixed');
+    final flexibleLoan = activeLoans.firstWhereOrNull((l) => l['repaymentType'] == 'flexible');
+
+    double defaultDeduction = 0.0;
+    String defaultDeductionType = 'none';
+    if (fixedLoan != null) {
+      final balance = FinanceLoansStorage.getLoanBalance(fixedLoan);
+      final usual = (fixedLoan['usualInstallment'] as num?)?.toDouble() ?? 0.0;
+      defaultDeduction = usual.clamp(0.0, balance);
+      defaultDeductionType = 'loan';
+    }
+
     // Controllers
-    final otherDeductionsCtrl = TextEditingController(text: '0');
+    final otherDeductionsCtrl = TextEditingController(text: defaultDeduction > 0 ? defaultDeduction.toStringAsFixed(0) : '0');
     final arrearsCtrl = TextEditingController(text: '0');
     final overtimeBonusCtrl = TextEditingController(text: overtimeBonusTotal.toStringAsFixed(0));
     final noteCtrl = TextEditingController();
+    String otherDeductionsType = defaultDeductionType;
 
-    double netPaid = baseSalaryEarned - absenceDeductions + overtimeBonusTotal;
+    double netPaid = baseSalaryEarned - absenceDeductions - defaultDeduction + overtimeBonusTotal;
 
     showModalBottomSheet(
       context: context,
@@ -1196,10 +1634,10 @@ class _PayrollTabState extends State<PayrollTab> {
                     Text('Payroll Period: ${widget.monthKey}', style: TextStyle(color: t.textSecondary, fontSize: 12)),
                     const SizedBox(height: 14),
                     if (totalEmployedDays < totalDays) ...[
-                      _buildCalculationRow('Contract Base Salary', baseSalaryWeighted, false, t),
+                      _buildCalculationRow('Contract Base Salary', contractSalary, false, t),
                       _buildCalculationRow('Prorated Base Salary (Employed $totalEmployedDays/$totalDays days)', baseSalaryEarned, false, t),
                     ] else ...[
-                      _buildCalculationRow('Base Salary', baseSalaryWeighted, false, t),
+                      _buildCalculationRow('Base Salary', contractSalary, false, t),
                     ],
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -1207,7 +1645,7 @@ class _PayrollTabState extends State<PayrollTab> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('Automatically Detected Days', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-                          Text('${totalEmployedDays < totalDays ? "Employed: $totalEmployedDays" : "Total: $totalDays"} | Worked: $workingDays | Paid Leaves: $paidLeaves', style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text('${totalEmployedDays < totalDays ? "Employed: $totalEmployedDays" : "Total: $totalDays"} | Worked: ${_formatDayCount(workingDays)} | Paid Leaves: ${_formatDayCount(paidLeaves)}', style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -1219,7 +1657,7 @@ class _PayrollTabState extends State<PayrollTab> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text('Overtime & Holiday details', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-                          Text('Holidays: $holidayCount | Worked: $holidayWorkedDays | Sun OT: $sundayOvertimeDays', style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold)),
+                          Text('Holidays: $holidayCount | Worked: ${_formatDayCount(holidayWorkedDays)} | Sun OT: ${_formatDayCount(sundayOvertimeDays)}', style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -1233,11 +1671,120 @@ class _PayrollTabState extends State<PayrollTab> {
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       onChanged: (_) => updateCalculations(),
                     ),
-                    const SizedBox(height: 10),
-                    Divider(color: t.bgRule, height: 1),
-                    const SizedBox(height: 14),
+                     const SizedBox(height: 10),
+                     Divider(color: t.bgRule, height: 1),
+                     const SizedBox(height: 14),
 
-                    // Input: Other deductions
+                     if (activeLoans.isNotEmpty) ...[
+                       Container(
+                         padding: const EdgeInsets.all(12),
+                         margin: const EdgeInsets.only(bottom: 14),
+                         decoration: BoxDecoration(
+                           color: t.accent.withOpacity(0.06),
+                           borderRadius: BorderRadius.circular(10),
+                           border: Border.all(color: t.accent.withOpacity(0.2)),
+                         ),
+                         child: Column(
+                           crossAxisAlignment: CrossAxisAlignment.start,
+                           children: [
+                             Row(
+                               children: [
+                                 Icon(Icons.credit_card, size: 16, color: t.accent),
+                                 const SizedBox(width: 6),
+                                 Text('Active Loan/Advance detected', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                               ],
+                             ),
+                             const SizedBox(height: 6),
+                             ...activeLoans.map((loan) {
+                               final balance = FinanceLoansStorage.getLoanBalance(loan);
+                               final isFixed = loan['repaymentType'] == 'fixed';
+                               final usual = (loan['usualInstallment'] as num?)?.toDouble() ?? 0.0;
+                               return Padding(
+                                 padding: const EdgeInsets.only(bottom: 4),
+                                 child: Text(
+                                   '• ${loan['reason']}: PKR ${NumberFormat('#,###').format(balance)} outstanding (${isFixed ? "Fixed Installment: PKR ${NumberFormat('#,###').format(usual)}/mo" : "Flexible repayment"})',
+                                   style: TextStyle(color: t.textSecondary, fontSize: 11),
+                                 ),
+                               );
+                             }),
+                             if (fixedLoan != null) ...[
+                               const SizedBox(height: 8),
+                               Text(
+                                 'Fixed installment of PKR ${NumberFormat('#,###').format(defaultDeduction)} is automatically pre-filled below.',
+                                 style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.bold),
+                               ),
+                             ],
+                             if (fixedLoan == null && flexibleLoan != null) ...[
+                               const SizedBox(height: 8),
+                               Text(
+                                 'This employee has a Flexible Loan. Would you like to deduct any amount towards this loan?',
+                                 style: TextStyle(color: t.textSecondary, fontSize: 11, fontStyle: FontStyle.italic),
+                               ),
+                               const SizedBox(height: 6),
+                               Row(
+                                 children: [
+                                   ElevatedButton(
+                                     style: ElevatedButton.styleFrom(
+                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                       minimumSize: Size.zero,
+                                       backgroundColor: t.accent.withOpacity(0.1),
+                                       foregroundColor: t.accent,
+                                       elevation: 0,
+                                     ),
+                                     onPressed: () {
+                                       setSheetState(() {
+                                         otherDeductionsType = 'loan';
+                                         otherDeductionsCtrl.text = '1000';
+                                         updateCalculations();
+                                       });
+                                     },
+                                     child: const Text('Deduct 1,000', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                   ),
+                                   const SizedBox(width: 8),
+                                   ElevatedButton(
+                                     style: ElevatedButton.styleFrom(
+                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                       minimumSize: Size.zero,
+                                       backgroundColor: t.accent.withOpacity(0.1),
+                                       foregroundColor: t.accent,
+                                       elevation: 0,
+                                     ),
+                                     onPressed: () {
+                                       setSheetState(() {
+                                         otherDeductionsType = 'loan';
+                                         otherDeductionsCtrl.text = '5000';
+                                         updateCalculations();
+                                       });
+                                     },
+                                     child: const Text('Deduct 5,000', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                   ),
+                                   const SizedBox(width: 8),
+                                   ElevatedButton(
+                                     style: ElevatedButton.styleFrom(
+                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                       minimumSize: Size.zero,
+                                       backgroundColor: Colors.grey.withOpacity(0.1),
+                                       foregroundColor: Colors.grey[700],
+                                       elevation: 0,
+                                     ),
+                                     onPressed: () {
+                                       setSheetState(() {
+                                         otherDeductionsType = 'none';
+                                         otherDeductionsCtrl.text = '0';
+                                         updateCalculations();
+                                       });
+                                     },
+                                     child: const Text('No Deduction', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                   ),
+                                 ],
+                               ),
+                             ],
+                           ],
+                         ),
+                       ),
+                     ],
+
+                     // Input: Other deductions
                     buildFormField(
                       controller: otherDeductionsCtrl,
                       label: 'Other Deductions (Fine, tax, etc.)',
@@ -1246,6 +1793,20 @@ class _PayrollTabState extends State<PayrollTab> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       onChanged: (_) => updateCalculations(),
+                    ),
+                    const SizedBox(height: 10),
+                    buildDropdownField(
+                      label: 'Deduction Type',
+                      value: otherDeductionsType == 'loan' 
+                          ? 'Loan Deduction' 
+                          : (otherDeductionsType == 'security' ? 'Security Deduction' : 'None'),
+                      items: ['None', 'Loan Deduction', 'Security Deduction'],
+                      onChanged: (val) => setSheetState(() {
+                        if (val == 'None') otherDeductionsType = 'none';
+                        if (val == 'Loan Deduction') otherDeductionsType = 'loan';
+                        if (val == 'Security Deduction') otherDeductionsType = 'security';
+                      }),
+                      theme: t,
                     ),
 
                     // Input: Arrears adjustment
@@ -1364,7 +1925,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                           Row(
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
-                                              Text('Other Deductions:', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                                              Text(otherDeductionsType == 'loan' ? 'Loan Deduction:' : (otherDeductionsType == 'security' ? 'Security Deduction:' : 'Other Deductions:'), style: TextStyle(color: t.textTertiary, fontSize: 11)),
                                               Text('- PKR ${NumberFormat('#,###').format(otherDed)}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
                                             ],
                                           ),
@@ -1443,6 +2004,7 @@ class _PayrollTabState extends State<PayrollTab> {
                             'baseSalaryWeighted': baseSalaryWeighted,
                             'baseSalaryEarned': baseSalaryEarned,
                             'otherDeductions': otherDed,
+                            'otherDeductionsType': otherDeductionsType,
                             'advanceAdded': 0.0,
                             'paymentMethod': paymentMethod,
                             'note': noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : 'Monthly salary processed.',
@@ -1453,6 +2015,25 @@ class _PayrollTabState extends State<PayrollTab> {
                             data: ledgerData,
                             performedBy: curUser,
                           );
+
+                          // Auto-apply loan repayment if type is loan and amount > 0
+                          if (otherDeductionsType == 'loan' && otherDed > 0) {
+                            double remainingToDeduct = otherDed;
+                            for (final loan in activeLoans) {
+                              if (remainingToDeduct <= 0.01) break;
+                              final balance = FinanceLoansStorage.getLoanBalance(loan);
+                              final deductFromThis = remainingToDeduct.clamp(0.0, balance);
+                              if (deductFromThis > 0) {
+                                await FinanceLoansStorage.recordPayment(
+                                  loanId: loan['id'],
+                                  amount: deductFromThis,
+                                  note: 'Salary Deduction for Period ${widget.monthKey}',
+                                  performedBy: curUser,
+                                );
+                                remainingToDeduct -= deductFromThis;
+                              }
+                            }
+                          }
 
                           if (sheetCtx.mounted) {
                             Navigator.pop(sheetCtx);

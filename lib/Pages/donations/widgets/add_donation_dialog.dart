@@ -123,7 +123,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
 
     try {
       final data = {
-        'donorName': _isAnonymous ? 'Anonymous' : _nameCtrl.text.trim(),
+        'donorName': _isAnonymous ? 'Walk-in Donor' : _nameCtrl.text.trim(),
         'phone': _isAnonymous ? '' : _phoneCtrl.text.trim(),
         'donorId': _isAnonymous ? '' : _donorIdCtrl.text.trim(),
         'isAnonymous': _isAnonymous,
@@ -228,7 +228,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
                             onChanged: (v) => setState(() => _isAnonymous = v ?? false),
                             activeColor: AppColors.primary,
                           ),
-                          const Text('Anonymous Donation', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                          const Text('Walk-in Donor', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                         ],
                       ),
                       

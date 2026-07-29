@@ -7,6 +7,7 @@ import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:another_flushbar/flushbar.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
@@ -45,6 +46,7 @@ class _PatientFormState extends State<PatientForm> {
   bool _loadingBranch = true;
   bool _isLoadingPrescription = true;
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
+  int? _selectedSyringeCount;
 
   // ─── Queue-type normaliser ────────────────────────────────────────────────
   static String _normaliseQueueType(String? raw) {
@@ -169,61 +171,67 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   // ─── Prescription loader ──────────────────────────────────────────────────
+  // ─── Prescription loader ──────────────────────────────────────────────────
   Future<void> _loadPrescription() async {
     if (!mounted) return;
     setState(() => _isLoadingPrescription = true);
-    String serial = '';
-    for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
-      final v = widget.queueEntry[f]?.toString().trim() ?? '';
-      if (v.isNotEmpty) { serial = v.toLowerCase(); break; }
-    }
-    String cnic = '';
-    for (final f in ['patientCnic', 'cnic', 'guardianCnic', 'patientCNIC', 'guardianCNIC']) {
-      final v = (widget.queueEntry[f]?.toString() ?? '')
-          .trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
-      if (v.isNotEmpty && v != '0000000000000') { cnic = v; break; }
-    }
-    Map<String, dynamic> found = {};
-    found = _searchHive(serial, cnic);
-    if (found.isEmpty) {
-      final entryKey = '${widget.branchId}-$serial';
-      final entry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
-      final embedded = (entry is Map) ? entry['prescription'] : null;
-      if (embedded is Map && embedded.isNotEmpty) {
-        found = Map<String, dynamic>.from(embedded);
+    try {
+      String serial = '';
+      for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
+        final v = widget.queueEntry[f]?.toString().trim() ?? '';
+        if (v.isNotEmpty) { serial = v.toLowerCase(); break; }
       }
+      String cnic = '';
+      for (final f in ['patientCnic', 'cnic', 'guardianCnic', 'patientCNIC', 'guardianCNIC']) {
+        final v = (widget.queueEntry[f]?.toString() ?? '')
+            .trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
+        if (v.isNotEmpty && v != '0000000000000') { cnic = v; break; }
+      }
+      Map<String, dynamic> found = {};
+      found = _searchHive(serial, cnic);
+      if (found.isEmpty) {
+        final entryKey = '${widget.branchId}-$serial';
+        final entry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+        final embedded = (entry is Map) ? entry['prescription'] : null;
+        if (embedded is Map && embedded.isNotEmpty) {
+          found = Map<String, dynamic>.from(embedded);
+        }
+      }
+      if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty) {
+        found = await _fetchFromPrescriptionsByCnic(serial, cnic);
+        if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
+      }
+      if (found.isEmpty && serial.isNotEmpty) {
+        found = await _fetchFromSerialsEmbedded(serial);
+        if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
+      }
+      if (found.isEmpty && serial.isNotEmpty) {
+        found = await _fetchFromPrescriptionsScanAll(serial);
+        if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
+      }
+      if (found.isEmpty) found = _searchHive(serial, cnic);
+      final vitals = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
+      final gender = found['patientGender']?.toString() ??
+          widget.queueEntry['patientGender']?.toString() ??
+          vitals['gender']?.toString() ?? 'N/A';
+      final age = found['patientAge']?.toString() ??
+          widget.queueEntry['patientAge']?.toString() ??
+          vitals['age']?.toString() ?? 'N/A';
+      final dispenseStatus = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase();
+      final patientName = found['patientName']?.toString() ??
+          widget.queueEntry['patientName']?.toString() ?? 'Unknown Patient';
+      if (found.isNotEmpty) found['patientName'] = patientName;
+      if (mounted) setState(() {
+        _data = found;
+        _gender = gender;
+        _age = age;
+        _isDispensed = dispenseStatus == 'dispensed';
+      });
+    } catch (e) {
+      debugPrint('[PatientForm] Error loading prescription: $e');
+    } finally {
+      if (mounted) setState(() => _isLoadingPrescription = false);
     }
-    if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty) {
-      found = await _fetchFromPrescriptionsByCnic(serial, cnic);
-      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
-    }
-    if (found.isEmpty && serial.isNotEmpty) {
-      found = await _fetchFromSerialsEmbedded(serial);
-      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
-    }
-    if (found.isEmpty && serial.isNotEmpty) {
-      found = await _fetchFromPrescriptionsScanAll(serial);
-      if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
-    }
-    if (found.isEmpty) found = _searchHive(serial, cnic);
-    final vitals = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
-    final gender = found['patientGender']?.toString() ??
-        widget.queueEntry['patientGender']?.toString() ??
-        vitals['gender']?.toString() ?? 'N/A';
-    final age = found['patientAge']?.toString() ??
-        widget.queueEntry['patientAge']?.toString() ??
-        vitals['age']?.toString() ?? 'N/A';
-    final dispenseStatus = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase();
-    final patientName = found['patientName']?.toString() ??
-        widget.queueEntry['patientName']?.toString() ?? 'Unknown Patient';
-    if (found.isNotEmpty) found['patientName'] = patientName;
-    if (mounted) setState(() {
-      _data = found;
-      _gender = gender;
-      _age = age;
-      _isDispensed = dispenseStatus == 'dispensed';
-      _isLoadingPrescription = false;
-    });
   }
 
   Map<String, dynamic> _searchHive(String serial, String cnic) {
@@ -263,7 +271,8 @@ class _PatientFormState extends State<PatientForm> {
       final snap = await FirebaseFirestore.instance
           .collection('branches').doc(widget.branchId)
           .collection('prescriptions').doc(cnic)
-          .collection('prescriptions').doc(serial).get();
+          .collection('prescriptions').doc(serial).get()
+          .timeout(const Duration(seconds: 4));
       if (snap.exists && snap.data() != null) {
         final d = Map<String, dynamic>.from(snap.data()!);
         d['id'] = snap.id; d['serial'] = snap.id;
@@ -277,9 +286,10 @@ class _PatientFormState extends State<PatientForm> {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collectionGroup('prescriptions')
-          .where(FieldPath.documentId, isEqualTo: serial)
+          .where('serial', isEqualTo: serial)
           .limit(1)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 4));
       if (snapshot.docs.isNotEmpty) {
         final prescSnap = snapshot.docs.first;
         final d = Map<String, dynamic>.from(prescSnap.data());
@@ -303,7 +313,8 @@ class _PatientFormState extends State<PatientForm> {
         final snap = await FirebaseFirestore.instance
             .collection('branches').doc(widget.branchId)
             .collection('serials').doc(dateKey)
-            .collection(type).doc(serial).get();
+            .collection(type).doc(serial).get()
+            .timeout(const Duration(seconds: 4));
         if (snap.exists && snap.data() != null) {
           final d = Map<String, dynamic>.from(snap.data()!);
           d['queueType'] = type;
@@ -373,6 +384,39 @@ class _PatientFormState extends State<PatientForm> {
         t.contains('drip') || t.contains('syringe') || t.contains('nebulization');
   }
 
+  static bool _isSyrupType(String? type, String? name) {
+    final t = (type ?? '').toLowerCase();
+    final n = (name ?? '').toLowerCase();
+    return t.contains('syrup') || t.contains('syp') || n.contains('syrup') || n.contains('syp');
+  }
+
+  int _getAutoSyringeCount(List<dynamic> allPrescriptions) {
+    int totalInj = 0;
+    for (final med in allPrescriptions) {
+      if (med is! Map) continue;
+      final medMap = Map<String, dynamic>.from(med);
+      final type = medMap['type']?.toString() ?? '';
+      final t = type.toLowerCase();
+      final isInjOrDrip = t.contains('injection') || t.contains('drip');
+      final isSyringe = t.contains('syringe');
+      if (isInjOrDrip && !isSyringe) {
+        final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
+        final qty = (qtyRaw is num) ? qtyRaw.toInt() : (int.tryParse(qtyRaw.toString()) ?? 1);
+        totalInj += qty > 0 ? qty : 1;
+      }
+    }
+    return totalInj;
+  }
+
+  int _getEffectiveSyringeCount(List<dynamic> allPrescriptions) {
+    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 2);
+    if (autoCount == 0) return 0;
+    if (_selectedSyringeCount != null) {
+      return _selectedSyringeCount!.clamp(0, 2);
+    }
+    return autoCount;
+  }
+
   Future<void> _deductInventoryLocally(
       String branchId, String serial, List<dynamic> medicines, int days) async {
     for (final med in medicines) {
@@ -385,9 +429,12 @@ class _PatientFormState extends State<PatientForm> {
           ? perDayRaw.toDouble()
           : double.tryParse(perDayRaw.toString()) ?? 0.0;
       if (medicineId.isEmpty || perDay <= 0) continue;
-      final multiplier = _isInjectableType(medMap['type']?.toString()) ? 1 : days;
-      final qtyNum = perDay * multiplier;
-      debugPrint('[PatientForm] deduct $medicineId: ${perDay}/day × $multiplier = $qtyNum');
+      final isSyrup = _isSyrupType(medMap['type']?.toString(), medMap['name']?.toString());
+      final multiplier = isSyrup
+          ? 1.0
+          : (_isInjectableType(medMap['type']?.toString()) ? 1.0 : days.toDouble());
+      final qtyNum = isSyrup ? 1.0 : perDay * multiplier;
+      debugPrint('[PatientForm] deduct $medicineId: (isSyrup=$isSyrup) perDay=${perDay}/day × $multiplier = $qtyNum');
       try {
         final stockBox = Hive.box(LocalStorageService.stockBox);
         var existing = stockBox.get('stock:$medicineId');
@@ -459,22 +506,7 @@ class _PatientFormState extends State<PatientForm> {
 
   Future<void> _deductSyringeIfNeeded(
       String branchId, String serial, List<dynamic> allPrescriptions) async {
-    double totalSyringesToDeduct = 0.0;
-    for (final med in allPrescriptions) {
-      if (med is! Map) continue;
-      final medMap = Map<String, dynamic>.from(med);
-      final type = medMap['type']?.toString();
-      
-      final t = (type ?? '').toLowerCase();
-      final isInjOrDrip = t.contains('injection') || t.contains('drip');
-      final isSyringe = t.contains('syringe');
-      
-      if (isInjOrDrip && !isSyringe) {
-        final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
-        final qty = qtyRaw is num ? qtyRaw.toDouble() : double.tryParse(qtyRaw.toString()) ?? 1.0;
-        totalSyringesToDeduct += qty;
-      }
-    }
+    final totalSyringesToDeduct = _getEffectiveSyringeCount(allPrescriptions).toDouble();
 
     if (totalSyringesToDeduct > 0.0) {
       try {
@@ -567,8 +599,11 @@ class _PatientFormState extends State<PatientForm> {
           : double.tryParse(perDayRaw.toString()) ?? 0.0;
       if (medicineId.isEmpty || perDay <= 0) continue;
       
-      final multiplier = _isInjectableType(medMap['type']?.toString()) ? 1 : days;
-      final qtyNum = perDay * multiplier;
+      final isSyrup = _isSyrupType(medMap['type']?.toString(), medMap['name']?.toString());
+      final multiplier = isSyrup
+          ? 1.0
+          : (_isInjectableType(medMap['type']?.toString()) ? 1.0 : days.toDouble());
+      final qtyNum = isSyrup ? 1.0 : perDay * multiplier;
 
       var existing = stockBox.get('stock:$medicineId');
       if (existing == null) {
@@ -597,25 +632,9 @@ class _PatientFormState extends State<PatientForm> {
     }
 
     // Check syringes if needed
-    double totalSyringesToDeduct = 0.0;
-    for (final med in allPrescriptions) {
-      if (med is! Map) continue;
-      final medMap = Map<String, dynamic>.from(med);
-      final type = medMap['type']?.toString();
-      
-      final t = (type ?? '').toLowerCase();
-      final isInjOrDrip = t.contains('injection') || t.contains('drip');
-      final isSyringe = t.contains('syringe');
-      
-      if (isInjOrDrip && !isSyringe) {
-        final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
-        final qty = qtyRaw is num ? qtyRaw.toDouble() : double.tryParse(qtyRaw.toString()) ?? 1.0;
-        totalSyringesToDeduct += qty;
-      }
-    }
+    final totalSyringesToDeduct = _getEffectiveSyringeCount(allPrescriptions).toDouble();
 
     if (totalSyringesToDeduct > 0.0) {
-      String? syringeKey;
       Map<String, dynamic>? syringeMap;
       
       for (final key in stockBox.keys) {
@@ -623,7 +642,6 @@ class _PatientFormState extends State<PatientForm> {
         if (val is Map) {
           final type = (val['type'] ?? '').toString().toLowerCase();
           if (type.contains('syringe')) {
-            syringeKey = key.toString();
             syringeMap = Map<String, dynamic>.from(val);
             break;
           }
@@ -643,39 +661,75 @@ class _PatientFormState extends State<PatientForm> {
     }
 
     if (insufficientMeds.isNotEmpty) {
-      await showDialog(
+      final action = await showDialog<String>(
         context: context,
         builder: (ctx) => AlertDialog(
           title: Row(
             children: const [
-              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
               SizedBox(width: 8),
               Text('Insufficient Stock'),
             ],
           ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('The following items do not have enough stock to dispense:'),
-              const SizedBox(height: 12),
-              ...insufficientMeds.map((med) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Text('• $med', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-              )),
-              const SizedBox(height: 12),
-              const Text('Please adjust or add stock before dispensing this prescription.'),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('The following items do not have enough stock in local inventory:'),
+                const SizedBox(height: 12),
+                ...insufficientMeds.map((med) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text('• $med', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                )),
+                const SizedBox(height: 16),
+                const Text(
+                  'Choose how to handle this patient:\n'
+                  '• Put On Hold: Moves patient to On-Hold section so queue can continue.\n'
+                  '• Dispense Available: Dispenses remaining stock and proceeds.',
+                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Close'),
+              onPressed: () => Navigator.pop(ctx, 'cancel'),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'hold'),
+              icon: const Icon(Icons.pause_circle_outline, color: Colors.white, size: 18),
+              label: const Text('Put On Hold'),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade800),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, 'dispense_available'),
+              icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+              label: const Text('Dispense Available'),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00695C)),
             ),
           ],
         ),
       );
-      return;
+
+      if (action == 'hold') {
+        final serial = _resolvedSerial;
+        if (serial.isNotEmpty) {
+          await LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'on_hold');
+          if (mounted) {
+            Flushbar(
+              message: 'Patient #$serial moved to On-Hold list',
+              backgroundColor: Colors.orange.shade800,
+              duration: const Duration(seconds: 3),
+            ).show(context);
+          }
+        }
+        widget.onDispensed?.call();
+        return;
+      } else if (action != 'dispense_available') {
+        return;
+      }
     }
 
     // Fallback/standard RoleTheme read to display dialogue matching exact color palette
@@ -872,8 +926,9 @@ class _PatientFormState extends State<PatientForm> {
         final urduLine = PatientFormHelper.buildUrduDosageLine(item);
         final mealUrdu = PatientFormHelper.getMealUrdu(item['meal']?.toString() ?? '');
         final isInj = _isInjectableType(item['type']?.toString());
+        final isSyrup = _isSyrupType(item['type']?.toString(), item['name']?.toString());
         final perDayQty = ((item['quantity'] ?? 1) as num).toInt();
-        final totalQty = isInj ? perDayQty : perDayQty * days;
+        final totalQty = isSyrup ? 1 : (isInj ? perDayQty : perDayQty * days);
         
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
@@ -912,7 +967,7 @@ class _PatientFormState extends State<PatientForm> {
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
-                            isInj ? 'Single Dose' : '$perDayQty/day',
+                            isSyrup ? '1 Bottle' : (isInj ? 'Single Dose' : '$perDayQty/day'),
                             style: TextStyle(
                               color: t.accent,
                               fontSize: isMobile ? 10 : 11,
@@ -1123,6 +1178,93 @@ class _PatientFormState extends State<PatientForm> {
       child: Text(
         label,
         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+      ),
+    );
+  }
+
+  Widget _buildSyringeSelectionCard(List<dynamic> allPrescriptions, RoleThemeData t, {required bool isMobile}) {
+    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 2);
+    if (autoCount == 0) return const SizedBox.shrink();
+    final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 2);
+
+    return Container(
+      margin: EdgeInsets.only(top: isMobile ? 12 : 16),
+      padding: EdgeInsets.all(isMobile ? 12 : 16),
+      decoration: BoxDecoration(
+        color: t.accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.accent.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.vaccines_rounded, color: t.accent, size: isMobile ? 22 : 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Syringes To Dispense',
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: isMobile ? 14 : 16,
+                  ),
+                ),
+                Text(
+                  'Auto-calculated: $autoCount syringe${autoCount > 1 ? 's' : ''} (Max 2)',
+                  style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: isMobile ? 11 : 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              IconButton(
+                onPressed: effectiveCount > 0
+                    ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 2))
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline),
+                color: t.accent,
+                iconSize: isMobile ? 24 : 28,
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: t.accent.withValues(alpha: 0.4)),
+                ),
+                child: Text(
+                  '$effectiveCount',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: isMobile ? 15 : 18,
+                    color: t.textPrimary,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: effectiveCount < 2
+                    ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 2))
+                    : null,
+                icon: const Icon(Icons.add_circle_outline),
+                color: t.accent,
+                iconSize: isMobile ? 24 : 28,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1559,6 +1701,8 @@ class _PatientFormState extends State<PatientForm> {
           _sectionTitle('Custom Injectables', Icons.vaccines, t, isMobile: isMobile),
           _linedList(customInjectables, t, isMobile: isMobile),
         ],
+        if (inventoryInjectables.isNotEmpty || customInjectables.isNotEmpty)
+          _buildSyringeSelectionCard(prescriptions, t, isMobile: isMobile),
       ],
     );
 

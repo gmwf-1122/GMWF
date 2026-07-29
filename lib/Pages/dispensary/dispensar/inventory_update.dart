@@ -14,6 +14,7 @@ class InventoryUpdatePage extends StatefulWidget {
   final String branchId;
   final bool isAdmin;
   final bool isDispenser;
+  final bool isDoctor;
   final bool isEmbedded;
   final int showMode; // 0: both, 1: Add Stock, 2: Register New
 
@@ -22,6 +23,7 @@ class InventoryUpdatePage extends StatefulWidget {
     required this.branchId,
     this.isAdmin = false,
     this.isDispenser = false,
+    this.isDoctor = false,
     this.isEmbedded = false,
     this.showMode = 0,
   });
@@ -71,6 +73,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   final _regExpCtrl = TextEditingController();
   final _regPriceCtrl = TextEditingController();
   final _regDoseCtrl = TextEditingController();
+  final _regCodeCtrl = TextEditingController();
   String _regType = 'Tablet';
   String? _regSelectedDose;
   bool _isSubmittingReg = false;
@@ -143,6 +146,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     _regExpCtrl.dispose();
     _regPriceCtrl.dispose();
     _regDoseCtrl.dispose();
+    _regCodeCtrl.dispose();
     super.dispose();
   }
 
@@ -167,6 +171,44 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     );
   }
 
+  // ── Barcode uniqueness check ────────────────────────────────────────────
+  // Checks local Hive cache first (covers items registered offline and not
+  // yet synced to Firestore), then falls back to a Firestore query. If the
+  // device is offline, the Firestore call fails silently and we rely on the
+  // local check only — SyncService will reconcile any conflicts once online.
+  Future<bool> _isBarcodeTaken(String code, {String? excludeDocId}) async {
+    final normalized = code.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+
+    final localItems =
+        LocalStorageService.getAllLocalStockItems(branchId: widget.branchId);
+    final localMatch = localItems.any((item) {
+      final itemCode = (item['code']?.toString().trim().toLowerCase() ?? '');
+      if (itemCode.isEmpty || itemCode != normalized) return false;
+      final itemDocId = item['_docId'] ?? item['id'] ?? item['docId'];
+      if (excludeDocId != null && itemDocId == excludeDocId) return false;
+      return true;
+    });
+    if (localMatch) return true;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory')
+          .where('code', isEqualTo: code.trim())
+          .limit(5)
+          .get();
+      for (final doc in snap.docs) {
+        if (excludeDocId != null && doc.id == excludeDocId) continue;
+        return true;
+      }
+    } catch (_) {
+      // Offline — fall back to the local-only check above.
+    }
+    return false;
+  }
+
   // ── Submit: Edit Request (needs approval or direct update for admin) ─────
   Future<void> _submitEditRequest(
       Map<String, dynamic> originalMed, Map<String, dynamic> updatedFields) async {
@@ -174,7 +216,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       final userInfo = await _getUserInfo();
       final db = FirebaseFirestore.instance;
 
-      if (widget.isAdmin) {
+      if (widget.isAdmin || widget.isDoctor) {
         final docId = originalMed['_docId'] ?? originalMed['id'] ?? originalMed['medicineId'];
         if (docId != null) {
           await db
@@ -207,11 +249,13 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         }
       }
 
+      final requestId = 'req_edit_${userInfo['uid'] ?? 'dispenser'}_${DateTime.now().millisecondsSinceEpoch}';
       await db
           .collection('branches')
           .doc(widget.branchId)
           .collection('edit_requests')
-          .add({
+          .doc(requestId)
+          .set({
         'requestType': 'edit_medicine',
         'requestedBy': userInfo['uid'],
         'requestedByName': userInfo['username'],
@@ -605,6 +649,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     if (!_regFormKey.currentState!.validate()) return;
 
     final name = _regNameCtrl.text.trim();
+    final code = _regCodeCtrl.text.trim();
     final qty = int.tryParse(_regQtyCtrl.text.trim()) ?? 0;
     final price = _regPriceCtrl.text.trim();
     final exp = _regExpCtrl.text.trim();
@@ -614,6 +659,14 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
     setState(() => _isSubmittingReg = true);
     try {
+      // Barcode must be unique across the branch's inventory.
+      final barcodeTaken = await _isBarcodeTaken(code);
+      if (barcodeTaken) {
+        _snack('This barcode is already registered to another medicine', err: true);
+        setState(() => _isSubmittingReg = false);
+        return;
+      }
+
       final userInfo = await _getUserInfo();
 
       final medData = {
@@ -621,6 +674,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'name_lower': name.toLowerCase(),
         'formula': '',
         'formula_lower': '',
+        'code': code,
         'type': _regType,
         'dose': dose,
         'quantity': qty,
@@ -697,6 +751,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     _regExpCtrl.clear();
     _regPriceCtrl.clear();
     _regDoseCtrl.clear();
+    _regCodeCtrl.clear();
     setState(() {
       _regType = 'Tablet';
       _regSelectedDose = null;
@@ -1125,6 +1180,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         medicine: med,
         allTypes: _allTypes,
         doseOptions: _doseOptions,
+        isAdmin: widget.isAdmin,
+        isDoctor: widget.isDoctor,
+        isDispenser: widget.isDispenser,
+        isBarcodeTaken: _isBarcodeTaken,
         onSubmit: (updatedFields) =>
             _submitEditRequest(med, updatedFields),
       ),
@@ -1149,7 +1208,32 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   // ══════════════════════════════════════════════════════════════════════════
   // TAB 2 — Register New Medicine
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _registerTab() => SingleChildScrollView(
+  Widget _registerTab() {
+    if (widget.isDispenser && !widget.isAdmin) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_outline_rounded, size: 64, color: Colors.orange),
+              const SizedBox(height: 16),
+              const Text(
+                'Access Restricted',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _tealDark),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Only doctors and admins can register new medicines.\nDispensers can restock existing inventory under "Add Stock".',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: _textMid),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 40),
         child: Column(children: [
           _card(
@@ -1172,6 +1256,21 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                       hint: 'e.g. Amoxicillin, Panadol Extra'),
                   validator: (v) => v?.trim().isEmpty ?? true
                       ? 'Formula is required'
+                      : null,
+                ),
+                const SizedBox(height: 14),
+
+                // Barcode — required and must be unique across the branch
+                TextFormField(
+                  controller: _regCodeCtrl,
+                  style:
+                      const TextStyle(color: _textDark, fontSize: 15),
+                  cursorColor: _teal,
+                  decoration: _inputDec('Barcode',
+                      icon: Icons.qr_code_rounded,
+                      hint: 'e.g. 8964000123456'),
+                  validator: (v) => v?.trim().isEmpty ?? true
+                      ? 'Barcode is required'
                       : null,
                 ),
                 const SizedBox(height: 14),
@@ -1371,6 +1470,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           ),
         ]),
       );
+  }
 
   // ── Shared widgets ─────────────────────────────────────────────────────────
   Widget _card({required Widget child}) => Container(
@@ -1437,6 +1537,10 @@ class _EditRequestSheet extends StatefulWidget {
   final Map<String, dynamic> medicine;
   final List<String> allTypes;
   final Map<String, List<String>> doseOptions;
+  final bool isAdmin;
+  final bool isDoctor;
+  final bool isDispenser;
+  final Future<bool> Function(String code, {String? excludeDocId}) isBarcodeTaken;
   final Future<void> Function(Map<String, dynamic> updatedFields) onSubmit;
 
   const _EditRequestSheet({
@@ -1444,6 +1548,10 @@ class _EditRequestSheet extends StatefulWidget {
     required this.medicine,
     required this.allTypes,
     required this.doseOptions,
+    this.isAdmin = false,
+    this.isDoctor = false,
+    this.isDispenser = false,
+    required this.isBarcodeTaken,
     required this.onSubmit,
   });
 
@@ -1467,6 +1575,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
   late TextEditingController _qtyCtrl;
   late TextEditingController _expiryCtrl;
   late TextEditingController _reasonCtrl;
+  late TextEditingController _codeCtrl;
   late String _selectedType;
   String? _selectedDoseDropdown;
 
@@ -1506,6 +1615,8 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
     _expiryCtrl =
         TextEditingController(text: med['expiryDate']?.toString() ?? '');
     _reasonCtrl = TextEditingController();
+    _codeCtrl =
+        TextEditingController(text: med['code']?.toString() ?? '');
     _selectedType = widget.allTypes.contains(med['type'])
         ? med['type'].toString()
         : widget.allTypes.first;
@@ -1525,12 +1636,37 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
     _priceCtrl.dispose();
     _expiryCtrl.dispose();
     _reasonCtrl.dispose();
+    _codeCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _submitting = true);
+
+    // Barcode must remain unique across the branch's inventory. Only check
+    // when it actually changed, excluding this medicine's own record.
+    final newCode = _codeCtrl.text.trim();
+    final originalCode = (widget.medicine['code'] ?? '').toString().trim();
+    if (newCode.toLowerCase() != originalCode.toLowerCase()) {
+      final excludeDocId =
+          widget.medicine['_docId'] ?? widget.medicine['id'];
+      final taken = await widget.isBarcodeTaken(newCode,
+          excludeDocId: excludeDocId?.toString());
+      if (taken) {
+        if (mounted) {
+          setState(() => _submitting = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'This barcode is already registered to another medicine'),
+              backgroundColor: _red,
+            ),
+          );
+        }
+        return;
+      }
+    }
 
     final dose = _hasDd(_selectedType)
         ? (_selectedDoseDropdown ?? '')
@@ -1542,6 +1678,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
       'name': _nameCtrl.text.trim(),
       'type': _selectedType,
       'dose': dose,
+      'code': newCode,
       'quantity': int.tryParse(_qtyCtrl.text.trim()) ?? 0,
       'price': _priceCtrl.text.trim(),
       'expiryDate': _expiryCtrl.text.trim(),
@@ -1662,6 +1799,22 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
                           ? 'Required'
                           : null,
                 ),
+                const SizedBox(height: 12),
+
+                // Barcode — required and must be unique across the branch
+                Builder(builder: (context) {
+                  final canEditBarcode = widget.isAdmin || widget.isDoctor || !widget.isDispenser;
+                  return _field(
+                    controller: _codeCtrl,
+                    label: 'Barcode',
+                    icon: Icons.qr_code_rounded,
+                    enabled: canEditBarcode,
+                    helperText: canEditBarcode ? null : 'Only Doctor can edit barcode',
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Barcode is required'
+                        : null,
+                  );
+                }),
                 const SizedBox(height: 12),
 
                 // Type dropdown
@@ -1876,6 +2029,8 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
     TextInputType keyboardType = TextInputType.text,
     String? Function(String?)? validator,
     int maxLines = 1,
+    bool enabled = true,
+    String? helperText,
   }) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
@@ -1889,33 +2044,35 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
           keyboardType: keyboardType,
           validator: validator,
           maxLines: maxLines,
+          enabled: enabled,
+          readOnly: !enabled,
           cursorColor: _teal,
-          style:
-              const TextStyle(color: _textDark, fontSize: 14),
+          style: TextStyle(color: enabled ? _textDark : Colors.grey.shade700, fontSize: 14),
           decoration: InputDecoration(
-            prefixIcon:
-                Icon(icon, size: 17, color: _teal),
+            prefixIcon: Icon(icon, size: 17, color: enabled ? _teal : Colors.grey),
+            suffixIcon: !enabled ? const Icon(Icons.lock_rounded, size: 16, color: Colors.grey) : null,
+            helperText: helperText,
+            helperStyle: TextStyle(color: Colors.amber.shade900, fontSize: 11, fontWeight: FontWeight.bold),
             filled: true,
-            fillColor: _green50,
+            fillColor: enabled ? _green50 : Colors.grey.shade100,
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: _border)),
+                borderSide: const BorderSide(color: _border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(
-                    color: _teal, width: 1.5)),
+                borderSide: const BorderSide(color: _teal, width: 1.5)),
+            disabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey.shade300)),
             errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: _red)),
+                borderSide: const BorderSide(color: _red)),
             focusedErrorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide:
-                    const BorderSide(color: _red, width: 1.5)),
+                borderSide: const BorderSide(color: _red, width: 1.5)),
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: 14, vertical: 13),
           ),

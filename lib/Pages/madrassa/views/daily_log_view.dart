@@ -1,5 +1,6 @@
 import 'package:image_picker/image_picker.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import '../models/madrassa_config.dart';
@@ -7,19 +8,30 @@ import '../models/madrassa_fee_logic.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import '../utils/photo_upload_helper.dart';
+import '../utils/madrassa_report_helper.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../utils/madrassa_local_storage.dart';
+import '../../../services/image_upload_service.dart';
 import '../../../services/sync_service.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import '../../../services/local_storage_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/madrassa_providers.dart';
-
-import 'package:image_picker/image_picker.dart';
 import 'dart:async';
 
 import '../madrassa_strings.dart';
+
+bool _isGlobalLevelUser(String role) {
+  final r = role.toLowerCase().trim();
+  return r == 'chairman' ||
+      r == 'ceo' ||
+      r == 'hq_manager' ||
+      r == 'hq manager' ||
+      r == 'superadmin' ||
+      r == 'super_admin' ||
+      r == 'global_admin' ||
+      r == 'global admin' ||
+      r == 'admin';
+}
 
 class DailyLogView extends ConsumerStatefulWidget {
   final String branchId;
@@ -53,6 +65,7 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
   final GlobalKey _calendarKey = GlobalKey();
   bool _hasInitialScrollDone = false;
   bool _showBackToTop = false;
+  bool? _localAllowStudentLeave;
 
   @override
   void initState() {
@@ -291,7 +304,114 @@ _changeNotifier.value++;
     }
   }
 
-
+  void _showPtmClaimsPopup(BuildContext context, List<Map<String, dynamic>> claims) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  const Icon(Icons.people_rounded, color: Colors.blue),
+                  const SizedBox(width: 8),
+                  Text(
+                    context.isUrdu ? 'پی ٹی ایم حاضری کے دعوے' : 'PTM Attendance Claims',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: claims.isEmpty
+                    ? Center(
+                        child: Text(
+                          context.isUrdu ? 'کوئی دعوے زیر التوا نہیں ہیں' : 'No claims pending',
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                      )
+                    : ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: claims.length,
+                        separatorBuilder: (_, __) => const Divider(),
+                        itemBuilder: (context, index) {
+                          final claim = claims[index];
+                          final sId = claim['id'];
+                          final name = claim['name'];
+                          final roll = claim['rollNumber'];
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      Text('Roll: $roll', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                    ],
+                                  ),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    _updateLocalSilent(sId, 'ptm', true);
+                                    _updateLocalSilent(sId, 'ptmRequestStatus', 'approved');
+                                    setDialogState(() {
+                                      claims.removeAt(index);
+                                    });
+                                    if (claims.isEmpty) {
+                                      Navigator.pop(ctx);
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: const Text('Approve'),
+                                ),
+                                const SizedBox(width: 8),
+                                ElevatedButton(
+                                  onPressed: () {
+                                    _updateLocalSilent(sId, 'ptm', false);
+                                    _updateLocalSilent(sId, 'ptmRequestStatus', 'rejected');
+                                    setDialogState(() {
+                                      claims.removeAt(index);
+                                    });
+                                    if (claims.isEmpty) {
+                                      Navigator.pop(ctx);
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: const Text('Decline'),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,6 +427,7 @@ _changeNotifier.value++;
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (e, st) => Scaffold(body: Center(child: Text('Error loading config: $e'))),
       data: (config) {
+        final effectiveAllowLeave = _localAllowStudentLeave ?? config.allowStudentLeave;
         final ptmDate = getPtmDateFor(_selectedDate.year, _selectedDate.month, config);
         final isPtmDay = _selectedDate.year == ptmDate.year && _selectedDate.month == ptmDate.month && _selectedDate.day == ptmDate.day;
         final isReadOnly = !_canSaveData();
@@ -349,7 +470,82 @@ _changeNotifier.value++;
               SliverToBoxAdapter(
                 child: _buildHorizontalCalendar(config, cachedHolidays),
               ),
-              if (!_canSaveData())
+              // Pending PTM claims notification banner
+              ValueListenableBuilder<int>(
+                valueListenable: _changeNotifier,
+                builder: (context, _, __) {
+                  final logData = logAsyncValue.value ?? {};
+                  final pendingPtmClaims = <Map<String, dynamic>>[];
+                  final studentsList = filteredStudentsAsyncValue.value ?? [];
+                  for (final s in studentsList) {
+                    final sId = s['id'] ?? '';
+                    final sLog = _localChanges[sId] ?? _safeMap(logData[sId]);
+                    if (sLog['ptmRequestStatus'] == 'claimed') {
+                      pendingPtmClaims.add({
+                        'id': sId,
+                        'name': s['name'] ?? 'Student',
+                        'rollNumber': s['rollNumber'] ?? '?',
+                        'log': sLog,
+                      });
+                    }
+                  }
+
+                  if (pendingPtmClaims.isEmpty || isReadOnly) {
+                    return const SliverToBoxAdapter(child: SizedBox.shrink());
+                  }
+
+                  return SliverToBoxAdapter(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.blue.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.people_rounded, color: Colors.blue.shade900),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  context.isUrdu 
+                                      ? 'پی ٹی ایم کی حاضری کے دعوے زیر التوا ہیں'
+                                      : 'Pending PTM Attendance Claims',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue.shade900),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  context.isUrdu
+                                      ? '${pendingPtmClaims.length} طلباء نے پی ٹی ایم میں شرکت کا دعویٰ کیا ہے۔ جائزہ لینے کے لیے کلک کریں۔'
+                                      : '${pendingPtmClaims.length} student(s) claimed PTM attendance. Tap to review.',
+                                  style: TextStyle(fontSize: 12, color: Colors.blue.shade800),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: () {
+                              _showPtmClaimsPopup(context, pendingPtmClaims);
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue.shade700,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Text(context.isUrdu ? 'جائزہ لیں' : 'Review'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              if (isReadOnly)
                 SliverToBoxAdapter(
                   child: Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -596,7 +792,7 @@ _changeNotifier.value++;
                                       ValueListenableBuilder<int>(
                                         valueListenable: _changeNotifier,
                                         builder: (context, _, __) =>
-                                            _buildStatusLegend(context, students, logData),
+                                            _buildStatusLegend(context, config, students, logData),
                                       ),
                                     ],
                                   );
@@ -613,6 +809,8 @@ _changeNotifier.value++;
                                   isPtmDay: isPtmDay,
                                   isReadOnly: isReadOnly,
                                   branchId: widget.branchId,
+                                  allowStudentLeave: effectiveAllowLeave,
+                                  editorRole: widget.editorRole,
                                   uploadStatus: _uploadStates[sId],
                                   onUpdateLocal: _updateLocalSilent,
                                   onPickPhoto: _pickAndUploadPhoto,
@@ -649,6 +847,7 @@ _changeNotifier.value++;
     final ptmDate = config.getPtmDate();
     final workingDays = MadrassaFeeLogic.getWorkingDaysCount(config.year, config.month);
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final effectiveAllowLeave = _localAllowStudentLeave ?? config.allowStudentLeave;
 
     return Padding(
       padding: EdgeInsets.fromLTRB(isMobile ? 16 : 24, isMobile ? 16 : 24, isMobile ? 16 : 24, 8),
@@ -744,6 +943,132 @@ _changeNotifier.value++;
             '$workingDays working days • Sundays excluded • PTM: ${DateFormat('EEE, MMM d').format(ptmDate)}',
             style: const TextStyle(fontSize: 13, color: Colors.grey),
           ),
+          if (_isGlobalLevelUser(widget.editorRole)) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: effectiveAllowLeave ? const Color(0xFFFFF8E1) : const Color(0xFFE0F2F1),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: effectiveAllowLeave ? Colors.amber.shade400 : const Color(0xFF008080),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    effectiveAllowLeave ? Icons.event_available_rounded : Icons.event_busy_rounded,
+                    color: effectiveAllowLeave ? Colors.amber.shade900 : const Color(0xFF008080),
+                    size: 26,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E293B),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                context.isUrdu ? '👑 صرف گلوبل لیول یوزرز' : '👑 Global Users Only (Chairman, CEO, HQ Manager, Admin)',
+                                style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          effectiveAllowLeave
+                              ? (context.isUrdu ? 'طلباء کی رخصت (L) تمام یوزرز کے لیے آن ہے' : 'Student Leave Allowed (Visible to ALL Users)')
+                              : (context.isUrdu ? 'طلباء کی رخصت (L) تمام یوزرز کے لیے بند ہے' : 'Student Leave Stopped (Hidden from ALL Users)'),
+                          style: context.urduStyle(
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: effectiveAllowLeave ? Colors.amber.shade900 : const Color(0xFF004D40),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          effectiveAllowLeave
+                              ? (context.isUrdu
+                                  ? 'رخصت بند کرنے کے لیے کلک کریں۔ یہ تمام اساتذہ، پرنسپل اور گلوبل یوزرز سے بٹن چھپا دے گا۔'
+                                  : 'Click to STOP leave. This will hide the Leave (L) button for ALL users.')
+                              : (context.isUrdu
+                                  ? 'رخصت کھولنی کے لیے کلک کریں۔ یہ تمام اساتذہ، پرنسپل اور گلوبل یوزرز کے لیے بٹن ظاہر کر دے گا۔'
+                                  : 'Click to ALLOW leave. This will display the Leave (L) button for ALL users.'),
+                          style: context.urduStyle(
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: effectiveAllowLeave ? Colors.amber.shade900 : Colors.grey.shade700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: effectiveAllowLeave ? const Color(0xFFD32F2F) : const Color(0xFF008080),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    ),
+                    icon: Icon(
+                      effectiveAllowLeave ? Icons.block : Icons.check_circle_outline,
+                      size: 18,
+                    ),
+                    label: Text(
+                      effectiveAllowLeave
+                          ? (context.isUrdu ? 'رخصت بند کریں' : 'Stop Leave')
+                          : (context.isUrdu ? 'اجازت رخصت دیں' : 'Allow Leave'),
+                      style: context.urduStyle(
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ),
+                    onPressed: () async {
+                      final newAllowState = !effectiveAllowLeave;
+                      setState(() {
+                        _localAllowStudentLeave = newAllowState;
+                      });
+                      await FirebaseFirestore.instance
+                          .collection('branches')
+                          .doc(widget.branchId)
+                          .collection('madrassa_config')
+                          .doc('current')
+                          .set({'allowStudentLeave': newAllowState}, SetOptions(merge: true));
+
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            duration: const Duration(seconds: 2),
+                            backgroundColor: newAllowState ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+                            content: Text(
+                              newAllowState
+                                  ? (context.isUrdu
+                                      ? 'رخصت کا بٹن تمام اساتذہ اور تمام یوزرز کے لیے آن ہو گیا ہے۔'
+                                      : 'Leave (L) button is now VISIBLE to ALL users.')
+                                  : (context.isUrdu
+                                      ? 'رخصت کا بٹن تمام اساتذہ اور تمام یوزرز کے لیے بند کر دیا گیا ہے۔'
+                                      : 'Leave (L) button is now HIDDEN from ALL users.'),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -751,7 +1076,6 @@ _changeNotifier.value++;
 
   Widget _buildHorizontalCalendar(MadrassaConfig config, List<Map<String, dynamic>> holidays) {
     final daysInMonth = DateTime(_selectedDate.year, _selectedDate.month + 1, 0).day;
-    final ptmDate = config.getPtmDate();
     final now = DateTime.now();
 
     if (!_hasInitialScrollDone) {
@@ -955,7 +1279,7 @@ _changeNotifier.value++;
     );
   }
 
-  Widget _buildStatusLegend(BuildContext context, List<Map<String, dynamic>> students, Map<String, dynamic> logData) {
+  Widget _buildStatusLegend(BuildContext context, MadrassaConfig config, List<Map<String, dynamic>> students, Map<String, dynamic> logData) {
     final isDesktop = MediaQuery.of(context).size.width > 900;
     final isMobile = MediaQuery.of(context).size.width < 600;
     final isReadOnly = !_canSaveData();
@@ -1097,7 +1421,20 @@ _changeNotifier.value++;
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
-
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () => _showDailyReportDialog(config, students, logData),
+            icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 16),
+            label: Text(
+              context.isUrdu ? 'روزانہ گروپ رپورٹ' : 'Daily Group Report',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: const BorderSide(color: Color(0xFF008080)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
         ],
       );
     } else {
@@ -1161,9 +1498,15 @@ _changeNotifier.value++;
                   });
                 },
               ),
+              _efficiencyButton(
+                label: context.isUrdu ? 'روزانہ گروپ رپورٹ' : 'Daily Group Report',
+                icon: Icons.share_outlined,
+                color: const Color(0xFF008080),
+                isSelected: false,
+                onTap: () => _showDailyReportDialog(config, students, logData),
+              ),
             ],
           ),
-
         ],
       );
     }
@@ -1298,61 +1641,86 @@ _changeNotifier.value++;
 
 
   Future<void> _pickAndUploadPhoto(String studentId) async {
-    try {
-      final picker = ImagePicker();
-      final XFile? picked = await picker.pickImage(source: ImageSource.gallery);
-      if (picked == null) return;
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                context.isUrdu ? 'طالب علم کی تصویر منتخب کریں' : 'Update Student Photo',
+                style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+              title: Text(
+                context.isUrdu ? 'کیمرہ سے تصویر لیں' : 'Take Photo with Camera',
+                style: context.urduStyle(),
+              ),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+              title: Text(
+                context.isUrdu ? 'گیلری سے منتخب کریں' : 'Choose from Gallery',
+                style: context.urduStyle(),
+              ),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
 
+    if (source == null) return;
+
+    try {
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.uploading);
 
-      final bytes = await picked.readAsBytes();
-      
-      final uploadStream = PhotoUploadHelper.upload(
-        bytes: bytes,
-        branchId: widget.branchId,
-        studentId: studentId,
-      );
+      final b64 = await ImageUploadService.pickAndProcessImage(source: source);
+      if (b64 == null || b64.isEmpty) {
+        if (mounted) setState(() => _uploadStates[studentId] = PhotoUploadStatus.idle);
+        return;
+      }
 
-      await for (final state in uploadStream) {
-        if (!mounted) return;
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('madrassa_students')
+          .doc(studentId)
+          .update({'photoUrl': b64});
+
+      final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId);
+      if (studentCache != null) {
+        studentCache['photoUrl'] = b64;
+        await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
+      }
+
+      if (mounted) {
         setState(() {
-          _uploadStates[studentId] = state.status;
+          _uploadStates[studentId] = PhotoUploadStatus.success;
         });
-
-        if (state.status == PhotoUploadStatus.success) {
-          final downloadUrl = state.downloadUrl;
-          if (downloadUrl != null && downloadUrl.isNotEmpty) {
-            await FirebaseFirestore.instance
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('madrassa_students')
-                .doc(studentId)
-                .update({'photoUrl': downloadUrl});
-
-            // Update local student cache instantly
-            final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId);
-            if (studentCache != null) {
-              studentCache['photoUrl'] = downloadUrl;
-              await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
-            }
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Photo updated')),
-              );
-            }
-          }
-        } else if (state.status == PhotoUploadStatus.error) {
-          throw Exception(state.error ?? 'Upload error');
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.isUrdu ? 'تصویر کامیابی کے ساتھ اپ ڈیٹ ہو گئی' : 'Student photo updated successfully!',
+              style: context.urduStyle(),
+            ),
+            backgroundColor: const Color(0xFF008080),
+          ),
+        );
       }
     } catch (e) {
-      debugPrint('Error picking or uploading image: $e');
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.error);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo upload failed, try again.')),
+        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: Colors.red),
       );
     }
   }
@@ -1386,7 +1754,13 @@ _changeNotifier.value++;
             onSubmitted: (val) {
               final newLines = int.tryParse(val.trim());
               if (newLines != null && newLines >= 0) {
-                _updateLocalSilent(studentId, 'currentLines', newLines);
+                final clamped = newLines.clamp(0, 8640);
+                if (newLines > 8640) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
+                  );
+                }
+                _updateLocalSilent(studentId, 'currentLines', clamped);
                 Navigator.of(dContext).pop();
               }
             },
@@ -1408,7 +1782,13 @@ _changeNotifier.value++;
               onPressed: () {
                 final newLines = int.tryParse(textCtrl.text.trim());
                 if (newLines != null && newLines >= 0) {
-                  _updateLocalSilent(studentId, 'currentLines', newLines);
+                  final clamped = newLines.clamp(0, 8640);
+                  if (newLines > 8640) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
+                    );
+                  }
+                  _updateLocalSilent(studentId, 'currentLines', clamped);
                   Navigator.of(dContext).pop();
                 }
               },
@@ -1532,6 +1912,230 @@ _changeNotifier.value++;
     }
   }
 
+  String _generateDailyReportText(List<Map<String, dynamic>> students, Map<String, dynamic> logData) {
+    int total = students.length;
+    int present = 0;
+    int leave = 0;
+    int absent = 0;
+
+    final List<String> studentLines = [];
+
+    String formatRatio(String? ratio) {
+      if (ratio == '1/4') return '1/4';
+      if (ratio == '1/2') return '1/2';
+      if (ratio == '3/4') return '3/4';
+      if (ratio == '1') return '1';
+      if (ratio == 'nahi_sunaya') return 'نہیں سنایا';
+      return ratio ?? '-';
+    }
+
+    for (int i = 0; i < students.length; i++) {
+      final s = students[i];
+      final sId = s['id'] ?? '';
+      final log = _localChanges[sId] ?? _safeMap(logData[sId]);
+      final att = log['attendance'] ?? 'absent';
+      final uni = log['uniform'] == true;
+      final name = s['name'] ?? '—';
+      final roll = s['rollNumber'] ?? '?';
+
+      String attText = 'Absent / غیر حاضر';
+      if (att == 'present') {
+        present++;
+        attText = 'Present / حاضر';
+      } else if (att == 'leave') {
+        leave++;
+        attText = 'On Leave / رخصت';
+      } else {
+        absent++;
+      }
+
+      var details = '';
+      if (att == 'present') {
+        final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
+        final int sabkiParaVal = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
+        final String? sabkiRatioVal = log['sabkiRatio']?.toString();
+        final int manzilParaVal = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);
+        final String? manzilRatioVal = log['manzilRatio']?.toString();
+
+        final String uniformMsg = uni ? 'Clean / صاف' : 'Not Clean / صاف نہیں';
+        
+        List<String> progressParts = [];
+        if (lines > 0) {
+          progressParts.add('Sabak: $lines lines');
+        }
+        if (sabkiParaVal > 0 && sabkiRatioVal != null && sabkiRatioVal.isNotEmpty && sabkiRatioVal != '-') {
+          progressParts.add('Sabki: Para $sabkiParaVal (${formatRatio(sabkiRatioVal)})');
+        } else if (sabkiRatioVal == 'nahi_sunaya') {
+          progressParts.add('Sabki: نہیں سنایا');
+        }
+        if (manzilParaVal > 0 && manzilRatioVal != null && manzilRatioVal.isNotEmpty && manzilRatioVal != '-') {
+          progressParts.add('Manzil: Para $manzilParaVal (${formatRatio(manzilRatioVal)})');
+        } else if (manzilRatioVal == 'nahi_sunaya') {
+          progressParts.add('Manzil: نہیں سنایا');
+        }
+
+        final progressStr = progressParts.isNotEmpty ? ' | ' + progressParts.join(' | ') : '';
+        details = '\n   • Uniform: $uniformMsg$progressStr';
+      }
+
+      final parentReplied = log['parentReplied'] == true;
+      final replyText = parentReplied ? (context.isUrdu ? 'جواب: ہاں' : 'Reply: Yes') : (context.isUrdu ? 'جواب: نہیں' : 'Reply: No');
+
+      studentLines.add('${i + 1}. *$name* (Roll: $roll) - $attText | $replyText$details');
+    }
+
+    final dateStr = DateFormat('dd-MM-yyyy').format(_selectedDate);
+
+    final String message = 
+        '*Gulzar Madina Welfare Foundation (Madrassa)*\n'
+        '*Daily Progress Report | روزانہ کارکردگی رپورٹ*\n'
+        '--------------------------------------------\n'
+        '*Date / تاریخ:* $dateStr\n'
+        '*Total Students / کل طلباء:* $total\n'
+        '*Present / حاضر:* $present  |  *Leave / رخصت:* $leave  |  *Absent / غیر حاضر:* $absent\n'
+        '--------------------------------------------\n'
+        '${studentLines.join("\n")}\n'
+        '--------------------------------------------\n'
+        'JazakAllah Khair! / جزاک اللہ خیر!';
+
+    return message;
+  }
+
+  void _showDailyReportDialog(MadrassaConfig config, List<Map<String, dynamic>> students, Map<String, dynamic> logData) {
+    final reportText = _generateDailyReportText(students, logData);
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.share, color: Color(0xFF008080)),
+              const SizedBox(width: 10),
+              Text(
+                context.isUrdu ? 'روزانہ رپورٹ شیئر کریں' : 'Share Daily Report',
+                style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  context.isUrdu 
+                      ? 'رپورٹ کا ٹیکسٹ نیچے پیش نظارہ میں دیکھیں۔ آپ اسے کاپی کر سکتے ہیں یا واٹس ایپ پر براہ راست بھیج سکتے ہیں، یا پی ڈی ایف ڈاؤن لوڈ کر سکتے ہیں۔'
+                      : 'Preview the report text below. You can copy it, send it directly to WhatsApp, or download/share the PDF.',
+                  style: context.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  height: 200,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      reportText,
+                      style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actionsAlignment: MainAxisAlignment.spaceBetween,
+          actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.of(ctx).pop();
+                final Map<String, dynamic> compiledLogData = {};
+                for (final s in students) {
+                  final sId = s['id'] ?? '';
+                  compiledLogData[sId] = _localChanges[sId] ?? _safeMap(logData[sId]);
+                }
+                try {
+                  await MadrassaReportHelper.exportDailyPdf(
+                    config: config,
+                    selectedDate: _selectedDate,
+                    students: students,
+                    logData: compiledLogData,
+                  );
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Error generating PDF: $e')),
+                    );
+                  }
+                }
+              },
+              icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              label: Text(
+                context.isUrdu ? 'پی ڈی ایف رپورٹ' : 'PDF Report',
+                style: context.urduStyle(style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              ),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: context.isUrdu ? 'ٹیکسٹ کاپی کریں' : 'Copy Text',
+                  icon: const Icon(Icons.copy, color: Color(0xFF008080)),
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: reportText));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(context.isUrdu ? 'ٹیکسٹ کاپی ہو گیا!' : 'Copied to clipboard!')),
+                    );
+                  },
+                ),
+                const SizedBox(width: 8),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    Navigator.of(ctx).pop();
+                    final waUri = Uri.parse('https://api.whatsapp.com/send?text=${Uri.encodeComponent(reportText)}');
+                    try {
+                      final success = await launchUrl(waUri, mode: LaunchMode.externalApplication);
+                      if (!success) {
+                        throw 'Could not launch URL';
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Could not launch WhatsApp.')),
+                        );
+                      }
+                    }
+                  },
+                  icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.white, size: 16),
+                  label: Text(
+                    context.isUrdu ? 'واٹس ایپ پر بھیجیں' : 'Send WhatsApp',
+                    style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF25D366),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
 
 
   Widget? _buildFabArea(bool isDesktop) {
@@ -1592,16 +2196,23 @@ class SegmentedAttendanceToggle extends StatelessWidget {
   final String value; // 'present', 'leave', 'absent'
   final ValueChanged<String>? onChanged;
   final bool showLabel;
+  final bool allowStudentLeave;
+  final bool isGlobalUser;
 
   const SegmentedAttendanceToggle({
     super.key,
     required this.value,
     this.onChanged,
     this.showLabel = true,
+    this.allowStudentLeave = false,
+    this.isGlobalUser = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool canUseLeave = allowStudentLeave;
+    final bool showLeaveSegment = allowStudentLeave || value == 'leave' || value == 'leave_requested';
+
     Widget toggle = Container(
       height: 36,
       decoration: BoxDecoration(
@@ -1619,14 +2230,16 @@ class SegmentedAttendanceToggle extends StatelessWidget {
             activeColor: const Color(0xFF10B981), // Emerald green
             onTap: onChanged == null ? null : () => onChanged!('present'),
           ),
-          const SizedBox(width: 4),
-          _buildSegment(
-            context: context,
-            label: 'L',
-            isSelected: value == 'leave',
-            activeColor: const Color(0xFFF59E0B), // Orange/yellow
-            onTap: onChanged == null ? null : () => onChanged!('leave'),
-          ),
+          if (showLeaveSegment) ...[
+            const SizedBox(width: 4),
+            _buildSegment(
+              context: context,
+              label: 'L',
+              isSelected: value == 'leave' || value == 'leave_requested',
+              activeColor: const Color(0xFFF59E0B), // Orange/yellow
+              onTap: (onChanged == null || !canUseLeave) ? null : () => onChanged!('leave'),
+            ),
+          ],
           const SizedBox(width: 4),
           _buildSegment(
             context: context,
@@ -1700,6 +2313,8 @@ class _StudentLogCard extends StatelessWidget {
   final bool isPtmDay;
   final bool isReadOnly;
   final String branchId;
+  final bool allowStudentLeave;
+  final String editorRole;
   final PhotoUploadStatus? uploadStatus;
   final Function(String sId, String key, dynamic value) onUpdateLocal;
   final Function(String sId) onPickPhoto;
@@ -1715,6 +2330,8 @@ class _StudentLogCard extends StatelessWidget {
     required this.isPtmDay,
     required this.isReadOnly,
     required this.branchId,
+    this.allowStudentLeave = false,
+    this.editorRole = 'Madrassa Teacher',
     this.uploadStatus,
     required this.onUpdateLocal,
     required this.onPickPhoto,
@@ -1827,11 +2444,11 @@ class _StudentLogCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             IconButton(
-              icon: const Icon(Icons.add_circle_outline, color: Color(0xFF2E7D32), size: 20),
-              onPressed: isReadOnly
+              icon: Icon(Icons.add_circle_outline, color: (isReadOnly || lines >= 8640) ? Colors.grey : const Color(0xFF2E7D32), size: 20),
+              onPressed: (isReadOnly || lines >= 8640)
                   ? null
                   : () {
-                      onUpdateLocal(sId, 'currentLines', lines + 1);
+                      onUpdateLocal(sId, 'currentLines', (lines + 1).clamp(0, 8640));
                     },
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -1902,6 +2519,22 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
+  Widget _buildLogAvatarFallback(String name) {
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: const BoxDecoration(
+        color: Color(0xFFE0F2F1),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: const TextStyle(color: Color(0xFF008080), fontWeight: FontWeight.bold, fontSize: 13),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
@@ -1919,9 +2552,11 @@ class _StudentLogCard extends StatelessWidget {
         final att = log['attendance'] ?? 'absent';
         final uni = log['uniform'] ?? false;
         final msg = log['parentReplied'] ?? false;
-        final isParentRequested = log['isParentRequested'] == true;
-        final parentRepliedRequested = log['parentRepliedRequested'] == true;
         final leaveStatus = log['leaveStatus'] ?? 'pending';
+        final isParentRequested = log['isParentRequested'] == true ||
+            att == 'leave_requested' ||
+            (leaveStatus == 'pending' && log['leaveReason'] != null && log['leaveReason'].toString().isNotEmpty);
+        final parentRepliedRequested = log['parentRepliedRequested'] == true;
 
         final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
         final int sabkiPara = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
@@ -1936,45 +2571,41 @@ class _StudentLogCard extends StatelessWidget {
             height: 32,
             child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
           );
-        } else if (photoUrl != null && photoUrl.isNotEmpty) {
-          avatarWidget = ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: Image.network(
-              photoUrl,
-              width: 32,
-              height: 32,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
+        } else {
+          final str = photoUrl?.toString().trim();
+          final bytes = ImageUploadService.decodeBase64ToBytes(str);
+          if (bytes != null) {
+            avatarWidget = ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.memory(
+                bytes,
                 width: 32,
                 height: 32,
-                color: const Color(0xFFE0F2F1),
-                alignment: Alignment.center,
-                child: Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : '?',
-                  style: const TextStyle(color: Color(0xFF008080), fontWeight: FontWeight.bold, fontSize: 13),
-                ),
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(name),
               ),
-            ),
-          );
-        } else {
-          avatarWidget = Container(
-            width: 32,
-            height: 32,
-            decoration: const BoxDecoration(
-              color: Color(0xFFE0F2F1),
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              name.isNotEmpty ? name[0].toUpperCase() : '?',
-              style: const TextStyle(color: Color(0xFF008080), fontWeight: FontWeight.bold, fontSize: 13),
-            ),
-          );
+            );
+          } else if (str != null && str.startsWith('http')) {
+            avatarWidget = ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                str,
+                width: 32,
+                height: 32,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(name),
+              ),
+            );
+          } else {
+            avatarWidget = _buildLogAvatarFallback(name);
+          }
         }
 
         avatarWidget = GestureDetector(
-          onTap: isReadOnly ? null : () {
-            if (photoUrl != null && photoUrl.isNotEmpty) {
+          onTap: () {
+            if (photoUrl != null && photoUrl.toString().trim().isNotEmpty) {
+              final str = photoUrl.toString().trim();
+              final bytes = ImageUploadService.decodeBase64ToBytes(str);
               showDialog(
                 context: context,
                 builder: (context) => Dialog(
@@ -1994,10 +2625,9 @@ class _StudentLogCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(16),
                         child: InteractiveViewer(
                           maxScale: 4.0,
-                          child: Image.network(
-                            photoUrl,
-                            fit: BoxFit.contain,
-                          ),
+                          child: bytes != null
+                              ? Image.memory(bytes, fit: BoxFit.contain, width: 300, height: 300)
+                              : Image.network(str, fit: BoxFit.contain, width: 300, height: 300),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -2026,6 +2656,51 @@ class _StudentLogCard extends StatelessWidget {
           child: avatarWidget,
         );
 
+        Widget? hifzBadge;
+        if (lines >= 8640) {
+          hifzBadge = Container(
+            margin: const EdgeInsets.only(left: 6, right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5E9),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFF2E7D32), width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.stars_rounded, color: Colors.amber, size: 12),
+                const SizedBox(width: 3),
+                Text(
+                  context.isUrdu ? 'حفظ مکمل! 🎉' : 'Hifz Complete! 🎉',
+                  style: const TextStyle(color: Color(0xFF2E7D32), fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          );
+        } else if (lines >= 8000) {
+          hifzBadge = Container(
+            margin: const EdgeInsets.only(left: 6, right: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF3E0),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.orange, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.auto_awesome, color: Colors.orange, size: 12),
+                const SizedBox(width: 3),
+                Text(
+                  context.isUrdu ? 'حفظ مکمل ہونے والا ہے! 🌟' : 'Nearing Hifz! 🌟',
+                  style: const TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+          );
+        }
+
         Widget topRow = Row(
           children: [
             SizedBox(
@@ -2038,9 +2713,17 @@ class _StudentLogCard extends StatelessWidget {
             avatarWidget,
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                name,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      name,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (hifzBadge != null) hifzBadge,
+                ],
               ),
             ),
             IconButton(
@@ -2064,24 +2747,52 @@ class _StudentLogCard extends StatelessWidget {
           children: [
             if (isParentRequested && leaveStatus == 'pending')
               Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _actionButton('Approve', Colors.green, () {
-                      onUpdateLocal(sId, 'attendance', 'leave');
-                      onUpdateLocal(sId, 'leaveStatus', 'approved');
-                    }),
-                    const SizedBox(width: 8),
-                    _actionButton('Deny', Colors.red, () {
-                      onUpdateLocal(sId, 'attendance', 'absent');
-                      onUpdateLocal(sId, 'leaveStatus', 'denied');
-                    }),
-                  ],
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.amber.shade300),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              context.isUrdu ? 'رخصت کی درخواست' : 'Leave Request',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                            ),
+                            if (log['leaveReason'] != null && log['leaveReason'].toString().isNotEmpty)
+                              Text(
+                                log['leaveReason'].toString(),
+                                style: const TextStyle(fontSize: 11, color: Colors.black87),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _actionButton(context.isUrdu ? 'منظور' : 'Approve', Colors.green, () {
+                        onUpdateLocal(sId, 'attendance', 'leave');
+                        onUpdateLocal(sId, 'leaveStatus', 'approved');
+                      }),
+                      const SizedBox(width: 6),
+                      _actionButton(context.isUrdu ? 'مسترد' : 'Deny', Colors.red, () {
+                        onUpdateLocal(sId, 'attendance', 'absent');
+                        onUpdateLocal(sId, 'leaveStatus', 'denied');
+                      }),
+                    ],
+                  ),
                 ),
               )
             else ...[
               SegmentedAttendanceToggle(
                 value: att,
+                allowStudentLeave: allowStudentLeave,
+                isGlobalUser: _isGlobalLevelUser(editorRole),
                 onChanged: isReadOnly ? null : (newAtt) {
                   onUpdateLocal(sId, 'attendance', newAtt);
                   if (newAtt != 'present') {
@@ -2123,9 +2834,17 @@ class _StudentLogCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          name,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (hifzBadge != null) hifzBadge,
+                    ],
                   ),
                   if (isParentRequested && leaveStatus == 'pending')
                     Container(
@@ -2161,6 +2880,37 @@ class _StudentLogCard extends StatelessWidget {
                         ],
                       ),
                     ),
+                  if (log['ptmRequestStatus'] == 'claimed')
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.blue.shade100),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.people_rounded, size: 14, color: Colors.blue.shade900),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Parent claimed PTM attendance',
+                            style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(width: 8),
+                          _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
+                            onUpdateLocal(sId, 'ptm', true);
+                            onUpdateLocal(sId, 'ptmRequestStatus', 'approved');
+                          }),
+                          const SizedBox(width: 6),
+                          _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                            onUpdateLocal(sId, 'ptm', false);
+                            onUpdateLocal(sId, 'ptmRequestStatus', 'rejected');
+                          }),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -2182,6 +2932,8 @@ class _StudentLogCard extends StatelessWidget {
             else
               SegmentedAttendanceToggle(
                 value: att,
+                allowStudentLeave: allowStudentLeave,
+                isGlobalUser: _isGlobalLevelUser(editorRole),
                 onChanged: isReadOnly ? null : (newAtt) {
                   onUpdateLocal(sId, 'attendance', newAtt);
                   if (newAtt != 'present') {
@@ -2328,6 +3080,37 @@ class _StudentLogCard extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
                                   onUpdateLocal(sId, 'parentRepliedRequested', false);
+                                }),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (log['ptmRequestStatus'] == 'claimed') ...[
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            width: double.infinity,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    context.isUrdu ? 'والدین نے پی ٹی ایم میں شرکت کا دعویٰ کیا ہے' : 'Parent claimed PTM attendance',
+                                    style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  ),
+                                ),
+                                _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
+                                  onUpdateLocal(sId, 'ptm', true);
+                                  onUpdateLocal(sId, 'ptmRequestStatus', 'approved');
+                                }),
+                                const SizedBox(width: 8),
+                                _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                                  onUpdateLocal(sId, 'ptm', false);
+                                  onUpdateLocal(sId, 'ptmRequestStatus', 'rejected');
                                 }),
                               ],
                             ),

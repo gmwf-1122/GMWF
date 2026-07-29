@@ -152,7 +152,7 @@ class MadrassaLocale {
   final String statusActive = 'Active';
   final String statusArchived = 'Archived';
   final String statusHifzCompleted = 'Hifz Completed';
-  final String statusLeft = 'Left / Dropped';
+  final String statusLeft = 'Left';
   final String joinDate = 'Join Date';
   final String studentProgress = 'Daily Progress';
   final String studentProgressHint = 'Progress details';
@@ -810,6 +810,8 @@ extension MadrassaTranslationExtension on BuildContext {
       'Logout': 'لاگ آؤٹ',
       'Academic Summary': 'تعلیمی خلاصہ',
       'Attendance': 'حاضری',
+      'Clean': 'صاف',
+      'Unclean': 'غیر صاف',
       'Memorization': 'حفظ',
       'Discipline Dues': 'ڈسپلن فیس',
       'Active Period': 'فعال مدت',
@@ -915,6 +917,11 @@ extension MadrassaTranslationExtension on BuildContext {
       'Nisf (1/2)': 'نصف (1/2)',
       'Salasa (3/4)': 'ثلاثہ (3/4)',
       'Para (1)': 'پارہ (1)',
+      'Overall Quran Majeed Memorization Progress': 'مجموعی قرآن مجید حفظ کی پیشرفت',
+      'Quran Majeed & Attendance Progress': 'قرآن مجید اور حاضری کی پیشرفت',
+      'Quran Majeed & Attendance': 'قرآن مجید اور حاضری',
+      'Cleanliness': 'صفائی',
+      'Absent': 'غائب',
     };
     return map[text] ?? text;
   }

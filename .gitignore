@@ -43,6 +43,27 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/app/build/
+/android/build/
 
 # GMWF Backups
 lib/*.json
+
+# Build outputs & installers (large binaries)
+Installer/
+*.exe
+
+# Temp data files
+temp_hive/
+temp_hive_inspect/
+temp_inspect_hive/
+.sentry-native/
+
+# Scratch / debug files
+*.xlsx
+*.csv
+*.pdf
+*.patch
+*.png
+build_output.txt
+debug_branches.txt

@@ -6,6 +6,8 @@ import 'views/student_management_view.dart';
 import 'views/monthly_report_view.dart';
 import 'views/madrassa_config_view.dart';
 import 'views/madrassa_overview_view.dart';
+import 'views/madrassa_progress_view.dart';
+import 'dialogs/enrollment_dialog.dart';
 import 'madrassa_strings.dart';
 import '../../services/sync_service.dart';
 
@@ -15,6 +17,7 @@ class MadrassaDashboard extends StatefulWidget {
   final String role;
   final bool isAdmin;
   final int? initialIndex;
+  final bool autoOpenAddStudent;
 
   const MadrassaDashboard({
     super.key,
@@ -23,6 +26,7 @@ class MadrassaDashboard extends StatefulWidget {
     required this.role,
     this.isAdmin = true,
     this.initialIndex,
+    this.autoOpenAddStudent = false,
   });
 
   @override
@@ -38,6 +42,16 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
     _selectedIndex = widget.initialIndex ?? 0;
     if (widget.branchId.isNotEmpty && widget.branchId != 'unknown') {
       SyncService().start(widget.branchId);
+    }
+    if (widget.autoOpenAddStudent) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        showAddStudentDialog(
+          context,
+          widget.branchId,
+          username: widget.username,
+          role: widget.role,
+        );
+      });
     }
   }
 
@@ -74,6 +88,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
               role: widget.role,
             ),
             if (isTeacherOrAdmin) ...[
+              MadrassaProgressView(
+                branchId: branchId,
+                isAdmin: widget.isAdmin,
+              ),
               MonthlyReportView(branchId: branchId),
               MadrassaConfigView(
                 branchId: branchId,
@@ -83,14 +101,28 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ],
           ];
 
+          final isMobileLayout = MediaQuery.of(context).size.width < 600;
+
           // Navigation items definitions
           final navTitles = [
-            if (widget.isAdmin) context.l.navHome,
-            context.l.dailyLog,
-            context.l.students,
+            if (widget.isAdmin)
+              isMobileLayout
+                  ? (context.isUrdu ? 'اوور ویو' : 'Home')
+                  : context.l.overviewTitle,
+            isMobileLayout
+                ? (context.isUrdu ? 'روزانہ' : 'Daily')
+                : context.l.dailyLog,
+            isMobileLayout
+                ? (context.isUrdu ? 'طلبہ' : 'Students')
+                : context.l.students,
             if (isTeacherOrAdmin) ...[
-              context.l.monthlyReport,
-              context.l.navConfig,
+              context.isUrdu ? 'پیشرفت' : 'Progress',
+              isMobileLayout
+                  ? (context.isUrdu ? 'ماہانہ' : 'Monthly')
+                  : context.l.monthlyReport,
+              isMobileLayout
+                  ? (context.isUrdu ? 'سیٹنگ' : 'Setup')
+                  : context.l.navConfig,
             ],
           ];
 
@@ -99,6 +131,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             const Icon(Icons.calendar_today_outlined),
             const Icon(Icons.people_outline),
             if (isTeacherOrAdmin) ...[
+              const Icon(Icons.trending_up_outlined),
               const Icon(Icons.bar_chart_outlined),
               const Icon(Icons.settings_outlined),
             ],
@@ -109,6 +142,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             const Icon(Icons.calendar_today),
             const Icon(Icons.people),
             if (isTeacherOrAdmin) ...[
+              const Icon(Icons.trending_up),
               const Icon(Icons.bar_chart),
               const Icon(Icons.settings),
             ],

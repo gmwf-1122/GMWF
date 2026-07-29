@@ -43,15 +43,18 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   Map<String, dynamic>? _reportData;
   List<Map<String, dynamic>> _allMedicines = [];
   bool _isSearchingMeds = false;
+  DateTime _selectedMonth = DateTime.now();
 
   @override
   void initState() {
     super.initState();
     _selectedMed = widget.initialMedicine;
-    _loadMedicines();
-    if (_selectedMed != null) {
-      _loadReport();
-    }
+    _initData();
+  }
+
+  Future<void> _initData() async {
+    await _loadMedicines();
+    _loadReport();
   }
 
   // ── Data Fetching ──────────────────────────────────────────────────────────
@@ -71,13 +74,15 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   }
 
   String _cacheKey() {
-    if (_selectedMed == null) return '';
+    final monthStr = DateFormat('yyyy-MM').format(_selectedMonth);
+    if (_selectedMed == null) {
+      return '${widget.branchId}_all_meds_$monthStr';
+    }
     final medId = _selectedMed!['id'] ?? _selectedMed!['docId'] ?? _selectedMed!['medicineId'] ?? _selectedMed!['name'];
-    return '${widget.branchId}_${medId}_all_time';
+    return '${widget.branchId}_${medId}_$monthStr';
   }
 
   Future<void> _loadReport({bool forceRecalculate = false}) async {
-    if (_selectedMed == null) return;
     setState(() => _isLoading = true);
 
     final key = _cacheKey();
@@ -93,43 +98,54 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     }
 
     try {
-      final medId = _selectedMed!['id'] ?? _selectedMed!['docId'] ?? '';
-      final selectedType = (_selectedMed!['type'] ?? '').toString().toLowerCase();
-      final isSelectedMedSyringe = selectedType.contains('syringe');
-      
-      // 1. Query Logs (Additions, Registrations, Edits) from inventory_log (All-Time)
+      final medId = _selectedMed != null ? (_selectedMed!['id'] ?? _selectedMed!['docId'] ?? '') : '';
+      final selectedType = _selectedMed != null ? (_selectedMed!['type'] ?? '').toString().toLowerCase() : '';
+      final isSelectedMedSyringe = _selectedMed != null ? selectedType.contains('syringe') : false;
+      final selectedYear = _selectedMonth.year;
+      final selectedMonthVal = _selectedMonth.month;
+
+      // 1. Query Logs (Additions, Registrations, Edits) from inventory_log (All-Time and filter in memory)
       final List<Future<QuerySnapshot>> logQueries = [];
-      if (medId.isNotEmpty) {
-        logQueries.add(FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('inventory_log')
-            .where('medicineId', isEqualTo: medId)
-            .get());
-        logQueries.add(FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('inventory_log')
-            .where('docId', isEqualTo: medId)
-            .get());
-        logQueries.add(FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('inventory_log')
-            .where('newId', isEqualTo: medId)
-            .get());
-        logQueries.add(FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('inventory_log')
-            .where('oldId', isEqualTo: medId)
-            .get());
+      if (_selectedMed != null) {
+        if (medId.isNotEmpty) {
+          logQueries.add(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .where('medicineId', isEqualTo: medId)
+              .get());
+          logQueries.add(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .where('docId', isEqualTo: medId)
+              .get());
+          logQueries.add(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .where('newId', isEqualTo: medId)
+              .get());
+          logQueries.add(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .where('oldId', isEqualTo: medId)
+              .get());
+        } else {
+          logQueries.add(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .where('medicineName', isEqualTo: _selectedMed!['name'])
+              .get());
+        }
       } else {
+        // Query all logs when no specific medicine is selected
         logQueries.add(FirebaseFirestore.instance
             .collection('branches')
             .doc(widget.branchId)
             .collection('inventory_log')
-            .where('medicineName', isEqualTo: _selectedMed!['name'])
             .get());
       }
 
@@ -144,7 +160,6 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       double totalAdded = 0;
       double totalAdjusted = 0; // Absolute value of manual edits
       List<Map<String, dynamic>> logs = [];
-      DateTime? earliestDate;
 
       for (final doc in uniqueDocs.values) {
         final d = doc.data() as Map<String, dynamic>;
@@ -152,47 +167,48 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         final qty = (q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0);
         final ts = (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now();
         final action = d['action'] ?? '';
+        final medName = d['medicineName'] ?? d['name'] ?? 'Unknown Medicine';
         
-        if (earliestDate == null || ts.isBefore(earliestDate)) {
-          earliestDate = ts;
-        }
-        
-        if (action == 'edit_stock' || action == 'medicine_edited') {
-           totalAdjusted += qty;
-           logs.add({
-             'type': qty >= 0 ? 'added' : 'removed',
-             'qty': qty.abs(),
-             'date': ts,
-             'user': d['performedByName'] ?? d['performedBy'] ?? 'Admin',
-             'msg': action == 'medicine_edited' ? 'Medicine Edited' : 'Manual Adjustment',
-           });
-        } else {
-           totalAdded += qty;
-           logs.add({
-             'type': 'added',
-             'qty': qty,
-             'date': ts,
-             'user': d['performedByName'] ?? d['performedBy'] ?? 'Unknown',
-             'msg': (action == 'medicine_registered_directly' || action == 'medicine_registered') 
-                 ? 'Initial Registration' 
-                 : 'Restock',
-           });
+        // Only include inventory logs matching the selected month
+        if (ts.year == selectedYear && ts.month == selectedMonthVal) {
+          if (action == 'edit_stock' || action == 'medicine_edited') {
+            totalAdjusted += qty;
+            logs.add({
+              'type': qty >= 0 ? 'added' : 'removed',
+              'qty': qty.abs(),
+              'date': ts,
+              'user': d['performedByName'] ?? d['performedBy'] ?? 'Admin',
+              'msg': '${action == 'medicine_edited' ? 'Medicine Edited' : 'Manual Adjustment'} ($medName)',
+              'medicineName': medName,
+            });
+          } else {
+            totalAdded += qty;
+            logs.add({
+              'type': 'added',
+              'qty': qty,
+              'date': ts,
+              'user': d['performedByName'] ?? d['performedBy'] ?? 'Unknown',
+              'msg': '${(action == 'medicine_registered_directly' || action == 'medicine_registered') ? 'Initial Registration' : 'Restock'} ($medName)',
+              'medicineName': medName,
+            });
+          }
         }
       }
 
-      // Determine search range for dispensing
-      DateTime searchStart = earliestDate ?? DateTime.now().subtract(const Duration(days: 90));
-
-      searchStart = DateTime(searchStart.year, searchStart.month, searchStart.day);
-      final todayMidnight = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day, 23, 59, 59);
-
-      // 2. Query Removals (Dispensing) over the identified lifetime
-      double totalRemoved = 0;
-      
+      // Determine days to fetch in the selected month
       final List<DateTime> daysToFetch = [];
-      for (DateTime curr = searchStart; curr.isBefore(todayMidnight); curr = curr.add(const Duration(days: 1))) {
+      DateTime start = DateTime(selectedYear, selectedMonthVal, 1);
+      DateTime end = DateTime(selectedYear, selectedMonthVal + 1, 1).subtract(const Duration(seconds: 1));
+      final today = DateTime.now();
+      if (end.isAfter(today)) {
+        end = today;
+      }
+      for (DateTime curr = start; curr.isBefore(end.add(const Duration(seconds: 1))); curr = curr.add(const Duration(days: 1))) {
         daysToFetch.add(curr);
       }
+
+      // 2. Query Removals (Dispensing) over the selected month
+      double totalRemoved = 0;
 
       // Fetch days in parallel to drastically improve speed
       final fetchFutures = daysToFetch.map((curr) async {
@@ -215,17 +231,24 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             final prescriptions = (d['prescriptions'] as List?) ?? [];
             for (final rx in prescriptions) {
               if (rx is! Map) continue;
-              // Check inventoryId first, fallback to name matching
-              final String rxId = (rx['inventoryId'] ?? rx['medicineId'] ?? rx['id'] ?? '').toString();
-              bool isMatch = false;
               
-              if (medId.isNotEmpty && rxId.isNotEmpty && rxId == medId) {
-                isMatch = true;
+              bool isMatch = false;
+              final rxName = rx['name'] ?? '';
+              
+              if (_selectedMed != null) {
+                // Check inventoryId first, fallback to name matching
+                final String rxId = (rx['inventoryId'] ?? rx['medicineId'] ?? rx['id'] ?? '').toString();
+                if (medId.isNotEmpty && rxId.isNotEmpty && rxId == medId) {
+                  isMatch = true;
+                } else {
+                  final nameMatch = rx['name'] == _selectedMed!['name'];
+                  final typeMatch = rx['type'] == _selectedMed!['type'];
+                  final doseMatch = rx['dose'] == _selectedMed!['dose'];
+                  isMatch = nameMatch && typeMatch && doseMatch;
+                }
               } else {
-                final nameMatch = rx['name'] == _selectedMed!['name'];
-                final typeMatch = rx['type'] == _selectedMed!['type'];
-                final doseMatch = rx['dose'] == _selectedMed!['dose'];
-                isMatch = nameMatch && typeMatch && doseMatch;
+                // If no specific medicine is selected, match all
+                isMatch = true;
               }
 
               if (isMatch) {
@@ -240,15 +263,35 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 final qty = isInj ? perDay : (perDay * days);
                 dayTotalRemoved += qty;
 
+                final patientName = d['patientName'] ?? d['name'] ?? 'Unknown Patient';
+                final patientCnic = d['patientCnic'] ?? d['cnic'] ?? '';
+                final age = d['patientAge'] ?? d['age'] ?? '';
+                final gender = d['patientGender'] ?? d['gender'] ?? '';
+
+                final dispensedAtStr = d['dispensedAt']?.toString() ?? d['createdAt']?.toString();
+                DateTime logDate = curr;
+                if (dispensedAtStr != null) {
+                  final parsed = DateTime.tryParse(dispensedAtStr);
+                  if (parsed != null) {
+                    logDate = parsed.toLocal();
+                  }
+                }
+
                 dayLogs.add({
                   'type': 'removed',
                   'qty': qty,
-                  'date': curr,
+                  'date': logDate,
                   'user': d['dispenserName'] ?? 'Unknown',
-                  'msg': 'Dispensed (Token: ${d['serial']})',
+                  'msg': 'Dispensed',
+                  'medicineName': rxName,
+                  'patientName': patientName,
+                  'patientCnic': patientCnic,
+                  'age': age,
+                  'gender': gender,
+                  'serial': d['serial'] ?? '',
                   'days': days.toInt(),
                 });
-              } else if (isSelectedMedSyringe) {
+              } else if (_selectedMed != null && isSelectedMedSyringe) {
                 final typeStr = rx['type']?.toString().toLowerCase() ?? '';
                 final isInjOrDrip = typeStr.contains('injection') || typeStr.contains('drip');
                 final isRxSyringe = typeStr.contains('syringe');
@@ -257,12 +300,32 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   final perDay = perDayRaw is num ? perDayRaw.toDouble() : double.tryParse(perDayRaw.toString()) ?? 1.0;
                   dayTotalRemoved += perDay;
 
+                  final patientName = d['patientName'] ?? d['name'] ?? 'Unknown Patient';
+                  final patientCnic = d['patientCnic'] ?? d['cnic'] ?? '';
+                  final age = d['patientAge'] ?? d['age'] ?? '';
+                  final gender = d['patientGender'] ?? d['gender'] ?? '';
+
+                  final dispensedAtStr = d['dispensedAt']?.toString() ?? d['createdAt']?.toString();
+                  DateTime logDate = curr;
+                  if (dispensedAtStr != null) {
+                    final parsed = DateTime.tryParse(dispensedAtStr);
+                    if (parsed != null) {
+                      logDate = parsed.toLocal();
+                    }
+                  }
+
                   dayLogs.add({
                     'type': 'removed',
                     'qty': perDay,
-                    'date': curr,
+                    'date': logDate,
                     'user': d['dispenserName'] ?? 'Unknown',
                     'msg': 'Auto-deducted Syringe (Token: ${d['serial']})',
+                    'medicineName': rxName,
+                    'patientName': patientName,
+                    'patientCnic': patientCnic,
+                    'age': age,
+                    'gender': gender,
+                    'serial': d['serial'] ?? '',
                     'days': 1,
                   });
                 }
@@ -282,10 +345,17 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         logs.addAll(res['logs'] as List<Map<String, dynamic>>);
       }
 
-
       // 4. Get Current Remaining
-      final smQty = _selectedMed!['quantity'];
-      final currentStock = (smQty is num ? smQty.toDouble() : double.tryParse(smQty?.toString() ?? '') ?? 0.0);
+      double currentStock = 0;
+      if (_selectedMed != null) {
+        final smQty = _selectedMed!['quantity'];
+        currentStock = (smQty is num ? smQty.toDouble() : double.tryParse(smQty?.toString() ?? '') ?? 0.0);
+      } else {
+        for (final med in _allMedicines) {
+          final smQty = med['quantity'];
+          currentStock += (smQty is num ? smQty.toDouble() : double.tryParse(smQty?.toString() ?? '') ?? 0.0);
+        }
+      }
 
       // 5. Finalize Report
       // Sort logs by date descending
@@ -301,7 +371,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           'date': (l['date'] as DateTime).toIso8601String(),
         }).toList(),
         'calculatedAt': DateTime.now().toIso8601String(),
-        'month': 'All Time History',
+        'month': DateFormat('MMMM yyyy').format(_selectedMonth),
       };
 
       // Save to Hive
@@ -334,8 +404,6 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           SliverToBoxAdapter(child: _buildFilters()),
           if (_isLoading)
             const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: _teal)))
-          else if (_selectedMed == null)
-            _buildEmptyState('Select a medicine to view its ledger')
           else if (_reportData == null)
             _buildEmptyState('No data found for this period')
           else
@@ -399,7 +467,6 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           Row(
             children: [
               Expanded(
-                flex: 2,
                 child: InkWell(
                   onTap: _showMedicinePicker,
                   child: Container(
@@ -429,26 +496,66 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_left_rounded, color: _teal),
+                onPressed: () {
+                  setState(() {
+                    _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
+                    _reportData = null;
+                  });
+                  _loadReport();
+                },
+              ),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: _teal.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _teal.withValues(alpha: 0.2)),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.history_rounded, size: 16, color: _teal),
-                      SizedBox(width: 8),
-                      Text(
-                        'All Time History',
-                        style: TextStyle(color: _tealDark, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
+                child: InkWell(
+                  onTap: () async {
+                    final DateTime? picked = await showDatePicker(
+                      context: context,
+                      initialDate: _selectedMonth,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now(),
+                      initialDatePickerMode: DatePickerMode.year,
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _selectedMonth = DateTime(picked.year, picked.month);
+                        _reportData = null;
+                      });
+                      _loadReport();
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: _teal.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _teal.withValues(alpha: 0.1)),
+                    ),
+                    child: Text(
+                      DateFormat('MMMM yyyy').format(_selectedMonth),
+                      style: const TextStyle(color: _tealDark, fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
                   ),
                 ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_right_rounded, color: _teal),
+                onPressed: _selectedMonth.year == DateTime.now().year && _selectedMonth.month == DateTime.now().month
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month + 1);
+                          _reportData = null;
+                        });
+                        _loadReport();
+                      },
               ),
             ],
           ),
@@ -472,6 +579,134 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     );
   }
 
+  Widget _buildConsolidatedBreakdown(Map<String, dynamic> report) {
+    if (_selectedMed != null) return const SizedBox.shrink();
+
+    final logs = (report['logs'] as List?) ?? [];
+    
+    // Group by medicine name
+    final Map<String, Map<String, dynamic>> groups = {};
+    for (final l in logs) {
+      final name = l['medicineName']?.toString() ?? 'Unknown Medicine';
+      final type = l['type']?.toString() ?? 'removed';
+      final qty = (l['qty'] as num?)?.toDouble() ?? 0.0;
+      final patientId = l['patientCnic'] ?? l['patientName'] ?? '';
+      
+      groups.putIfAbsent(name, () => {
+        'added': 0.0,
+        'removed': 0.0,
+        'patients': <String>{},
+      });
+      
+      if (type == 'added') {
+        groups[name]!['added'] = (groups[name]!['added'] as double) + qty;
+      } else {
+        groups[name]!['removed'] = (groups[name]!['removed'] as double) + qty;
+        if (patientId.toString().isNotEmpty) {
+          (groups[name]!['patients'] as Set<String>).add(patientId.toString());
+        }
+      }
+    }
+
+    if (groups.isEmpty) return const SizedBox.shrink();
+
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: true,
+          leading: const Icon(Icons.analytics_rounded, color: _teal),
+          title: const Text(
+            'Medicine Breakdown Summary',
+            style: TextStyle(fontWeight: FontWeight.bold, color: _tealDark, fontSize: 15),
+          ),
+          subtitle: Text('${groups.length} medicines moved this month'),
+          children: [
+            const Divider(height: 1),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(16),
+              itemCount: groups.length,
+              separatorBuilder: (_, __) => const Divider(height: 12),
+              itemBuilder: (context, index) {
+                final name = groups.keys.elementAt(index);
+                final counts = groups[name]!;
+                final added = counts['added'] as double;
+                final removed = counts['removed'] as double;
+                final patientSet = counts['patients'] as Set<String>;
+                final net = added - removed;
+
+                return Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: _textDark, fontSize: 14),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              if (added > 0)
+                                Container(
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: _teal.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '+${added.toStringAsFixed(0)} units',
+                                    style: const TextStyle(color: _teal, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                              if (removed > 0)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: _red.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '-${removed.toStringAsFixed(0)} units (${patientSet.length} patient${patientSet.length == 1 ? '' : 's'})',
+                                    style: const TextStyle(color: _red, fontSize: 10, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          net >= 0 ? '+${net.toStringAsFixed(0)}' : net.toStringAsFixed(0),
+                          style: TextStyle(
+                            color: net >= 0 ? _teal : _red,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const Text('Net change', style: TextStyle(color: _textLight, fontSize: 10)),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLedgerContent() {
     final report = _reportData!;
     final logs = (report['logs'] as List?) ?? [];
@@ -479,6 +714,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     return SliverList(
       delegate: SliverChildListDelegate([
         _buildSummaryCards(report),
+        _buildConsolidatedBreakdown(report),
         const Padding(
           padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
           child: Text('Transaction History', style: TextStyle(color: _tealDark, fontWeight: FontWeight.bold, fontSize: 16)),
@@ -585,6 +821,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 5, offset: const Offset(0, 2))],
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             padding: const EdgeInsets.all(10),
@@ -603,12 +840,35 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(log['msg'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, color: _textDark, fontSize: 14)),
-                const SizedBox(height: 2),
-                Text('By ${log['user']}', style: const TextStyle(color: _textLight, fontSize: 11)),
+                Text(
+                  isAdded 
+                      ? (log['msg'] ?? '') 
+                      : 'Dispensed ${log['medicineName'] ?? ''} to ${log['patientName'] ?? 'Unknown Patient'}', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: _textDark, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                if (!isAdded) ...[
+                  if (log['patientCnic'] != null && log['patientCnic'].toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 2),
+                      child: Text('CNIC: ${log['patientCnic']}', style: const TextStyle(color: _textLight, fontSize: 11)),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      'Token: ${log['serial']} • Age: ${log['age']} • Gender: ${log['gender']}',
+                      style: const TextStyle(color: _textLight, fontSize: 11),
+                    ),
+                  ),
+                ],
+                Text(
+                  isAdded ? 'By ${log['user']}' : 'Dispenser: ${log['user']}', 
+                  style: const TextStyle(color: _textLight, fontSize: 11),
+                ),
               ],
             ),
           ),
+          const SizedBox(width: 12),
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
@@ -621,7 +881,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 ),
               ),
               const SizedBox(height: 2),
-              Text(DateFormat('dd MMM').format(date), style: const TextStyle(color: _textLight, fontSize: 11)),
+              Text(DateFormat('dd MMM hh:mm a').format(date), style: const TextStyle(color: _textLight, fontSize: 11)),
               if (!isAdded && log['days'] != null) ...[
                 const SizedBox(height: 4),
                 Container(
@@ -658,9 +918,27 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             const SizedBox(height: 16),
             Expanded(
               child: ListView.builder(
-                itemCount: _allMedicines.length,
+                itemCount: _allMedicines.length + 1,
                 itemBuilder: (ctx, i) {
-                  final med = _allMedicines[i];
+                  if (i == 0) {
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: _teal.withValues(alpha: 0.1),
+                        child: const Icon(Icons.apps_rounded, size: 16, color: _teal),
+                      ),
+                      title: const Text('All Medicines', style: TextStyle(fontWeight: FontWeight.bold, color: _tealDark)),
+                      subtitle: const Text('Show ledger for all stock items'),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        setState(() {
+                          _selectedMed = null;
+                          _reportData = null;
+                        });
+                        _loadReport();
+                      },
+                    );
+                  }
+                  final med = _allMedicines[i - 1];
                   return ListTile(
                     leading: CircleAvatar(backgroundColor: _teal.withValues(alpha: 0.1), child: const Icon(Icons.medication_rounded, size: 16, color: _teal)),
                     title: Text(med['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),

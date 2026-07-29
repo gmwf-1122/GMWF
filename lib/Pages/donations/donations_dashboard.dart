@@ -8,7 +8,10 @@ import 'package:excel/excel.dart' hide Border;
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:shimmer/shimmer.dart';
+import 'package:archive/archive.dart';
+import 'package:collection/collection.dart';
 import '../../constants/colors.dart';
 import 'donations_shared.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -572,35 +575,496 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
   }
 
   Future<void> _importDonations() async {
-    // Pick JSON file
+    // Pick JSON or Excel file
     final result = await FilePicker.platform.pickFiles(
-      dialogTitle: 'Select Parsed JSON Donations File',
+      dialogTitle: 'Select Donations File (JSON or XLSX)',
       type: FileType.custom,
-      allowedExtensions: ['json'],
+      allowedExtensions: ['json', 'xlsx'],
+      withData: true,
     );
-    if (result == null || result.files.single.path == null) return;
+    if (result == null || result.files.isEmpty) return;
 
-    final file = File(result.files.single.path!);
-    final jsonContent = await file.readAsString();
+    final fileObj = result.files.first;
+    final extension = fileObj.extension?.toLowerCase();
 
-    List<dynamic> jsonList;
-    try {
-      jsonList = json.decode(jsonContent) as List<dynamic>;
-    } catch (e) {
+    List<Map<String, dynamic>> recordsList = [];
+
+    if (extension == 'json') {
+      try {
+        final path = fileObj.path;
+        String jsonContent;
+        if (fileObj.bytes != null) {
+          jsonContent = utf8.decode(fileObj.bytes!);
+        } else if (path != null) {
+          final file = File(path);
+          jsonContent = await file.readAsString();
+        } else {
+          throw Exception('No file data available');
+        }
+        final decoded = json.decode(jsonContent);
+        if (decoded is List) {
+          recordsList = decoded.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        } else {
+          throw Exception('JSON file is not a list of donation records');
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Invalid JSON file format: $e'),
+            backgroundColor: Colors.redAccent,
+          ));
+        }
+        return;
+      }
+    } else if (extension == 'xlsx') {
+      try {
+        Uint8List? bytes = fileObj.bytes;
+        final path = fileObj.path;
+        if (bytes == null && path != null) {
+          bytes = await File(path).readAsBytes();
+        }
+        if (bytes == null) {
+          throw Exception('Could not read Excel file data');
+        }
+
+        final excel = Excel.decodeBytes(_sanitizeExcelBytes(bytes));
+
+        // Step 1: Scan for duplicate receipts across all sheets
+        final Map<String, int> receiptCounts = {};
+        for (final sheetName in excel.tables.keys) {
+          final sheet = excel.tables[sheetName]!;
+          List<dynamic>? headers;
+          int firstRowIdx = -1;
+          for (int rIdx = 0; rIdx < sheet.rows.length; rIdx++) {
+            final row = sheet.rows[rIdx];
+            if (row.any((cell) => cell != null && cell.value != null)) {
+              headers = row.map((cell) => cell?.value).toList();
+              firstRowIdx = rIdx;
+              break;
+            }
+          }
+          if (headers == null || firstRowIdx == -1) continue;
+
+          int receiptIdx = -1;
+          for (int idx = 0; idx < headers.length; idx++) {
+            final h = headers[idx];
+            if (h != null) {
+              final hStr = h.toString().toLowerCase();
+              if ((hStr.contains('receipt') || hStr.contains('reciept')) && !hStr.contains('deposit')) {
+                receiptIdx = idx;
+                break;
+              }
+            }
+          }
+          if (receiptIdx == -1) {
+            receiptIdx = 1;
+          }
+
+          for (int rIdx = firstRowIdx + 1; rIdx < sheet.rows.length; rIdx++) {
+            final row = sheet.rows[rIdx];
+
+            bool otherFieldsPopulatedScan = false;
+            for (int i = 0; i < row.length; i++) {
+              if (i != receiptIdx && row[i] != null && row[i]!.value != null) {
+                if (row[i]!.value.toString().trim().isNotEmpty) {
+                  otherFieldsPopulatedScan = true;
+                  break;
+                }
+              }
+            }
+            if (!otherFieldsPopulatedScan) continue;
+
+            if (receiptIdx < row.length) {
+              final receiptVal = row[receiptIdx]?.value;
+              final cleanRc = _cleanReceiptForParsing(receiptVal);
+              if (cleanRc.isNotEmpty) {
+                receiptCounts[cleanRc] = (receiptCounts[cleanRc] ?? 0) + 1;
+              }
+            }
+          }
+        }
+
+        final Set<String> duplicateReceipts = receiptCounts.entries
+            .where((e) => e.value > 1)
+            .map((e) => e.key)
+            .toSet();
+
+        // Step 2: Parse rows and construct donation records
+        final Map<String, int> receiptOccurrences = {};
+
+        for (final sheetName in excel.tables.keys) {
+          final sheet = excel.tables[sheetName]!;
+          List<dynamic>? headers;
+          int firstRowIdx = -1;
+          for (int rIdx = 0; rIdx < sheet.rows.length; rIdx++) {
+            final row = sheet.rows[rIdx];
+            if (row.any((cell) => cell != null && cell.value != null)) {
+              headers = row.map((cell) => cell?.value).toList();
+              firstRowIdx = rIdx;
+              break;
+            }
+          }
+          if (headers == null || firstRowIdx == -1) continue;
+
+          final sheetNameUpper = sheetName.toUpperCase();
+          final String categoryId = sheetName.toLowerCase().contains('masjid') ? 'jamia' : 'gmwf';
+
+          int dateIdx = 0;
+          int receiptIdx = 1;
+          int amountIdx = 2;
+
+          int nameIdx = -1;
+          int cellIdx = -1;
+          int receivedByIdx = -1;
+          int categoryColIdx = -1;
+          int subCategoryColIdx = -1;
+          int statusColIdx = -1;
+          List<int> onlineFallbackCols = [];
+
+          for (int idx = 0; idx < headers.length; idx++) {
+            final h = headers[idx]?.toString().toLowerCase().trim() ?? '';
+            if (h.isEmpty) continue;
+
+            if (h == 'date' || h == 'day') {
+              dateIdx = idx;
+            } else if ((h.contains('receipt') || h.contains('reciept')) && !h.contains('deposit')) {
+              receiptIdx = idx;
+            } else if (h == 'amount' || h == 'ammount') {
+              amountIdx = idx;
+            } else if (h.contains('donor') || h.contains('donner') || h == 'name') {
+              if (h.contains('cell') || h.contains('phone') || h.contains('mobile') || h.contains('num')) {
+                cellIdx = idx;
+              } else {
+                nameIdx = idx;
+              }
+            } else if (h.contains('received') || h.contains('collector') || h.contains('by') || h.contains('recorded')) {
+              receivedByIdx = idx;
+            } else if (h.contains('category') || h == 'type' || h == 'sector' || h == 'account') {
+              categoryColIdx = idx;
+            } else if (h.contains('sub') || h.contains('program') || h.contains('head') || h.contains('purpose') || h.contains('project') || h.contains('detail')) {
+              subCategoryColIdx = idx;
+            } else if (h.contains('status')) {
+              statusColIdx = idx;
+            }
+          }
+
+          // Fallbacks in case headers aren't detected
+          if (nameIdx == -1 && headers.length > 3) nameIdx = 3;
+          if (cellIdx == -1 && headers.length > 4) cellIdx = 4;
+          if (receivedByIdx == -1 && headers.length > 5) receivedByIdx = 5;
+
+          if (sheetNameUpper == 'GMWF-25') {
+            onlineFallbackCols = [6, 7];
+          }
+
+          String currentDate = "2024-09-29";
+
+          for (int rIdx = firstRowIdx + 1; rIdx < sheet.rows.length; rIdx++) {
+            final row = sheet.rows[rIdx];
+
+            // Skip completely blank rows
+            final int maxColToCheck = receivedByIdx != -1 ? receivedByIdx + 1 : 4;
+            bool otherFieldsPopulated = false;
+            final int limit = row.length < maxColToCheck ? row.length : maxColToCheck;
+            for (int colI = 0; colI < limit; colI++) {
+              if (colI != receiptIdx && colI < row.length && row[colI] != null && row[colI]!.value != null) {
+                if (row[colI]!.value.toString().trim().isNotEmpty) {
+                  otherFieldsPopulated = true;
+                  break;
+                }
+              }
+            }
+            if (!otherFieldsPopulated && sheetNameUpper == 'GMWF-25') {
+              for (final colI in onlineFallbackCols) {
+                if (colI < row.length && row[colI] != null && row[colI]!.value != null) {
+                  final val = row[colI]!.value;
+                  if (val is! DateCellValue && val is! DateTimeCellValue) {
+                    if (val.toString().trim().isNotEmpty) {
+                      otherFieldsPopulated = true;
+                      break;
+                    }
+                  }
+                }
+              }
+            }
+            if (!otherFieldsPopulated) {
+              continue;
+            }
+
+            final receiptVal = receiptIdx < row.length ? row[receiptIdx]?.value : null;
+            final cleanRc = _cleanReceiptForParsing(receiptVal);
+
+            // Date propagation
+            final dateVal = dateIdx < row.length ? row[dateIdx]?.value : null;
+            currentDate = _parseDateVal(dateVal, currentDate, sheetName);
+
+            // Duplicate receipt suffixing
+            String receiptNo = cleanRc;
+            if (duplicateReceipts.contains(cleanRc)) {
+              receiptOccurrences[cleanRc] = (receiptOccurrences[cleanRc] ?? 0) + 1;
+              final occNum = receiptOccurrences[cleanRc]!;
+              final suffix = (occNum == 1) ? "-a" : "-b";
+              receiptNo = "$cleanRc$suffix";
+            }
+
+            // Read donor name, cell, and received_by
+            final nameVal = nameIdx != -1 && nameIdx < row.length ? row[nameIdx]?.value : null;
+            final donorName = nameVal != null ? nameVal.toString().trim() : "";
+
+            final cellVal = cellIdx != -1 && cellIdx < row.length ? row[cellIdx]?.value : null;
+            final cell = cellVal != null ? cellVal.toString().trim() : "";
+
+            final recVal = receivedByIdx != -1 && receivedByIdx < row.length ? row[receivedByIdx]?.value : null;
+            final receivedBy = recVal != null ? recVal.toString().trim() : "Excel Import";
+
+            // Online Donation Name Extraction
+            String parsedDonorName = donorName;
+            final nameCleanUpper = donorName.toUpperCase().trim();
+            if (nameCleanUpper.startsWith('ONLINE') || nameCleanUpper.startsWith('EASYPAISA') || nameCleanUpper.startsWith('JAZZCASH')) {
+              // Try to find text in parentheses
+              final parenMatch = RegExp(r'\(([^)]+)\)').firstMatch(donorName);
+              if (parenMatch != null) {
+                parsedDonorName = parenMatch.group(1)!.trim();
+              } else {
+                // Try to split by dash/hyphen or colon
+                final parts = donorName.split(RegExp(r'[-–—:]'));
+                if (parts.length > 1 && parts.last.trim().isNotEmpty) {
+                  parsedDonorName = parts.last.trim();
+                }
+              }
+            }
+
+            // Check if cancelled
+            bool isCancelled = false;
+            if (donorName.toLowerCase().contains("cancel")) {
+              isCancelled = true;
+            }
+            final rawAmount = amountIdx < row.length ? row[amountIdx]?.value : null;
+            if (rawAmount != null && rawAmount.toString().toLowerCase().contains("cancel")) {
+              isCancelled = true;
+            }
+
+            double amountVal = 0.0;
+            String entryType = "cash";
+            String? goodsItem;
+            String paymentMethod = "Cash";
+            bool onlineFallbackUsed = false;
+
+            if (isCancelled) {
+              amountVal = 0.0;
+            } else {
+              const goodsKeywords = ['pcs', 'kg', 'roti', 'quran'];
+              final nameIsGoods = goodsKeywords.any((term) => donorName.toLowerCase().contains(term));
+
+              final amt2 = _parseAmountStr(rawAmount);
+              if (amt2 != null && amt2 > 0) {
+                final amtIsGoods = goodsKeywords.any((term) => rawAmount.toString().toLowerCase().contains(term));
+                if (nameIsGoods || amtIsGoods) {
+                  entryType = 'goods';
+                  goodsItem = donorName.isNotEmpty ? donorName : rawAmount.toString();
+                  amountVal = amt2;
+                  paymentMethod = 'Goods';
+                } else {
+                  amountVal = amt2;
+                }
+              } else {
+                if (nameIsGoods) {
+                  entryType = 'goods';
+                  goodsItem = donorName;
+                  amountVal = 0.0;
+                  paymentMethod = 'Goods';
+                }
+              }
+
+              if (amountVal == 0.0 && entryType != 'goods') {
+                isCancelled = true;
+              }
+            }
+
+            // Build notes (defined early for keyword matching)
+            final List<String> notesParts = [];
+            if (isCancelled) {
+              notesParts.add("CANCELLED receipt. Needs manual check.");
+            } else if (entryType == 'goods') {
+              notesParts.add("In-kind donation: $goodsItem");
+            }
+            if (onlineFallbackUsed) {
+              notesParts.add("Online Transfer (amount from notes column)");
+            }
+            if ((isCancelled || entryType == 'goods') && donorName.isNotEmpty) {
+              notesParts.add("Original Text: $donorName");
+            }
+            notesParts.add("sheet: $sheetName.xlsx");
+            final notesVal = notesParts.join(" | ");
+
+            // Parse payment method from donorName and notes keywords if not goods
+            if (!isCancelled && entryType != 'goods') {
+              final textToSearch = '${donorName} ${notesVal}'.toLowerCase();
+              if (textToSearch.contains('online') || textToSearch.contains('bank') || textToSearch.contains('transfer') || textToSearch.contains('deposit') || textToSearch.contains('easypaisa') || textToSearch.contains('jazzcash') || textToSearch.contains('ubl') || textToSearch.contains('meezan')) {
+                paymentMethod = 'Bank Transfer';
+              }
+            }
+
+            // Donor anonymity
+            bool isAnonymous = true;
+            String donorDisplayName = 'Walk-in Donor';
+            if (!isCancelled && entryType != 'goods') {
+              final nameClean = parsedDonorName.trim().toUpperCase();
+              final anonymousNames = {
+                'UNKNOWN', 'ANONYMOUS', 'VALUED DONOR', 'WALK-IN DONOR', 'ONLINE',
+                'ONLINE TRANSFER', 'ONLINE DEPOSIT', 'SCRAP SALE', ''
+              };
+              if (nameClean.isNotEmpty && !anonymousNames.contains(nameClean)) {
+                isAnonymous = false;
+                donorDisplayName = parsedDonorName;
+              }
+            }
+
+            // Format phone
+            String phoneVal = "";
+            if (!isCancelled && cell.isNotEmpty) {
+              phoneVal = cell.replaceAll(RegExp(r'\D'), '');
+              if (phoneVal.length == 10 && phoneVal.startsWith('3')) {
+                phoneVal = '0' + phoneVal;
+              }
+            }
+
+            // Dynamic Category & Subcategory Resolution
+            String catId = categoryId;
+            String? subTypeId;
+            String? gmwfSubId;
+
+            if (categoryColIdx != -1 && categoryColIdx < row.length) {
+              final catVal = row[categoryColIdx]?.value?.toString().toLowerCase().trim() ?? '';
+              if (catVal.isNotEmpty) {
+                if (catVal.contains('jamia') || catVal.contains('masjid')) {
+                  catId = 'jamia';
+                } else if (catVal.contains('gmwf')) {
+                  catId = 'gmwf';
+                }
+              }
+            }
+
+            if (subCategoryColIdx != -1 && subCategoryColIdx < row.length) {
+              final subVal = row[subCategoryColIdx]?.value?.toString().toLowerCase().trim() ?? '';
+              if (subVal.isNotEmpty) {
+                for (final sub in GmwfSubCategory.values) {
+                  final label = sub.name.toLowerCase();
+                  final display = sub.label.toLowerCase();
+                  if (subVal == label || subVal == display || subVal.contains(label) || subVal.contains(display)) {
+                    catId = 'gmwf';
+                    gmwfSubId = sub.name;
+                    break;
+                  }
+                }
+                for (final sub in DonationSubtype.values) {
+                  final label = sub.name.toLowerCase();
+                  final display = sub.label.toLowerCase();
+                  if (subVal == label || subVal == display || subVal.contains(label) || subVal.contains(display)) {
+                    catId = 'jamia';
+                    subTypeId = sub.name;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Keyword fallback mapping if subcategory is not found
+            if (catId == 'gmwf' && gmwfSubId == null) {
+              final textToSearch = '${donorName} ${notesVal}'.toLowerCase();
+              if (textToSearch.contains('dasterkhwaan') || textToSearch.contains('roti') || textToSearch.contains('meals') || textToSearch.contains('food')) {
+                gmwfSubId = GmwfSubCategory.dasterkhwaan.name;
+              } else if (textToSearch.contains('dispensary') || textToSearch.contains('medicine') || textToSearch.contains('medical') || textToSearch.contains('health')) {
+                gmwfSubId = GmwfSubCategory.dispensary.name;
+              } else if (textToSearch.contains('madrisa') || textToSearch.contains('madrassa') || textToSearch.contains('madrissa')) {
+                gmwfSubId = GmwfSubCategory.madrisa.name;
+              } else if (textToSearch.contains('school') || textToSearch.contains('education') || textToSearch.contains('student')) {
+                gmwfSubId = GmwfSubCategory.school.name;
+              } else if (textToSearch.contains('libaas') || textToSearch.contains('clothes')) {
+                gmwfSubId = GmwfSubCategory.libaas.name;
+              } else if (textToSearch.contains('rashan') || textToSearch.contains('ration') || textToSearch.contains('grocery')) {
+                gmwfSubId = GmwfSubCategory.rashan.name;
+              } else {
+                gmwfSubId = GmwfSubCategory.general.name;
+              }
+            }
+
+            if (catId == 'jamia' && subTypeId == null) {
+              final textToSearch = '${donorName} ${notesVal}'.toLowerCase();
+              if (textToSearch.contains('zakat')) {
+                subTypeId = DonationSubtype.zakat.name;
+              } else if (textToSearch.contains('sadqa') || textToSearch.contains('sadqa atyaat') || textToSearch.contains('atyaat') || textToSearch.contains('charity')) {
+                subTypeId = DonationSubtype.sadqaAtyaat.name;
+              } else if (textToSearch.contains('construction') || textToSearch.contains('building') || textToSearch.contains('masjid project')) {
+                subTypeId = DonationSubtype.construction.name;
+              } else if (textToSearch.contains('maintenance') || textToSearch.contains('repair')) {
+                subTypeId = DonationSubtype.maintenance.name;
+              } else if (textToSearch.contains('iftar') || textToSearch.contains('ramadan')) {
+                subTypeId = DonationSubtype.iftar.name;
+              } else if (textToSearch.contains('fitrana') || textToSearch.contains('fitra')) {
+                subTypeId = DonationSubtype.fitrana.name;
+              } else if (textToSearch.contains('fidya')) {
+                subTypeId = DonationSubtype.fidya.name;
+              } else {
+                subTypeId = DonationSubtype.general.name;
+              }
+            }
+
+            // Dynamic Status parsing
+            String statusVal = 'received';
+            if (statusColIdx != -1 && statusColIdx < row.length) {
+              final rawStatus = row[statusColIdx]?.value?.toString().toLowerCase().trim() ?? '';
+              if (rawStatus.contains('pending')) {
+                statusVal = 'pending';
+              }
+            }
+
+            final record = {
+              'branchId':      widget.branchId,
+              'branchName':    widget.branchName,
+              'date':          currentDate,
+              'amount':        amountVal,
+              'receiptNo':     receiptNo,
+              'donorName':     donorDisplayName,
+              'phone':         phoneVal,
+              'isAnonymous':   isAnonymous,
+              'notes':         notesVal,
+              'categoryId':    catId,
+              'subtypeId':     subTypeId,
+              'gmwfSubCategoryId': gmwfSubId,
+              'paymentMethod': paymentMethod,
+              'entryType':     entryType,
+              'goodsItem':     goodsItem,
+              'status':        statusVal,
+              'recordedBy':    receivedBy.isNotEmpty ? receivedBy : 'Excel Import'
+            };
+            recordsList.add(record);
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Error parsing Excel file: $e'),
+            backgroundColor: Colors.redAccent,
+          ));
+        }
+        return;
+      }
+    } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Invalid JSON file format: $e'),
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Unsupported file format. Please upload a JSON or Excel file.'),
           backgroundColor: Colors.redAccent,
         ));
       }
       return;
     }
 
-    final total = jsonList.length;
+    final total = recordsList.length;
     if (total == 0) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No records found in selected JSON file.'),
+          content: Text('No records found in selected JSON/Excel file.'),
           backgroundColor: Colors.orangeAccent,
         ));
       }
@@ -615,8 +1079,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     // Detect target branch from the JSON data, fallback to current widget branch
     String targetBranchId = widget.branchId;
     String targetBranchName = widget.branchName;
-    if (jsonList.isNotEmpty && jsonList.first is Map) {
-      final firstRecord = jsonList.first as Map;
+    if (recordsList.isNotEmpty) {
+      final firstRecord = recordsList.first;
       if (firstRecord.containsKey('branchId')) {
         targetBranchId = (firstRecord['branchId']?.toString() ?? widget.branchId).toLowerCase().trim();
       }
@@ -624,6 +1088,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         targetBranchName = firstRecord['branchName']?.toString() ?? targetBranchId;
       }
     }
+
+    bool importCancelled = false;
 
     // Show Progress Dialog
     showDialog(
@@ -681,6 +1147,20 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           ),
                           textAlign: TextAlign.center,
                         ),
+                        const SizedBox(height: 24),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            importCancelled = true;
+                            Navigator.of(dialogCtx).pop();
+                          },
+                          icon: const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
+                          label: const Text('Cancel Import', style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.red),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -720,7 +1200,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       final branchCode = LocalStorageService.getBranchCode(targetBranchId);
 
       for (int i = 0; i < total; i++) {
-        final recordMap = Map<String, dynamic>.from(jsonList[i] as Map);
+        if (importCancelled) {
+          debugPrint("Import cancelled by user at index $i");
+          break;
+        }
+        final recordMap = Map<String, dynamic>.from(recordsList[i]);
         
         final receiptNoRaw = recordMap['receiptNo']?.toString() ?? '';
         final cleanRcpt = cleanReceiptNumber(receiptNoRaw);
@@ -1846,4 +2330,181 @@ class _HeaderActionButtonState extends State<_HeaderActionButton> {
       ),
     );
   }
+}
+
+String _cleanReceiptForParsing(dynamic receipt) {
+  if (receipt == null) return '';
+  var rcptStr = receipt.toString().trim();
+  if (rcptStr.endsWith('.0')) {
+    rcptStr = rcptStr.substring(0, rcptStr.length - 2);
+  }
+  return rcptStr;
+}
+
+String _parseDateVal(dynamic val, String currentDate, String sheetName) {
+  if (val == null) return currentDate;
+  
+  if (val is DateCellValue) {
+    final y = val.year;
+    final m = val.month.toString().padLeft(2, '0');
+    final d = val.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+  if (val is DateTimeCellValue) {
+    final y = val.year;
+    final m = val.month.toString().padLeft(2, '0');
+    final d = val.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
+  
+  final dateStr = val.toString().trim();
+  if (dateStr.isEmpty) return currentDate;
+  
+  final monthsMap = {
+    'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+    'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
+  };
+  
+  final parts = dateStr.split('-');
+  if (parts.length == 2) {
+    final dayPart = parts[0].trim();
+    final monthPart = parts[1].trim().toLowerCase();
+    
+    final day = int.tryParse(dayPart);
+    if (day != null) {
+      int? month;
+      if (int.tryParse(monthPart) != null) {
+        month = int.tryParse(monthPart);
+      } else if (monthPart.length >= 3 && monthsMap.containsKey(monthPart.substring(0, 3))) {
+        month = monthsMap[monthPart.substring(0, 3)];
+      }
+      
+      if (month != null) {
+        int year = DateTime.now().year;
+        final sheetNameUpper = sheetName.toUpperCase();
+        if (sheetNameUpper == 'GMWF' || sheetNameUpper == 'MASJID') {
+          year = 2024;
+        } else if (sheetNameUpper.contains('25')) {
+          year = 2025;
+        } else if (sheetNameUpper.contains('26')) {
+          year = 2026;
+        } else if (sheetNameUpper.contains('24')) {
+          year = 2024;
+        }
+        
+        try {
+          final dt = DateTime(year, month, day);
+          if (dt.year == year && dt.month == month && dt.day == day) {
+            final mStr = month.toString().padLeft(2, '0');
+            final dStr = day.toString().padLeft(2, '0');
+            return '$year-$mStr-$dStr';
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  
+  final matchIso = RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(dateStr);
+  if (matchIso != null) {
+    return '${matchIso.group(1)}-${matchIso.group(2)}-${matchIso.group(3)}';
+  }
+  
+  return currentDate;
+}
+
+double? _parseAmountStr(dynamic val, {bool isFallbackCol = false}) {
+  if (val == null) return null;
+  if (val is DateCellValue || val is DateTimeCellValue) return null;
+  
+  if (val is DoubleCellValue) {
+    final v = val.value;
+    if (isFallbackCol && v >= 2000 && v <= 2100) return null;
+    if (isFallbackCol && v >= 1000000) return null;
+    return v;
+  }
+  if (val is IntCellValue) {
+    final v = val.value.toDouble();
+    if (isFallbackCol && v >= 2000 && v <= 2100) return null;
+    if (isFallbackCol && v >= 1000000) return null;
+    return v;
+  }
+  
+  final s = val.toString().trim().toUpperCase();
+  if (s.isEmpty) return null;
+  if (s == 'ONLINE' || s == 'ONLINE TRANSFER' || s == 'ONLINE DEPOSIT') return null;
+  
+  final m = RegExp(r'^([\d\.]+)\s*K\b').firstMatch(s);
+  if (m != null) {
+    final parsed = double.tryParse(m.group(1) ?? '');
+    if (parsed != null) {
+      return parsed * 1000;
+    }
+  }
+  
+  final m2 = RegExp(r'^([\d\.]+)').firstMatch(s);
+  if (m2 != null) {
+    final v = double.tryParse(m2.group(1) ?? '');
+    if (v != null) {
+      if (isFallbackCol && v >= 2000 && v <= 2100) return null;
+      if (isFallbackCol && v >= 1000000) return null;
+      return v;
+    }
+  }
+  
+  return null;
+}
+
+Uint8List _sanitizeExcelBytes(Uint8List bytes) {
+  try {
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final newArchive = Archive();
+    bool sanitized = false;
+
+    for (final file in archive) {
+      if (file.name == 'xl/styles.xml') {
+        final contentBytes = file.content as List<int>;
+        var xmlText = utf8.decode(contentBytes);
+        
+        final declRx = RegExp(r'<numFmt\s+[^>]*numFmtId="([0-9]+)"[^>]*>');
+        final customIds = declRx.allMatches(xmlText)
+            .map((m) => int.tryParse(m.group(1) ?? ''))
+            .whereType<int>()
+            .where((id) => id < 164)
+            .toSet();
+
+        if (customIds.isNotEmpty) {
+          xmlText = xmlText.replaceAllMapped(declRx, (match) {
+            final idStr = match.group(1);
+            if (idStr != null) {
+              final id = int.tryParse(idStr) ?? 0;
+              if (id < 164) {
+                return '';
+              }
+            }
+            return match.group(0)!;
+          });
+
+          for (final id in customIds) {
+            xmlText = xmlText.replaceAll('numFmtId="$id"', 'numFmtId="0"');
+          }
+          sanitized = true;
+        }
+        final sanitizedBytes = utf8.encode(xmlText);
+        newArchive.addFile(ArchiveFile('xl/styles.xml', sanitizedBytes.length, sanitizedBytes));
+      } else {
+        newArchive.addFile(file);
+      }
+    }
+
+    if (sanitized) {
+      final encoder = ZipEncoder();
+      final newBytes = encoder.encode(newArchive);
+      if (newBytes != null) {
+        return Uint8List.fromList(newBytes);
+      }
+    }
+  } catch (e) {
+    debugPrint("Error sanitizing excel bytes: $e");
+  }
+  return bytes;
 }

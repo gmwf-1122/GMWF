@@ -97,20 +97,48 @@ class _PatientQueueState extends State<PatientQueue>
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
       final type = event['event_type'] as String?;
-      final data = event['data'] as Map<String, dynamic>?;
+      final data = event['data'] as Map<String, dynamic>? ?? event;
       if (!mounted || type == null) return;
 
-      final msgBranch = data?['branchId']?.toString().toLowerCase().trim();
+      final msgBranch = (data['branchId'] ?? event['branchId'])?.toString().toLowerCase().trim();
       final myBranch  = widget.branchId.toLowerCase().trim();
-      if (msgBranch != null && msgBranch != myBranch) return;
+      if (msgBranch != null && msgBranch.isNotEmpty && msgBranch != myBranch) return;
 
       if (type == RealtimeEvents.saveEntry ||
-          type == RealtimeEvents.savePrescription ||
-          type == 'dispense_completed') {
-        setState(() {});
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _tryAutoSelectSmallestWaiting();
-        });
+          type == 'token_created' ||
+          type == 'save_entry') {
+        final serial = (data['serial'] ?? data['id'])?.toString();
+        if (serial != null && serial.isNotEmpty) {
+          LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
+        }
+        if (mounted) {
+          setState(() {});
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _tryAutoSelectSmallestWaiting();
+          });
+        }
+      } else if (type == 'dispense_completed') {
+        final serial = (data['serial'] ?? data['id'])?.toString();
+        if (serial != null && serial.isNotEmpty) {
+          final entryKey = '${widget.branchId}-$serial';
+          final existing = Hive.box(LocalStorageService.entriesBox).get(entryKey);
+          if (existing is Map) {
+            final updated = Map<String, dynamic>.from(existing)
+              ..['dispenseStatus'] = 'dispensed'
+              ..['status'] = 'completed';
+            Hive.box(LocalStorageService.entriesBox).put(entryKey, updated);
+          }
+        }
+        if (mounted) {
+          setState(() {});
+        }
+      } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
+        if (mounted) {
+          setState(() {});
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _tryAutoSelectSmallestWaiting();
+          });
+        }
       } else if (type == RealtimeEvents.tokenExceptionRequest) {
         final requestId = data?['requestId']?.toString() ??
             'local_${DateTime.now().millisecondsSinceEpoch}';

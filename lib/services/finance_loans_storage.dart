@@ -1,4 +1,4 @@
-﻿// lib/services/finance_loans_storage.dart
+// lib/services/finance_loans_storage.dart
 
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -85,9 +85,75 @@ class FinanceLoansStorage {
     if (principal <= 0) {
       throw Exception('Loan amount must be greater than zero.');
     }
+    final issued = dateIssued ?? DateTime.now();
+
+    // Month Lock Check
+    final monthKey = DateFormat('yyyy-MM').format(issued);
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('Loans cannot be issued in a closed and locked month: $monthKey');
+    }
+
+    // Check if employee already has an active loan
+    final activeLoans = getActiveLoansForEmployee(employeeId);
+    if (activeLoans.isNotEmpty) {
+      final existingLoan = Map<String, dynamic>.from(activeLoans.first);
+      final loanId = existingLoan['id'] as String;
+      final now = _nowIso();
+
+      final payments = List<Map<String, dynamic>>.from(
+        (existingLoan['payments'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)),
+      );
+
+      final topupId = _newId();
+      payments.add({
+        'id': topupId,
+        'date': issued.toIso8601String(),
+        'amount': principal,
+        'amountMinor': (principal * 100).round(),
+        'currency': 'PKR',
+        'note': reason.trim().isNotEmpty ? reason.trim() : 'Additional loan top-up.',
+        'recordedBy': performedBy,
+        'isVoided': false,
+        'createdAt': now,
+        'type': 'topup',
+      });
+
+      existingLoan['payments'] = payments;
+      existingLoan['principal'] = (existingLoan['principal'] as num).toDouble() + principal;
+      existingLoan['principalMinor'] = (existingLoan['principalMinor'] as num).toInt() + (principal * 100).round();
+      existingLoan['updatedAt'] = now;
+      existingLoan['syncStatus'] = 'pending';
+
+      if (repaymentType == 'fixed' && usualInstallment > 0) {
+        existingLoan['usualInstallment'] = usualInstallment;
+        existingLoan['usualInstallmentMinor'] = (usualInstallment * 100).round();
+      }
+
+      final sanitized = _sanitize(existingLoan);
+      await loansBox.put(loanId, sanitized);
+      await loansBox.flush();
+
+      await LocalStorageService.enqueueSync({
+        'type': 'save_finance_loan',
+        'branchId': branchId,
+        'loanId': loanId,
+        'data': sanitized,
+      });
+
+      await _logLoanAction(
+        branchId: branchId,
+        entityId: loanId,
+        action: 'topup',
+        performedBy: performedBy,
+        reason: 'Added PKR ${principal.toStringAsFixed(0)} to existing active loan for $employeeName. New Principal: PKR ${existingLoan['principal'].toStringAsFixed(0)}',
+      );
+
+      return loanId;
+    }
+
     final id = _newId();
     final now = _nowIso();
-    final issued = dateIssued ?? DateTime.now();
 
     final record = _sanitize({
       'id': id,
@@ -97,10 +163,14 @@ class FinanceLoansStorage {
       'employeeId': employeeId,
       'employeeName': employeeName,
       'principal': principal,
+      'principalMinor': (principal * 100).round(),
+      'usualInstallment': usualInstallment,
+      'usualInstallmentMinor': (usualInstallment * 100).round(),
+      'currency': 'PKR',
+      'eventVersion': 1,
       'dateIssued': issued.toIso8601String(),
       'reason': reason.trim().isNotEmpty ? reason.trim() : 'Loan issued.',
       'repaymentType': repaymentType,
-      'usualInstallment': usualInstallment,
       'status': 'active',
       'payments': <Map<String, dynamic>>[],
       'createdAt': now,
@@ -152,6 +222,15 @@ class FinanceLoansStorage {
       throw Exception('This loan is already closed/paid off.');
     }
 
+    final payDate = date ?? DateTime.now();
+
+    // Month Lock Check
+    final monthKey = DateFormat('yyyy-MM').format(payDate);
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('Repayments cannot be recorded in a closed and locked month: $monthKey');
+    }
+
     final currentBalance = getLoanBalance(loan);
     if (amount > currentBalance + 0.01) {
       throw Exception(
@@ -160,7 +239,6 @@ class FinanceLoansStorage {
 
     final paymentId = _newId();
     final now = _nowIso();
-    final payDate = date ?? DateTime.now();
 
     final payments = List<Map<String, dynamic>>.from(
       (loan['payments'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)),
@@ -169,6 +247,8 @@ class FinanceLoansStorage {
       'id': paymentId,
       'date': payDate.toIso8601String(),
       'amount': amount,
+      'amountMinor': (amount * 100).round(),
+      'currency': 'PKR',
       'note': note.trim(),
       'recordedBy': performedBy,
       'isVoided': false,
@@ -229,10 +309,28 @@ class FinanceLoansStorage {
     final idx = payments.indexWhere((p) => p['id'] == paymentId);
     if (idx == -1) throw Exception('Payment not found.');
 
+    final dateStr = payments[idx]['date']?.toString() ?? '';
+    if (dateStr.isNotEmpty) {
+      final monthKey = dateStr.substring(0, 7);
+      final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+      if (isLocked) {
+        throw Exception('Repayments in a closed and locked month ($monthKey) cannot be voided.');
+      }
+    }
+
+    final payType = payments[idx]['type']?.toString();
+    final isTopup = payType == 'topup' || payType == 'loan_issue';
+    final double amt = (payments[idx]['amount'] as num?)?.toDouble() ?? 0.0;
+
     payments[idx]['isVoided'] = true;
     payments[idx]['voidedBy'] = performedBy;
     payments[idx]['voidReason'] = reason.trim();
     payments[idx]['voidedAt'] = _nowIso();
+
+    if (isTopup) {
+      loan['principal'] = (loan['principal'] as num).toDouble() - amt;
+      loan['principalMinor'] = (loan['principalMinor'] as num).toInt() - (amt * 100).round();
+    }
 
     loan['payments'] = payments;
     loan['updatedAt'] = _nowIso();
@@ -277,6 +375,13 @@ class FinanceLoansStorage {
     if (raw == null || raw is! Map) throw Exception('Loan not found.');
     final loan = Map<String, dynamic>.from(raw);
 
+    // Period Lock Check
+    final monthKey = DateFormat('yyyy-MM').format(DateTime.now());
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('Loans cannot be closed manually in a closed and locked month: $monthKey');
+    }
+
     loan['status'] = 'closed';
     loan['closedAt'] = _nowIso();
     loan['closeReason'] = reason.trim();
@@ -305,15 +410,16 @@ class FinanceLoansStorage {
 
   // -- Queries ---------------------------------------------------------------
   static double getLoanBalance(Map<String, dynamic> loan) {
-    final principal = (loan['principal'] as num?)?.toDouble() ?? 0.0;
+    final pMinor = (loan['principalMinor'] as num?)?.toInt() ?? (((loan['principal'] as num?)?.toDouble() ?? 0.0) * 100).round();
     final payments = (loan['payments'] as List? ?? []);
-    double paid = 0.0;
+    int paidMinor = 0;
     for (final p in payments) {
       if (p is! Map) continue;
       if (p['isVoided'] == true) continue;
-      paid += (p['amount'] as num?)?.toDouble() ?? 0.0;
+      if (p['type'] == 'topup' || p['type'] == 'loan_issue') continue;
+      paidMinor += (p['amountMinor'] as num?)?.toInt() ?? (((p['amount'] as num?)?.toDouble() ?? 0.0) * 100).round();
     }
-    return (principal - paid).clamp(0.0, double.infinity);
+    return ((pMinor - paidMinor) / 100).clamp(0.0, double.infinity);
   }
 
   static List<Map<String, dynamic>> getLoansForEmployee(String employeeId) {

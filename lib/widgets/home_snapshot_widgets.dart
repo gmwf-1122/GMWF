@@ -11,23 +11,29 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/app_theme.dart';
+import '../theme/role_theme_provider.dart';
 import '../models/module_registry.dart';
 import '../services/home_dashboard_service.dart';
 import 'dashboard_widgets.dart';
 import '../pages/office/finance_page.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../services/local_storage_service.dart';
+import '../pages/school/utils/school_local_storage.dart';
+import '../pages/school/school_dashboard.dart';
 
 // ════════════════════════════════════════════════════════════════════════
 // 1. Compact stat tile w/ "vs yesterday" delta
 // ════════════════════════════════════════════════════════════════════════
 
-class HomeStatTile extends StatelessWidget {
+class HomeStatTile extends StatefulWidget {
   final String label;
   final String value;
   final String? prefix;
   final IconData icon;
   final Color color;
   final double? deltaPct; // null = no yesterday data ("New today")
+  final VoidCallback? onTap;
 
   const HomeStatTile({
     super.key,
@@ -37,74 +43,242 @@ class HomeStatTile extends StatelessWidget {
     required this.icon,
     required this.color,
     this.deltaPct,
+    this.onTap,
   });
 
   @override
+  State<HomeStatTile> createState() => _HomeStatTileState();
+}
+
+class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderStateMixin {
+  bool _hov = false;
+  late AnimationController _pressCtrl;
+  late Animation<double> _pressScale;
+
+  @override
+  void initState() {
+    super.initState();
+    _pressCtrl = AnimationController(
+        vsync: this, duration: const Duration(milliseconds: 100));
+    _pressScale = Tween<double>(begin: 1.0, end: 0.97).animate(
+        CurvedAnimation(parent: _pressCtrl, curve: Curves.easeOut));
+  }
+
+  @override
+  void dispose() {
+    _pressCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasDelta = deltaPct != null;
-    final isUp = hasDelta && deltaPct! >= 0;
+    final t = RoleThemeScope.dataOf(context);
+    final hasDelta = widget.deltaPct != null;
+    final isUp = hasDelta && widget.deltaPct! >= 0;
     final deltaColor = !hasDelta
         ? DS.neutral
         : (isUp ? const Color(0xFF16A34A) : const Color(0xFFDC2626));
+    final isDark = t.isDarkCanvas;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: DS.s2 - 2),
+    final Color categoryColor = widget.color;
+    final categoryGradient = LinearGradient(
+      colors: [categoryColor.withValues(alpha: 0.85), categoryColor],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+
+    final tileContent = AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutQuart,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 10, offset: const Offset(0, 3)),
-        ],
+        color: isDark 
+            ? (_hov ? const Color(0xFF1F2937) : const Color(0xFF0F172A))
+            : (_hov ? Colors.white : t.bgCard),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: _hov
+              ? categoryColor.withValues(alpha: 0.6)
+              : (isDark ? const Color(0xFF1E293B) : t.bgRule),
+          width: _hov ? 2.0 : 1.2,
+        ),
+        boxShadow: _hov
+            ? [
+                BoxShadow(
+                    color: categoryColor.withValues(alpha: 0.22),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8)),
+              ]
+            : [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3)),
+              ],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(9),
-            decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(DS.r1)),
-            child: Icon(icon, color: color, size: 17),
-          ),
-          const SizedBox(width: DS.s1 + 2),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label,
-                    style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w600),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                  if (prefix != null)
-                    Text(prefix!,
-                        style: TextStyle(color: color.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w700)),
-                  Flexible(
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.centerLeft,
-                      child: Text(value,
-                          style: const TextStyle(
-                              color: Color(0xFF111827), fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: -0.4)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20.8),
+        child: Stack(
+          children: [
+            // Background radial glow on hover
+            if (_hov)
+              Positioned(
+                top: -35, right: -35,
+                child: Container(
+                  width: 90, height: 90,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        categoryColor.withValues(alpha: 0.18),
+                        Colors.transparent,
+                      ],
                     ),
                   ),
-                ]),
-                const SizedBox(height: 4),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(!hasDelta
-                      ? Icons.fiber_new_rounded
-                      : (isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded),
-                      size: 11, color: deltaColor),
-                  const SizedBox(width: 2),
-                  Text(!hasDelta ? 'New today' : '${deltaPct!.abs().toStringAsFixed(0)}% vs yesterday',
-                      style: TextStyle(color: deltaColor, fontSize: 10, fontWeight: FontWeight.w700)),
-                ]),
-              ],
+                ),
+              ),
+            
+            // Top accent indicator line
+            Positioned(
+              left: 0, right: 0, top: 0,
+              height: 3,
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [categoryColor, categoryColor.withValues(alpha: 0.3)],
+                  ),
+                ),
+              ),
             ),
-          ),
-        ],
+
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Icon container with dynamic rotation on hover
+                  AnimatedRotation(
+                    turns: _hov ? 0.03 : 0,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOutBack,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        gradient: _hov ? categoryGradient : null,
+                        color: !_hov 
+                            ? (isDark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.1)) 
+                            : null,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        widget.icon,
+                        color: _hov ? Colors.white : categoryColor,
+                        size: 15,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  
+                  // Text fields
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.label,
+                          style: TextStyle(
+                            color: isDark ? t.textSecondary : const Color(0xFF6B7280),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (widget.prefix != null)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 3),
+                                child: Text(
+                                  widget.prefix!,
+                                  style: TextStyle(
+                                    color: categoryColor.withValues(alpha: 0.8),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            Flexible(
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  widget.value,
+                                  style: TextStyle(
+                                    color: isDark ? t.textPrimary : const Color(0xFF111827),
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: -0.4,
+                                    height: 1.1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              !hasDelta
+                                  ? Icons.fiber_new_rounded
+                                  : (isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded),
+                              size: 10,
+                              color: deltaColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              !hasDelta ? 'New today' : '${widget.deltaPct!.abs().toStringAsFixed(0)}% vs yesterday',
+                              style: TextStyle(color: deltaColor, fontSize: 8.5, fontWeight: FontWeight.w700),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
+
+    if (widget.onTap != null) {
+      return MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hov = true),
+        onExit: (_) => setState(() {
+          _hov = false;
+          _pressCtrl.reverse();
+        }),
+        child: GestureDetector(
+          onTapDown: (_) => _pressCtrl.forward(),
+          onTapUp: (_) => _pressCtrl.reverse(),
+          onTapCancel: () => _pressCtrl.reverse(),
+          onTap: widget.onTap,
+          child: ScaleTransition(
+            scale: _pressScale,
+            child: tileContent,
+          ),
+        ),
+      );
+    }
+    return tileContent;
   }
 }
 
@@ -115,25 +289,31 @@ class HomeStatTileRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
-      if (c.maxWidth >= 900) {
-        return Row(
-          children: tiles.map((tile) => Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: tile,
-            ),
-          )).toList(),
-        );
+      int cols = 6;
+      double aspectRatio = 2.15;
+
+      if (c.maxWidth < 600) {
+        cols = 3;
+        aspectRatio = 1.6;
+      } else if (c.maxWidth < 1100) {
+        cols = 6;
+        aspectRatio = 1.95;
+      } else {
+        cols = 6;
+        aspectRatio = 2.25;
       }
-      final cols = c.maxWidth < 480 ? 2 : 3;
-      return GridView.count(
-        crossAxisCount: cols,
-        crossAxisSpacing: DS.s2,
-        mainAxisSpacing: DS.s2,
-        childAspectRatio: cols == 2 ? 1.6 : 1.5,
+
+      return GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
-        children: tiles,
+        itemCount: tiles.length,
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: aspectRatio,
+        ),
+        itemBuilder: (context, index) => tiles[index],
       );
     });
   }
@@ -154,7 +334,6 @@ class _FlatDonutPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final total = values.fold(0.0, (a, b) => a + b);
-    if (total == 0) return;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width, size.height) / 2 - 6;
     const strokeW = 34.0;
@@ -164,6 +343,12 @@ class _FlatDonutPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeW
       ..strokeCap = StrokeCap.butt;
+
+    if (total == 0) {
+      paint.color = Colors.grey.withValues(alpha: 0.18);
+      canvas.drawArc(Rect.fromCircle(center: center, radius: radius), 0, 2 * pi, false, paint);
+      return;
+    }
 
     for (int i = 0; i < values.length; i++) {
       if (values[i] == 0) continue;
@@ -239,47 +424,46 @@ class HomePatientDonutCard extends StatelessWidget {
     final nPct = total > 0 ? (s.nonZakat / total * 100).round() : 0;
     final gPct = total > 0 ? (s.gmwf / total * 100).round() : 0;
 
+    final values = total == 0 ? [0.0] : [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()];
+    final colors = total == 0 
+        ? [Colors.grey.shade300] 
+        : [t.zakat, t.nonZakat, t.gmwf];
+
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: t.bgCard,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: t.bgRule),
         boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Patients by Category',
-            style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+        Text('Patients by Category',
+            style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
         const SizedBox(height: DS.s2),
-        if (total == 0)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 20),
-            child: Center(child: Text('No patients yet today', style: TextStyle(color: DS.neutral, fontSize: 12))),
-          )
-        else
-          LayoutBuilder(builder: (context, c) {
-            final isWide = c.maxWidth >= 420;
-            final donut = _FlatAnimatedDonut(
-              size: isWide ? 150 : 130,
-              values: [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()],
-              colors: [t.zakat, t.nonZakat, t.gmwf],
-              center: Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('$total', style: TextStyle(color: t.textPrimary, fontSize: 24, fontWeight: FontWeight.w900)),
-                const Text('patients', style: TextStyle(color: DS.neutral, fontSize: 11)),
-              ]),
-            );
-            final legend = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _flatLegendRow(t.zakat, 'Zakat', s.zakat, zPct),
-              const SizedBox(height: 10),
-              _flatLegendRow(t.nonZakat, 'Non-Zakat', s.nonZakat, nPct),
-              const SizedBox(height: 10),
-              _flatLegendRow(t.gmwf, 'GMWF', s.gmwf, gPct),
-            ]);
-            if (isWide) {
-              return Row(children: [donut, const SizedBox(width: DS.s3), Expanded(child: legend)]);
-            }
-            return Column(children: [Center(child: donut), const SizedBox(height: DS.s2), legend]);
-          }),
+        LayoutBuilder(builder: (context, c) {
+          final isWide = c.maxWidth >= 420;
+          final donut = _FlatAnimatedDonut(
+            size: isWide ? 150 : 130,
+            values: values,
+            colors: colors,
+            center: Column(mainAxisSize: MainAxisSize.min, children: [
+              Text('$total', style: TextStyle(color: total == 0 ? t.textTertiary : t.textPrimary, fontSize: 24, fontWeight: FontWeight.w900)),
+              const Text('patients', style: TextStyle(color: DS.neutral, fontSize: 11)),
+            ]),
+          );
+          final legend = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.zakat, 'Zakat', s.zakat, zPct),
+            const SizedBox(height: 10),
+            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.nonZakat, 'Non-Zakat', s.nonZakat, nPct),
+            const SizedBox(height: 10),
+            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.gmwf, 'GMWF', s.gmwf, gPct),
+          ]);
+          if (isWide) {
+            return Row(children: [donut, const SizedBox(width: DS.s3), Expanded(child: legend)]);
+          }
+          return Column(children: [Center(child: donut), const SizedBox(height: DS.s2), legend]);
+        }),
       ]),
     );
   }
@@ -287,12 +471,14 @@ class HomePatientDonutCard extends StatelessWidget {
   Widget _flatLegendRow(Color color, String label, int count, int pct) => Row(children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 8),
-        Expanded(child: Text(label, style: const TextStyle(color: Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600))),
+        Expanded(child: Text(label, style: TextStyle(color: color == Colors.grey.shade400 ? Colors.grey.shade500 : const Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600))),
         Text('$count', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
         const SizedBox(width: 6),
         Text('$pct%', style: const TextStyle(color: DS.neutral, fontSize: 11)),
       ]);
 }
+
+
 
 class HomeBranchRow {
   final String id;
@@ -314,9 +500,9 @@ class HomeBranchPerformanceTable extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: t.bgCard,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -324,14 +510,14 @@ class HomeBranchPerformanceTable extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Branch Performance Today',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+          Text('Branch Performance Today',
+              style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           // Table header
           Container(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: DS.border, width: 1.0)),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.bgRule, width: 1.0)),
             ),
             child: const Row(
               children: [
@@ -379,12 +565,14 @@ class HomeBranchPerformanceTable extends StatelessWidget {
               final yRev = row.yesterday.dispensaryRevenue;
               final double? revDelta = yRev == 0 ? null : ((rev - yRev) / yRev) * 100;
 
+              final bool isDark = t.isDarkCanvas;
+
               return InkWell(
                 onTap: onTapBranch != null ? () => onTapBranch!(row.id) : null,
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: DS.border, width: 0.5)),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 0.5)),
                   ),
                   child: Row(
                     children: [
@@ -398,7 +586,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 row.name,
-                                style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w700),
+                                style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w700),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -412,7 +600,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(fmtNum(don), style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
+                              Text(fmtNum(don), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
                               if (donDelta != null) _deltaIndicator(donDelta),
                             ],
                           ),
@@ -425,7 +613,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(fmtNum(pats), style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
+                              Text(fmtNum(pats), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
                               if (patsDelta != null) _deltaIndicator(patsDelta),
                             ],
                           ),
@@ -438,7 +626,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text(fmtNum(rev), style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
+                              Text(fmtNum(rev), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
                               if (revDelta != null) _deltaIndicator(revDelta),
                             ],
                           ),
@@ -514,6 +702,7 @@ class HomeBestBranchSpotlight extends StatelessWidget {
   final int patients;
   final double? growthPct;
   final VoidCallback onTap;
+  final RoleThemeData? t;
 
   const HomeBestBranchSpotlight({
     super.key,
@@ -523,6 +712,7 @@ class HomeBestBranchSpotlight extends StatelessWidget {
     required this.patients,
     required this.growthPct,
     required this.onTap,
+    this.t,
   });
 
   @override
@@ -530,22 +720,27 @@ class HomeBestBranchSpotlight extends StatelessWidget {
     final hasGrowth = growthPct != null;
     final isUp = hasGrowth && growthPct! >= 0;
 
+    final accent1 = t?.accent ?? const Color(0xFF0F766E);
+    final accent2 = Color.lerp(accent1, Colors.black, 0.35) ?? const Color(0xFF0B524D);
+    final accent3 = Color.lerp(accent1, Colors.black, 0.55) ?? const Color(0xFF073834);
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF0F766E), Color(0xFF115E59)],
+          gradient: LinearGradient(
+            colors: [accent1, accent2, accent3],
+            stops: const [0.0, 0.55, 1.0],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(DS.r2),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF0F766E).withValues(alpha: 0.3),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+              color: accent1.withValues(alpha: 0.35),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
@@ -597,23 +792,41 @@ class HomeBestBranchSpotlight extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Trophy icon with glow
+                // 3D Golden trophy on solid 100% white circle
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: Colors.white,
                     shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.18),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
                   ),
-                  child: const Icon(
-                    Icons.emoji_events_rounded,
-                    color: Color(0xFFFBBF24),
-                    size: 36,
+                  child: ShaderMask(
+                    shaderCallback: (bounds) => const LinearGradient(
+                      colors: [
+                        Color(0xFFFFF176),
+                        Color(0xFFF59E0B),
+                        Color(0xFFB45309),
+                      ],
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                    ).createShader(bounds),
+                    child: const Icon(
+                      Icons.emoji_events_rounded,
+                      color: Colors.white,
+                      size: 34,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 20),
-            const Divider(color: Colors.white24, height: 1),
+            const Divider(color: Colors.white30, height: 1),
             const SizedBox(height: 14),
             // Details list
             _metricRow(Icons.payments_outlined, 'Revenue', fmtPKR(revenue)),
@@ -628,7 +841,9 @@ class HomeBestBranchSpotlight extends StatelessWidget {
               hasGrowth
                   ? '${isUp ? '+' : ''}${growthPct!.toStringAsFixed(0)}% vs yesterday'
                   : 'No data for yesterday',
-              valueColor: hasGrowth ? (isUp ? const Color(0xFF34D399) : const Color(0xFFF87171)) : Colors.white70,
+              valueColor: hasGrowth
+                  ? (isUp ? const Color(0xFFD1FAE5) : const Color(0xFFFFE4E6))
+                  : Colors.white.withValues(alpha: 0.85),
             ),
           ],
         ),
@@ -639,9 +854,9 @@ class HomeBestBranchSpotlight extends StatelessWidget {
   Widget _metricRow(IconData icon, String label, String value, {Color valueColor = Colors.white}) {
     return Row(
       children: [
-        Icon(icon, color: Colors.white70, size: 16),
+        Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: 16),
         const SizedBox(width: 8),
-        Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.90), fontSize: 12, fontWeight: FontWeight.w600)),
         const Spacer(),
         Text(value, style: TextStyle(color: valueColor, fontSize: 13, fontWeight: FontWeight.w800)),
       ],
@@ -658,13 +873,14 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final int total = s.zakat + s.nonZakat + s.gmwf;
+    final bool isDark = t.isDarkCanvas;
     
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -672,8 +888,8 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Patients by Category',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+          Text('Patients by Category',
+              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           Expanded(
             child: total == 0
@@ -716,8 +932,8 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                                 children: [
                                   Text(
                                     total.toString(),
-                                    style: const TextStyle(
-                                      color: Color(0xFF111827),
+                                    style: TextStyle(
+                                      color: isDark ? t.textPrimary : const Color(0xFF111827),
                                       fontSize: 20,
                                       fontWeight: FontWeight.w900,
                                       letterSpacing: -0.5,
@@ -749,6 +965,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
 
   Widget _donutLegendItem(String label, int val, int total, Color color, IconData icon) {
     final double pct = total == 0 ? 0.0 : (val / total) * 100;
+    final bool isDark = t.isDarkCanvas;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
@@ -779,7 +996,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                 const SizedBox(height: 1),
                 Text(
                   val.toString(),
-                  style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w900),
+                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w900),
                 ),
               ],
             ),
@@ -864,13 +1081,14 @@ class HomeRecentDonationsTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final donations = activities.where((a) => a.type == 'donation').toList();
+    final bool isDark = t.isDarkCanvas;
 
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -881,8 +1099,8 @@ class HomeRecentDonationsTable extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Recent Donations',
-                  style: TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              Text('Recent Donations',
+                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               Text('View all', style: TextStyle(color: t.accent, fontSize: 10, fontWeight: FontWeight.w700)),
             ],
           ),
@@ -890,7 +1108,7 @@ class HomeRecentDonationsTable extends StatelessWidget {
           // Table header
           Container(
             padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: DS.border, width: 1.0))),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 1.0))),
             child: const Row(
               children: [
                 Expanded(flex: 3, child: Text('Donor', style: TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.w700))),
@@ -908,18 +1126,18 @@ class HomeRecentDonationsTable extends StatelessWidget {
           else
             ...donations.take(4).map((a) {
               final match = RegExp(r'Received from ([^(]+)').firstMatch(a.subtitle);
-              final donorName = match?.group(1)?.trim() ?? 'Anonymous';
+              final donorName = match?.group(1)?.trim() ?? 'Walk-in Donor';
               final amt = a.amount ?? 0.0;
               final timeStr = DateFormat('hh:mm a').format(a.timestamp);
 
               return Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: DS.border, width: 0.5))),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 0.5))),
                 child: Row(
                   children: [
                     Expanded(
                       flex: 3,
-                      child: Text(donorName, style: const TextStyle(color: Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+                      child: Text(donorName, style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
                     ),
                     Expanded(
                       flex: 2,
@@ -956,13 +1174,14 @@ class HomeRecentPatientsTable extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = activities.where((a) => a.type == 'token').toList();
+    final bool isDark = t.isDarkCanvas;
 
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -973,8 +1192,8 @@ class HomeRecentPatientsTable extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Recent Patients',
-                  style: TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              Text('Recent Patients',
+                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               Text('View all', style: TextStyle(color: t.accent, fontSize: 10, fontWeight: FontWeight.w700)),
             ],
           ),
@@ -982,7 +1201,7 @@ class HomeRecentPatientsTable extends StatelessWidget {
           // Table header
           Container(
             padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: DS.border, width: 1.0))),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 1.0))),
             child: const Row(
               children: [
                 Expanded(flex: 3, child: Text('Patient ID', style: TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.w700))),
@@ -1008,19 +1227,19 @@ class HomeRecentPatientsTable extends StatelessWidget {
               
               final timeStr = DateFormat('hh:mm a').format(a.timestamp);
 
-              Color badgeBg = const Color(0xFFECFDF5);
-              Color badgeText = const Color(0xFF047857);
+              Color badgeBg = isDark ? const Color(0xFF064E3B) : const Color(0xFFECFDF5);
+              Color badgeText = isDark ? const Color(0xFF34D399) : const Color(0xFF047857);
               if (category.toLowerCase() == 'non-zakat') {
-                badgeBg = const Color(0xFFEFF6FF);
-                badgeText = const Color(0xFF1D4ED8);
+                badgeBg = isDark ? const Color(0xFF1E3A8A) : const Color(0xFFEFF6FF);
+                badgeText = isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
               } else if (category.toLowerCase() == 'gmwf') {
-                badgeBg = const Color(0xFFFEF3C7);
-                badgeText = const Color(0xFFD97706);
+                badgeBg = isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7);
+                badgeText = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
               }
 
               return Container(
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: DS.border, width: 0.5))),
+                decoration: BoxDecoration(border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 0.5))),
                 child: Row(
                   children: [
                     Expanded(
@@ -1028,7 +1247,7 @@ class HomeRecentPatientsTable extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(pId, style: const TextStyle(color: Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700)),
+                          Text(pId, style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700)),
                           Text(pName, style: const TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
                         ],
                       ),
@@ -1116,12 +1335,14 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
         ? 10
         : max(10.0, widget.points.map((p) => p.employeesPresent.toDouble()).reduce(max)) * 1.15;
 
+    final bool isDark = widget.t.isDarkCanvas;
+
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? widget.t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? widget.t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -1132,14 +1353,14 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Weekly Progress Trends',
-                        style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-                    SizedBox(height: 2),
-                    Text('Metrics for the last 5 weeks',
+                        style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                    const SizedBox(height: 2),
+                    const Text('Metrics for the last 5 weeks',
                         style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w500)),
                   ],
                 ),
@@ -1153,7 +1374,7 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                       children: [
                         Text(
                           'Week ending ${DateFormat('d MMM').format(pt.date)}',
-                          style: const TextStyle(color: Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 4),
                         Row(
@@ -1216,6 +1437,8 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                       maxTokens: maxTokens,
                       maxEmployees: maxEmployees,
                       hoveredIndex: hoveredIndex,
+                      isDark: isDark,
+                      gridColor: isDark ? widget.t.bgRule : DS.border,
                     ),
                   ),
                 );
@@ -1284,6 +1507,8 @@ class _MultiLineChartPainter extends CustomPainter {
   final double maxTokens;
   final double maxEmployees;
   final int? hoveredIndex;
+  final bool isDark;
+  final Color gridColor;
 
   _MultiLineChartPainter({
     required this.points,
@@ -1291,6 +1516,8 @@ class _MultiLineChartPainter extends CustomPainter {
     required this.maxMoney,
     required this.maxTokens,
     required this.maxEmployees,
+    required this.isDark,
+    required this.gridColor,
     this.hoveredIndex,
   });
 
@@ -1321,7 +1548,7 @@ class _MultiLineChartPainter extends CustomPainter {
 
     // 1. Draw Grid Lines
     final gridPaint = Paint()
-      ..color = DS.border
+      ..color = gridColor
       ..strokeWidth = 0.5;
     
     const int gridCount = 4;
@@ -1459,13 +1686,14 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
     final maxTokens = sortedRows.isEmpty
         ? 1
         : max(1, sortedRows.map((r) => r.today.tokens).reduce(max));
+    final bool isDark = t.isDarkCanvas;
 
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -1473,8 +1701,8 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Patients by Branch (Today)',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+          Text('Patients by Branch (Today)',
+              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           if (sortedRows.isEmpty)
             const Expanded(
@@ -1500,7 +1728,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                         width: 110,
                         child: Text(
                           row.name,
-                          style: const TextStyle(color: Color(0xFF4B5563), fontSize: 11, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: isDark ? t.textSecondary : const Color(0xFF4B5563), fontSize: 11, fontWeight: FontWeight.w700),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -1514,7 +1742,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                                 Container(
                                   height: 10,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFF3F4F6),
+                                    color: isDark ? t.bg : const Color(0xFFF3F4F6),
                                     borderRadius: BorderRadius.circular(5),
                                   ),
                                 ),
@@ -1542,7 +1770,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                         width: 24,
                         child: Text(
                           val.toString(),
-                          style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w900),
+                          style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w900),
                           textAlign: TextAlign.right,
                         ),
                       ),
@@ -1577,12 +1805,14 @@ class HomeRecentActivityFeed extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bool isDark = t.isDarkCanvas;
+
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -1593,8 +1823,8 @@ class HomeRecentActivityFeed extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Recent Activity',
-                  style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              Text('Recent Activity',
+                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               InkWell(
                 onTap: () {
                   final reportsModule = availableModules.firstWhere(
@@ -1674,7 +1904,7 @@ class HomeRecentActivityFeed extends StatelessWidget {
                               children: [
                                 Text(
                                   act.title,
-                                  style: const TextStyle(color: Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700),
+                                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -1726,33 +1956,41 @@ class QuickActionsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Map<String, dynamic>> targetActions = [
-      {'id': 'donations', 'label': 'Add Donation', 'icon': Icons.volunteer_activism_rounded, 'color': const Color(0xFF10B981)},
-      {'id': 'patients_registration', 'label': 'Add Patient', 'icon': Icons.person_add_rounded, 'color': const Color(0xFF8B5CF6)},
-      {'id': 'pharmacy', 'label': 'Dispensary', 'icon': Icons.medication_outlined, 'color': const Color(0xFF3B82F6)},
-      {'id': 'employee_attendance', 'label': 'Staff Attendance', 'icon': Icons.co_present_rounded, 'color': const Color(0xFF6366F1)},
-      {'id': 'student_attendance', 'label': 'Student Attend.', 'icon': Icons.how_to_reg_rounded, 'color': const Color(0xFFEC4899)},
-      {'id': 'madrassa_report', 'label': 'Madrassa Report', 'icon': Icons.assignment_rounded, 'color': const Color(0xFF14B8A6)},
+      {'id': 'branches', 'label': 'Branches Summary', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
+      {'id': 'employee_attendance', 'label': 'Staff Attendance', 'icon': Icons.badge_outlined, 'color': const Color(0xFF6366F1)},
+      {'id': 'madrassa_attendance', 'label': 'Madrassa Attend.', 'icon': Icons.how_to_reg_rounded, 'color': const Color(0xFFEC4899)},
+      {'id': 'madrassa_students', 'label': 'Madrassa Students', 'icon': Icons.groups_rounded, 'color': const Color(0xFF14B8A6)},
+      {'id': 'school_attendance', 'label': 'School Students', 'icon': Icons.school_rounded, 'color': const Color(0xFF10B981)},
+      {'id': 'school_teacher_attendance', 'label': 'School Faculty', 'icon': Icons.co_present_rounded, 'color': const Color(0xFF8B5CF6)},
+      {'id': 'office_boy', 'label': 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': const Color(0xFFF59E0B)},
+      {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhawaan Stock', 'icon': Icons.inventory_2_outlined, 'color': const Color(0xFFD97706)},
+      {'id': 'inventory', 'label': 'Med Inventory', 'icon': Icons.medication_liquid_rounded, 'color': const Color(0xFF0284C7)},
       {'id': 'finance', 'label': 'Finance & HR', 'icon': Icons.monetization_on_rounded, 'color': const Color(0xFFEF4444)},
-      {'id': 'executive_dashboard', 'label': 'Reports', 'icon': Icons.analytics_rounded, 'color': const Color(0xFFF59E0B)},
-      {'id': 'branches', 'label': 'Branches', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
+      {'id': 'donations', 'label': 'Add Donation', 'icon': Icons.volunteer_activism_rounded, 'color': const Color(0xFF059669)},
+      {'id': 'patients_registration', 'label': 'Add Patient', 'icon': Icons.person_add_rounded, 'color': const Color(0xFF7C3AED)},
     ];
 
     final activeActions = targetActions.where((action) {
       if (action['id'] == 'employee_attendance') {
         return availableModules.any((m) => m.id == 'finance');
       }
-      if (action['id'] == 'student_attendance' || action['id'] == 'madrassa_report') {
+      if (action['id'] == 'madrassa_attendance' || action['id'] == 'madrassa_students' || action['id'] == 'add_student' || action['id'] == 'madrassa_report') {
         return availableModules.any((m) => m.id == 'madrassa');
+      }
+      if (action['id'] == 'school_attendance' || action['id'] == 'school_teacher_attendance' || action['id'] == 'school') {
+        return availableModules.any((m) => m.id == 'school' || m.id == 'school_attendance' || m.id == 'school_teacher_attendance' || m.id == 'school_module');
       }
       return availableModules.any((m) => m.id == action['id'] || (action['id'] == 'patients_registration' && m.id == 'patient_register_standalone'));
     }).toList();
 
+    final bool isDark = t.isDarkCanvas;
+
     return Container(
       padding: const EdgeInsets.all(DS.s2),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? t.bgCard : Colors.white,
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
+        border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
@@ -1760,14 +1998,14 @@ class QuickActionsRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Quick Actions',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+          Text('Quick Actions',
+              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s1),
           Expanded(
             child: GridView.builder(
               physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: MediaQuery.of(context).size.width > 900 ? 6 : (MediaQuery.of(context).size.width > 600 ? 4 : 3),
                 crossAxisSpacing: 8,
                 mainAxisSpacing: 8,
                 childAspectRatio: 1.45,
@@ -1777,12 +2015,14 @@ class QuickActionsRow extends StatelessWidget {
                 final action = activeActions[index];
                 final mainModuleId = (action['id'] == 'employee_attendance')
                     ? 'finance'
-                    : ((action['id'] == 'student_attendance' || action['id'] == 'madrassa_report')
+                    : ((action['id'] == 'madrassa_attendance' || action['id'] == 'madrassa_students' || action['id'] == 'add_student' || action['id'] == 'madrassa_report')
                         ? 'madrassa'
-                        : action['id']);
+                        : ((action['id'] == 'school_attendance' || action['id'] == 'school_teacher_attendance' || action['id'] == 'school')
+                            ? 'school_module'
+                            : action['id']));
                 final baseModule = availableModules.firstWhere(
-                  (m) => m.id == mainModuleId || (mainModuleId == 'patients_registration' && m.id == 'patient_register_standalone'),
-                  orElse: () => availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                  (m) => m.id == mainModuleId || (mainModuleId == 'patients_registration' && m.id == 'patient_register_standalone') || (mainModuleId == 'school_module' && (m.id == 'school_attendance' || m.id == 'school_teacher_attendance' || m.id == 'school_module')),
+                  orElse: () => availableModules.firstWhere((m) => m.id == mainModuleId, orElse: () => availableModules.first),
                 );
                 
                 // Construct custom copy of the module with modified builder
@@ -1793,12 +2033,29 @@ class QuickActionsRow extends StatelessWidget {
                     builder: (context, data) => FinancePage(
                       branchId: data['branchId'] ?? 'all',
                       isAdmin: true,
-                      initialTabIndex: 0,
+                      initialTabIndex: 1,
                     ),
                   );
-                } else if (action['id'] == 'student_attendance') {
+                } else if (action['id'] == 'madrassa_students') {
                   module = baseModule.copyWith(
-                    title: 'Student Attendance',
+                    title: 'Madrassa Students',
+                    builder: (context, data) {
+                      final branchId = data['branchId'] ?? 'unknown';
+                      final username = data['name'] ?? data['username'] ?? 'User';
+                      final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
+                      final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
+                      return MadrassaDashboard(
+                        branchId: branchId,
+                        username: username,
+                        role: role,
+                        isAdmin: isAdmin,
+                        initialIndex: isAdmin ? 2 : 1,
+                      );
+                    },
+                  );
+                } else if (action['id'] == 'madrassa_attendance') {
+                  module = baseModule.copyWith(
+                    title: 'Madrassa Attendance',
                     builder: (context, data) {
                       final branchId = data['branchId'] ?? 'unknown';
                       final username = data['name'] ?? data['username'] ?? 'User';
@@ -1813,22 +2070,25 @@ class QuickActionsRow extends StatelessWidget {
                       );
                     },
                   );
-                } else if (action['id'] == 'madrassa_report') {
+                } else if (action['id'] == 'school_attendance') {
                   module = baseModule.copyWith(
-                    title: 'Madrassa Report',
-                    builder: (context, data) {
-                      final branchId = data['branchId'] ?? 'unknown';
-                      final username = data['name'] ?? data['username'] ?? 'User';
-                      final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
-                      final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
-                      return MadrassaDashboard(
-                        branchId: branchId,
-                        username: username,
-                        role: role,
-                        isAdmin: isAdmin,
-                        initialIndex: isAdmin ? 3 : 2,
-                      );
-                    },
+                    title: 'School Student Attendance',
+                    builder: (context, data) => SchoolDashboard(
+                      branchId: data['branchId'] ?? 'all',
+                      username: data['name'] ?? data['username'] ?? 'User',
+                      role: data['role'] ?? 'School Admin',
+                      initialTabIndex: 1,
+                    ),
+                  );
+                } else if (action['id'] == 'school_teacher_attendance') {
+                  module = baseModule.copyWith(
+                    title: 'School Faculty Attendance',
+                    builder: (context, data) => SchoolDashboard(
+                      branchId: data['branchId'] ?? 'all',
+                      username: data['name'] ?? data['username'] ?? 'User',
+                      role: data['role'] ?? 'School Admin',
+                      initialTabIndex: 2,
+                    ),
                   );
                 }
                 
@@ -2037,7 +2297,75 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         final today = data.todayCombined;
         final yesterday = data.yesterdayCombined;
 
-        // Build the 5 stat tiles
+        // Build the stat tiles with direct navigation & accurate count logic
+        void tryOpenModule(String id) {
+          final String mainModuleId = (id == 'employee_attendance')
+              ? 'finance'
+              : ((id == 'madrassa_attendance' || id == 'madrassa_students' || id == 'madrassa_report')
+                  ? 'madrassa'
+                  : ((id == 'school_attendance' || id == 'school_teacher_attendance')
+                      ? 'school_module'
+                      : id));
+
+          final baseModule = widget.availableModules.firstWhere(
+            (m) => m.id == mainModuleId || (mainModuleId == 'patients_list' && m.id == 'patient_register_standalone') || (mainModuleId == 'school_module' && (m.id == 'school_attendance' || m.id == 'school_teacher_attendance' || m.id == 'school_module')),
+            orElse: () => ModuleRegistry.allModules.firstWhere((m) => m.id == mainModuleId, orElse: () => ModuleRegistry.allModules.first),
+          );
+
+          var module = baseModule;
+          if (id == 'employee_attendance') {
+            module = baseModule.copyWith(
+              title: 'Employee Attendance',
+              builder: (context, data) => FinancePage(
+                branchId: data['branchId'] ?? 'all',
+                isAdmin: true,
+                initialTabIndex: 1,
+              ),
+            );
+          } else if (id == 'madrassa_attendance') {
+            module = baseModule.copyWith(
+              title: 'Madrassa Daily Log',
+              builder: (context, data) => MadrassaDashboard(
+                branchId: data['branchId'] ?? 'all',
+                username: data['name'] ?? data['username'] ?? 'User',
+                role: data['role'] ?? 'Admin',
+                initialIndex: 1,
+              ),
+            );
+          } else if (id == 'madrassa_students') {
+            module = baseModule.copyWith(
+              title: 'Madrassa Students',
+              builder: (context, data) => MadrassaDashboard(
+                branchId: data['branchId'] ?? 'all',
+                username: data['name'] ?? data['username'] ?? 'User',
+                role: data['role'] ?? 'Admin',
+                initialIndex: 2,
+              ),
+            );
+          } else if (id == 'school_attendance') {
+            module = baseModule.copyWith(
+              title: 'School Student Attendance',
+              builder: (context, data) => SchoolDashboard(
+                branchId: data['branchId'] ?? 'all',
+                username: data['name'] ?? data['username'] ?? 'User',
+                role: data['role'] ?? 'School Admin',
+                initialTabIndex: 1,
+              ),
+            );
+          } else if (id == 'school_teacher_attendance') {
+            module = baseModule.copyWith(
+              title: 'School Faculty Attendance',
+              builder: (context, data) => SchoolDashboard(
+                branchId: data['branchId'] ?? 'all',
+                username: data['name'] ?? data['username'] ?? 'User',
+                role: data['role'] ?? 'School Admin',
+                initialTabIndex: 2,
+              ),
+            );
+          }
+          widget.onOpenModule(module);
+        }
+
         final donationsTile = HomeStatTile(
           label: 'Donations Today',
           value: fmtNum(today.donations),
@@ -2045,6 +2373,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           icon: Icons.volunteer_activism_rounded,
           color: const Color(0xFF10B981),
           deltaPct: yesterday.donations == 0 ? null : ((today.donations - yesterday.donations) / yesterday.donations) * 100,
+          onTap: () => tryOpenModule('donations'),
         );
 
         final patientsTile = HomeStatTile(
@@ -2056,16 +2385,10 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               ? null 
               : (((today.zakat + today.nonZakat + today.gmwf) - (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) / 
                  (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) * 100,
+          onTap: () => tryOpenModule('patients_list'),
         );
 
-        final patientsRevTile = HomeStatTile(
-          label: 'Patients Revenue Today',
-          value: fmtNum(today.dispensaryRevenue),
-          prefix: 'Rs ',
-          icon: Icons.payments_rounded,
-          color: const Color(0xFFF59E0B),
-          deltaPct: yesterday.dispensaryRevenue == 0 ? null : ((today.dispensaryRevenue - yesterday.dispensaryRevenue) / yesterday.dispensaryRevenue) * 100,
-        );
+
 
         final overallRev = today.donations + today.dispensaryRevenue;
         final yOverallRev = yesterday.donations + yesterday.dispensaryRevenue;
@@ -2076,6 +2399,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           icon: Icons.account_balance_wallet_rounded,
           color: const Color(0xFF6366F1),
           deltaPct: yOverallRev == 0 ? null : ((overallRev - yOverallRev) / yOverallRev) * 100,
+          onTap: () => tryOpenModule('finance'),
         );
 
         final madrassaTile = HomeStatTile(
@@ -2084,28 +2408,155 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           icon: Icons.menu_book_rounded,
           color: const Color(0xFF0D9488),
           deltaPct: yesterday.prescribed == 0 ? null : ((today.prescribed - yesterday.prescribed) / yesterday.prescribed) * 100,
+          onTap: () => tryOpenModule('madrassa_attendance'),
+        );
+
+        final todayDateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        int empPresentCount = 0;
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+            final box = Hive.box(LocalStorageService.attendanceBox);
+            for (final key in box.keys) {
+              final keyStr = key.toString();
+              if (keyStr.endsWith('_$todayDateKey') || keyStr.endsWith(todayDateKey)) {
+                final val = box.get(key);
+                if (val is Map) {
+                  final status = val['status']?.toString().toLowerCase();
+                  if (status == 'present' || status == 'late' || status == 'overtime') {
+                    empPresentCount++;
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        final employeeAttendanceTile = HomeStatTile(
+          label: 'Employee Attendance',
+          value: fmtNum(empPresentCount),
+          icon: Icons.co_present_rounded,
+          color: const Color(0xFF3F82F6),
+          onTap: () => tryOpenModule('employee_attendance'),
+        );
+
+        final studentPresentCount = SchoolLocalStorage.getPresentStudentsCount('all', todayDateKey);
+        final teacherPresentCount = SchoolLocalStorage.getPresentTeachersCount('all', todayDateKey);
+
+        final schoolStudentsTile = HomeStatTile(
+          label: 'School Students',
+          value: fmtNum(studentPresentCount),
+          icon: Icons.school_rounded,
+          color: const Color(0xFF10B981),
+          onTap: () => tryOpenModule('school_attendance'),
+        );
+
+        final schoolTeachersTile = HomeStatTile(
+          label: 'School Teachers',
+          value: fmtNum(teacherPresentCount),
+          icon: Icons.record_voice_over_rounded,
+          color: const Color(0xFF8B5CF6),
+          onTap: () => tryOpenModule('school_teacher_attendance'),
+        );
+
+        int onlineUsersCount = 1;
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+            final uBox = Hive.box(LocalStorageService.usersBox);
+            int count = 0;
+            for (final u in uBox.values) {
+              if (u is Map) {
+                final isOnline = u['isOnline'] == true;
+                final rawDate = u['lastOnlineAt'] ?? u['lastLoginAt'] ?? u['updatedAt'];
+                bool recent = false;
+                if (rawDate is String && rawDate.isNotEmpty) {
+                  final dt = DateTime.tryParse(rawDate);
+                  if (dt != null && DateTime.now().difference(dt).inMinutes <= 15) recent = true;
+                }
+                if (isOnline || recent) count++;
+              }
+            }
+            if (count > 0) onlineUsersCount = count;
+          }
+        } catch (_) {}
+
+        final onlineUsersTile = HomeStatTile(
+          label: 'Online Users',
+          value: fmtNum(onlineUsersCount),
+          icon: Icons.wifi_tethering_rounded,
+          color: const Color(0xFF06B6D4),
+          onTap: () => tryOpenModule('users'),
+        );
+
+        final branchesSummaryTile = HomeStatTile(
+          label: 'Branches Summary',
+          value: fmtNum(data.branchRows.length),
+          icon: Icons.store_outlined,
+          color: const Color(0xFF0D9488),
+          onTap: () => tryOpenModule('branches'),
+        );
+
+        final dasterkhwaanTokensTile = HomeStatTile(
+          label: 'Dasterkhawaan Tokens',
+          value: 'Tokens',
+          icon: Icons.room_service_rounded,
+          color: const Color(0xFFF59E0B),
+          onTap: () => tryOpenModule('office_boy'),
+        );
+
+        final dasterkhwaanStockTile = HomeStatTile(
+          label: 'Dasterkhawaan Stock',
+          value: 'Stock',
+          icon: Icons.inventory_2_outlined,
+          color: const Color(0xFFD97706),
+          onTap: () => tryOpenModule('dasterkhwaan_inventory'),
         );
 
         final List<HomeStatTile> statTiles = [
+          branchesSummaryTile,
           donationsTile,
           patientsTile,
-          patientsRevTile,
           overallRevTile,
           madrassaTile,
+          employeeAttendanceTile,
+          schoolStudentsTile,
+          schoolTeachersTile,
+          dasterkhwaanTokensTile,
+          dasterkhwaanStockTile,
+          onlineUsersTile,
         ];
 
+        // Filter and sort branch rows by performance today
+        final activeBranchRows = data.branchRows.where((row) {
+          final pats = row.today.zakat + row.today.nonZakat + row.today.gmwf;
+          return row.today.donations > 0 || pats > 0 || row.today.dispensaryRevenue > 0;
+        }).toList();
+
+        final displayBranchRows = activeBranchRows.isNotEmpty ? activeBranchRows : data.branchRows;
+
+        final sortedBranchRows = List<HomeBranchRow>.from(displayBranchRows)
+          ..sort((a, b) {
+            final aPats = a.today.zakat + a.today.nonZakat + a.today.gmwf;
+            final bPats = b.today.zakat + b.today.nonZakat + b.today.gmwf;
+            final aScore = a.today.donations + a.today.dispensaryRevenue + aPats * 100;
+            final bScore = b.today.donations + b.today.dispensaryRevenue + bPats * 100;
+            if (bScore != aScore) {
+              return bScore.compareTo(aScore);
+            }
+            return a.name.compareTo(b.name);
+          });
+
         HomeBranchRow? bestBranch;
-        if (data.branchRows.isNotEmpty) {
-          final sorted = List<HomeBranchRow>.from(data.branchRows)
-            ..sort((a, b) => b.today.dispensaryRevenue.compareTo(a.today.dispensaryRevenue));
-          if (sorted.isNotEmpty && sorted.first.today.dispensaryRevenue > 0) {
-            bestBranch = sorted.first;
+        if (sortedBranchRows.isNotEmpty) {
+          final top = sortedBranchRows.first;
+          final pats = top.today.zakat + top.today.nonZakat + top.today.gmwf;
+          if (top.today.donations > 0 || pats > 0 || top.today.dispensaryRevenue > 0) {
+            bestBranch = top;
           }
         }
 
         // Layout rows
         final row2 = SizedBox(
-          height: 370,
+          height: 420,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -2113,7 +2564,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               const SizedBox(width: DS.s2),
               Expanded(flex: 4, child: HomeBranchPerformanceTable(
                 t: widget.t,
-                rows: data.branchRows,
+                rows: sortedBranchRows,
                 onTapBranch: (bId) {
                   final branchesModule = widget.availableModules.firstWhere(
                     (m) => m.id == 'branches',
@@ -2128,6 +2579,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 child: bestBranch == null
                     ? const SizedBox.shrink()
                     : HomeBestBranchSpotlight(
+                        t: widget.t,
                         branchName: bestBranch.name,
                         revenue: bestBranch.today.dispensaryRevenue,
                         donations: bestBranch.today.donations,
@@ -2195,10 +2647,10 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Today\'s Snapshot',
                     style: TextStyle(
-                      color: Color(0xFF111827),
+                      color: widget.t.textPrimary,
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.4,
@@ -2206,32 +2658,18 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              HomeStatTileRow(tiles: statTiles),
-              const SizedBox(height: DS.s3),
               if (widget.isDesktop) ...[
+                HomeStatTileRow(tiles: statTiles),
+                const SizedBox(height: DS.s3),
                 row2,
                 const SizedBox(height: DS.s3),
                 row3,
                 const SizedBox(height: DS.s3),
                 row4,
               ] else ...[
-                HomePatientsByCategoryDonut(t: widget.t, s: today),
-                const SizedBox(height: DS.s2),
-                HomeBranchPerformanceTable(
-                  t: widget.t,
-                  rows: data.branchRows,
-                  onTapBranch: (bId) {
-                    final branchesModule = widget.availableModules.firstWhere(
-                      (m) => m.id == 'branches',
-                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                    );
-                    widget.onOpenModule(branchesModule);
-                  },
-                ),
-                const SizedBox(height: DS.s2),
-                if (bestBranch != null)
+                if (bestBranch != null) ...[
                   HomeBestBranchSpotlight(
+                    t: widget.t,
                     branchName: bestBranch.name,
                     revenue: bestBranch.today.dispensaryRevenue,
                     donations: bestBranch.today.donations,
@@ -2249,27 +2687,50 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                       widget.onOpenModule(branchesModule);
                     },
                   ),
+                  const SizedBox(height: DS.s2),
+                ],
+                SizedBox(
+                  height: 240,
+                  child: QuickActionsRow(
+                    availableModules: widget.availableModules,
+                    t: widget.t,
+                    onOpenModule: widget.onOpenModule,
+                  ),
+                ),
+                const SizedBox(height: DS.s2),
+                HomeStatTileRow(tiles: statTiles),
+                const SizedBox(height: DS.s2),
+                SizedBox(height: 240, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
+                const SizedBox(height: DS.s2),
+                HomeBranchPerformanceTable(
+                  t: widget.t,
+                  rows: sortedBranchRows,
+                  onTapBranch: (bId) {
+                    final branchesModule = widget.availableModules.firstWhere(
+                      (m) => m.id == 'branches',
+                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                    );
+                    widget.onOpenModule(branchesModule);
+                  },
+                ),
                 const SizedBox(height: DS.s2),
                 HomeRevenueLineChart(points: data.chartPoints, t: widget.t),
                 const SizedBox(height: DS.s2),
-                HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows),
+                SizedBox(height: 240, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
                 const SizedBox(height: DS.s2),
-                HomeRecentActivityFeed(
-                  activities: data.recentActivities,
-                  t: widget.t,
-                  availableModules: widget.availableModules,
-                  onOpenModule: widget.onOpenModule,
+                SizedBox(
+                  height: 330,
+                  child: HomeRecentActivityFeed(
+                    activities: data.recentActivities,
+                    t: widget.t,
+                    availableModules: widget.availableModules,
+                    onOpenModule: widget.onOpenModule,
+                  ),
                 ),
                 const SizedBox(height: DS.s2),
                 HomeRecentDonationsTable(activities: data.recentActivities, t: widget.t),
                 const SizedBox(height: DS.s2),
                 HomeRecentPatientsTable(activities: data.recentActivities, t: widget.t),
-                const SizedBox(height: DS.s2),
-                QuickActionsRow(
-                  availableModules: widget.availableModules,
-                  t: widget.t,
-                  onOpenModule: widget.onOpenModule,
-                ),
               ],
             ],
           ),

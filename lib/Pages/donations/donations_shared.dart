@@ -1615,7 +1615,7 @@ Future<Uint8List> buildReceiptPdfSync(Map<String, dynamic> d) async {
   final cat = DonationCategory.values.firstWhere(
       (c) => c.name == categoryId, orElse: () => DonationCategory.gmwf);
 
-  final donorName     = (d['donorName']  as String? ?? 'Valued Donor').trim();
+  final donorName     = (d['donorName']  as String? ?? 'Walk-in Donor').trim();
     final donorPhone    = (d['phone'] as String? ?? '').trim();
   final rawBranchName = (d['branchName'] as String? ?? '').trim();
   final branchId      = (d['branchId']     as String? ?? '').trim();
@@ -2078,7 +2078,7 @@ Future<Uint8List> buildBankSlipPdf({
 }) async {
   Uint8List? logoBytes, qrGmBytes, qrAnjumanBytes;
   try {
-    final b = await rootBundle.load('assets/LOGO/gmwf.png');
+    final b = await rootBundle.load('assets/LOGO/gmwf-1.png');
     logoBytes = b.buffer.asUint8List();
   } catch (_) {}
   // Anjuman QR → gulzarmadina.com

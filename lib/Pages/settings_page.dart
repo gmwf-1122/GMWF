@@ -11,8 +11,11 @@ import '../theme/role_theme_provider.dart';
 import '../utils/localization_helper.dart';
 import '../services/local_storage_service.dart';
 import '../services/sync_service.dart';
+import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import 'admin/data_cleanup_screen.dart';
+import 'settings/biometric_device_manager_page.dart';
+
 
 class SettingsPage extends StatefulWidget {
   final Map<String, dynamic> userData;
@@ -216,6 +219,137 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  Future<void> _clearFinanceAndDonationsData() async {
+    final doubleConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final t = RoleThemeScope.dataOf(context);
+        return AlertDialog(
+          backgroundColor: t.bgCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: t.danger, size: 28),
+              const SizedBox(width: 12),
+              Text(
+                'WIPE FINANCE & DONATIONS',
+                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This will delete all local employee list, attendance sheets, salary ledger records, expenses, and donors/donations database. Other data like patients, dispensary, and stock will not be affected.',
+                style: _getStyle(t, size: 14),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Please type "WIPE" to confirm:',
+                style: _getStyle(t, size: 12, weight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: (val) {
+                  if (val.trim().toUpperCase() == 'WIPE') {
+                    Navigator.pop(context, true);
+                  }
+                },
+                decoration: roleInputDecoration(context, label: "Type WIPE to confirm", icon: Icons.delete_forever_outlined),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary)),
+            ),
+          ],
+        );
+      }
+    );
+
+    if (doubleConfirmed == true) {
+      setState(() => _isSyncing = true);
+      try {
+        final boxesToClear = [
+          LocalStorageService.donationsBox,
+          LocalStorageService.donorsBox,
+          LocalStorageService.employeesBox,
+          LocalStorageService.salaryHistoryBox,
+          LocalStorageService.attendanceBox,
+          LocalStorageService.salaryLedgerBox,
+          LocalStorageService.branchTransfersBox,
+          LocalStorageService.expensesBox,
+          LocalStorageService.financeLoansBox,
+          LocalStorageService.financeHolidaysBox,
+          LocalStorageService.financeSettingsBox,
+        ];
+        
+        for (final boxName in boxesToClear) {
+          if (Hive.isBoxOpen(boxName)) {
+            final box = Hive.box(boxName);
+            await box.clear();
+          } else {
+            final box = await Hive.openBox(boxName);
+            await box.clear();
+            await box.close();
+          }
+        }
+
+        // Also clean the sync queue for any finance/donation tasks to prevent syncing them to firebase
+        if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+          final syncBox = Hive.box(LocalStorageService.syncBox);
+          final keysToRemove = [];
+          for (var i = 0; i < syncBox.length; i++) {
+            final key = syncBox.keyAt(i);
+            final val = syncBox.get(key);
+            if (val is Map) {
+              final type = val['type']?.toString() ?? '';
+              if (type.contains('employee') ||
+                  type.contains('attendance') ||
+                  type.contains('salary') ||
+                  type.contains('expense') ||
+                  type.contains('donation') ||
+                  type.contains('donor')) {
+                keysToRemove.add(key);
+              }
+            }
+          }
+          for (final k in keysToRemove) {
+            await syncBox.delete(k);
+          }
+        }
+
+        _updatePendingSyncCount();
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Finance and Donation data has been cleared from local database.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to clear: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isSyncing = false);
+        }
+      }
+    }
+  }
+
   TextStyle _getStyle(RoleThemeData t, {double size = 14, FontWeight weight = FontWeight.normal, double height = 1.2}) {
     return TextStyle(
       color: t.textPrimary,
@@ -284,6 +418,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildColorPill(RoleThemeData t, String label, String? hexColor, Color previewColor) {
     final activeHex = _settingsBox.get('custom_accent_color') as String?;
     final isSelected = (hexColor == null && (activeHex == null || activeHex.isEmpty)) || (hexColor != null && activeHex == hexColor);
+    final isLightColor = previewColor.computeLuminance() > 0.45;
     
     return Tooltip(
       message: label,
@@ -308,19 +443,152 @@ class _SettingsPageState extends State<SettingsPage> {
               width: isSelected ? 3.0 : 1.0,
             ),
             boxShadow: isSelected
-                ? [BoxShadow(color: previewColor.withOpacity(0.4), blurRadius: 10, spreadRadius: 2)]
+                ? [BoxShadow(color: previewColor.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: 2)]
                 : [],
           ),
           child: isSelected
               ? Icon(
                   Icons.check,
-                  color: (hexColor == null || hexColor == '#B8860B') ? Colors.black : Colors.white,
+                  color: isLightColor ? Colors.black : Colors.white,
                   size: 20,
                 )
               : null,
         ),
       ),
     );
+  }
+
+  Widget _buildCustomHexColorPill(RoleThemeData t) {
+    final activeHex = _settingsBox.get('custom_accent_color') as String?;
+    const presetHexes = {
+      '#4A7FB5', '#B8860B', '#0047AB', '#2C4A8F', '#3A5178',
+      '#00A86B', '#2E7D5B', '#0E6E63', '#0E7C90', '#4B0082',
+      '#008080', '#5E5490', '#C2185B', '#D97706', '#DC2626'
+    };
+    final isCustomSelected = activeHex != null && activeHex.isNotEmpty && !presetHexes.contains(activeHex);
+
+    Color customPreview = t.accent;
+    if (isCustomSelected) {
+      try {
+        final hex = activeHex.replaceAll('#', '');
+        customPreview = Color(int.parse('FF$hex', radix: 16));
+      } catch (_) {}
+    }
+
+    final isLightColor = customPreview.computeLuminance() > 0.45;
+
+    return Tooltip(
+      message: isCustomSelected ? 'Custom ($activeHex)' : 'Custom Hex Color',
+      child: GestureDetector(
+        onTap: () => _showCustomColorDialog(t),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: isCustomSelected ? customPreview : t.bgCardAlt,
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: isCustomSelected ? t.textPrimary : t.bgRule,
+              width: isCustomSelected ? 3.0 : 1.0,
+            ),
+            boxShadow: isCustomSelected
+                ? [BoxShadow(color: customPreview.withValues(alpha: 0.5), blurRadius: 10, spreadRadius: 2)]
+                : [],
+          ),
+          child: isCustomSelected
+              ? Icon(
+                  Icons.check,
+                  color: isLightColor ? Colors.black : Colors.white,
+                  size: 20,
+                )
+              : Icon(
+                  Icons.colorize_rounded,
+                  color: t.textSecondary,
+                  size: 20,
+                ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCustomColorDialog(RoleThemeData t) async {
+    final activeHex = _settingsBox.get('custom_accent_color') as String? ?? '#4A7FB5';
+    final ctrl = TextEditingController(text: activeHex);
+    String tempHex = activeHex;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Color? preview;
+            try {
+              final hex = tempHex.replaceAll('#', '').trim();
+              if (hex.length == 6) {
+                preview = Color(int.parse('FF$hex', radix: 16));
+              }
+            } catch (_) {}
+
+            return AlertDialog(
+              backgroundColor: t.bgCard,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Text('Custom Accent Color', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: preview ?? t.accent,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: t.bgRule, width: 2),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextField(
+                          controller: ctrl,
+                          style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold),
+                          decoration: roleInputDecoration(context, label: 'HEX Code (e.g. #4A7FB5)', icon: Icons.palette_outlined),
+                          onChanged: (val) {
+                            tempHex = val;
+                            setDialogState(() {});
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('Cancel', style: TextStyle(color: t.textTertiary)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: preview ?? t.accent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: preview != null ? () => Navigator.pop(ctx, tempHex.toUpperCase().trim()) : null,
+                  child: const Text('Apply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != null && result.isNotEmpty) {
+      String cleanHex = result.startsWith('#') ? result : '#$result';
+      await _settingsBox.put('custom_accent_color', cleanHex);
+      setState(() {});
+    }
   }
 
   Widget _buildToggleButton(RoleThemeData t, String text, bool isSelected, VoidCallback onTap) {
@@ -667,9 +935,10 @@ class _SettingsPageState extends State<SettingsPage> {
         builder: (context, Box box, child) {
           final t = RoleThemeScope.dataOf(context);
           final isDesktop = MediaQuery.of(context).size.width >= 900;
-          final userName = widget.userData['name'] ?? widget.userData['username'] ?? 'User';
+          final userName = resolveUserDisplayName(widget.userData);
           final email = widget.userData['email'] ?? 'No email set';
-          final role = (widget.userData['role'] as String? ?? 'staff').toUpperCase();
+          final rawRole = widget.userData['role'] as String? ?? 'staff';
+          final role = rawRole.toLowerCase() == 'madrassa parent' ? 'GUARDIAN' : rawRole.toUpperCase();
           final branch = widget.userData['branchName'] ?? 'All Branches';
           final branchId = widget.userData['branchId'] as String? ?? '';
 
@@ -910,13 +1179,23 @@ class _SettingsPageState extends State<SettingsPage> {
                                 scrollDirection: Axis.horizontal,
                                 child: Row(
                                   children: [
-                                    _buildColorPill(t, 'Role Theme', null, t.accentGradient.colors.first),
+                                    _buildColorPill(t, 'Role Default', null, t.accentGradient.colors.first),
+                                    _buildColorPill(t, 'CEO Steel Blue', '#4A7FB5', const Color(0xFF4A7FB5)),
                                     _buildColorPill(t, 'Gold Authority', '#B8860B', const Color(0xFFB8860B)),
                                     _buildColorPill(t, 'Electric Blue', '#0047AB', const Color(0xFF0047AB)),
+                                    _buildColorPill(t, 'Sapphire Indigo', '#2C4A8F', const Color(0xFF2C4A8F)),
+                                    _buildColorPill(t, 'Midnight Slate', '#3A5178', const Color(0xFF3A5178)),
                                     _buildColorPill(t, 'Emerald Mint', '#00A86B', const Color(0xFF00A86B)),
+                                    _buildColorPill(t, 'Forest Sage', '#2E7D5B', const Color(0xFF2E7D5B)),
+                                    _buildColorPill(t, 'Executive Teal', '#0E6E63', const Color(0xFF0E6E63)),
+                                    _buildColorPill(t, 'Clinical Cyan', '#0E7C90', const Color(0xFF0E7C90)),
                                     _buildColorPill(t, 'Royal Indigo', '#4B0082', const Color(0xFF4B0082)),
                                     _buildColorPill(t, 'Clinical Teal', '#008080', const Color(0xFF008080)),
+                                    _buildColorPill(t, 'Slate Plum', '#5E5490', const Color(0xFF5E5490)),
                                     _buildColorPill(t, 'Warm Rose', '#C2185B', const Color(0xFFC2185B)),
+                                    _buildColorPill(t, 'Sunset Amber', '#D97706', const Color(0xFFD97706)),
+                                    _buildColorPill(t, 'Crimson Red', '#DC2626', const Color(0xFFDC2626)),
+                                    _buildCustomHexColorPill(t),
                                   ],
                                 ),
                               ),
@@ -1127,6 +1406,35 @@ class _SettingsPageState extends State<SettingsPage> {
                                   ],
                                 ),
                               ],
+                              _divider(t),
+                              Text(
+                                "Clear Finance & Donations Data",
+                                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 13.5),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                "Wipe all local employees, attendance history, payroll ledger, expenses, and donation records.",
+                                style: TextStyle(color: t.textTertiary, fontSize: 12),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _clearFinanceAndDonationsData,
+                                      icon: const Icon(Icons.money_off_rounded),
+                                      label: const Text('Clear Finance & Donations'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.orange.shade800,
+                                        foregroundColor: Colors.white,
+                                        elevation: 0,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        padding: const EdgeInsets.symmetric(vertical: 14),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
                               _divider(t),
                               Text(
                                 "Factory Data Reset",

@@ -128,7 +128,7 @@ String fmtPKRDouble(double n) {
 // ── Firestore data model ──────────────────────────────────────────────────────
 class BranchStats {
   final int zakat, nonZakat, gmwf, dasterkhwaan, dasterkhwaanServed,
-      donations, dispensed, prescribed, dispensaryRevenue;
+      donations, dispensed, prescribed, dispensaryRevenue, employeeAttendance;
   final int zakatRevenue, nonZakatRevenue, gmwfRevenue;
 
   const BranchStats({
@@ -136,6 +136,7 @@ class BranchStats {
     this.dasterkhwaan = 0, this.dasterkhwaanServed = 0,
     this.donations = 0, this.dispensed = 0, this.prescribed = 0,
     this.dispensaryRevenue = 0,
+    this.employeeAttendance = 0,
     this.zakatRevenue = 0, this.nonZakatRevenue = 0, this.gmwfRevenue = 0,
   });
 
@@ -1465,10 +1466,9 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
         // Table header
         Container(
           padding: const EdgeInsets.fromLTRB(DS.s2, DS.s1 + 4, DS.s2, DS.s1 + 4),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
               color: DS.neutralBg,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(DS.r2)),
-              border: const Border(bottom: BorderSide(color: DS.border))),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(DS.r2))),
           child: Row(children: [
             const Expanded(flex: 3, child: Text('Branch', style: TextStyle(
                 color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
@@ -1496,6 +1496,7 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
             const SizedBox(width: 24), // expand chevron space
           ]),
         ),
+        Container(height: 1, color: DS.border),
 
         // Rows with individual StreamBuilders for real-time independence
         ...sorted.asMap().entries.map((entry) {
@@ -2416,10 +2417,9 @@ class BranchSummaryCard extends StatelessWidget {
             // Header
             Container(
               padding: const EdgeInsets.fromLTRB(DS.s2, DS.s2 - 2, DS.s2 - 2, DS.s2 - 2),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: DS.neutralBg,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(DS.r2)),
-                border: const Border(bottom: BorderSide(color: DS.border, width: 0.5)),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(DS.r2)),
               ),
               child: Row(children: [
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -2446,6 +2446,7 @@ class BranchSummaryCard extends StatelessWidget {
                 ),
               ]),
             ),
+            Container(height: 0.5, color: DS.border),
 
             // Body
             Padding(

@@ -1,15 +1,21 @@
 // lib/pages/login_page.dart
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:hive/hive.dart';
 import 'package:another_flushbar/flushbar.dart';
 
 import '../services/offline_auth_service.dart';
+import '../services/device_info_service.dart';
+import '../services/pre_login_security_service.dart';
+import '../services/auto_update_service.dart';
+import '../widgets/update_dialog_widget.dart';
 import 'home_router.dart';
-import 'donations/donor_portal.dart';
+import 'access_revoked_screen.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -32,6 +38,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _isOnline        = true;
 
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  Timer? _autoOnlineCheckTimer;
 
   @override
   void initState() {
@@ -39,12 +46,19 @@ class _LoginPageState extends State<LoginPage> {
     _checkConnectivityFast();
     _loadCachedCredentials();
 
-    _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
-      final online = results.any((r) => r != ConnectivityResult.none);
-      if (mounted && online != _isOnline) {
-        setState(() => _isOnline = online);
-        debugPrint('[LoginPage] Connectivity changed → online: $online');
-      }
+    // Pre-authentication security logging & Auto-update check
+    PreLoginSecurityService.logAppLaunch();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+    });
+
+    // Periodic auto-check every 3 seconds to automatically recover online mode
+    _autoOnlineCheckTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _checkConnectivityFast();
+    });
+
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((_) {
+      _checkConnectivityFast();
     });
 
     _usernameFocus.addListener(_handleFocusChange);
@@ -53,6 +67,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   void dispose() {
+    _autoOnlineCheckTimer?.cancel();
     _connectivitySub?.cancel();
     _usernameFocus.removeListener(_handleFocusChange);
     _passwordFocus.removeListener(_handleFocusChange);
@@ -81,14 +96,61 @@ class _LoginPageState extends State<LoginPage> {
     });
   }
 
-  Future<void> _checkConnectivityFast() async {
+  Future<bool> _hasRealInternet() async {
+    try {
+      final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 2));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
+        return true;
+      }
+    } catch (_) {
+      try {
+        final lookup2 = await InternetAddress.lookup('firebase.google.com').timeout(const Duration(seconds: 2));
+        if (lookup2.isNotEmpty && lookup2[0].rawAddress.isNotEmpty) {
+          return true;
+        }
+      } catch (_) {}
+    }
+
     try {
       final result = await Connectivity().checkConnectivity();
-      final online = result.any((r) => r != ConnectivityResult.none);
-      if (mounted) setState(() => _isOnline = online);
+      return result.any((r) => r != ConnectivityResult.none);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _checkConnectivityFast() async {
+    final online = await _hasRealInternet();
+    if (mounted && online != _isOnline) {
+      setState(() => _isOnline = online);
+      debugPrint('[LoginPage] Automatic connectivity check → online: $online');
+    }
+  }
+
+  Future<void> _recheckOnlineMode() async {
+    if (mounted) setState(() => _loading = true);
+    try {
+      final online = await _hasRealInternet();
+      if (!mounted) return;
+
+      setState(() => _isOnline = online);
+      if (online) {
+        Flushbar(
+          message: "Connected to internet! Switched to Online Mode.",
+          backgroundColor: Colors.green.shade700,
+          duration: const Duration(seconds: 3),
+        ).show(context);
+      } else {
+        Flushbar(
+          message: "No internet connection detected. Remaining in Offline Mode.",
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 3),
+        ).show(context);
+      }
     } catch (e) {
-      debugPrint('[LoginPage] Connectivity check error: $e — assuming offline');
-      if (mounted) setState(() => _isOnline = false);
+      debugPrint('[LoginPage] _recheckOnlineMode error: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -136,9 +198,16 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) setState(() => _loading = true);
 
     try {
+      // Always verify real internet status first on click before defaulting to offline
+      final liveOnline = await _hasRealInternet();
+      if (liveOnline != _isOnline && mounted) {
+        setState(() => _isOnline = liveOnline);
+        debugPrint('[LoginPage] Auto-recovered online mode on sign in click → online: $liveOnline');
+      }
+
       // ── Pure offline path ──────────────────────────────────────────────────
-      if (!_isOnline) {
-        debugPrint('[LoginPage] OFFLINE MODE');
+      if (!_isOnline && !liveOnline) {
+        debugPrint('[LoginPage] OFFLINE MODE — attempting offline login');
         final ok = await _attemptOfflineLogin(input, password);
         if (!ok && mounted) {
           _showError("Offline login failed. Please connect to the internet and log in once first.");
@@ -150,29 +219,37 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] ONLINE MODE — Firebase login');
 
       // Resolve username → email if needed
-      String email = input.contains('@') ? input.toLowerCase() : '';
+      String email = input.contains('@') ? input.trim().toLowerCase() : '';
       if (email.isEmpty) {
         debugPrint('[LoginPage] Looking up email for username: $input');
         final found = await _findUserByUsername(input);
-        if (found == null) {
-          // No online record — try offline before giving up
-          final ok = await _attemptOfflineLogin(input, password);
-          if (!ok && mounted) {
-            _showError("No account found for username '$input'");
-          }
-          return;
+        if (found != null && found['email'] != null && (found['email'] as String).isNotEmpty) {
+          email = (found['email'] as String).trim().toLowerCase();
+          debugPrint('[LoginPage] Resolved email: $email');
+        } else {
+          // Fallback domain: attempt username@gmwf.org
+          email = '${input.trim().toLowerCase()}@gmwf.org';
+          debugPrint('[LoginPage] Fallback domain email attempt: $email');
         }
-        email = found['email'] as String;
-        debugPrint('[LoginPage] Resolved email: $email');
       }
 
-      // Firebase sign-in — single attempt, NO retry loops
-      final cred = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(
-            email: email.toLowerCase(),
-            password: password,
-          )
-          .timeout(const Duration(seconds: 15));
+      // Firebase sign-in — single attempt
+      UserCredential cred;
+      try {
+        cred = await FirebaseAuth.instance
+            .signInWithEmailAndPassword(
+              email: email.toLowerCase(),
+              password: password,
+            )
+            .timeout(const Duration(seconds: 15));
+      } on FirebaseAuthException catch (e) {
+        if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+          // Attempt offline fallback before failing
+          final ok = await _attemptOfflineLogin(input, password);
+          if (ok) return;
+        }
+        rethrow;
+      }
 
       final user = cred.user;
       if (user == null) {
@@ -186,6 +263,59 @@ class _LoginPageState extends State<LoginPage> {
       if (userData == null) {
         _showError("User account data not found. Contact admin.");
         return;
+      }
+
+      final userStatus = (userData['status'] ?? userData['accountStatus'] ?? 'active').toString().toLowerCase().trim();
+      final isRevoked = userStatus == 'inactive' ||
+          userStatus == 'suspended' ||
+          userStatus == 'terminated' ||
+          userStatus == 'resigned' ||
+          userStatus == 'retired' ||
+          userStatus == 'offboarded' ||
+          userStatus == 'revoked' ||
+          userData['isActive'] == false;
+
+      if (isRevoked) {
+        await FirebaseAuth.instance.signOut();
+        await OfflineAuthService.clearCredentials();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => AccessRevokedScreen(userData: userData, reason: userStatus)),
+            (route) => false,
+          );
+        }
+        return;
+      }
+
+      // Record last login timestamp
+      final nowIso = DateTime.now().toIso8601String();
+      userData['lastLoginAt'] = nowIso;
+      userData['lastOnlineAt'] = nowIso;
+
+      try {
+        final nowTs = FieldValue.serverTimestamp();
+        final uid = user.uid;
+        final bId = userData['branchId']?.toString() ?? 'global';
+        FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'lastLoginAt': nowTs,
+          'lastOnlineAt': nowTs,
+        }, SetOptions(merge: true));
+
+        DeviceInfoService.recordUserSession(userId: uid, email: user.email);
+
+        if (bId != 'global' && bId != 'all' && bId.isNotEmpty) {
+          FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('users')
+              .doc(uid)
+              .set({
+            'lastLoginAt': nowTs,
+            'lastOnlineAt': nowTs,
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('[LoginPage] Could not update lastLoginAt in Firestore: $e');
       }
 
       // ── Cache credentials for offline use ─────────────────────────────────
@@ -317,21 +447,24 @@ class _LoginPageState extends State<LoginPage> {
       // ── Firebase internal / transient error — NOT a credential problem ────
       case 'unknown-error':
       case 'internal-error':
-        debugPrint('[LoginPage] Firebase internal error (${e.code}) — trying offline first');
+        debugPrint('[LoginPage] Firebase internal error (${e.code}) — trying offline/local fallback');
         final okUnknown = await _attemptOfflineLogin(input, password);
-        if (!okUnknown && mounted) {
-          _showError(
-            "A temporary error occurred with the login service. "
-            "Please try again in a moment.",
-          );
+        if (okUnknown) return;
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
+        if (mounted) {
+          _showError("Incorrect username/email or password. Please check your credentials.");
         }
         return;
 
       default:
         debugPrint('[LoginPage] Unhandled Firebase error: ${e.code} — ${e.message}');
         final ok = await _attemptOfflineLogin(input, password);
-        if (!ok && mounted) {
-          _showError("Login failed (${e.code}). Please try again.");
+        if (ok) return;
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
+        if (mounted) {
+          _showError("Login failed (${e.code}). Please check your credentials.");
         }
     }
   }
@@ -350,6 +483,27 @@ class _LoginPageState extends State<LoginPage> {
         return false;
       }
 
+      final userStatus = (userData['status'] ?? userData['accountStatus'] ?? 'active').toString().toLowerCase().trim();
+      final isRevoked = userStatus == 'inactive' ||
+          userStatus == 'suspended' ||
+          userStatus == 'terminated' ||
+          userStatus == 'resigned' ||
+          userStatus == 'retired' ||
+          userStatus == 'offboarded' ||
+          userStatus == 'revoked' ||
+          userData['isActive'] == false;
+
+      if (isRevoked) {
+        await OfflineAuthService.clearCredentials();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => AccessRevokedScreen(userData: userData, reason: userStatus)),
+            (route) => false,
+          );
+        }
+        return true;
+      }
+
       debugPrint('[LoginPage] Offline login successful → role=${userData['role']}');
       if (mounted) {
         Flushbar(
@@ -361,22 +515,52 @@ class _LoginPageState extends State<LoginPage> {
       }
       return true;
     } catch (e) {
-      debugPrint('[LoginPage] Offline login exception: $e');
       return false;
     }
+  }
+
+  Future<bool> _tryLocalUsersFallbackLogin(String input, String password) async {
+    try {
+      final box = Hive.box('local_users');
+      final lowerInput = input.trim().toLowerCase();
+      for (final val in box.values) {
+        if (val is Map) {
+          final u = Map<String, dynamic>.from(val);
+          final email = (u['email']?.toString() ?? '').toLowerCase();
+          final username = (u['username']?.toString() ?? '').toLowerCase();
+          final savedPass = u['password']?.toString() ?? '1122';
+          if ((username == lowerInput || email == lowerInput) && savedPass == password) {
+            if (mounted) {
+              Flushbar(
+                message: "Welcome back, ${u['username']}!",
+                backgroundColor: Colors.green.shade700,
+                duration: const Duration(seconds: 2),
+              ).show(context);
+              _navigateToHomeOffline(u);
+            }
+            return true;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LoginPage] Fallback local_users login exception: $e');
+    }
+    return false;
   }
 
   // ── Firestore user data fetch ─────────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchUserDataFromFirestore(
       User user, String inputUsername) async {
     final uid = user.uid;
+    final userEmail = user.email?.toLowerCase().trim() ?? '';
 
+    // 1. Top-level users collection by UID
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 8));
       if (doc.exists && doc.data() != null) {
         final d = doc.data()!;
         return {
@@ -393,13 +577,14 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] Top-level /users fetch failed: $e');
     }
 
+    // 2. Branch users subcollections by UID
     try {
       final querySnap = await FirebaseFirestore.instance
           .collectionGroup('users')
-          .where(FieldPath.documentId, isEqualTo: uid)
+          .where('uid', isEqualTo: uid)
           .limit(1)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 8));
       if (querySnap.docs.isNotEmpty) {
         final doc = querySnap.docs.first;
         final d = doc.data();
@@ -419,6 +604,54 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] Branch /users fetch failed via collectionGroup: $e');
     }
 
+    // 3. Fallback: Search by email in collectionGroup('users')
+    if (userEmail.isNotEmpty) {
+      try {
+        final queryByEmail = await FirebaseFirestore.instance
+            .collectionGroup('users')
+            .where('email', isEqualTo: userEmail)
+            .limit(1)
+            .get()
+            .timeout(const Duration(seconds: 8));
+        if (queryByEmail.docs.isNotEmpty) {
+          final doc = queryByEmail.docs.first;
+          final d = doc.data();
+          final pathParts = doc.reference.path.split('/');
+          final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
+          return {
+            'uid': d['uid'] ?? uid,
+            'email': user.email,
+            'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
+            'role': d['role'] ?? 'unknown',
+            'branchId': branchId,
+            'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
+            ...d,
+          };
+        }
+      } catch (e) {
+        debugPrint('[LoginPage] Search by email failed: $e');
+      }
+    }
+
+    // 4. Fallback: Search in Hive local_users
+    try {
+      final box = Hive.box('local_users');
+      final inputLower = inputUsername.trim().toLowerCase();
+      for (final val in box.values) {
+        if (val is Map) {
+          final Map<String, dynamic> u = Map<String, dynamic>.from(val);
+          final email = (u['email']?.toString() ?? '').toLowerCase();
+          final username = (u['username']?.toString() ?? '').toLowerCase();
+          final uUid = u['uid']?.toString() ?? '';
+          if ((userEmail.isNotEmpty && email == userEmail) || username == inputLower || uUid == uid) {
+            return u;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LoginPage] Search local_users failed: $e');
+    }
+
     return null;
   }
 
@@ -426,23 +659,84 @@ class _LoginPageState extends State<LoginPage> {
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
     try {
-      final q = await FirebaseFirestore.instance
+      final box = Hive.box('local_users');
+      for (final val in box.values) {
+        if (val is Map) {
+          final uName = (val['username']?.toString() ?? '').toLowerCase();
+          final uNameLower = (val['usernameLower']?.toString() ?? '').toLowerCase();
+          final name = (val['name']?.toString() ?? '').toLowerCase();
+          final email = (val['email']?.toString() ?? '').toLowerCase();
+
+          if (uName == lower || uNameLower == lower || name == lower || email.startsWith('$lower@')) {
+            return {
+              'email': val['email'],
+              'username': val['username'] ?? val['name'],
+              'branchId': val['branchId'] ?? 'all',
+            };
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LoginPage] Local username lookup failed: $e');
+    }
+
+    try {
+      final qLower = await FirebaseFirestore.instance
           .collection('users')
-          .where('username', isEqualTo: lower)
+          .where('usernameLower', isEqualTo: lower)
           .limit(1)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 5));
+      if (qLower.docs.isNotEmpty) {
+        final doc = qLower.docs.first;
+        return {'email': doc['email'], 'username': doc['username']};
+      }
+
+      final q = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: username.trim())
+          .limit(1)
+          .get()
+          .timeout(const Duration(seconds: 5));
       if (q.docs.isNotEmpty) {
         final doc = q.docs.first;
         return {'email': doc['email'], 'username': doc['username']};
       }
 
-      final querySnap = await FirebaseFirestore.instance
-          .collectionGroup('users')
-          .where('username', isEqualTo: lower)
+      final qName = await FirebaseFirestore.instance
+          .collection('users')
+          .where('name', isEqualTo: username.trim())
           .limit(1)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 5));
+      if (qName.docs.isNotEmpty) {
+        final doc = qName.docs.first;
+        return {'email': doc['email'], 'username': doc['name'] ?? doc['username']};
+      }
+
+      final querySnapLower = await FirebaseFirestore.instance
+          .collectionGroup('users')
+          .where('usernameLower', isEqualTo: lower)
+          .limit(1)
+          .get()
+          .timeout(const Duration(seconds: 5));
+      if (querySnapLower.docs.isNotEmpty) {
+        final doc = querySnapLower.docs.first;
+        final pathParts = doc.reference.path.split('/');
+        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        return {
+          'email': doc['email'],
+          'username': doc['username'],
+          'branchId': branchId,
+        };
+      }
+
+      final querySnap = await FirebaseFirestore.instance
+          .collectionGroup('users')
+          .where('username', isEqualTo: username.trim())
+          .limit(1)
+          .get()
+          .timeout(const Duration(seconds: 5));
       if (querySnap.docs.isNotEmpty) {
         final doc = querySnap.docs.first;
         final pathParts = doc.reference.path.split('/');
@@ -454,7 +748,7 @@ class _LoginPageState extends State<LoginPage> {
         };
       }
     } catch (e) {
-      debugPrint('[LoginPage] Username lookup failed via collectionGroup: $e');
+      debugPrint('[LoginPage] Username lookup error: $e');
     }
     return null;
   }
@@ -635,7 +929,7 @@ class _LoginPageState extends State<LoginPage> {
                           onLongPress: () async {
                             final confirm = await showDialog<bool>(
                               context: context,
-                              builder: (_) => AlertDialog(
+                              builder: (dialogCtx) => AlertDialog(
                                 title: const Text("Clear Saved Login?"),
                                 content: const Text(
                                   "This will remove the cached username and allow "
@@ -644,7 +938,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 actions: [
                                   TextButton(
-                                    onPressed: () => Navigator.pop(context, false),
+                                    onPressed: () => Navigator.pop(dialogCtx, false),
                                     child: const Text("Cancel"),
                                   ),
                                   ElevatedButton(
@@ -652,7 +946,7 @@ class _LoginPageState extends State<LoginPage> {
                                       backgroundColor: const Color(0xFF00695C),
                                       foregroundColor: Colors.white,
                                     ),
-                                    onPressed: () => Navigator.pop(context, true),
+                                    onPressed: () => Navigator.pop(dialogCtx, true),
                                     child: const Text("Clear",
                                         style: TextStyle(color: Colors.white)),
                                   ),
@@ -661,15 +955,14 @@ class _LoginPageState extends State<LoginPage> {
                             );
                             if (confirm == true) {
                               await OfflineAuthService.clearCredentials();
-                              if (mounted) {
-                                _usernameOrEmailController.clear();
-                                _passwordController.clear();
-                                Flushbar(
-                                  message: "Saved login cleared. Please sign in.",
-                                  backgroundColor: Colors.orange.shade700,
-                                  duration: const Duration(seconds: 3),
-                                ).show(context);
-                              }
+                              if (!context.mounted) return;
+                              _usernameOrEmailController.clear();
+                              _passwordController.clear();
+                              Flushbar(
+                                message: "Saved login cleared. Please sign in.",
+                                backgroundColor: Colors.orange.shade700,
+                                duration: const Duration(seconds: 3),
+                              ).show(context);
                             }
                           },
                           child: Image.asset(
@@ -695,19 +988,73 @@ class _LoginPageState extends State<LoginPage> {
                         const SizedBox(height: 8),
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 300),
-                          child: Text(
-                            _isOnline ? "Sign in to continue" : "⚠️ OFFLINE MODE",
-                            key: ValueKey(_isOnline),
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: _isOnline
-                                  ? Colors.grey.shade700
-                                  : Colors.orange.shade800,
-                              fontWeight: _isOnline
-                                  ? FontWeight.normal
-                                  : FontWeight.bold,
-                            ),
-                          ),
+                          child: _isOnline
+                              ? Text(
+                                  "Sign in to continue",
+                                  key: const ValueKey(true),
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: Colors.grey.shade700,
+                                  ),
+                                )
+                              : Row(
+                                  key: const ValueKey(false),
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.shade50,
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(color: Colors.orange.shade300),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange.shade900),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            "OFFLINE MODE",
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.orange.shade900,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    InkWell(
+                                      onTap: _recheckOnlineMode,
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF00695C).withValues(alpha: 0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(color: const Color(0xFF00695C)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: const [
+                                            Icon(Icons.wifi_find_rounded, size: 15, color: Color(0xFF00695C)),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              "Go Online",
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: Color(0xFF00695C),
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                         ),
                         const SizedBox(height: 48),
 
@@ -826,6 +1173,32 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                         ),
+                        if (!_isOnline) ...[
+                          const SizedBox(height: 14),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 48,
+                            child: OutlinedButton.icon(
+                              onPressed: _loading ? null : _recheckOnlineMode,
+                              icon: const Icon(Icons.wifi_rounded, color: Color(0xFF00695C)),
+                              label: const Text(
+                                "Return to Online Mode",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                  color: Color(0xFF00695C),
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFF00695C), width: 2),
+                                backgroundColor: const Color(0xFFE0F2F1).withValues(alpha: 0.5),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 32),
 
                         Text(
@@ -834,6 +1207,15 @@ class _LoginPageState extends State<LoginPage> {
                               fontSize: 14,
                               color: Colors.grey.shade600,
                               fontStyle: FontStyle.italic),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          "GMWF Platform v${AutoUpdateService.currentVersion}",
+                          style: TextStyle(
+                              fontSize: 11.5,
+                              color: Colors.grey.shade500,
+                              fontWeight: FontWeight.bold),
                           textAlign: TextAlign.center,
                         ),
                       ],

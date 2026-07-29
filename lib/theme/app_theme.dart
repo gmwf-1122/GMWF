@@ -485,7 +485,9 @@ class RoleThemeData {
     // Derived colors from custom accent
     final hsv = HSVColor.fromColor(customAccent);
     final light = hsv.withValue((hsv.value + 0.2).clamp(0.0, 1.0)).withSaturation((hsv.saturation - 0.1).clamp(0.0, 1.0)).toColor();
-    final muted = hsv.withSaturation(0.1).withValue(0.95).toColor();
+    final muted = base.isDarkCanvas
+        ? hsv.withSaturation((hsv.saturation * 0.4).clamp(0.1, 0.4)).withValue(0.15).toColor()
+        : hsv.withSaturation(0.1).withValue(0.95).toColor();
     final dark = hsv.withValue((hsv.value - 0.2).clamp(0.0, 1.0)).toColor();
 
     return RoleThemeData(
@@ -525,9 +527,13 @@ class RoleThemeData {
       case 'manager':
       case 'hq manager':      return RoleTheme.hqManager;
       case 'branch manager':  return RoleTheme.branchManager;
-      case 'doctor':          return RoleTheme.doctor;
+      case 'doctor':
+      case 'doc+rec':
+      case 'doc+dis':
+      case 'doc+rec+dis':     return RoleTheme.doctor;
       case 'supervisor':      return RoleTheme.supervisor;
-      case 'dispenser':       return RoleTheme.dispenser;
+      case 'dispenser':
+      case 'rec+dis':         return RoleTheme.dispenser;
       case 'receptionist':    return RoleTheme.receptionist;
       case 'madrassa admin':
       case 'madrassa teacher':
@@ -539,7 +545,7 @@ class RoleThemeData {
     }
   }
 
-  RoleThemeData _withLabel(String label) => RoleThemeData(
+  RoleThemeData withLabel(String label) => RoleThemeData(
     roleLabel:             label,
     isDarkCanvas:          isDarkCanvas,
     bg:                    bg,

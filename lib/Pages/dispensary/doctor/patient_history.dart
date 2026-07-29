@@ -815,24 +815,35 @@ class _CompactLatestCard extends StatelessWidget {
             color: _teal,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
           ),
-          child: Row(children: [
-            const Icon(Icons.calendar_month_rounded, color: Colors.white70, size: 13),
-            const SizedBox(width: 5),
-            Expanded(child: Text(dateStr,
-                style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600))),
-            if (e.doctorName.isNotEmpty)
-              Row(children: [
-                const Icon(Icons.person_outline_rounded, color: Colors.white60, size: 13),
-                const SizedBox(width: 4),
-                Text(e.doctorName, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-              ]),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
-              child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-            ),
-          ]),
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.calendar_month_rounded, color: Colors.white70, size: 13),
+                  const SizedBox(width: 5),
+                  Text(dateStr, style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600)),
+                ],
+              ),
+              if (e.doctorName.isNotEmpty)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person_outline_rounded, color: Colors.white60, size: 13),
+                    const SizedBox(width: 4),
+                    Text(e.doctorName, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+                  ],
+                ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
+                child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -998,21 +1009,24 @@ class _HistoryCard extends StatelessWidget {
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  const Icon(Icons.calendar_today, color: Colors.white, size: 14),
-                  const SizedBox(width: 6),
-                  Text(dateStr, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 8),
-                  const Icon(Icons.access_time, color: Colors.white70, size: 14),
-                  const SizedBox(width: 4),
-                  Text(timeStr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                  const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(6)),
-                    child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                  ),
-                ]),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    const Icon(Icons.calendar_today, color: Colors.white, size: 14),
+                    Text(dateStr, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(width: 2),
+                    const Icon(Icons.access_time, color: Colors.white70, size: 14),
+                    Text(timeStr, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(6)),
+                      child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 Text('Serial: ${e.serial}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ])),

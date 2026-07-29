@@ -259,3 +259,81 @@ Widget buildActivityItem(BuildContext context, String user, String text, String 
     ),
   );
 }
+
+class PasswordField extends StatefulWidget {
+  final TextEditingController controller;
+  final String label;
+  final bool isRequired;
+  final String? errorText;
+  final ValueChanged<String>? onChanged;
+  final IconData icon;
+  final bool enabled;
+
+  const PasswordField({
+    super.key,
+    required this.controller,
+    required this.label,
+    this.isRequired = false,
+    this.errorText,
+    this.onChanged,
+    this.icon = Icons.lock_outline,
+    this.enabled = true,
+  });
+
+  @override
+  State<PasswordField> createState() => _PasswordFieldState();
+}
+
+class _PasswordFieldState extends State<PasswordField> {
+  bool _obscureText = true;
+
+  @override
+  Widget build(BuildContext context) {
+    final en = widget.label.split('\n')[0];
+
+    return TextField(
+      controller: widget.controller,
+      obscureText: _obscureText,
+      onChanged: widget.onChanged,
+      enabled: widget.enabled,
+      decoration: InputDecoration(
+        label: widget.isRequired
+            ? RichText(
+                text: TextSpan(
+                  children: [
+                    TextSpan(
+                      text: en,
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
+                    ),
+                    const TextSpan(
+                      text: ' *',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFD32F2F)),
+                    ),
+                  ],
+                ),
+              )
+            : Text(en, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        prefixIcon: Icon(widget.icon),
+        suffixIcon: IconButton(
+          icon: Icon(_obscureText ? Icons.visibility_off : Icons.visibility),
+          onPressed: () {
+            setState(() {
+              _obscureText = !_obscureText;
+            });
+          },
+        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: widget.errorText != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        errorText: widget.errorText,
+      ),
+    );
+  }
+}

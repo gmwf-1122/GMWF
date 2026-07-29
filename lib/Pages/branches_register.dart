@@ -10,6 +10,7 @@ import 'package:image_cropper/image_cropper.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../services/auth_service.dart';
+import '../services/image_upload_service.dart';
 
 class BranchesRegister extends StatefulWidget {
   const BranchesRegister({super.key});
@@ -103,50 +104,15 @@ class _BranchesRegisterState extends State<BranchesRegister>
 
   Future<void> _pickProfileImage() async {
     try {
-      final picked = await ImagePicker()
-          .pickImage(source: ImageSource.gallery, imageQuality: 85);
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      if (!mounted) return;
-      try {
-        final t = RoleThemeScope.dataOf(context);
-        final cropped = await ImageCropper().cropImage(
-          sourcePath: picked.path,
-          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-          compressQuality: 80,
-          uiSettings: [
-            AndroidUiSettings(
-                toolbarTitle: 'Crop Photo',
-                toolbarColor: t.accent,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.square,
-                lockAspectRatio: true),
-            IOSUiSettings(title: 'Crop Photo', aspectRatioLockEnabled: true),
-            WebUiSettings(
-                context: context,
-                presentStyle: WebPresentStyle.dialog,
-                size: const CropperSize(width: 500, height: 500),
-                initialAspectRatio: 1.0),
-          ],
-        );
-        if (cropped != null) {
-          final cb = await cropped.readAsBytes();
-          setState(() {
-            _profileImageXFile = XFile(cropped.path);
-            _profileImageBytes = cb;
-          });
-        } else {
-          setState(() {
-            _profileImageXFile = picked;
-            _profileImageBytes = bytes;
-          });
-        }
-      } catch (_) {
-        setState(() {
-          _profileImageXFile = picked;
-          _profileImageBytes = bytes;
-        });
-      }
+      final source = await ImageUploadService.showSourceDialog(context, title: 'Choose Profile Photo Source');
+      if (source == null) return;
+      final b64 = await ImageUploadService.pickAndProcessImage(source: source, quality: 85);
+      if (b64 == null || b64.isEmpty) return;
+      final bytes = ImageUploadService.decodeBase64ToBytes(b64);
+      if (bytes == null || !mounted) return;
+      setState(() {
+        _profileImageBytes = bytes;
+      });
     } catch (e) {
       _snack('Failed to pick image: $e', error: true);
     }

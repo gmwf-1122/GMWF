@@ -28,7 +28,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   HANDLE hMutex = ::CreateMutex(nullptr, TRUE, L"GmwfSingleInstanceMutex");
   if (::GetLastError() == ERROR_ALREADY_EXISTS) {
     // Another instance is running — find its window and bring it to front.
-    HWND existing = ::FindWindow(nullptr, L"Gulzar Madina Dispensary");
+    HWND existing = ::FindWindow(nullptr, L"GMWF v1.2.6");
     if (existing) {
       if (::IsIconic(existing)) {
         ::ShowWindow(existing, SW_RESTORE);
@@ -53,7 +53,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"gmwf", origin, size)) {
+  if (!window.Create(L"GMWF v1.2.6", origin, size)) {
     if (hMutex) {
       ::CloseHandle(hMutex);
     }

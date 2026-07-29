@@ -1345,6 +1345,241 @@ class MadrassaReportHelper {
     }
   }
 
+  static Future<void> exportDailyPdf({
+    required MadrassaConfig config,
+    required DateTime selectedDate,
+    required List<dynamic> students,
+    required Map<String, dynamic> logData,
+  }) async {
+    if (_amiriFont == null) {
+      final amiriData = await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
+      _amiriFont = pw.Font.ttf(amiriData);
+    }
+
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: pw.Font.helvetica(),
+        bold: pw.Font.helveticaBold(),
+      ),
+    );
+
+    final dateStr = DateFormat('dd-MM-yyyy').format(selectedDate);
+    final dateLabelStr = DateFormat('dd MMMM yyyy').format(selectedDate);
+    final logoData = await rootBundle.load('assets/logo/gmwf-1.jpg');
+    final logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
+
+    // Calculate attendance stats
+    int presentCount = 0;
+    int leaveCount = 0;
+    int absentCount = 0;
+
+    for (final s in students) {
+      final sId = s is DocumentSnapshot ? s.id : (s as Map)['id']?.toString() ?? '';
+      final log = _asStringMap(logData[sId]) ?? {};
+      final att = log['attendance']?.toString() ?? 'absent';
+      if (att == 'present') {
+        presentCount++;
+      } else if (att == 'leave') {
+        leaveCount++;
+      } else {
+        absentCount++;
+      }
+    }
+
+    String formatRatioCompact(String ratio) {
+      if (ratio == '1/4') return '1/4';
+      if (ratio == '1/2') return '1/2';
+      if (ratio == '3/4') return '3/4';
+      if (ratio == '1') return '1';
+      if (ratio == 'nahi_sunaya') return 'NS';
+      return ratio;
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        header: (pw.Context context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: const pw.BoxDecoration(
+                color: PdfColor.fromInt(0xFF00695C),
+                borderRadius: pw.BorderRadius.all(pw.Radius.circular(8)),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'Gulzar Madina Madrassa',
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.white,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.Text(
+                        'Daily Progress Report - $dateLabelStr',
+                        style: const pw.TextStyle(
+                          fontSize: 11,
+                          color: PdfColors.teal50,
+                        ),
+                      ),
+                    ],
+                  ),
+                  pw.ClipOval(
+                    child: pw.Container(
+                      color: PdfColors.white,
+                      width: 36,
+                      height: 36,
+                      child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 16),
+          ],
+        ),
+        build: (pw.Context context) {
+          return [
+            // Stats summary row
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: pw.BoxDecoration(
+                color: const PdfColor.fromInt(0xFFF1F5F9),
+                borderRadius: pw.BorderRadius.circular(6),
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFCBD5E1), width: 0.5),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                children: [
+                  _totalChip('Total Students', '${students.length}'),
+                  _totalChip('Present', '$presentCount'),
+                  _totalChip('Leave', '$leaveCount'),
+                  _totalChip('Absent', '$absentCount'),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 16),
+            
+            // Student list table
+            pw.TableHelper.fromTextArray(
+              headers: const [
+                '#', 'Student', 'Roll', 'Attendance', 'Reply', 'Uniform', 'Sabak', 'Sabki', 'Manzil'
+              ],
+              data: List.generate(students.length, (i) {
+                final s = students[i];
+                final sData = s is DocumentSnapshot ? (_asStringMap(s.data()) ?? <String, dynamic>{}) : Map<String, dynamic>.from(s as Map);
+                final sId = s is DocumentSnapshot ? s.id : (s as Map)['id']?.toString() ?? '';
+                final log = _asStringMap(logData[sId]) ?? {};
+                
+                final att = log['attendance']?.toString() ?? 'absent';
+                final uni = log['uniform'] == true;
+                final parentReplied = log['parentReplied'] == true;
+
+                String attText = 'Absent';
+                if (att == 'present') {
+                  attText = 'Present';
+                } else if (att == 'leave') {
+                  attText = 'Leave';
+                }
+
+                String replyText = parentReplied ? 'Yes' : 'No';
+
+                String uniformText = '-';
+                String sabakText = '-';
+                String sabkiText = '-';
+                String manzilText = '-';
+
+                if (att == 'present') {
+                  uniformText = uni ? 'Clean' : 'Not Clean';
+                  
+                  final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
+                  sabakText = lines > 0 ? '$lines lines' : '-';
+
+                  final int sabkiPara = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
+                  final String sabkiRatio = log['sabkiRatio']?.toString() ?? '';
+                  sabkiText = sabkiPara > 0
+                      ? 'Para $sabkiPara (${formatRatioCompact(sabkiRatio)})'
+                      : (sabkiRatio == 'nahi_sunaya' ? 'NS' : '-');
+
+                  final int manzilPara = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);
+                  final String manzilRatio = log['manzilRatio']?.toString() ?? '';
+                  manzilText = manzilPara > 0
+                      ? 'Para $manzilPara (${formatRatioCompact(manzilRatio)})'
+                      : (manzilRatio == 'nahi_sunaya' ? 'NS' : '-');
+                }
+
+                return [
+                  '${i + 1}',
+                  _processUrduCell(sData['name'] ?? '', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold), alignment: pw.Alignment.centerLeft),
+                  '${sData['rollNumber'] ?? ''}',
+                  attText,
+                  replyText,
+                  uniformText,
+                  sabakText,
+                  sabkiText,
+                  manzilText,
+                ];
+              }),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
+              cellStyle: const pw.TextStyle(fontSize: 8.5),
+              headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF00695C)),
+              headerPadding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              cellAlignment: pw.Alignment.center,
+              cellAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.center,
+                3: pw.Alignment.center,
+                4: pw.Alignment.center,
+                5: pw.Alignment.center,
+                6: pw.Alignment.center,
+                7: pw.Alignment.center,
+                8: pw.Alignment.center,
+              },
+              cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+              columnWidths: {
+                0: const pw.FixedColumnWidth(22),
+                1: const pw.FlexColumnWidth(3),
+                2: const pw.FixedColumnWidth(30),
+                3: const pw.FixedColumnWidth(55),
+                4: const pw.FixedColumnWidth(40),
+                5: const pw.FixedColumnWidth(50),
+                6: const pw.FixedColumnWidth(50),
+                7: const pw.FixedColumnWidth(60),
+                8: const pw.FixedColumnWidth(60),
+              },
+              border: pw.TableBorder(
+                horizontalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFE2E8F0), width: 0.5),
+                verticalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFE2E8F0), width: 0.5),
+                top: const pw.BorderSide(color: PdfColor.fromInt(0xFF00695C), width: 0.75),
+                bottom: const pw.BorderSide(color: PdfColor.fromInt(0xFF00695C), width: 0.75),
+                left: const pw.BorderSide(color: PdfColor.fromInt(0xFF00695C), width: 0.75),
+                right: const pw.BorderSide(color: PdfColor.fromInt(0xFF00695C), width: 0.75),
+              ),
+              rowDecoration: const pw.BoxDecoration(color: PdfColors.white),
+              oddRowDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFF8FAFC)),
+            ),
+          ];
+        },
+        footer: (pw.Context context) => pw.Align(
+          alignment: pw.Alignment.centerRight,
+          child: pw.Text('Page ${context.pageNumber} of ${context.pagesCount}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+        ),
+      ),
+    );
+
+    final bytes = await pdf.save();
+    await _saveAndNotify('Madrassa_Daily_Report_${dateStr}.pdf', bytes);
+  }
+
   static Future<void> _saveAndNotify(String fileName, Uint8List bytes) async {
     try {
       String? finalFilePath;

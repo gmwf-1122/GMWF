@@ -34,6 +34,7 @@ class DasterkhwaanKitchen extends StatefulWidget {
   static const String routeName = '/dasterkhwaan-kitchen';
   final String? branchId;
   final String? username;
+  final String? role;
   /// Which bottom-nav tab to start on: 0=Tokens 1=Cooking 2=Inventory 3=History
   final int initialTab;
 
@@ -41,6 +42,7 @@ class DasterkhwaanKitchen extends StatefulWidget {
     super.key,
     this.branchId,
     this.username,
+    this.role,
     this.initialTab = 0,
   });
 
@@ -53,6 +55,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   late int _currentNav;
   String _username = 'Kitchen Staff';
   String? _branchId;
+  String? _role;
 
   final DateFormat _dateFmt    = DateFormat('yyyy-MM-dd');
   final DateFormat _displayFmt = DateFormat('dd MMM yyyy');
@@ -133,10 +136,11 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   @override
   void initState() {
     super.initState();
-    _currentNav = widget.initialTab;
+    _currentNav = widget.initialTab == 3 ? 2 : widget.initialTab;
     _animCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400))
       ..forward();
+    _role = widget.role;
 
     if (widget.branchId != null) {
       _branchId = widget.branchId;
@@ -170,6 +174,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               user.email?.split('@').first ??
               'Kitchen Staff';
           _branchId = branch.id;
+          _role ??= data['role'];
         });
         await _loadAllStockItems();
         await _applyPreviousDaySaved();
@@ -314,69 +319,28 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   // ── Token serving ────────────────────────────────────────────────────────
 
   Future<void> _serveToken(String tokenId, int tokenNumber) async {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-                color: kSuccess.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12)),
-            child: const Icon(Icons.restaurant_rounded,
-                color: kSuccess, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Text('Serve Token #$tokenNumber',
-              style: const TextStyle(
-                  fontWeight: FontWeight.w800, fontSize: 18)),
-        ]),
-        content: const Text('Mark this token as served?',
-            style: TextStyle(fontSize: 14)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kSuccess,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () async {
-              Navigator.pop(context);
-              HapticFeedback.mediumImpact();
-              final batch = FirebaseFirestore.instance.batch();
-              batch.update(_tokensCol(today).doc(tokenId), {
-                'served':     true,
-                'servedTime': FieldValue.serverTimestamp(),
-              });
-              batch.set(
-                _dayDoc(today),
-                {'servedTokens': FieldValue.increment(1)},
-                SetOptions(merge: true),
-              );
-              await batch.commit();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text('Token #$tokenNumber served ✓'),
-                  backgroundColor: kSuccess,
-                  behavior: SnackBarBehavior.floating,
-                  margin: const EdgeInsets.all(16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ));
-              }
-            },
-            child: const Text('Confirm Serve',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
+    HapticFeedback.mediumImpact();
+    final batch = FirebaseFirestore.instance.batch();
+    batch.update(_tokensCol(today).doc(tokenId), {
+      'served':     true,
+      'servedTime': FieldValue.serverTimestamp(),
+    });
+    batch.set(
+      _dayDoc(today),
+      {'servedTokens': FieldValue.increment(1)},
+      SetOptions(merge: true),
     );
+    await batch.commit();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Token #$tokenNumber served ✓'),
+        backgroundColor: kSuccess,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12)),
+      ));
+    }
   }
 
   Future<void> _deleteCookSession(
@@ -478,128 +442,46 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       );
     }
 
+    final isKitchenUser = _role?.toLowerCase() == 'kitchen' || _role?.toLowerCase() == 'dasterkhwaan kitchen';
+
     return Scaffold(
       backgroundColor: kSurface,
-      floatingActionButton: _currentNav == 1
-          ? FloatingActionButton.extended(
-              onPressed: () => showFoodTypeChooser(
-                context,
-                allStockItems: _allStockItems,
-                stockLoaded:   _stockLoaded,
-                branchId:      _branchId!,
-                today:         today,
-                onDone:        _loadAllStockItems,
-              ),
-              backgroundColor: kWarning,
-              foregroundColor: Colors.white,
-              elevation: 4,
-              icon: const Icon(Icons.add_rounded, size: 22),
-              label: const Text('Log Food',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+      body: isKitchenUser
+          ? _TokensTab(
+              branchId:   _branchId!,
+              today:      today,
+              tokensCol:  _tokensCol(today),
+              serveToken: _serveToken,
+              username:   _username,
+              onLogout:   _logout,
             )
-          : null,
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      body: IndexedStack(
-        index: _currentNav,
-        children: [
-          _TokensTab(
-            branchId:   _branchId!,
-            today:      today,
-            tokensCol:  _tokensCol(today),
-            serveToken: _serveToken,
-            username:   _username,
-            onLogout:   _logout,
-          ),
-          _CookingTab(
-            branchId:   _branchId!,
-            today:      today,
-            cookingCol: _cookingCol(today),
-            onAdd: () => showFoodTypeChooser(
-              context,
-              allStockItems: _allStockItems,
-              stockLoaded:   _stockLoaded,
-              branchId:      _branchId!,
-              today:         today,
-              onDone:        _loadAllStockItems,
+          : IndexedStack(
+              index: _currentNav,
+              children: [
+                _TokensTab(
+                  branchId:   _branchId!,
+                  today:      today,
+                  tokensCol:  _tokensCol(today),
+                  serveToken: _serveToken,
+                  username:   _username,
+                  onLogout:   _logout,
+                ),
+                _HistoryTab(
+                  branchId:   _branchId!,
+                  dateFmt:    _dateFmt,
+                  displayFmt: _displayFmt,
+                  username:   _username,
+                  onLogout:   _logout,
+                ),
+              ],
             ),
-            onEdit: (data, id) {
-              final isSaved = data['isSavedFood'] as bool? ?? false;
-              if (isSaved) {
-                showSavedFoodDialog(
-                  context,
-                  existing:      data,
-                  docId:         id,
-                  allStockItems: _allStockItems,
-                  stockLoaded:   _stockLoaded,
-                  branchId:      _branchId!,
-                  today:         today,
-                  onDone:        _loadAllStockItems,
-                );
-              } else {
-                showCookDialog(
-                  context,
-                  existing:      data,
-                  docId:         id,
-                  allStockItems: _allStockItems,
-                  stockLoaded:   _stockLoaded,
-                  branchId:      _branchId!,
-                  today:         today,
-                  onDone:        _loadAllStockItems,
-                );
-              }
-            },
-            onDelete: _deleteCookSession,
-            username: _username,
-            onLogout: _logout,
-          ),
-          _InventoryTab(
-            branchId:      _branchId!,
-            allStockItems: _allStockItems,
-            stockLoaded:   _stockLoaded,
-            onRefresh:     _loadAllStockItems,
-            onAddNew: () => showAddStockDialog(
-              context,
-              branchId:      _branchId!,
-              allStockItems: _allStockItems,
-              onDone:        _loadAllStockItems,
-            ),
-            onEdit: (item) => showAddStockDialog(
-              context,
-              editItem:      item,
-              branchId:      _branchId!,
-              allStockItems: _allStockItems,
-              onDone:        _loadAllStockItems,
-            ),
-            onAdjust: (item, {required bool isAdd}) =>
-                showAdjustStockDialog(
-              context,
-              item,
-              isAdd:    isAdd,
-              branchId: _branchId!,
-              onAdjust: _adjustStock,
-            ),
-            username: _username,
-            onLogout: _logout,
-          ),
-          _HistoryTab(
-            branchId:   _branchId!,
-            dateFmt:    _dateFmt,
-            displayFmt: _displayFmt,
-            username:   _username,
-            onLogout:   _logout,
-          ),
-        ],
-      ),
-      bottomNavigationBar: _buildBottomNav(),
+      bottomNavigationBar: isKitchenUser ? null : _buildBottomNav(),
     );
   }
 
   Widget _buildBottomNav() {
     const items = [
       _NavItem(Icons.confirmation_number_rounded, 'Tokens',    kSuccess),
-      _NavItem(Icons.soup_kitchen_rounded,         'Cooking',   kWarning),
-      _NavItem(Icons.inventory_2_rounded,          'Inventory', kInfo),
       _NavItem(Icons.history_rounded,              'History',   kPurple),
     ];
     return Container(
@@ -1549,395 +1431,8 @@ class _CookingCard extends StatelessWidget {
       );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// INVENTORY TAB
-// ═══════════════════════════════════════════════════════════════════════════
 
-class _InventoryTab extends StatefulWidget {
-  final String branchId, username;
-  final List<StockItem> allStockItems;
-  final bool stockLoaded;
-  final VoidCallback onRefresh, onAddNew, onLogout;
-  final Function(StockItem) onEdit;
-  final Function(StockItem, {required bool isAdd}) onAdjust;
 
-  const _InventoryTab({
-    required this.branchId,
-    required this.allStockItems,
-    required this.stockLoaded,
-    required this.onRefresh,
-    required this.onAddNew,
-    required this.onEdit,
-    required this.onAdjust,
-    required this.username,
-    required this.onLogout,
-  });
-
-  @override
-  State<_InventoryTab> createState() => _InventoryTabState();
-}
-
-class _InventoryTabState extends State<_InventoryTab> {
-  final _searchCtrl   = TextEditingController();
-  bool _showLowOnly   = false;
-  bool _showSavedOnly = false;
-
-  @override
-  Widget build(BuildContext context) {
-    var items = _searchCtrl.text.isEmpty
-        ? widget.allStockItems
-        : widget.allStockItems
-            .where((i) => i.name
-                .toLowerCase()
-                .contains(_searchCtrl.text.toLowerCase()))
-            .toList();
-    if (_showLowOnly)   items = items.where((i) => i.quantity <= 2).toList();
-    if (_showSavedOnly) items = items.where((i) => i.name.startsWith('Saved:')).toList();
-
-    final lowStock      = widget.allStockItems.where((i) => i.quantity <= 2).length;
-    final criticalStock = widget.allStockItems.where((i) => i.quantity == 0).length;
-    final savedItems    = widget.allStockItems.where((i) => i.name.startsWith('Saved:')).length;
-
-    return Column(children: [
-      if (!GlobalModuleWrapper.isWrapped(context))
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-                colors: [Color(0xFF1D4ED8), kInfo],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                  Column(crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    const Text('Inventory',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5)),
-                    Text(
-                        '${widget.allStockItems.length} items · $savedItems saved carry-overs',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            fontSize: 12)),
-                  ]),
-                  Row(children: [
-                    GestureDetector(
-                      onTap: widget.onAddNew,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.3)),
-                        ),
-                        child: const Row(children: [
-                          Icon(Icons.add_rounded,
-                              color: Colors.white, size: 16),
-                          SizedBox(width: 4),
-                          Text('Add',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13)),
-                        ]),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _logoutBtn(widget.onLogout),
-                  ]),
-                ]),
-                const SizedBox(height: 14),
-                Row(children: [
-                  Expanded(
-                      child: _invStat('$lowStock', 'Low Stock',
-                          Icons.warning_rounded,
-                          const Color(0xFFFFD54F))),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: _invStat('$criticalStock', 'Out of Stock',
-                          Icons.error_rounded,
-                          const Color(0xFFFCA5A5))),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: _invStat('$savedItems', 'Saved Items',
-                          Icons.save_rounded,
-                          const Color(0xFF93C5FD))),
-                ]),
-              ]),
-            ),
-          ),
-        ),
-
-      Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-        child: Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _searchCtrl,
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                hintText: 'Search inventory…',
-                prefixIcon: const Icon(Icons.search,
-                    color: kTextLight, size: 20),
-                suffixIcon: _searchCtrl.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear, size: 18),
-                        onPressed: () {
-                          _searchCtrl.clear();
-                          setState(() {});
-                        })
-                    : null,
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide.none),
-                contentPadding: const EdgeInsets.symmetric(
-                    vertical: 13, horizontal: 16),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => setState(() {
-              _showLowOnly = !_showLowOnly;
-              if (_showLowOnly) _showSavedOnly = false;
-            }),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _showLowOnly ? kWarning : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2))
-                ],
-              ),
-              child: Icon(Icons.warning_rounded,
-                  color: _showLowOnly ? Colors.white : kTextLight,
-                  size: 20),
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => setState(() {
-              _showSavedOnly = !_showSavedOnly;
-              if (_showSavedOnly) _showLowOnly = false;
-            }),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _showSavedOnly ? kTeal : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2))
-                ],
-              ),
-              child: Icon(Icons.recycling_rounded,
-                  color: _showSavedOnly ? Colors.white : kTextLight,
-                  size: 20),
-            ),
-          ),
-        ]),
-      ),
-
-      Expanded(
-        child: !widget.stockLoaded
-            ? const Center(
-                child: CircularProgressIndicator(
-                    color: kInfo, strokeWidth: 2))
-            : items.isEmpty
-                ? Center(
-                    child: Text(
-                    _showLowOnly
-                        ? 'No low-stock items!'
-                        : _showSavedOnly
-                            ? 'No saved food carry-overs yet'
-                            : 'No items found',
-                    style: const TextStyle(
-                        fontSize: 15, color: kTextLight),
-                  ))
-                : RefreshIndicator(
-                    onRefresh: () async => widget.onRefresh(),
-                    color: kInfo,
-                    child: ListView.builder(
-                      padding:
-                          const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                      itemCount: items.length,
-                      itemBuilder: (_, i) {
-                        final item = items[i];
-                        return _InventoryCard(
-                          item:       item,
-                          isLow:      item.quantity <= 2 && item.quantity > 0,
-                          isCritical: item.quantity == 0,
-                          isSaved:    item.name.startsWith('Saved:'),
-                          onAdd:    () => widget.onAdjust(item, isAdd: true),
-                          onRemove: () => widget.onAdjust(item, isAdd: false),
-                          onEdit:   () => widget.onEdit(item),
-                        );
-                      },
-                    ),
-                  ),
-      ),
-    ]);
-  }
-
-  Widget _invStat(
-          String value, String label, IconData icon, Color color) =>
-      Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        ),
-        child: Column(children: [
-          Icon(icon, color: color, size: 16),
-          const SizedBox(height: 4),
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900)),
-          Text(label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  fontSize: 9,
-                  fontWeight: FontWeight.w600)),
-        ]),
-      );
-}
-
-class _InventoryCard extends StatelessWidget {
-  final StockItem item;
-  final bool isLow, isCritical, isSaved;
-  final VoidCallback onAdd, onRemove, onEdit;
-  const _InventoryCard({
-    required this.item,
-    required this.isLow,
-    required this.isCritical,
-    required this.isSaved,
-    required this.onAdd,
-    required this.onRemove,
-    required this.onEdit,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    Color statusColor   = kSuccess;
-    IconData statusIcon = Icons.check_circle_rounded;
-    if (isSaved) {
-      statusColor = kTeal;
-      statusIcon  = Icons.recycling_rounded;
-    } else if (isCritical) {
-      statusColor = kAccent;
-      statusIcon  = Icons.error_rounded;
-    } else if (isLow) {
-      statusColor = kWarning;
-      statusIcon  = Icons.warning_rounded;
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-            color: (isCritical || isLow || isSaved)
-                ? statusColor.withValues(alpha: 0.3)
-                : Colors.transparent),
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 2))
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-        child: Row(children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
-                color: statusColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(13)),
-            child: Icon(statusIcon, color: statusColor, size: 20),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-            Text(item.name,
-                style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: kTextDark)),
-            const SizedBox(height: 2),
-            Text(
-                'Updated ${DateFormat('dd MMM, hh:mm a').format(item.lastUpdated.toDate())}',
-                style: const TextStyle(
-                    fontSize: 10, color: kTextLight)),
-          ])),
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 5),
-            decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: statusColor.withValues(alpha: 0.3)),
-            ),
-            child: Text('${item.quantity} ${item.unit}',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: statusColor)),
-          ),
-          const SizedBox(width: 6),
-          Column(children: [
-            _miniBtn(Icons.add_rounded,    const Color(0xFF1D4ED8), onAdd),
-            const SizedBox(height: 3),
-            _miniBtn(Icons.remove_rounded, kAccent,                 onRemove),
-            const SizedBox(height: 3),
-            _miniBtn(Icons.edit_rounded,   kPurple,                 onEdit),
-          ]),
-        ]),
-      ),
-    );
-  }
-
-  Widget _miniBtn(IconData icon, Color color, VoidCallback onTap) =>
-      GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, color: color, size: 16),
-        ),
-      );
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
@@ -2019,8 +1514,10 @@ class _HistoryTabState extends State<_HistoryTab> {
     final displayDate = widget.displayFmt.format(_selectedDate);
     final isToday     = dateKey == widget.dateFmt.format(DateTime.now());
 
+    final isWrapped = GlobalModuleWrapper.isWrapped(context);
+
     return Column(children: [
-      if (!GlobalModuleWrapper.isWrapped(context))
+      if (!isWrapped)
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -2131,6 +1628,70 @@ class _HistoryTabState extends State<_HistoryTab> {
             ),
           ),
         ),
+      // Date navigation bar — always visible (even when embedded in dashboard)
+      if (isWrapped)
+        Container(
+          margin: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: kPurple.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: kPurple.withValues(alpha: 0.2)),
+          ),
+          child: Row(children: [
+            _dateNavBtn(
+              Icons.chevron_left_rounded,
+              () => setState(() => _selectedDate =
+                  _selectedDate.subtract(const Duration(days: 1))),
+            ),
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedDate,
+                    firstDate: DateTime(2024),
+                    lastDate: DateTime.now(),
+                    builder: (ctx, child) => Theme(
+                      data: ThemeData.light().copyWith(
+                          colorScheme: const ColorScheme.light(
+                              primary: kPurple)),
+                      child: child!,
+                    ),
+                  );
+                  if (picked != null) {
+                    setState(() => _selectedDate = picked);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                    const Icon(Icons.calendar_today_rounded,
+                        color: kPurple, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                        isToday
+                            ? 'Today — $displayDate'
+                            : displayDate,
+                        style: const TextStyle(
+                            color: kPurple,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14)),
+                  ]),
+                ),
+              ),
+            ),
+            _dateNavBtn(
+              Icons.chevron_right_rounded,
+              isToday
+                  ? null
+                  : () => setState(() => _selectedDate =
+                      _selectedDate.add(const Duration(days: 1))),
+            ),
+          ]),
+        ),
       Expanded(
         child: FutureBuilder<Map<String, dynamic>>(
           key: ValueKey(dateKey),
@@ -2229,8 +1790,9 @@ class _HistoryTabState extends State<_HistoryTab> {
     ]);
   }
 
-  Widget _dateNavBtn(IconData icon, VoidCallback? onTap) =>
-      GestureDetector(
+  Widget _dateNavBtn(IconData icon, VoidCallback? onTap) {
+    final isWrapped = GlobalModuleWrapper.isWrapped(context);
+    return GestureDetector(
         onTap: onTap,
         child: Container(
           width: 40,
@@ -2238,17 +1800,18 @@ class _HistoryTabState extends State<_HistoryTab> {
           margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: onTap == null
-                ? Colors.white.withValues(alpha: 0.05)
-                : Colors.white.withValues(alpha: 0.15),
+                ? (isWrapped ? kPurple.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.05))
+                : (isWrapped ? kPurple.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.15)),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon,
               color: onTap == null
-                  ? Colors.white.withValues(alpha: 0.3)
-                  : Colors.white,
+                  ? (isWrapped ? kPurple.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.3))
+                  : (isWrapped ? kPurple : Colors.white),
               size: 20),
         ),
       );
+  }
 
   Widget _sectionCard({
     required IconData icon,

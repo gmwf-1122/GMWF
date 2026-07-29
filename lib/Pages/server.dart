@@ -1294,9 +1294,17 @@ class ServerSyncManager {
       final opQueueType = _resolveQueueType(
           message['queueType'] ?? (message['data'] is Map ? message['data']['queueType'] : null));
 
+      final clientBranchId = (message['branchId'] ??
+              (message['data'] is Map ? message['data']['branchId'] : null))
+          ?.toString()
+          .trim();
+      final bId = (clientBranchId != null && clientBranchId.isNotEmpty)
+          ? clientBranchId
+          : branchId;
+
       box.put(key, {
         'type':      _mapEventTypeToSyncType(eventType),
-        'branchId':  branchId,
+        'branchId':  bId,
         'queueType': opQueueType,   // top level
         'dateKey':   message['dateKey'] ?? (message['data'] is Map ? message['data']['dateKey'] : null),
         'serial':    message['serial'] ?? (message['data'] is Map ? message['data']['serial'] : null),

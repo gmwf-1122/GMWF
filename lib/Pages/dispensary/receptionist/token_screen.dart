@@ -677,11 +677,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     if (dob != null) 'dob': Timestamp.fromDate(dob),
                   };
                   try {
+                    final reqId = 'req_patient_edit_${widget.receptionistId}_${DateTime.now().millisecondsSinceEpoch}';
                     await FirebaseFirestore.instance
                         .collection('branches')
                         .doc(widget.branchId)
                         .collection('edit_requests')
-                        .add({
+                        .doc(reqId)
+                        .set({
                       'requestType':     'patient_edit',
                       'status':          'pending',
                       'patientId':       _patientData!['patientId'],
@@ -1020,20 +1022,20 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         'branchId':        widget.branchId,
       };
 
-      String docId = 'local_${DateTime.now().millisecondsSinceEpoch}';
+      final docId = 'req_exception_${widget.receptionistId}_${DateTime.now().millisecondsSinceEpoch}';
 
       try {
-        final docRef = await FirebaseFirestore.instance
+        await FirebaseFirestore.instance
             .collection('branches')
             .doc(widget.branchId)
             .collection('edit_requests')
-            .add({
+            .doc(docId)
+            .set({
           ...requestData,
           'requestedAt': FieldValue.serverTimestamp(),
         });
-        docId = docRef.id;
       } catch (e) {
-        debugPrint('[TokenScreen] Firestore offline — using local ID: $docId');
+        debugPrint('[TokenScreen] Firestore offline — using generated ID: $docId');
       }
 
       await LocalStorageService.enqueueSync({

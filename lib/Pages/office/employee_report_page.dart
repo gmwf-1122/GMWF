@@ -1,4 +1,4 @@
-﻿// lib/pages/office/employee_report_page.dart
+// lib/pages/office/employee_report_page.dart
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +7,7 @@ import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_loans_storage.dart';
 import 'finance_report_helper.dart';
+import 'shared_widgets.dart';
 
 class EmployeeReportPage extends StatefulWidget {
   final String employeeId;
@@ -46,8 +47,13 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
         iconTheme: IconThemeData(color: t.textPrimary),
         actions: [
           IconButton(
+            icon: Icon(Icons.receipt_long_outlined, color: t.accent),
+            tooltip: 'Export Payment History PDF',
+            onPressed: () => FinanceReportHelper.exportPaymentReportPdf(widget.employeeId),
+          ),
+          IconButton(
             icon: Icon(Icons.picture_as_pdf_outlined, color: t.accent),
-            tooltip: 'Export PDF',
+            tooltip: 'Export Profile PDF',
             onPressed: () => FinanceReportHelper.exportIndividualPdf(widget.employeeId),
           ),
         ],
@@ -73,13 +79,12 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
       decoration: BoxDecoration(color: t.bgCard, borderRadius: BorderRadius.circular(16), border: Border.all(color: t.bgRule)),
       child: Row(
         children: [
-          CircleAvatar(
+          buildInitialsAvatar(
+            name: emp['name']?.toString() ?? '',
+            theme: t,
             radius: 28,
-            backgroundColor: t.accentMuted,
-            child: Text(
-              (emp['name']?.toString() ?? '?').isNotEmpty ? emp['name'].toString()[0].toUpperCase() : '?',
-              style: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: 22),
-            ),
+            imageUrl: emp['profilePictureUrl']?.toString(),
+            imagePath: emp['profilePicturePath']?.toString(),
           ),
           const SizedBox(width: 14),
           Expanded(

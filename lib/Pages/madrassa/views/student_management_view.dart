@@ -2,9 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
+import 'package:excel/excel.dart' hide Border, BorderStyle, TextSpan;
 
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import '../../../services/local_storage_service.dart';
+import '../../../services/image_upload_service.dart';
+import '../utils/madrassa_local_storage.dart';
 import '../widgets/student_progress_dialog.dart';
 import '../utils/photo_upload_helper.dart';
 
@@ -12,6 +18,7 @@ import '../widgets/madrassa_status_menu.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../dialogs/enrollment_dialog.dart';
 import '../madrassa_strings.dart';
+import 'student_detail_page.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/madrassa_providers.dart';
@@ -34,16 +41,25 @@ class StudentManagementView extends ConsumerStatefulWidget {
 }
 
 class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+  bool get _canAddStudent {
+    if (widget.isAdmin) return true;
+    final r = widget.role.toLowerCase();
+    return r.contains('admin') || r.contains('teacher') || r.contains('nazim') || r.contains('staff') || r.contains('madrassa');
+  }
+
   String _searchQuery = '';
   String _statusFilter = 'all';
   String _sortBy = 'rollNumber';
   final Map<String, PhotoUploadStatus> _uploadStates = {};
+  final Set<String> _expandedStudentIds = {};
+  bool _showFilters = false;
+
 
   Future<void> _importStudentsFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['json', 'csv'],
+        allowedExtensions: ['json', 'csv', 'xlsx', 'xls'],
         withData: true,
       );
 
@@ -53,12 +69,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       final bytes = file.bytes;
       if (bytes == null) return;
 
-      final fileContent = utf8.decode(bytes);
       final extension = file.extension?.toLowerCase();
 
       List<Map<String, dynamic>> studentsToImport = [];
 
       if (extension == 'json') {
+        final fileContent = utf8.decode(bytes);
         final decoded = jsonDecode(fileContent);
         if (decoded is List) {
           for (var item in decoded) {
@@ -70,7 +86,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           studentsToImport.add(decoded);
         }
       } else if (extension == 'csv') {
+        final fileContent = utf8.decode(bytes);
         studentsToImport = _parseCsvToMap(fileContent);
+      } else if (extension == 'xlsx' || extension == 'xls') {
+        studentsToImport = _parseExcelToStudents(bytes);
       }
 
       if (studentsToImport.isEmpty) {
@@ -241,6 +260,71 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     }
   }
 
+  List<Map<String, dynamic>> _parseExcelToStudents(Uint8List bytes) {
+    final List<Map<String, dynamic>> result = [];
+    try {
+      final excel = Excel.decodeBytes(bytes);
+      if (excel.tables.isEmpty) return result;
+      final sheet = excel.tables.values.first;
+
+      List<String> headers = [];
+      int headerRowIdx = -1;
+
+      // Find headers
+      for (int i = 0; i < sheet.rows.length; i++) {
+        final row = sheet.rows[i];
+        if (row.any((cell) => cell != null && cell.value != null)) {
+          headers = row.map((cell) => cell?.value?.toString().replaceAll('"', '').trim().toLowerCase() ?? '').toList();
+          headerRowIdx = i;
+          break;
+        }
+      }
+
+      if (headerRowIdx == -1 || headers.isEmpty) return result;
+
+      for (int i = headerRowIdx + 1; i < sheet.rows.length; i++) {
+        final row = sheet.rows[i];
+        if (!row.any((cell) => cell != null && cell.value != null && cell.value.toString().trim().isNotEmpty)) {
+          continue;
+        }
+
+        final Map<String, dynamic> studentRow = {};
+        for (int j = 0; j < headers.length; j++) {
+          if (j < row.length) {
+            final cellVal = row[j]?.value;
+            if (cellVal == null) continue;
+            final valStr = cellVal.toString().trim();
+            final header = headers[j];
+
+            if (header == 'rollnumber' || header == 'roll' || header == 'roll_number') {
+              studentRow['rollNumber'] = valStr;
+            } else if (header == 'name' || header == 'fullname' || header == 'student_name') {
+              studentRow['name'] = valStr;
+            } else if (header == 'guardianname' || header == 'guardian_name') {
+              studentRow['guardianName'] = valStr;
+            } else if (header == 'guardiancnic' || header == 'guardian_cnic') {
+              studentRow['guardianCnic'] = valStr;
+            } else if (header == 'contactphone' || header == 'phone' || header == 'contact_phone') {
+              studentRow['contactPhone'] = valStr;
+            } else if (header == 'studentcnic' || header == 'student_cnic') {
+              studentRow['studentCnic'] = valStr;
+            } else if (header == 'class' || header == 'classname') {
+              studentRow['class'] = valStr;
+            } else if (header == 'currentlines' || header == 'lines' || header == 'progress') {
+              studentRow['currentLines'] = valStr;
+            } else if (header.isNotEmpty) {
+              studentRow[header] = valStr;
+            }
+          }
+        }
+        result.add(studentRow);
+      }
+    } catch (e) {
+      debugPrint("Excel Student Import Error: $e");
+    }
+    return result;
+  }
+
   List<Map<String, dynamic>> _parseCsvToMap(String csvText) {
     final List<Map<String, dynamic>> result = [];
     final lines = csvText.split('\n');
@@ -305,7 +389,92 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     return result;
   }
 
+  double _calculateRecentPace(String studentId, String branchId, double overallAvg) {
+    try {
+      final box = Hive.box(LocalStorageService.madrassaLogsBox);
+      final prefix = '${branchId.toLowerCase().trim()}__log__';
+      
+      final logsList = <MapEntry<DateTime, int>>[];
+      for (final key in box.keys) {
+        if (key.toString().startsWith(prefix)) {
+          final datePart = key.toString().substring(prefix.length);
+          final date = DateTime.tryParse(datePart);
+          if (date == null) continue;
+          
+          final logVal = box.get(key);
+          if (logVal is Map && logVal.containsKey(studentId)) {
+            final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
+            final currentLines = studentLog['currentLines'] as int?;
+            if (currentLines != null && currentLines > 0) {
+              logsList.add(MapEntry(date, currentLines));
+            }
+          }
+        }
+      }
+      
+      if (logsList.length < 2) {
+        return overallAvg;
+      }
+      
+      // Sort chronologically
+      logsList.sort((a, b) => a.key.compareTo(b.key));
+      
+      final latest = logsList.last;
+      
+      // Find reference log from 7 to 30 days ago
+      MapEntry<DateTime, int>? bestRef;
+      for (int i = logsList.length - 2; i >= 0; i--) {
+        final ref = logsList[i];
+        final daysDiff = latest.key.difference(ref.key).inDays;
+        if (daysDiff >= 7 && daysDiff <= 30) {
+          bestRef = ref;
+          if (daysDiff >= 14) break;
+        }
+      }
+      
+      // Fallback: take oldest different log if no 7-30 days log exists
+      if (bestRef == null) {
+        for (final ref in logsList) {
+          if (ref.key != latest.key) {
+            bestRef = ref;
+            break;
+          }
+        }
+      }
+      
+      if (bestRef != null) {
+        final daysDiff = latest.key.difference(bestRef.key).inDays;
+        final linesDiff = latest.value - bestRef.value;
+        if (daysDiff > 0 && linesDiff >= 0) {
+          final pace = linesDiff / daysDiff;
+          return pace >= 0.8 ? pace : overallAvg;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error calculating recent pace: $e');
+    }
+    return overallAvg;
+  }
+
+  void _openStudentDetailPage(Map<String, dynamic> studentData) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StudentDetailPage(
+          studentData: studentData,
+          branchId: widget.branchId,
+          isAdmin: widget.isAdmin,
+          username: widget.username,
+          role: widget.role,
+        ),
+      ),
+    );
+  }
+
   void _showStudentProgressDialog(BuildContext context, Map<String, dynamic> studentData) {
+    final studentId = studentData['id']?.toString() ?? '';
+    final branchId = widget.branchId;
+
     final totalLines = 8640;
     final currentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
     final prevLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
@@ -326,8 +495,14 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     final totalMemorized = currentLines + prevLines;
     // Use totalMemorized for rate so prior hifz is reflected in the student's real pace
     final avgPerDay = daysSinceJoin > 0 ? totalMemorized / daysSinceJoin : 0.0;
+    
+    // Calculate recent pace (moving average) using the cached logs
+    final recentDailyRate = _calculateRecentPace(studentId, branchId, avgPerDay);
+
     final remainingLines = (totalLines - totalMemorized).clamp(0, totalLines);
-    final estimatedDays = avgPerDay > 0 ? (remainingLines / avgPerDay).ceil() : null;
+    
+    // Estimate completion using the recent pace instead of overall average
+    final estimatedDays = recentDailyRate > 0.3 ? (remainingLines / recentDailyRate).ceil() : null;
     final pct = ((totalMemorized / totalLines) * 100).clamp(0.0, 100.0).toStringAsFixed(1);
 
     showDialog(
@@ -343,6 +518,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         prevHifzLines: prevLines,
         percentage: pct,
         estimatedDays: estimatedDays,
+        recentDailyRate: recentDailyRate,
       ),
     );
   }
@@ -368,6 +544,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       case 'left':
         statusLabel = context.l.statusLeft;
         color = const Color(0xFFEF4444); // Red/Rose
+        break;
+      case 'dropped':
+      case 'dropped_out':
+        statusLabel = context.isUrdu ? 'خارج' : 'Dropped Out';
+        color = const Color(0xFFDC2626); // Dark Red
         break;
       case 'inactive':
         statusLabel = context.isUrdu ? 'غیر فعال' : 'Inactive';
@@ -468,101 +649,127 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
   Widget _buildMobileStudentCard(dynamic s, Map<String, dynamic> d) {
     final studentId = s is DocumentSnapshot ? s.id : s['id'].toString();
+    final isExpanded = _expandedStudentIds.contains(studentId);
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0xFFE0E2E7)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          key: PageStorageKey<String>('std_tile_$studentId'),
+          initiallyExpanded: isExpanded,
+          onExpansionChanged: (expanded) {
+            setState(() {
+              if (expanded) {
+                _expandedStudentIds.add(studentId);
+              } else {
+                _expandedStudentIds.remove(studentId);
+              }
+            });
+          },
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          leading: GestureDetector(
+            onTap: () => _pickAndUploadPhoto(studentId),
+            child: SizedBox(
+              width: 38,
+              height: 38,
+              child: _uploadStates[studentId] == PhotoUploadStatus.uploading
+                  ? const Padding(
+                      padding: EdgeInsets.all(6.0),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
+                    )
+                  : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 38),
+            ),
+          ),
+          title: Text(
+            d['name'] ?? '',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          subtitle: Text(
+            '${context.l.rollNumber}: ${d['rollNumber'] ?? '?'} • Class: ${d['class'] ?? 'Hifz'}',
+            style: context.urduStyle(style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              GestureDetector(
-                onTap: () => _pickAndUploadPhoto(studentId),
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: const BoxDecoration(color: Color(0xFFF0F2F5), shape: BoxShape.circle),
-                  child: _uploadStates[studentId] == PhotoUploadStatus.uploading
-                      ? const Padding(
-                          padding: EdgeInsets.all(6.0),
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
-                        )
-                      : (d['photoUrl'] != null && d['photoUrl'].toString().isNotEmpty
-                          ? ClipOval(
-                              child: Image.network(
-                                d['photoUrl'],
-                                fit: BoxFit.cover,
-                                width: 36,
-                                height: 36,
-                                errorBuilder: (context, error, stackTrace) => _buildAvatarFallback(d['name'], fontSize: 14),
-                              ),
-                            )
-                          : _buildAvatarFallback(d['name'], fontSize: 14)),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${context.l.rollNumber}: ${d['rollNumber'] ?? '?'} • Class: ${d['class'] ?? 'Hifz'}',
-                      style: context.urduStyle(style: TextStyle(color: Colors.grey[600], fontSize: 12)),
-                    ),
-                    const SizedBox(height: 6),
-                    _buildStatusChip(context, d),
-                  ],
-                ),
-              ),
-              StatusActionMenu(
-                student: s,
-                branchId: widget.branchId,
-                isAdmin: widget.isAdmin,
-                t: RoleThemeScope.dataOf(context),
-                username: widget.username,
-                role: widget.role,
-              ),
-              IconButton(
-                icon: const Icon(Icons.info_outline, color: Color(0xFF008080)),
-                tooltip: context.l.moreInfo,
-                onPressed: () => _showStudentProgressDialog(context, d),
+              _buildStatusChip(context, d),
+              const SizedBox(width: 4),
+              Icon(
+                isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                color: Colors.grey,
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          const Divider(height: 1, color: Color(0xFFE0E2E7)),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
-                  const SizedBox(height: 2),
-                  Text(d['guardianName'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  const Divider(height: 1, color: Color(0xFFE0E2E7)),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
+                          const SizedBox(height: 2),
+                          Text(d['guardianName'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        ],
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
+                          const SizedBox(height: 2),
+                          Text(d['contactPhone'] ?? d['phone'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildProgressBar(context, d['currentLines'] ?? 0),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      StatusActionMenu(
+                        student: s,
+                        branchId: widget.branchId,
+                        isAdmin: widget.isAdmin,
+                        t: RoleThemeScope.dataOf(context),
+                        username: widget.username,
+                        role: widget.role,
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.badge_outlined, color: Color(0xFF008080)),
+                            tooltip: 'View Student Profile',
+                            onPressed: () => _openStudentDetailPage(d),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.info_outline, color: Color(0xFF008080)),
+                            tooltip: context.l.moreInfo,
+                            onPressed: () => _showStudentProgressDialog(context, d),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                 ],
               ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
-                  const SizedBox(height: 2),
-                  Text(d['contactPhone'] ?? d['phone'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _buildProgressBar(context, d['currentLines'] ?? 0),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -607,6 +814,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FD),
+      floatingActionButton: null,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -684,12 +892,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 // Group students by batch
                 final Map<String, List<Map<String, dynamic>>> studentsByBatch = {};
                 for (final student in filteredStudents) {
-                  final batch = student['batch'] ?? 'active';
+                  final batch = student['batch'] ?? student['status'] ?? 'active';
                   studentsByBatch.putIfAbsent(batch, () => []).add(student);
                 }
 
                 // Define batch order
-                const batchOrder = ['active', 'left', 'dropped', 'hifz_complete'];
+                const batchOrder = ['active', 'left', 'dropped', 'dropped_out', 'hifz_completed', 'hifz_complete', 'archived', 'inactive'];
 
                 if (isMobile) {
                   return ListView(
@@ -757,30 +965,28 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                         children: [
                                           GestureDetector(
                                             onTap: () => _pickAndUploadPhoto(studentId),
-                                            child: Container(
-                                              width: 24,
-                                              height: 24,
-                                              decoration: const BoxDecoration(color: Color(0xFFF0F2F5), shape: BoxShape.circle),
+                                            child: SizedBox(
+                                              width: 28,
+                                              height: 28,
                                               child: _uploadStates[studentId] == PhotoUploadStatus.uploading
                                                   ? const Padding(
                                                       padding: EdgeInsets.all(4.0),
                                                       child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
                                                     )
-                                                  : (d['photoUrl'] != null && d['photoUrl'].toString().isNotEmpty
-                                                      ? ClipOval(
-                                                          child: Image.network(
-                                                            d['photoUrl'],
-                                                            fit: BoxFit.cover,
-                                                            width: 24,
-                                                            height: 24,
-                                                            errorBuilder: (context, error, stackTrace) => _buildAvatarFallback(d['name'], fontSize: 10),
-                                                          ),
-                                                        )
-                                                      : _buildAvatarFallback(d['name'], fontSize: 10)),
+                                                  : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 28),
                                             ),
                                           ),
                                           const SizedBox(width: 8),
-                                          Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                          InkWell(
+                                            onTap: () => _openStudentDetailPage(d),
+                                            child: Text(
+                                              d['name'] ?? '',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFF008080),
+                                              ),
+                                            ),
+                                          ),
                                         ],
                                       )),
                                       DataCell(Text(d['rollNumber']?.toString() ?? '?')),
@@ -896,35 +1102,41 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
-              if (widget.isAdmin)
+              if (_canAddStudent)
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    if (widget.isAdmin)
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF008080),
+                          foregroundColor: Colors.white,
+                        ),
+                        onPressed: _importStudentsFile,
+                        icon: const Icon(Icons.upload_file),
+                        label: Text(
+                          context.isUrdu ? 'درآمد کریں' : 'Import File',
+                          style: context.urduStyle(style: const TextStyle(color: Colors.white)),
+                        ),
+                      ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF008080),
                         foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
-                      onPressed: _importStudentsFile,
-                      icon: const Icon(Icons.upload_file),
-                      label: Text(
-                        context.isUrdu ? 'درآمد کریں' : 'Import File',
-                        style: context.urduStyle(style: const TextStyle(color: Colors.white)),
-                      ),
-                    ),
-                    ElevatedButton.icon(
                       onPressed: () => showAddStudentDialog(
                         context,
                         widget.branchId,
                         username: widget.username,
                         role: widget.role,
                       ),
-                      icon: const Icon(Icons.add),
+                      icon: const Icon(Icons.person_add_rounded, color: Colors.white),
                       label: Text(
-                        context.l.enrollNew,
-                        style: context.urduStyle(),
+                        context.isUrdu ? 'نیا طالب علم داخل کریں / Add Student' : '+ Add Student',
+                        style: context.urduStyle(style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
@@ -932,175 +1144,264 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             ],
           ),
           const SizedBox(height: 12),
-          TextField(
-            decoration: InputDecoration(
-              hintText: '${context.l.search}...',
-              prefixIcon: const Icon(Icons.search, color: Colors.grey),
-              filled: true,
-              fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: '${context.l.search}...',
+                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                  ),
+                  onChanged: (val) {
+                    setState(() {
+                      _searchQuery = val;
+                    });
+                  },
+                ),
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+              const SizedBox(width: 8),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE0E2E7)),
+                ),
+                child: IconButton(
+                  icon: Icon(
+                    Icons.tune,
+                    color: _showFilters ? const Color(0xFF008080) : Colors.grey,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _showFilters = !_showFilters;
+                    });
+                  },
+                ),
               ),
+            ],
+          ),
+          if (_showFilters) ...[
+            const SizedBox(height: 12),
+            Builder(
+              builder: (context) {
+                final isSmallScreen = MediaQuery.of(context).size.width < 600;
+
+                final statusFilterDropdown = DropdownButtonFormField<String>(
+                  value: _statusFilter,
+                  decoration: InputDecoration(
+                    labelText: context.isUrdu ? 'حیثیت کے لحاظ سے فلٹر کریں' : 'Filter by Status',
+                    labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                  ),
+                  dropdownColor: Colors.white,
+                  style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
+                  items: [
+                    DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? 'تمام' : 'All Statuses')),
+                    DropdownMenuItem(value: 'active', child: Text(context.l.statusActive)),
+                    DropdownMenuItem(value: 'inactive', child: Text(context.isUrdu ? 'غیر فعال' : 'Inactive')),
+                    DropdownMenuItem(value: 'archived', child: Text(context.l.statusArchived)),
+                    DropdownMenuItem(value: 'hifz_completed', child: Text(context.l.statusHifzCompleted)),
+                    DropdownMenuItem(value: 'left', child: Text(context.l.statusLeft)),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() {
+                        _statusFilter = val;
+                      });
+                    }
+                  },
+                );
+
+                final sortByDropdown = DropdownButtonFormField<String>(
+                  value: _sortBy,
+                  decoration: InputDecoration(
+                    labelText: context.isUrdu ? 'ترتیب دیں' : 'Sort By',
+                    labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                    ),
+                  ),
+                  dropdownColor: Colors.white,
+                  style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
+                  items: [
+                    DropdownMenuItem(value: 'rollNumber', child: Text(context.isUrdu ? 'رول نمبر' : 'Roll Number')),
+                    DropdownMenuItem(value: 'progress', child: Text(context.isUrdu ? 'حفظ کی ترقی' : 'Progress')),
+                    DropdownMenuItem(value: 'joinDate', child: Text(context.isUrdu ? 'شمولیت کی تاریخ' : 'Joining Date')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() {
+                        _sortBy = val;
+                      });
+                    }
+                  },
+                );
+
+                return isSmallScreen
+                    ? Column(
+                        children: [
+                          statusFilterDropdown,
+                          const SizedBox(height: 12),
+                          sortByDropdown,
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: statusFilterDropdown),
+                          const SizedBox(width: 12),
+                          Expanded(child: sortByDropdown),
+                        ],
+                      );
+              },
             ),
-            onChanged: (val) {
-              setState(() {
-                _searchQuery = val;
-              });
-            },
-          ),
-          const SizedBox(height: 12),
-          Builder(
-            builder: (context) {
-              final isSmallScreen = MediaQuery.of(context).size.width < 600;
-
-              final statusFilterDropdown = DropdownButtonFormField<String>(
-                value: _statusFilter,
-                decoration: InputDecoration(
-                  labelText: context.isUrdu ? 'حیثیت کے لحاظ سے فلٹر کریں' : 'Filter by Status',
-                  labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
-                  ),
-                ),
-                dropdownColor: Colors.white,
-                style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
-                items: [
-                  DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? 'تمام' : 'All Statuses')),
-                  DropdownMenuItem(value: 'active', child: Text(context.l.statusActive)),
-                  DropdownMenuItem(value: 'inactive', child: Text(context.isUrdu ? 'غیر فعال' : 'Inactive')),
-                  DropdownMenuItem(value: 'archived', child: Text(context.l.statusArchived)),
-                  DropdownMenuItem(value: 'hifz_completed', child: Text(context.l.statusHifzCompleted)),
-                  DropdownMenuItem(value: 'left', child: Text(context.l.statusLeft)),
-                ],
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _statusFilter = val;
-                    });
-                  }
-                },
-              );
-
-              final sortByDropdown = DropdownButtonFormField<String>(
-                value: _sortBy,
-                decoration: InputDecoration(
-                  labelText: context.isUrdu ? 'ترتیب دیں' : 'Sort By',
-                  labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
-                  filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
-                  ),
-                ),
-                dropdownColor: Colors.white,
-                style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
-                items: [
-                  DropdownMenuItem(value: 'rollNumber', child: Text(context.isUrdu ? 'رول نمبر' : 'Roll Number')),
-                  DropdownMenuItem(value: 'progress', child: Text(context.isUrdu ? 'حفظ کی ترقی' : 'Progress')),
-                  DropdownMenuItem(value: 'joinDate', child: Text(context.isUrdu ? 'شمولیت کی تاریخ' : 'Joining Date')),
-                ],
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _sortBy = val;
-                    });
-                  }
-                },
-              );
-
-              return isSmallScreen
-                  ? Column(
-                      children: [
-                        statusFilterDropdown,
-                        const SizedBox(height: 12),
-                        sortByDropdown,
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        Expanded(child: statusFilterDropdown),
-                        const SizedBox(width: 12),
-                        Expanded(child: sortByDropdown),
-                      ],
-                    );
-            },
-          ),
+          ],
         ],
       ),
     );
   }
 
   Future<void> _pickAndUploadPhoto(String studentId) async {
-    try {
-      final picker = ImagePicker();
-      final XFile? picked = await picker.pickImage(source: ImageSource.gallery);
-      if (picked == null) return;
+    final ImageSource? source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                context.isUrdu ? 'طالب علم کی تصویر منتخب کریں' : 'Update Student Photo',
+                style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+              title: Text(
+                context.isUrdu ? 'کیمرہ سے تصویر لیں' : 'Take Photo with Camera',
+                style: context.urduStyle(),
+              ),
+              onTap: () => Navigator.pop(ctx, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+              title: Text(
+                context.isUrdu ? 'گیلری سے منتخب کریں' : 'Choose from Gallery',
+                style: context.urduStyle(),
+              ),
+              onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
 
+    if (source == null) return;
+
+    try {
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.uploading);
 
-      final bytes = await picked.readAsBytes();
-      
-      final uploadStream = PhotoUploadHelper.upload(
-        bytes: bytes,
-        branchId: widget.branchId,
-        studentId: studentId,
-      );
+      final b64 = await ImageUploadService.pickAndProcessImage(source: source);
+      if (b64 == null || b64.isEmpty) {
+        if (mounted) setState(() => _uploadStates[studentId] = PhotoUploadStatus.idle);
+        return;
+      }
 
-      await for (final state in uploadStream) {
-        if (!mounted) return;
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('madrassa_students')
+          .doc(studentId)
+          .update({'photoUrl': b64});
+
+      final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId);
+      if (studentCache != null) {
+        studentCache['photoUrl'] = b64;
+        await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
+      }
+
+      if (mounted) {
         setState(() {
-          _uploadStates[studentId] = state.status;
+          _uploadStates[studentId] = PhotoUploadStatus.success;
         });
-
-        if (state.status == PhotoUploadStatus.success) {
-          final downloadUrl = state.downloadUrl;
-          if (downloadUrl != null && downloadUrl.isNotEmpty) {
-            await FirebaseFirestore.instance
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('madrassa_students')
-                .doc(studentId)
-                .update({'photoUrl': downloadUrl});
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Photo updated')),
-              );
-            }
-          }
-        } else if (state.status == PhotoUploadStatus.error) {
-          throw Exception(state.error ?? 'Upload error');
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.isUrdu ? 'تصویر کامیابی کے ساتھ اپ ڈیٹ ہو گئی' : 'Student photo updated successfully!',
+              style: context.urduStyle(),
+            ),
+            backgroundColor: const Color(0xFF008080),
+          ),
+        );
       }
     } catch (e) {
-      
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.error);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Photo upload failed, try again.')),
+        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: Colors.red),
       );
     }
+  }
+
+  Widget _buildStudentAvatar(String? photoUrl, String? name, {double size = 36}) {
+    if (photoUrl != null && photoUrl.trim().isNotEmpty) {
+      final str = photoUrl.trim();
+      if (str.startsWith('http://') || str.startsWith('https://')) {
+        return ClipOval(
+          child: Image.network(
+            str,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _buildAvatarFallback(name, fontSize: size * 0.4),
+          ),
+        );
+      }
+      final bytes = ImageUploadService.decodeBase64ToBytes(str);
+      if (bytes != null) {
+        return ClipOval(
+          child: Image.memory(
+            bytes,
+            width: size,
+            height: size,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => _buildAvatarFallback(name, fontSize: size * 0.4),
+          ),
+        );
+      }
+    }
+    return _buildAvatarFallback(name, fontSize: size * 0.4);
   }
 
   Widget _buildAvatarFallback(String? name, {double? fontSize}) {

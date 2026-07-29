@@ -49,7 +49,7 @@ class FinanceLocalStorage {
   // Returns true if enough time has passed since the last successful sync of
   // [key], meaning a fresh download should be performed. Stores the timestamp
   // in the finance settings box so it persists across restarts.
-  static bool _shouldRefresh(String key, {Duration ttl = const Duration(minutes: 60)}) {
+  static bool _shouldRefresh(String key, {Duration ttl = const Duration(minutes: 5)}) {
     try {
       final box = Hive.box(LocalStorageService.financeSettingsBox);
       final raw = box.get('__sync_ts_$key') as String?;
@@ -137,22 +137,24 @@ class FinanceLocalStorage {
     final isNew = !employeesBox.containsKey(localId);
     final now = _nowIso();
 
-    // CNIC validation check
+    // CNIC validation check — only if CNIC is provided
     final cnic = (data['cnic'] as String? ?? '').trim();
-    final cnicRegex = RegExp(r'^\d{5}-\d{7}-\d{1}$');
-    if (!cnicRegex.hasMatch(cnic)) {
-      throw Exception('Invalid CNIC format. Expected XXXXX-XXXXXXX-X');
-    }
+    if (cnic.isNotEmpty) {
+      final cnicRegex = RegExp(r'^\d{5}-\d{7}-\d{1}$');
+      if (!cnicRegex.hasMatch(cnic)) {
+        throw Exception('Invalid CNIC format. Expected XXXXX-XXXXXXX-X');
+      }
 
-    // CNIC Duplicate check (excluding current employee being updated)
-    for (final key in employeesBox.keys) {
-      if (key == localId) continue;
-      final val = employeesBox.get(key);
-      if (val is Map) {
-        final existingCnic = val['cnic']?.toString() ?? '';
-        if (existingCnic == cnic) {
-          final existingName = val['name']?.toString() ?? 'Unknown';
-          throw Exception('An employee is already registered with CNIC $cnic (Name: $existingName)');
+      // CNIC Duplicate check (excluding current employee being updated)
+      for (final key in employeesBox.keys) {
+        if (key == localId) continue;
+        final val = employeesBox.get(key);
+        if (val is Map) {
+          final existingCnic = val['cnic']?.toString() ?? '';
+          if (existingCnic == cnic) {
+            final existingName = val['name']?.toString() ?? 'Unknown';
+            throw Exception('An employee is already registered with CNIC $cnic (Name: $existingName)');
+          }
         }
       }
     }
@@ -177,8 +179,19 @@ class FinanceLocalStorage {
     record['createdAt'] = oldRecord['createdAt'] ?? now;
     record['createdBy'] = oldRecord['createdBy'] ?? performedBy;
 
-    // Recalculate displays
-    record['currentAdvanceBalance'] = getAdvanceBalance(localId);
+    // Convert money to minor units (paisa)
+    final double salary = (record['currentSalary'] as num?)?.toDouble() ?? 0.0;
+    final double installment = (record['monthlyAdvanceInstallment'] as num?)?.toDouble() ?? 0.0;
+    final double advBalance = getAdvanceBalance(localId);
+
+    record['currentSalaryMinor'] = (salary * 100).round();
+    record['monthlyAdvanceInstallmentMinor'] = (installment * 100).round();
+    record['currentAdvanceBalanceMinor'] = (advBalance * 100).round();
+    record['currentSalary'] = salary;
+    record['monthlyAdvanceInstallment'] = installment;
+    record['currentAdvanceBalance'] = advBalance;
+    record['currency'] = 'PKR';
+    record['eventVersion'] = 1;
 
     final sanitized = _sanitize(record);
     await employeesBox.put(localId, sanitized);
@@ -233,6 +246,16 @@ class FinanceLocalStorage {
       }
     }
 
+    // Automatic CNIC-based linking between Employee and Registered User
+    if (cnic.isNotEmpty) {
+      await linkEmployeeWithUserByCnic(
+        employeeId: localId,
+        employeeName: sanitized['name']?.toString() ?? '',
+        cnic: cnic,
+        department: sanitized['department']?.toString(),
+      );
+    }
+
     // Queue Sync
     await LocalStorageService.enqueueSync({
       'type': 'save_employee',
@@ -242,6 +265,87 @@ class FinanceLocalStorage {
     });
 
     return localId;
+  }
+
+  static Future<void> linkEmployeeWithUserByCnic({
+    required String employeeId,
+    required String employeeName,
+    required String cnic,
+    String? department,
+  }) async {
+    final cleanCnic = cnic.replaceAll(RegExp(r'\D'), '');
+    if (cleanCnic.isEmpty) return;
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final uBox = Hive.box(LocalStorageService.usersBox);
+        for (final key in uBox.keys) {
+          final raw = uBox.get(key);
+          if (raw is Map) {
+            final userCnic = ((raw['cnic'] ?? raw['identification']) ?? '').toString().replaceAll(RegExp(r'\D'), '');
+            if (userCnic.isNotEmpty && userCnic == cleanCnic) {
+              final uMap = Map<String, dynamic>.from(raw);
+              final userId = key.toString();
+              uMap['linkedEmployeeId'] = employeeId;
+              uMap['linkedEmployeeName'] = employeeName;
+              if (department != null) uMap['linkedDepartment'] = department;
+              await uBox.put(userId, uMap);
+
+              final empRaw = employeesBox.get(employeeId);
+              if (empRaw is Map) {
+                final empMap = Map<String, dynamic>.from(empRaw);
+                empMap['linkedUserId'] = userId;
+                empMap['linkedUserRole'] = uMap['role'];
+                empMap['linkedUserName'] = uMap['username'] ?? uMap['name'];
+                await employeesBox.put(employeeId, empMap);
+              }
+
+              try {
+                await FirebaseFirestore.instance.collection('users').doc(userId).set({
+                  'linkedEmployeeId': employeeId,
+                  'linkedEmployeeName': employeeName,
+                  if (department != null) 'linkedDepartment': department,
+                }, SetOptions(merge: true));
+              } catch (_) {}
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[FinanceLocalStorage] Automatic user-employee linking error: $e');
+    }
+  }
+
+  static Future<void> linkUserAndEmployeeByCnic({
+    required String cnic,
+    required String userId,
+    String? userRole,
+    String? userName,
+    String? email,
+    String? department,
+    String branchId = '',
+  }) async {
+    try {
+      final match = findMatchingEmployeeForUser(
+        branchId: branchId,
+        cnic: cnic,
+        email: email,
+        username: userName,
+        department: department,
+        role: userRole,
+      );
+
+      if (match != null) {
+        final empId = match['id']?.toString() ?? match['localId']?.toString() ?? '';
+        if (empId.isNotEmpty) {
+          await linkUserToEmployee(userId: userId, employeeId: empId);
+          debugPrint('[FinanceLS] Auto-linked User $userId to Employee $empId (${match['matchReason']})');
+        }
+      }
+    } catch (e) {
+      debugPrint('[FinanceLocalStorage] Automatic user-employee linking error: $e');
+    }
   }
 
   static List<Map<String, dynamic>> getEmployees(String branchId) {
@@ -267,11 +371,97 @@ class FinanceLocalStorage {
     return record;
   }
 
+  static Future<void> syncBiDirectionalOffboarding({
+    String? employeeId,
+    String? userId,
+    String? cnic,
+    required String performedBy,
+  }) async {
+    final cleanCnic = (cnic ?? '').replaceAll(RegExp(r'\D'), '');
+
+    // 1. Offboard & stop salary on Employee record
+    Map<String, dynamic>? emp;
+    String? empKey = employeeId;
+    if (empKey != null && empKey.isNotEmpty) {
+      final raw = employeesBox.get(empKey);
+      if (raw is Map) emp = Map<String, dynamic>.from(raw);
+    }
+    if (emp == null && cleanCnic.isNotEmpty) {
+      for (final k in employeesBox.keys) {
+        final raw = employeesBox.get(k);
+        if (raw is Map) {
+          final eCnic = (raw['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          if (eCnic.isNotEmpty && eCnic == cleanCnic) {
+            emp = Map<String, dynamic>.from(raw);
+            empKey = k.toString();
+            break;
+          }
+        }
+      }
+    }
+
+    if (emp != null && empKey != null) {
+      emp['isActive'] = false;
+      emp['status'] = 'Inactive';
+      emp['currentSalary'] = 0.0;
+      emp['currentSalaryMinor'] = 0;
+      emp['payrollStatus'] = 'Salary Stopped';
+      emp['updatedAt'] = _nowIso();
+      await employeesBox.put(empKey, _sanitize(emp));
+      await employeesBox.flush();
+    }
+
+    // 2. Revoke App Access on System User Account
+    String? uKey = userId ?? emp?['linkedUserId']?.toString();
+    if (uKey == null && cleanCnic.isNotEmpty && Hive.isBoxOpen(LocalStorageService.usersBox)) {
+      final uBox = Hive.box(LocalStorageService.usersBox);
+      for (final k in uBox.keys) {
+        final raw = uBox.get(k);
+        if (raw is Map) {
+          final uCnic = ((raw['cnic'] ?? raw['identification']) ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          if (uCnic.isNotEmpty && uCnic == cleanCnic) {
+            uKey = k.toString();
+            break;
+          }
+        }
+      }
+    }
+
+    if (uKey != null && Hive.isBoxOpen(LocalStorageService.usersBox)) {
+      final uBox = Hive.box(LocalStorageService.usersBox);
+      final raw = uBox.get(uKey);
+      if (raw is Map) {
+        final uMap = Map<String, dynamic>.from(raw);
+        uMap['status'] = 'revoked';
+        uMap['isRevoked'] = true;
+        uMap['accessRevoked'] = true;
+        uMap['updatedAt'] = _nowIso();
+        await uBox.put(uKey, uMap);
+      }
+
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(uKey).set({
+          'status': 'revoked',
+          'isRevoked': true,
+          'accessRevoked': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (_) {}
+    }
+  }
+
   static Future<void> deleteEmployeePermanently({
     required String branchId,
     required String employeeId,
     required String performedBy,
   }) async {
+    final emp = getEmployee(employeeId);
+    await syncBiDirectionalOffboarding(
+      employeeId: employeeId,
+      cnic: emp?['cnic']?.toString(),
+      performedBy: performedBy,
+    );
+
     await employeesBox.delete(employeeId);
     await employeesBox.flush();
 
@@ -287,7 +477,7 @@ class FinanceLocalStorage {
       entityId: employeeId,
       action: 'delete',
       performedBy: performedBy,
-      reason: 'Permanently deleted employee profile.',
+      reason: 'Permanently deleted employee profile & revoked linked app access.',
     );
   }
 
@@ -310,6 +500,13 @@ class FinanceLocalStorage {
     final empBefore = getEmployee(employeeId);
     final oldSalary = empBefore != null ? ((empBefore['currentSalary'] as num?)?.toDouble() ?? amount) : amount;
 
+    // Period Lock Check
+    final monthKey = DateFormat('yyyy-MM').format(effectiveDate);
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('Salary changes are blocked: the period $monthKey is closed and locked.');
+    }
+
     final historyRecord = {
       'id': localId,
       'localId': localId,
@@ -318,6 +515,9 @@ class FinanceLocalStorage {
       'syncStatus': 'pending',
       'lastSyncedAt': null,
       'amount': amount,
+      'rateMinor': (amount * 100).round(),
+      'currency': 'PKR',
+      'eventVersion': 1,
       'effectiveDate': effectiveDate.toIso8601String(),
       'reason': reason,
       'isRetroactive': isRetroactive,
@@ -335,8 +535,12 @@ class FinanceLocalStorage {
     if (emp != null) {
       // Find latest salary rate effective
       final historyList = getSalaryHistory(employeeId);
-      final latest = historyList.isNotEmpty ? historyList.first['amount'] : amount;
-      emp['currentSalary'] = (latest as num).toDouble();
+      final latest = historyList.isNotEmpty ? (historyList.first['rateMinor'] as num? ?? historyList.first['amount'] as num? ?? amount) : amount;
+      final double latestDouble = latest is int ? latest / 100 : (latest as num).toDouble();
+      
+      emp['currentSalary'] = latestDouble;
+      emp['currentSalaryMinor'] = (latestDouble * 100).round();
+      
       await employeesBox.put(employeeId, _sanitize(emp));
       await employeesBox.flush();
 
@@ -498,6 +702,15 @@ class FinanceLocalStorage {
         'employeeName': employeeName,
         'type': 'arrears_payment',
         'amount': totalArrears,
+        'amountMinor': (totalArrears * 100).round(),
+        'advanceDeductionsMinor': 0,
+        'absenceDeductionsMinor': 0,
+        'otherDeductionsMinor': 0,
+        'advanceAddedMinor': 0,
+        'currency': 'PKR',
+        'periodLocked': false,
+        'eventVersion': 1,
+        'correctsId': null,
         'monthKey': DateFormat('yyyy-MM').format(today),
         'date': now,
         'advanceDeductions': 0.0,
@@ -549,6 +762,14 @@ class FinanceLocalStorage {
   }) async {
     final employeeId = data['employeeId'] as String;
     final dateStr = data['date'] as String; // YYYY-MM-DD
+    
+    // Period Lock Check
+    final monthKey = dateStr.substring(0, 7);
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('Attendance changes are blocked: the period $monthKey is closed and locked.');
+    }
+
     final attendanceKey = '${employeeId}_$dateStr';
     final now = _nowIso();
 
@@ -574,6 +795,18 @@ class FinanceLocalStorage {
     });
 
     return attendanceKey;
+  }
+
+  static bool hasAttendanceDataForMonth(String employeeId, String monthKey) {
+    final daysInMonth = getDaysInMonth(monthKey);
+    for (var d = 1; d <= daysInMonth; d++) {
+      final dd = d.toString().padLeft(2, '0');
+      final key = '${employeeId}_$monthKey-$dd';
+      if (attendanceBox.containsKey(key)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static List<Map<String, dynamic>> getAttendanceForDate(String branchId, String dateStr) {
@@ -844,6 +1077,7 @@ class FinanceLocalStorage {
     double fullMonthWeightedSalary = 0.0;
     int totalEmployedDays = 0;
     int unmarkedDays = 0;
+    int forfeitedSundaysCount = 0;
 
     final joinStr = emp?['joiningDate']?.toString();
     final exitStr = emp?['exitDate']?.toString();
@@ -862,6 +1096,33 @@ class FinanceLocalStorage {
     final mo = int.parse(parts[1]);
     final daysInMonth = getDaysInMonth(monthKey);
     final todayDateOnly = DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+
+    // Determine the cutoff date for this month calculation
+    DateTime cutoffDate;
+    final endOfMonth = DateTime(yr, mo, daysInMonth);
+    if (todayDateOnly.isAfter(endOfMonth)) {
+      cutoffDate = endOfMonth;
+    } else if (todayDateOnly.isBefore(DateTime(yr, mo, 1))) {
+      int maxRecordDay = 0;
+      for (var d = 1; d <= daysInMonth; d++) {
+        final dd = d.toString().padLeft(2, '0');
+        if (attendanceBox.containsKey('${employeeId}_$monthKey-$dd')) {
+          maxRecordDay = d;
+        }
+      }
+      cutoffDate = DateTime(yr, mo, maxRecordDay);
+    } else {
+      int maxRecordDay = todayDateOnly.day;
+      for (var d = 1; d <= daysInMonth; d++) {
+        final dd = d.toString().padLeft(2, '0');
+        if (attendanceBox.containsKey('${employeeId}_$monthKey-$dd')) {
+          if (d > maxRecordDay) {
+            maxRecordDay = d;
+          }
+        }
+      }
+      cutoffDate = DateTime(yr, mo, maxRecordDay);
+    }
 
     for (var d = 1; d <= daysInMonth; d++) {
       final dd = d.toString().padLeft(2, '0');
@@ -883,28 +1144,36 @@ class FinanceLocalStorage {
         }
       }
 
+      if (!isEmployed) continue;
+
       final activeSalaryRate = getSalaryRateForDay(employeeId, date);
       final dailyRate = activeSalaryRate / daysInMonth;
       fullMonthWeightedSalary += dailyRate;
 
-      if (!isEmployed) continue;
-
-      totalEmployedDays++;
-
-      // Future dates are neutral for salary — nothing earned, nothing
-      // deducted, and they don't count as "unmarked" either, since the
-      // day simply hasn't happened yet.
-      final isFutureDay = date.isAfter(todayDateOnly);
-      if (isFutureDay) continue;
-
-      baseSalaryEarned += dailyRate;
-
+      final isFutureDay = date.isAfter(cutoffDate);
       final key = '${employeeId}_$dateStr';
       final val = attendanceBox.get(key);
       final hasRecord = val != null;
 
+      final isHolidayDay = isHoliday(
+        branchId: branchId,
+        department: employeeDept,
+        dateStr: dateStr,
+      );
+      final isSunday = date.weekday == DateTime.sunday;
+
+      // Skip future dates if they do not have any explicit attendance record marked.
+      if (isFutureDay && !hasRecord) {
+        continue;
+      }
+
+      totalEmployedDays++;
+      baseSalaryEarned += dailyRate;
+
       if (!hasRecord && date.weekday != DateTime.sunday) {
-        unmarkedDays++;
+        if (!isFutureDay) {
+          unmarkedDays++;
+        }
       }
 
       String status;
@@ -916,8 +1185,10 @@ class FinanceLocalStorage {
         leaveType = val['leaveType']?.toString();
         overtimeDuration = val['overtimeDuration']?.toString();
       } else {
+        if (isFutureDay && !isSunday && !isHolidayDay) continue;
+
         // Defaults: Sunday defaults to 'off', other days default to 'unmarked'
-        if (date.weekday == DateTime.sunday) {
+        if (isSunday) {
           status = 'off';
         } else {
           status = 'unmarked';
@@ -925,25 +1196,74 @@ class FinanceLocalStorage {
         leaveType = null;
         overtimeDuration = null;
       }
-
-      final isHolidayDay = isHoliday(
-        branchId: branchId,
-        department: employeeDept,
-        dateStr: dateStr,
-      );
       if (isHolidayDay) {
         holidayCount++;
       }
 
       if (date.weekday == DateTime.sunday) {
-        // Sundays are off. We only check for overtime.
-        if (status == 'overtime') {
-          if (overtimeDuration == 'half') {
-            sundayOvertimeDays += 0.5;
-            sundayOvertimeBonus += 0.5 * dailyRate;
-          } else {
-            sundayOvertimeDays += 1.0;
-            sundayOvertimeBonus += dailyRate;
+        // Evaluate Sunday Eligibility
+        bool isSundayPayable = true;
+
+        // Sunday Weekly Work Check: Must work at least one day in the preceding weekdays (Monday to Saturday) of this week
+        if (isSundayPayable) {
+          bool workedInWeek = false;
+          int eligibleWeekdaysCount = 0;
+
+          for (int offset = 1; offset <= 6; offset++) {
+            final weekdayDate = date.subtract(Duration(days: offset));
+            
+            // Check if the weekday is within the employee's employment period
+            if (joinDate != null) {
+              final joinDay = DateTime(joinDate.year, joinDate.month, joinDate.day);
+              if (weekdayDate.isBefore(joinDay)) continue;
+            }
+            if (exitDate != null) {
+              final exitDay = DateTime(exitDate.year, exitDate.month, exitDate.day);
+              if (weekdayDate.isAfter(exitDay)) continue;
+            }
+
+            eligibleWeekdaysCount++;
+
+            final weekdayDateStr = DateFormat('yyyy-MM-dd').format(weekdayDate);
+            final weekdayKey = '${employeeId}_$weekdayDateStr';
+            final weekdayVal = attendanceBox.get(weekdayKey);
+
+            if (weekdayVal == null) {
+              // Defaults to unmarked, which counts as worked/paid for eligibility
+              workedInWeek = true;
+              break;
+            } else if (weekdayVal is Map) {
+              final status = weekdayVal['status']?.toString();
+              final leaveType = weekdayVal['leaveType']?.toString();
+
+              if (status != 'absent' && !(status == 'leave' && leaveType == 'unpaid')) {
+                workedInWeek = true;
+                break;
+              }
+            }
+          }
+
+          // If there are no preceding weekdays in the week that fall within their employment period, they get paid for Sunday by default.
+          if (eligibleWeekdaysCount > 0 && !workedInWeek) {
+            isSundayPayable = false;
+          }
+        }
+
+        if (!isSundayPayable) {
+          // Forfeited Sunday contributes Rs. 0 to earned salary.
+          // Since baseSalaryEarned += dailyRate was already done, we subtract it here to make it Rs. 0.
+          baseSalaryEarned -= dailyRate;
+          forfeitedSundaysCount++;
+        } else {
+          // Sundays are off. We only check for overtime.
+          if (status == 'overtime') {
+            if (overtimeDuration == 'half') {
+              sundayOvertimeDays += 0.5;
+              sundayOvertimeBonus += 0.5 * dailyRate;
+            } else {
+              sundayOvertimeDays += 1.0;
+              sundayOvertimeBonus += dailyRate;
+            }
           }
         }
       } else {
@@ -1007,6 +1327,7 @@ class FinanceLocalStorage {
       'sundayOvertimeBonus': sundayOvertimeBonus,
       'fullMonthWeightedSalary': fullMonthWeightedSalary,
       'unmarkedDays': unmarkedDays,
+      'forfeitedSundays': forfeitedSundaysCount,
     };
   }
 
@@ -1071,6 +1392,12 @@ class FinanceLocalStorage {
     required String performedBy,
     String? approvedBy,
   }) async {
+    final monthKey = data['monthKey']?.toString() ?? DateFormat('yyyy-MM').format(DateTime.now());
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('This month ($monthKey) is closed and locked. Modifying ledger entries is blocked.');
+    }
+
     final localId = _newLocalId();
     final now = _nowIso();
 
@@ -1085,6 +1412,23 @@ class FinanceLocalStorage {
     record['createdAt'] = now;
     record['isVoided'] = false;
 
+    // Convert money to minor units
+    final double amount = (record['amount'] as num?)?.toDouble() ?? 0.0;
+    final double advanceDeductions = (record['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
+    final double absenceDeductions = (record['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
+    final double otherDeductions = (record['otherDeductions'] as num?)?.toDouble() ?? 0.0;
+    final double advanceAdded = (record['advanceAdded'] as num?)?.toDouble() ?? 0.0;
+
+    record['amountMinor'] = (amount * 100).round();
+    record['advanceDeductionsMinor'] = (advanceDeductions * 100).round();
+    record['absenceDeductionsMinor'] = (absenceDeductions * 100).round();
+    record['otherDeductionsMinor'] = (otherDeductions * 100).round();
+    record['advanceAddedMinor'] = (advanceAdded * 100).round();
+    record['currency'] = 'PKR';
+    record['eventVersion'] = 1;
+    record['periodLocked'] = false;
+    record['correctsId'] = record['correctsId'];
+
     final sanitized = _sanitize(record);
     await salaryLedgerBox.put(localId, sanitized);
     await salaryLedgerBox.flush();
@@ -1093,7 +1437,9 @@ class FinanceLocalStorage {
     final employeeId = data['employeeId'] as String;
     final emp = getEmployee(employeeId);
     if (emp != null) {
-      emp['currentAdvanceBalance'] = getAdvanceBalance(employeeId);
+      final double bal = getAdvanceBalance(employeeId);
+      emp['currentAdvanceBalance'] = bal;
+      emp['currentAdvanceBalanceMinor'] = (bal * 100).round();
       await employeesBox.put(employeeId, _sanitize(emp));
       await employeesBox.flush();
 
@@ -1148,6 +1494,12 @@ class FinanceLocalStorage {
     final entry = Map<String, dynamic>.from(raw);
     if (entry['isVoided'] == true) return; // already voided
 
+    final monthKey = entry['monthKey']?.toString() ?? DateFormat('yyyy-MM').format(DateTime.now());
+    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
+    if (isLocked) {
+      throw Exception('This month ($monthKey) is closed and locked. Voiding ledger entries is blocked.');
+    }
+
     final now = _nowIso();
     entry['isVoided'] = true;
     entry['voidedBy'] = voidedBy;
@@ -1165,7 +1517,9 @@ class FinanceLocalStorage {
     final employeeId = entry['employeeId'] as String;
     final emp = getEmployee(employeeId);
     if (emp != null) {
-      emp['currentAdvanceBalance'] = getAdvanceBalance(employeeId);
+      final double bal = getAdvanceBalance(employeeId);
+      emp['currentAdvanceBalance'] = bal;
+      emp['currentAdvanceBalanceMinor'] = (bal * 100).round();
       await employeesBox.put(employeeId, _sanitize(emp));
       await employeesBox.flush();
 
@@ -1431,6 +1785,51 @@ class FinanceLocalStorage {
   }
 
   // ── Custom Roles & Departments Persistence ───────────────────────────────
+  static List<String> getCustomRolesForDepartment(String dept) {
+    final val = settingsBox.get('custom_roles_for_dept_${dept.toLowerCase().trim()}');
+    if (val is List) {
+      return List<String>.from(val);
+    }
+    return [];
+  }
+
+  static Future<void> addCustomRoleForDepartment(String dept, String role) async {
+    final list = getCustomRolesForDepartment(dept);
+    if (!list.contains(role)) {
+      list.add(role);
+      await settingsBox.put('custom_roles_for_dept_${dept.toLowerCase().trim()}', list);
+      await settingsBox.flush();
+    }
+  }
+
+  static List<String> getRolesForDepartment(String dept) {
+    final normDept = dept.trim();
+    final defaultRoles = <String>[];
+    if (normDept.toLowerCase() == 'administration' || normDept.toLowerCase() == 'admin') {
+      defaultRoles.addAll(['Chairman', 'CEO', 'HQ Manager', 'Admin', 'Branch Manager', 'IT']);
+    } else if (normDept.toLowerCase() == 'dispensary') {
+      defaultRoles.addAll(['Supervisor', 'Dispenser', 'Receptionist', 'Doctor']);
+    } else if (normDept.toLowerCase() == 'office') {
+      defaultRoles.addAll(['Sweeper', 'CEO', 'Admin', 'IT', 'Office Boy', 'Branch Manager']);
+    } else if (normDept.toLowerCase() == 'madrassa') {
+      defaultRoles.addAll(['Madrassa Teacher', 'Madrassa Admin', 'Principal', 'Khateeb', 'Imam', 'Moazan']);
+    } else if (normDept.toLowerCase() == 'school') {
+      defaultRoles.addAll(['Peon', 'Admin', 'Principal']);
+    } else if (normDept.toLowerCase() == 'dasterkhwaan') {
+      defaultRoles.addAll(['Helper', 'Cook']);
+    } else {
+      defaultRoles.addAll(['Helper', 'Staff', 'Manager']);
+    }
+
+    final custom = getCustomRolesForDepartment(normDept);
+    for (final r in custom) {
+      if (!defaultRoles.contains(r)) {
+        defaultRoles.add(r);
+      }
+    }
+    return defaultRoles;
+  }
+
   static List<String> getCustomRoles() {
     final val = settingsBox.get('global_custom_roles');
     if (val is List) {
@@ -1465,6 +1864,55 @@ class FinanceLocalStorage {
     }
   }
 
+  static List<String> getCustomBanks() {
+    final val = settingsBox.get('global_custom_banks');
+    if (val is List) {
+      return List<String>.from(val);
+    }
+    return [];
+  }
+
+  static Future<void> addCustomBank(String bank) async {
+    final list = getCustomBanks();
+    if (!list.contains(bank)) {
+      list.add(bank);
+      await settingsBox.put('global_custom_banks', list);
+      await settingsBox.flush();
+    }
+  }
+
+  static List<Map<String, dynamic>> getCustomBranches() {
+    final val = settingsBox.get('global_custom_branches');
+    if (val is List) {
+      return List<Map<String, dynamic>>.from(val.map((e) => Map<String, dynamic>.from(e as Map)));
+    }
+    return [];
+  }
+
+  static Future<void> addCustomBranch(String id, String name) async {
+    final list = getCustomBranches();
+    if (!list.any((b) => b['id'] == id)) {
+      list.add({'id': id, 'name': name});
+      await settingsBox.put('global_custom_branches', list.map((e) => Map<dynamic, dynamic>.from(e)).toList());
+      await settingsBox.flush();
+    }
+    
+    final box = Hive.box(LocalStorageService.branchesBox);
+    await box.put(id, {'id': id, 'name': name});
+    await box.flush();
+  }
+
+  static List<Map<String, dynamic>> getAllBranches(List<Map<String, dynamic>> originalBranches) {
+    final list = List<Map<String, dynamic>>.from(originalBranches);
+    final custom = getCustomBranches();
+    for (final c in custom) {
+      if (!list.any((b) => b['id'] == c['id'])) {
+        list.add(c);
+      }
+    }
+    return list;
+  }
+
   // ── Firestore Download Operations ─────────────────────────────────────────
   static Future<void> downloadEmployees(String branchId, {bool force = false}) async {
     final key = 'employees_$branchId';
@@ -1489,6 +1937,10 @@ class FinanceLocalStorage {
       for (final doc in snap.docs) {
         final data = doc.data();
         final localId = data['localId'] as String? ?? doc.id;
+        final localRecord = box.get(localId);
+        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+          continue;
+        }
         final docBranchId = data['branchId'] as String? ?? doc.reference.parent.parent?.id ?? branchId;
 
         final record = Map<String, dynamic>.from(data);
@@ -1542,6 +1994,12 @@ class FinanceLocalStorage {
             continue;
           }
 
+          final key = '${employeeId}_$historyId';
+          final localRecord = box.get(key);
+          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+            continue;
+          }
+
           final data = doc.data();
           final record = Map<String, dynamic>.from(data);
           record['id'] = historyId;
@@ -1554,7 +2012,6 @@ class FinanceLocalStorage {
             }
           }
 
-          final key = '${employeeId}_$historyId';
           updates[key] = _sanitize(record);
         }
       }
@@ -1595,6 +2052,12 @@ class FinanceLocalStorage {
             continue;
           }
 
+          final key = '${employeeId}_$dateStr';
+          final localRecord = box.get(key);
+          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+            continue;
+          }
+
           final data = doc.data();
           final record = Map<String, dynamic>.from(data);
           record['syncStatus'] = 'synced';
@@ -1605,7 +2068,6 @@ class FinanceLocalStorage {
             }
           }
 
-          final key = '${employeeId}_$dateStr';
           updates[key] = _sanitize(record);
         }
       }
@@ -1643,6 +2105,10 @@ class FinanceLocalStorage {
       for (final doc in snap.docs) {
         final data = doc.data();
         final recordId = data['localId'] as String? ?? doc.id;
+        final localRecord = box.get(recordId);
+        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+          continue;
+        }
         final docBranchId = data['branchId'] as String? ?? doc.reference.parent.parent?.id ?? branchId;
 
         final record = Map<String, dynamic>.from(data);
@@ -1741,6 +2207,11 @@ class FinanceLocalStorage {
           final transferId = doc.id;
 
           if (branchId != 'all' && branchId.isNotEmpty && docBranchId != branchId) {
+            continue;
+          }
+
+          final localRecord = box.get(transferId);
+          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
             continue;
           }
 
@@ -1890,6 +2361,10 @@ class FinanceLocalStorage {
       for (final doc in snap.docs) {
         final data = doc.data();
         final loanId = data['localId'] as String? ?? doc.id;
+        final localRecord = box.get(loanId);
+        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+          continue;
+        }
         final docBranchId = data['branchId'] as String? ?? doc.reference.parent.parent?.id ?? branchId;
 
         final record = Map<String, dynamic>.from(data);
@@ -1902,23 +2377,6 @@ class FinanceLocalStorage {
           if (record[field] is Timestamp) {
             record[field] = (record[field] as Timestamp).toDate().toIso8601String();
           }
-        }
-
-        if (record['payments'] is List) {
-          final paymentsList = List<dynamic>.from(record['payments'] as List);
-          final sanitizedPayments = <Map<String, dynamic>>[];
-          for (final p in paymentsList) {
-            if (p is Map) {
-              final pMap = Map<String, dynamic>.from(p);
-              for (final field in ['date', 'createdAt', 'voidedAt']) {
-                if (pMap[field] is Timestamp) {
-                  pMap[field] = (pMap[field] as Timestamp).toDate().toIso8601String();
-                }
-              }
-              sanitizedPayments.add(pMap);
-            }
-          }
-          record['payments'] = sanitizedPayments;
         }
 
         updates[loanId] = _sanitize(record);
@@ -1944,5 +2402,224 @@ class FinanceLocalStorage {
     await downloadAuditLogs(branchId);
     await downloadFinanceHolidays(branchId);
     await downloadLoans(branchId);
+  }
+
+  // ── Smart User-Employee Linking Helpers ─────────────────────────────────────
+
+  /// Helper to sanitize CNIC numbers by removing dashes, spaces, and slashes
+  static String _cleanCnic(String cnic) {
+    return cnic.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  /// Automatically finds matching Employee for a User based on:
+  /// 1. CNIC Match (highest confidence)
+  /// 2. Email Match
+  /// 3. Name + Department + Role Match
+  static Map<String, dynamic>? findMatchingEmployeeForUser({
+    required String branchId,
+    String? cnic,
+    String? email,
+    String? username,
+    String? department,
+    String? role,
+  }) {
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return null;
+    final empBox = Hive.box(LocalStorageService.employeesBox);
+
+    final cleanCnic = (cnic != null && cnic.isNotEmpty) ? _cleanCnic(cnic) : '';
+    final cleanEmail = email?.trim().toLowerCase() ?? '';
+    final cleanName = username?.trim().toLowerCase() ?? '';
+    final cleanDept = department?.trim().toLowerCase() ?? '';
+    final cleanRole = role?.trim().toLowerCase() ?? '';
+
+    Map<String, dynamic>? bestMatch;
+    String matchReason = '';
+
+    for (var val in empBox.values) {
+      if (val is Map) {
+        final emp = Map<String, dynamic>.from(val);
+
+        // Filter by branch if applicable
+        final empBranch = emp['branchId']?.toString() ?? '';
+        if (branchId.isNotEmpty && empBranch.isNotEmpty && empBranch != branchId && empBranch != 'all') {
+          continue;
+        }
+
+        final empCnic = _cleanCnic(emp['cnic']?.toString() ?? emp['identification']?.toString() ?? '');
+        final empEmail = (emp['email']?.toString() ?? '').trim().toLowerCase();
+        final empName = (emp['name']?.toString() ?? '').trim().toLowerCase();
+        final empDept = (emp['department']?.toString() ?? '').trim().toLowerCase();
+        final empRole = (emp['designation']?.toString() ?? emp['role']?.toString() ?? '').trim().toLowerCase();
+
+        // 1. Check CNIC Match
+        if (cleanCnic.length >= 10 && empCnic.length >= 10 && cleanCnic == empCnic) {
+          bestMatch = emp;
+          matchReason = 'Matched by CNIC ($cleanCnic)';
+          break; // Highest priority match
+        }
+
+        // 2. Check Email Match
+        if (bestMatch == null && cleanEmail.isNotEmpty && empEmail.isNotEmpty && cleanEmail == empEmail) {
+          bestMatch = emp;
+          matchReason = 'Matched by Email ($cleanEmail)';
+        }
+
+        // 3. Check Name + Department + Role Match
+        if (bestMatch == null && cleanName.isNotEmpty && empName.isNotEmpty && cleanName == empName) {
+          final deptMatches = cleanDept.isEmpty || empDept.isEmpty || cleanDept == empDept;
+          final roleMatches = cleanRole.isEmpty || empRole.isEmpty || cleanRole == empRole;
+          if (deptMatches && roleMatches) {
+            bestMatch = emp;
+            matchReason = 'Matched by Name ($empName) & Department/Role';
+          }
+        }
+      }
+    }
+
+    if (bestMatch != null) {
+      final res = Map<String, dynamic>.from(bestMatch);
+      res['matchReason'] = matchReason;
+      return res;
+    }
+
+    return null;
+  }
+
+  /// Manually or Programmatically links a User account to an Employee profile
+  static Future<bool> linkUserToEmployee({
+    required String userId,
+    required String employeeId,
+  }) async {
+    try {
+      // 1. Update User Record in local_users
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final usersBox = Hive.box(LocalStorageService.usersBox);
+        final userRaw = usersBox.get(userId);
+        if (userRaw is Map) {
+          final uMap = Map<String, dynamic>.from(userRaw);
+          uMap['employeeId'] = employeeId;
+          await usersBox.put(userId, uMap);
+          await usersBox.flush();
+        }
+      }
+
+      // 2. Update Employee Record in local_employees
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        final empBox = Hive.box(LocalStorageService.employeesBox);
+        final empRaw = empBox.get(employeeId);
+        if (empRaw is Map) {
+          final eMap = Map<String, dynamic>.from(empRaw);
+          eMap['userId'] = userId;
+          await empBox.put(employeeId, eMap);
+          await empBox.flush();
+        }
+      }
+
+      // 3. Update Firestore if online
+      try {
+        await FirebaseFirestore.instance.collection('users').doc(userId).update({'employeeId': employeeId});
+        await FirebaseFirestore.instance.collection('employees').doc(employeeId).update({'userId': userId});
+      } catch (e) {
+        debugPrint('[FinanceLS] Firestore user-employee link update warning: $e');
+      }
+
+      debugPrint('[FinanceLS] Successfully linked User $userId <-> Employee $employeeId');
+      return true;
+    } catch (e) {
+      debugPrint('[FinanceLS] Error linking user to employee: $e');
+      return false;
+    }
+  }
+
+  /// Creates or updates a unified Employee profile for an App User account.
+  /// Guarantees that registering a user automatically registers them as an Employee in Finance & HR.
+  static Future<String> createOrUpdateUnifiedEmployeeProfile({
+    required String userId,
+    required String username,
+    required String email,
+    required String role,
+    required String branchId,
+    String? cnic,
+    String? phone,
+    String? department,
+    double? baseSalary,
+    String? bankName,
+    String? bankAccount,
+    String? profilePictureUrl,
+  }) async {
+    try {
+      final empBox = employeesBox;
+
+      // 1. Check if employee already exists for this user ID, CNIC, or Email
+      Map<String, dynamic>? existingEmp = findMatchingEmployeeForUser(
+        branchId: branchId,
+        cnic: cnic,
+        email: email,
+        username: username,
+        department: department,
+        role: role,
+      );
+
+      String empId = existingEmp?['id']?.toString() ?? existingEmp?['localId']?.toString() ?? '';
+      if (empId.isEmpty) {
+        empId = 'EMP_${DateTime.now().millisecondsSinceEpoch}';
+      }
+
+      final deptName = (department != null && department.isNotEmpty)
+          ? department
+          : (role.toLowerCase().contains('doc') ? 'Dispensary' : 'Office');
+
+      final empData = <String, dynamic>{
+        'id': empId,
+        'localId': empId,
+        'userId': userId,
+        'linkedUserId': userId,
+        'name': username,
+        'email': email.trim().toLowerCase(),
+        'phone': phone ?? '',
+        'cnic': cnic ?? '',
+        'identification': cnic ?? '',
+        'role': role,
+        'designation': role,
+        'department': deptName,
+        'branchId': branchId,
+        'currentSalary': baseSalary ?? 0.0,
+        'baseSalary': baseSalary ?? 0.0,
+        'bankName': bankName ?? 'Cash',
+        'bankAccount': bankAccount ?? '',
+        'profilePictureUrl': profilePictureUrl ?? '',
+        'isActive': true,
+        'status': 'Active',
+        'joiningDate': _nowIso(),
+        'createdAt': _nowIso(),
+        'updatedAt': _nowIso(),
+        'syncStatus': 'synced',
+      };
+
+      if (existingEmp != null) {
+        final merged = Map<String, dynamic>.from(existingEmp)..addAll(empData);
+        await empBox.put(empId, _sanitize(merged));
+      } else {
+        await empBox.put(empId, _sanitize(empData));
+      }
+      await empBox.flush();
+
+      // 2. Link in User record
+      await linkUserToEmployee(userId: userId, employeeId: empId);
+
+      // 3. Sync to Firestore
+      try {
+        await FirebaseFirestore.instance.collection('employees').doc(empId).set(empData, SetOptions(merge: true));
+        await FirebaseFirestore.instance.collection('users').doc(userId).set({'employeeId': empId}, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('[FinanceLS] Firestore unified employee sync warning: $e');
+      }
+
+      debugPrint('[FinanceLS] Successfully unified User $userId -> Employee $empId');
+      return empId;
+    } catch (e) {
+      debugPrint('[FinanceLS] Error creating unified employee profile: $e');
+      return '';
+    }
   }
 }

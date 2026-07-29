@@ -10,15 +10,14 @@ import '../pages/dispensary/dispensar/medicine_ledger.dart';
 import '../pages/donations/donations_screen.dart';
 import '../pages/donations/donations_shared.dart';
 import '../pages/branches.dart';
-import '../pages/users.dart';
+
 import '../pages/server.dart';
 import '../pages/download_screen.dart';
 import '../pages/office/finance_page.dart';
 import '../pages/Dasterkhwaan/office_boy.dart';
 import '../pages/Dasterkhwaan/kitchen.dart';
+import '../pages/Dasterkhwaan/stock.dart';
 import '../pages/branches_register.dart';
-import '../pages/dispensary/dispensar/inventory_update.dart';
-// Note: inventory_update import kept for potential future use
 import '../pages/dispensary/patient_detail_screen.dart';
 import '../pages/dispensary/receptionist/patient_register.dart';
 import '../pages/register.dart';
@@ -26,13 +25,15 @@ import '../pages/overview.dart';
 import '../pages/request.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
 import '../pages/madrassa/madrassa_guardian_screen.dart';
-import '../pages/inventory_doc.dart';
+import '../pages/school/school_dashboard.dart';
+import '../pages/users.dart';
 
 enum ModuleCategory {
   office,
   dispensary,
   dasterkhwaan,
   madrassa,
+  school,
 }
 
 class AppModule {
@@ -208,6 +209,7 @@ class ModuleRegistry {
       requiredPermission: AppPermission.manageInventory,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
+      isFeatured: true,
       builder: (context, data) => InventoryPage(
         branchId: data['branchId'] ?? 'unknown',
       ),
@@ -284,7 +286,7 @@ class ModuleRegistry {
     ),
     AppModule(
       id: 'office_boy',
-      title: 'Office',
+      title: 'Office Boy',
       description: 'Office token issuing and management',
       icon: Icons.room_service_rounded,
       requiredPermission: AppPermission.generateFoodTokens,
@@ -293,8 +295,9 @@ class ModuleRegistry {
       builder: (context, data) => DasterkhwaanOfficeBoy(
         branchId: data['branchId'] ?? 'unknown',
         userName: data['name'] ?? 'User',
+        role: data['role'] ?? 'Office Boy',
       ),
-      category: ModuleCategory.dasterkhwaan,
+      category: ModuleCategory.office,
     ),
     AppModule(
       id: 'kitchen',
@@ -307,6 +310,19 @@ class ModuleRegistry {
       builder: (context, data) => DasterkhwaanKitchen(
         branchId: data['branchId'] ?? 'all', // Shared view for executives
         username: data['name'] ?? 'Executive',
+      ),
+      category: ModuleCategory.dasterkhwaan,
+    ),
+    AppModule(
+      id: 'dasterkhwaan_inventory',
+      title: 'Dasterkhwaan Inventory',
+      description: 'Manage Dasterkhwaan kitchen supplies and stock',
+      icon: Icons.inventory_2_outlined,
+      requiredPermission: AppPermission.manageKitchen,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => DasterkhwaanStock(
+        branchId: data['branchId'] ?? 'all',
       ),
       category: ModuleCategory.dasterkhwaan,
     ),
@@ -392,11 +408,13 @@ class ModuleRegistry {
       requiredPermission: AppPermission.viewMadrassaParent,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
+      isFeatured: true,
       builder: (context, data) {
         return MadrassaGuardianScreen(userData: data);
       },
       category: ModuleCategory.madrassa,
     ),
+
     AppModule(
       id: 'patient_register_standalone',
       title: 'Patient Registration',
@@ -431,6 +449,106 @@ class ModuleRegistry {
       ),
       category: ModuleCategory.dispensary,
     ),
+    AppModule(
+      id: 'school_module',
+      title: 'Taleem-o-Tarbiyat School',
+      description: 'Taleem-o-Tarbiyat School System dashboard overview, admissions, and analytics (GMWF)',
+      icon: Icons.school_rounded,
+      requiredPermission: AppPermission.manageSchool,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 0,
+      ),
+      category: ModuleCategory.school,
+    ),
+    AppModule(
+      id: 'school_attendance',
+      title: 'Student Attendance',
+      description: 'Daily student attendance log and uniform tracking',
+      icon: Icons.how_to_reg_rounded,
+      requiredPermission: AppPermission.manageSchool,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 1,
+      ),
+      category: ModuleCategory.school,
+    ),
+    AppModule(
+      id: 'school_teacher_attendance',
+      title: 'Faculty Attendance',
+      description: 'Daily faculty attendance, check-in tracking, and leave management',
+      icon: Icons.co_present_rounded,
+      requiredPermission: AppPermission.manageSchoolAdmin,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 2,
+      ),
+      category: ModuleCategory.school,
+    ),
+    AppModule(
+      id: 'school_students',
+      title: 'School Admissions',
+      description: 'Register and manage student profiles and academic streams',
+      icon: Icons.groups_rounded,
+      requiredPermission: AppPermission.manageSchool,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 3,
+      ),
+      category: ModuleCategory.school,
+    ),
+    AppModule(
+      id: 'school_teachers',
+      title: 'School Faculty',
+      description: 'Teacher staff registry, departments, and class assignments',
+      icon: Icons.record_voice_over_rounded,
+      requiredPermission: AppPermission.manageSchoolAdmin,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 4,
+      ),
+      category: ModuleCategory.school,
+    ),
+    AppModule(
+      id: 'school_library',
+      title: 'School Library',
+      description: 'Book catalog, issue/return records, and overdue tracking',
+      icon: Icons.local_library_rounded,
+      requiredPermission: AppPermission.manageSchoolLibrary,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => SchoolDashboard(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? data['username'] ?? 'User',
+        role: data['role'] ?? 'School Admin',
+        initialTabIndex: 5,
+      ),
+      category: ModuleCategory.school,
+    ),
   ];
 
   static List<AppModule> getAvailableModules(String role) {
@@ -459,6 +577,7 @@ class ModuleRegistry {
       if (isBM) {
         allowedIds.addAll([
           'kitchen',
+          'dasterkhwaan_inventory',
           'office_boy',
           'donations',
           'patients_list',
@@ -477,6 +596,7 @@ class ModuleRegistry {
         'inventory_ledger': 'Medicine Ledger',
         'office_boy': 'Office',
         'kitchen': 'Kitchen',
+        'dasterkhwaan_inventory': 'Dasterkhwaan Stock',
         'donations': 'Donations',
         'patients_list': 'Patients',
         'patient_register_standalone': 'Registration',
@@ -490,13 +610,14 @@ class ModuleRegistry {
             var updated = m.copyWith(title: renameMap[m.id]);
 
 
-            // Override Inventory builder for supervisor/BM to use InventoryDocPage
+            // Override Inventory builder for supervisor/BM to use InventoryPage in read-only mode
             if (m.id == 'inventory') {
               updated = updated.copyWith(
-                builder: (context, data) => InventoryDocPage(
+                builder: (context, data) => InventoryPage(
                   branchId: data['branchId'] ?? 'unknown',
-                  role: normalizedRole,
-                  isStandalone: false,
+                  isSupervisor: true,
+                  isReadOnly: true,
+                  isEmbedded: true,
                 ),
               );
             }
