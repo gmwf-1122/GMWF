@@ -205,6 +205,85 @@ class AutoUpdateService {
     return false;
   }
 
+  /// Direct in-app stream download with progress callback and auto-installer launch.
+  static Future<bool> downloadAndInstallUpdate(
+    String downloadUrl, {
+    required Function(double progress, String statusMessage) onProgress,
+  }) async {
+    if (downloadUrl.isEmpty) return false;
+
+    if (kIsWeb) {
+      return launchUpdateUrl(downloadUrl);
+    }
+
+    try {
+      onProgress(0.02, 'Connecting to update server...');
+      final client = http.Client();
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+      final response = await client.send(request);
+
+      if (response.statusCode != 200) {
+        onProgress(0.0, 'Direct download unavailable. Opening browser...');
+        return launchUpdateUrl(downloadUrl);
+      }
+
+      final contentLength = response.contentLength ?? 0;
+      final tempDir = await getTemporaryDirectory();
+
+      String fileName = 'GMWF_Setup_Update.exe';
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        fileName = 'GMWF_Update.apk';
+      }
+
+      final filePath = path.join(tempDir.path, fileName);
+      final file = File(filePath);
+      final sink = file.openWrite();
+
+      int receivedBytes = 0;
+      await response.stream.forEach((chunk) {
+        receivedBytes += chunk.length;
+        sink.add(chunk);
+
+        if (contentLength > 0) {
+          final progress = (receivedBytes / contentLength).clamp(0.0, 1.0);
+          final percent = (progress * 100).toInt();
+          final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+          final mbTotal = (contentLength / (1024 * 1024)).toStringAsFixed(1);
+          onProgress(progress, 'Downloading... $percent% ($mbReceived MB / $mbTotal MB)');
+        } else {
+          final mbReceived = (receivedBytes / (1024 * 1024)).toStringAsFixed(1);
+          onProgress(0.5, 'Downloading... $mbReceived MB');
+        }
+      });
+
+      await sink.flush();
+      await sink.close();
+      client.close();
+
+      onProgress(1.0, 'Download finished! Launching installer...');
+      await Future.delayed(const Duration(milliseconds: 600));
+
+      if (defaultTargetPlatform == TargetPlatform.windows) {
+        debugPrint('[AutoUpdateService] Launching Windows installer: $filePath');
+        await Process.start(filePath, []);
+        return true;
+      } else if (defaultTargetPlatform == TargetPlatform.android) {
+        final fileUri = Uri.file(filePath);
+        if (await canLaunchUrl(fileUri)) {
+          await launchUrl(fileUri, mode: LaunchMode.externalApplication);
+          return true;
+        } else {
+          return launchUpdateUrl(downloadUrl);
+        }
+      } else {
+        return launchUpdateUrl(downloadUrl);
+      }
+    } catch (e) {
+      debugPrint('[AutoUpdateService] In-app download error: $e. Falling back to browser launch.');
+      return launchUpdateUrl(downloadUrl);
+    }
+  }
+
   /// Downloads and executes silent installer for headless server instances.
   static Future<bool> performSilentHeadlessUpdate(String downloadUrl) async {
     if (downloadUrl.isEmpty || kIsWeb) return false;

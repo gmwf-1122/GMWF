@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import '../services/auto_update_service.dart';
 import '../theme/role_theme_provider.dart';
 
-class UpdateDialogWidget extends StatelessWidget {
+class UpdateDialogWidget extends StatefulWidget {
   final UpdateInfo updateInfo;
 
   const UpdateDialogWidget({
@@ -32,11 +32,47 @@ class UpdateDialogWidget extends StatelessWidget {
   }
 
   @override
+  State<UpdateDialogWidget> createState() => _UpdateDialogWidgetState();
+}
+
+class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
+  bool _isDownloading = false;
+  double _downloadProgress = 0.0;
+  String _statusMessage = '';
+
+  Future<void> _startInAppDownload() async {
+    setState(() {
+      _isDownloading = true;
+      _downloadProgress = 0.01;
+      _statusMessage = 'Connecting...';
+    });
+
+    await AutoUpdateService.downloadAndInstallUpdate(
+      widget.updateInfo.downloadUrl,
+      onProgress: (progress, statusMessage) {
+        if (mounted) {
+          setState(() {
+            _downloadProgress = progress;
+            _statusMessage = statusMessage;
+          });
+        }
+      },
+    );
+
+    if (mounted && !widget.updateInfo.forceUpdate) {
+      // Auto close dialog after installer launches if non-mandatory
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) Navigator.maybePop(context);
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
 
     return PopScope(
-      canPop: !updateInfo.forceUpdate,
+      canPop: !widget.updateInfo.forceUpdate && !_isDownloading,
       child: Dialog(
         backgroundColor: t.bgCard,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
@@ -113,7 +149,7 @@ class UpdateDialogWidget extends StatelessWidget {
                   border: Border.all(color: Colors.blue.shade200, width: 0.8),
                 ),
                 child: Text(
-                  'v${AutoUpdateService.currentVersion}  ➔  v${updateInfo.latestVersion}',
+                  'v${AutoUpdateService.currentVersion}  ➔  v${widget.updateInfo.latestVersion}',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -145,7 +181,7 @@ class UpdateDialogWidget extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      updateInfo.releaseNotes,
+                      widget.updateInfo.releaseNotes,
                       style: TextStyle(
                         fontSize: 13,
                         color: t.textPrimary,
@@ -158,7 +194,7 @@ class UpdateDialogWidget extends StatelessWidget {
               const SizedBox(height: 20),
 
               // Mandatory warning if required
-              if (updateInfo.forceUpdate) ...[
+              if (widget.updateInfo.forceUpdate) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
@@ -182,10 +218,34 @@ class UpdateDialogWidget extends StatelessWidget {
                 const SizedBox(height: 16),
               ],
 
+              // Live Download Progress Bar when active
+              if (_isDownloading) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: _downloadProgress > 0 ? _downloadProgress : null,
+                    backgroundColor: t.accent.withValues(alpha: 0.12),
+                    color: t.accent,
+                    minHeight: 8,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _statusMessage,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: t.accent,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // Buttons
               Row(
                 children: [
-                  if (!updateInfo.forceUpdate) ...[
+                  if (!widget.updateInfo.forceUpdate && !_isDownloading) ...[
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => Navigator.pop(context),
@@ -204,9 +264,7 @@ class UpdateDialogWidget extends StatelessWidget {
                   ],
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () {
-                        AutoUpdateService.launchUpdateUrl(updateInfo.downloadUrl);
-                      },
+                      onPressed: _isDownloading ? null : _startInAppDownload,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
                         foregroundColor: Colors.white,
@@ -214,12 +272,18 @@ class UpdateDialogWidget extends StatelessWidget {
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         elevation: 0,
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.download_rounded, size: 18),
-                          SizedBox(width: 6),
-                          Text('Update Now', style: TextStyle(fontWeight: FontWeight.w700)),
+                          Icon(
+                            _isDownloading ? Icons.hourglass_top_rounded : Icons.download_rounded,
+                            size: 18,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _isDownloading ? 'Downloading...' : 'Update Now',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
                         ],
                       ),
                     ),
