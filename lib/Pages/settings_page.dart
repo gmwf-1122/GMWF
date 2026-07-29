@@ -15,6 +15,8 @@ import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import 'admin/data_cleanup_screen.dart';
 import 'settings/biometric_device_manager_page.dart';
+import '../services/auto_update_service.dart';
+import '../widgets/update_dialog_widget.dart';
 
 
 class SettingsPage extends StatefulWidget {
@@ -1040,6 +1042,48 @@ class _SettingsPageState extends State<SettingsPage> {
                               _profileItem(t, Icons.badge_outlined, 'role', role),
                               _divider(t),
                               _profileItem(t, Icons.location_on_outlined, 'branch', branch),
+                              _divider(t),
+                              ListTile(
+                                onTap: () async {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: const Text('Checking for application updates...'),
+                                      duration: const Duration(seconds: 2),
+                                      backgroundColor: t.accent,
+                                    ),
+                                  );
+                                  final info = await AutoUpdateService.checkForUpdates();
+                                  if (context.mounted) {
+                                    if (info != null && info.hasUpdate) {
+                                      UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Your GMWF Platform is up to date (v1.2.6)!'),
+                                          backgroundColor: Colors.green,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                },
+                                leading: Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(Icons.system_update_rounded, color: t.accent, size: 20),
+                                ),
+                                title: Text(
+                                  'App Version v${AutoUpdateService.currentVersion}',
+                                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                subtitle: Text(
+                                  'Tap to check for updates',
+                                  style: TextStyle(color: t.textTertiary, fontSize: 12),
+                                ),
+                                trailing: Icon(Icons.chevron_right_rounded, color: t.textTertiary, size: 20),
+                              ),
                               _divider(t),
                               ListTile(
                                 onTap: () => _showChangePasswordDialog(context, t),

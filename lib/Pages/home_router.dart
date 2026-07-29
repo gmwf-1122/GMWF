@@ -55,6 +55,7 @@ class HomeRouter extends StatefulWidget {
 class _HomeRouterState extends State<HomeRouter> {
   late Future<Map<String, dynamic>?> _userDataFuture;
   StreamSubscription<DocumentSnapshot>? _revokeListener;
+  Timer? _periodicUpdateTimer;
   Map<String, dynamic>? _accessRevokedData;
 
   @override
@@ -67,12 +68,21 @@ class _HomeRouterState extends State<HomeRouter> {
         final role = (userData['role'] ?? '').toString().toLowerCase();
         final isServerMode = role == 'server';
         UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
+
+        // Periodically check for updates every 2 hours so users who never log out stay updated
+        _periodicUpdateTimer?.cancel();
+        _periodicUpdateTimer = Timer.periodic(const Duration(hours: 2), (_) {
+          if (mounted) {
+            UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
+          }
+        });
       }
     });
   }
 
   @override
   void dispose() {
+    _periodicUpdateTimer?.cancel();
     _revokeListener?.cancel();
     super.dispose();
   }
