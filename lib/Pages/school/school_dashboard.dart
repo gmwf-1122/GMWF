@@ -237,6 +237,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
       _initNavItemsAndViews();
     }
     final mediaWidth = MediaQuery.of(context).size.width;
+    final isMobile = mediaWidth < 700;
     final isSmallScreen = mediaWidth < 850;
     final effectiveCollapsed = _isCollapsed || isSmallScreen;
     final isWrapped = GlobalModuleWrapper.isWrapped(context);
@@ -244,10 +245,11 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
       appBar: isWrapped ? null : _buildTopAppBar(context),
+      drawer: isMobile ? Drawer(child: _buildSidebar(false, isDrawer: true)) : null,
       body: Row(
         children: [
-          // Sidebar Navigation
-          _buildSidebar(effectiveCollapsed),
+          // Sidebar Navigation (Hidden on mobile to give 100% screen width to views)
+          if (!isMobile) _buildSidebar(effectiveCollapsed),
 
           // Main View Content Area
           Expanded(
@@ -262,19 +264,27 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
   }
 
   PreferredSizeWidget _buildTopAppBar(BuildContext context) {
+    final isMobile = MediaQuery.of(context).size.width < 700;
+
     return AppBar(
       backgroundColor: SchoolTheme.sidebarBg,
       elevation: 0,
-      leading: const AppBackButton(color: Colors.white),
+      automaticallyImplyLeading: false,
+      leading: isMobile
+          ? IconButton(
+              icon: const Icon(Icons.menu_rounded, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            )
+          : const AppBackButton(color: Colors.white),
       title: Row(
         children: [
           // Dual Logo Header: GMWF Logo + TWT Logo
           ClipRRect(
             borderRadius: SchoolTheme.radius8,
             child: Image.asset(
-              'assets/logo/gmwf-1.png',
-              height: 32,
-              width: 32,
+              'assets/logo/gmwf-1.webp',
+              height: isMobile ? 26 : 32,
+              width: isMobile ? 26 : 32,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => Container(
                 padding: const EdgeInsets.all(6),
@@ -286,15 +296,15 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           const Text('•', style: TextStyle(color: SchoolTheme.sidebarMuted, fontSize: 16)),
-          const SizedBox(width: 8),
+          const SizedBox(width: 6),
           ClipRRect(
             borderRadius: SchoolTheme.radius8,
             child: Image.asset(
-              'assets/logo/twt_logo.png',
-              height: 32,
-              width: 32,
+              'assets/logo/twt_logo.webp',
+              height: isMobile ? 26 : 32,
+              width: isMobile ? 26 : 32,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -313,49 +323,55 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
               ),
             ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Taleem-o-Tarbiyat School System',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  'A Project of GMWF • Branch: ${widget.branchId} • Role: ${widget.role}',
-                  style: const TextStyle(color: SchoolTheme.sidebarMuted, fontSize: 12),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+          if (!isMobile) ...[
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Taleem-o-Tarbiyat School System',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'A Project of GMWF • Branch: ${widget.branchId} • Role: ${widget.role}',
+                    style: const TextStyle(color: SchoolTheme.sidebarMuted, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-          ),
+          ] else
+            const Spacer(),
         ],
       ),
       actions: [
         _SchoolSyncBadge(branchId: widget.branchId),
-        IconButton(
-          tooltip: _isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
-          icon: Icon(
-            _isCollapsed ? Icons.menu_open_rounded : Icons.menu_rounded,
-            color: Colors.white,
+        // Sidebar toggle only on desktop
+        if (!isMobile)
+          IconButton(
+            tooltip: _isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
+            icon: Icon(
+              _isCollapsed ? Icons.menu_open_rounded : Icons.menu_rounded,
+              color: Colors.white,
+            ),
+            onPressed: () {
+              setState(() => _isCollapsed = !_isCollapsed);
+            },
           ),
-          onPressed: () {
-            setState(() => _isCollapsed = !_isCollapsed);
-          },
-        ),
+        // Logout button in AppBar only on mobile (drawer has its own on desktop)
         IconButton(
           tooltip: 'Logout',
           icon: const Icon(Icons.logout_rounded, color: SchoolTheme.statusAbsent),
           onPressed: _logout,
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
       ],
     );
   }
 
-  Widget _buildSidebar(bool isCollapsed) {
+  Widget _buildSidebar(bool isCollapsed, {bool isDrawer = false}) {
     final width = isCollapsed ? 72.0 : 250.0;
 
     return AnimatedContainer(
@@ -408,6 +424,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
                     child: InkWell(
                       onTap: () {
                         setState(() => _selectedIndex = index);
+                        if (isDrawer) Navigator.pop(context);
                       },
                       splashColor: SchoolTheme.accent.withValues(alpha: 0.15),
                       hoverColor: SchoolTheme.sidebarBorder,
@@ -524,51 +541,53 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
             ),
           ),
 
-          // Sidebar Footer / Toggle button
-          const Divider(color: Color(0xFF1E293B), height: 1),
-          InkWell(
-            onTap: () => setState(() => _isCollapsed = !_isCollapsed),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-              alignment: Alignment.center,
-              child: Row(
-                mainAxisAlignment: isCollapsed
-                    ? MainAxisAlignment.center
-                    : MainAxisAlignment.spaceBetween,
-                children: [
-                  if (!isCollapsed)
-                    Row(
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF10B981),
-                            shape: BoxShape.circle,
+          // Sidebar Footer / Toggle button (hidden in drawer mode)
+          if (!isDrawer) ...[
+            const Divider(color: Color(0xFF1E293B), height: 1),
+            InkWell(
+              onTap: () => setState(() => _isCollapsed = !_isCollapsed),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                alignment: Alignment.center,
+                child: Row(
+                  mainAxisAlignment: isCollapsed
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.spaceBetween,
+                  children: [
+                    if (!isCollapsed)
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF10B981),
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          widget.branchId.toUpperCase(),
-                          style: const TextStyle(
-                            color: Color(0xFF94A3B8),
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.branchId.toUpperCase(),
+                            style: const TextStyle(
+                              color: Color(0xFF94A3B8),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    Icon(
+                      isCollapsed
+                          ? Icons.arrow_forward_ios_rounded
+                          : Icons.arrow_back_ios_rounded,
+                      color: const Color(0xFF64748B),
+                      size: 14,
                     ),
-                  Icon(
-                    isCollapsed
-                        ? Icons.arrow_forward_ios_rounded
-                        : Icons.arrow_back_ios_rounded,
-                    color: const Color(0xFF64748B),
-                    size: 14,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );

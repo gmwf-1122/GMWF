@@ -12,8 +12,10 @@ import '../../services/local_storage_service.dart';
 import '../../services/permission_service.dart';
 import 'shared_widgets.dart';
 import 'employee_form_sheet.dart';
+import 'employee_detail_page.dart';
 import 'finance_report_helper.dart';
 import 'employee_report_page.dart';
+
 
 class EmployeesTab extends StatefulWidget {
   final String branchId;
@@ -685,10 +687,19 @@ class _EmployeesTabState extends State<EmployeesTab> {
       ),
       margin: const EdgeInsets.only(bottom: 6),
       child: InkWell(
-        onTap: () => _showEmployeeDetailDrawer(context, empId),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EmployeeDetailPage(
+              employeeId: empId,
+              userRole: widget.userRole,
+              openEmployeeForm: widget.openEmployeeForm,
+            ),
+          ),
+        ),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             children: [
               Container(
@@ -706,7 +717,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 imageUrl: emp['profilePictureUrl']?.toString(),
                 imagePath: emp['profilePicturePath']?.toString(),
               ),
-                  const SizedBox(width: 10),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -741,6 +752,23 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 ),
               ),
               const SizedBox(width: 8),
+              // Quick Actions: Edit & Offboard
+              if (isActive) ...[
+                Tooltip(
+                  message: 'Edit Employee',
+                  child: IconButton(
+                    icon: Icon(Icons.edit_outlined, size: 18, color: t.accent),
+                    onPressed: () => widget.openEmployeeForm(context, empId),
+                  ),
+                ),
+                Tooltip(
+                  message: 'Offboard Employee',
+                  child: IconButton(
+                    icon: const Icon(Icons.person_off_outlined, size: 18, color: Colors.redAccent),
+                    onPressed: () => _showOffboardDialog(context, emp),
+                  ),
+                ),
+              ],
               Icon(Icons.chevron_right_rounded, size: 18, color: t.textTertiary),
             ],
           ),
@@ -748,6 +776,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
       ),
     );
   }
+
 
   Widget _buildEmptyState(RoleThemeData t) {
     return Center(
@@ -764,656 +793,135 @@ class _EmployeesTabState extends State<EmployeesTab> {
     );
   }
 
-  void _showEmployeeDetailDrawer(BuildContext context, String employeeId) {
-    final tOriginal = RoleThemeScope.dataOf(context);
-    final t = RoleThemeData(
-      roleLabel: tOriginal.roleLabel,
-      isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
-      zakat: tOriginal.zakat,
-      nonZakat: tOriginal.nonZakat,
-      gmwf: tOriginal.gmwf,
-      cardFillTokens: tOriginal.cardFillTokens,
-      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
-      cardFillDispensary: tOriginal.cardFillDispensary,
-      chartBar1: tOriginal.chartBar1,
-      chartBar2: tOriginal.chartBar2,
-      chartBar3: tOriginal.chartBar3,
-      chartGrid: tOriginal.chartGrid,
-    );
-    final ps = PermissionService();
-    DateTime calendarMonth = DateTime.now();
+  void _showOffboardDialog(BuildContext context, Map<String, dynamic> emp) {
+    final empId = emp['localId']?.toString() ?? emp['employeeId']?.toString() ?? '';
+    DateTime exitDate = DateTime.now();
+    String reason = 'Resigned';
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
-        return RoleThemeScope(
-          role: RoleTheme.admin,
-          child: StatefulBuilder(
-            builder: (drawerCtx, setDrawerState) {
-            final emp = FinanceLocalStorage.getEmployee(employeeId);
-            if (emp == null) return const Center(child: Text('Employee profile deleted.'));
-
-            final name = emp['name']?.toString() ?? '';
-            final role = emp['role']?.toString() ?? '';
-            final dept = emp['department']?.toString() ?? '';
-            final cnic = emp['cnic']?.toString() ?? '';
-            final phone = emp['phone']?.toString() ?? '';
-            final salary = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
-            final advance = (emp['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
-            final isActive = emp['isActive'] as bool? ?? true;
-
-            final history = FinanceLocalStorage.getSalaryHistory(employeeId);
-            final transfers = FinanceLocalStorage.getTransfersForEmployee(employeeId);
-            final auditLogs = FinanceLocalStorage.getAuditLogsForEmployee(employeeId);
-
-            final curRole = widget.userRole.toLowerCase().trim();
-            final empRole = (emp['role']?.toString() ?? emp['designation']?.toString() ?? '').toLowerCase().trim();
-            final empDept = (emp['department']?.toString() ?? '').toLowerCase().trim();
-            final isExecOrAdmin = empRole == 'ceo' ||
-                empRole == 'hq manager' ||
-                empRole == 'hq_manager' ||
-                empRole == 'admin' ||
-                empRole == 'chairman' ||
-                empDept == 'administration';
-            final canEditEmp = curRole == 'chairman' || (!isExecOrAdmin);
-
-            return DefaultTabController(
-              length: 4,
-              child: Container(
-                height: MediaQuery.of(drawerCtx).size.height * 0.85,
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+      builder: (dCtx) {
+        final t = RoleThemeScope.dataOf(context);
+        return StatefulBuilder(
+          builder: (dialogCtx, setDS) {
+            return AlertDialog(
+              backgroundColor: t.bgCard,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Employee Detail Card', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
-                      Row(
-                        children: [
-                          if (isActive && canEditEmp) ...[
-                            Tooltip(
-                              message: 'Edit Profile',
-                              child: IconButton(
-                                icon: Icon(Icons.edit_outlined, color: t.accent),
-                                onPressed: () {
-                                  Navigator.pop(drawerCtx);
-                                  widget.openEmployeeForm(context, employeeId);
-                                },
-                              ),
-                            ),
-                            if (ps.hasPermission(widget.userRole, AppPermission.transferEmployeeBranch))
-                              Tooltip(
-                                message: 'Transfer Branch',
-                                child: IconButton(
-                                  icon: Icon(Icons.compare_arrows_rounded, color: t.accent),
-                                  onPressed: () => _openTransferDialog(context, employeeId, emp['branchId']),
-                                ),
-                              ),
-                          ],
-                          Tooltip(
-                            message: 'Full Employee Report',
-                            child: IconButton(
-                              icon: Icon(Icons.insert_chart_outlined_rounded, color: t.accent),
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(builder: (_) => EmployeeReportPage(employeeId: employeeId)),
-                              ),
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Download Profile PDF',
-                            child: IconButton(
-                              icon: Icon(Icons.download_outlined, color: t.accent),
-                              onPressed: () => FinanceReportHelper.exportIndividualPdf(employeeId),
-                            ),
-                          ),
-                          Tooltip(
-                            message: 'Download Payment History PDF',
-                            child: IconButton(
-                              icon: Icon(Icons.receipt_long_outlined, color: t.accent),
-                              onPressed: () => FinanceReportHelper.exportPaymentReportPdf(employeeId),
-                            ),
-                          ),
-                          IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(drawerCtx)),
-                        ],
-                      ),
-                    ],
+                  const Icon(Icons.person_off_outlined, color: Colors.redAccent),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Offboard ${emp['name'] ?? 'Employee'}',
+                      style: TextStyle(color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                    const SizedBox(height: 8),
-                    TabBar(
-                      labelColor: t.accent,
-                      unselectedLabelColor: t.textTertiary,
-                      indicatorColor: t.accent,
-                      tabs: const [
-                        Tab(text: 'Profile', icon: Icon(Icons.person_outline, size: 18)),
-                        Tab(text: 'Attendance', icon: Icon(Icons.calendar_today_outlined, size: 18)),
-                        Tab(text: 'Leaves', icon: Icon(Icons.offline_pin_outlined, size: 18)),
-                        Tab(text: 'History', icon: Icon(Icons.history_outlined, size: 18)),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Expanded(
-                      child: TabBarView(
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Are you sure you want to offboard this employee? Active status will be terminated.',
+                    style: TextStyle(color: t.textSecondary, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Exit Date', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: dialogCtx,
+                        initialDate: exitDate,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) {
+                        setDS(() => exitDate = picked);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: t.bgCardAlt,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: t.bgRule),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Tab 1: Profile Details & Actions
-                          SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Center(
-                                  child: Column(
-                                    children: [
-                                      buildInitialsAvatar(
-                                        name: name,
-                                        theme: t,
-                                        radius: 36,
-                                        imageUrl: emp['profilePictureUrl']?.toString(),
-                                        imagePath: emp['profilePicturePath']?.toString(),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
-                                      const SizedBox(height: 2),
-                                      Text('$role • $dept', style: TextStyle(fontSize: 13, color: t.textSecondary)),
-                                      const SizedBox(height: 10),
-                                      Wrap(
-                                        alignment: WrapAlignment.center,
-                                        spacing: 8,
-                                        runSpacing: 6,
-                                        children: [
-                                          _buildInfoChip(Icons.badge, cnic, t),
-                                          _buildInfoChip(Icons.phone, phone, t),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
-                                _buildDetailSectionHeader('Job & Financial Details', t),
-                                _buildDetailRow('Joining Date', emp['joiningDate'] ?? 'N/A', t),
-                                _buildDetailRow('Current Branch', '${_getBranchName(emp['branchId']?.toString() ?? '')} (${emp['branchId']?.toString().toUpperCase() ?? 'N/A'})', t),
-                                _buildDetailRow('Compensation', _sentenceCase(emp['compensationType']?.toString()), t),
-                                _buildDetailRow('Base Salary', 'PKR ${NumberFormat('#,###').format(salary)}', t),
-                                _buildDetailRow('Bank Name', emp['bankName']?.toString().isNotEmpty == true ? emp['bankName'] : 'N/A', t),
-                                _buildDetailRow('Account / IBAN', emp['bankAccount']?.toString().isNotEmpty == true ? emp['bankAccount'] : 'N/A', t),
-                                _buildDetailRow('Education', emp['education'] ?? 'N/A', t),
-
-                                const SizedBox(height: 20),
-                                _buildDetailSectionHeader('Personal Details', t),
-                                _buildDetailRow('Gender', emp['gender'] ?? 'N/A', t),
-                                _buildDetailRow('DOB (Date of Birth)', emp['dob'] ?? 'N/A', t),
-                                _buildDetailRow('Marital Status', emp['maritalStatus'] ?? 'N/A', t),
-                                _buildDetailRow(emp['relationshipType'] ?? 'Father/Spouse', emp['relationshipName'] ?? 'N/A', t),
-                                _buildDetailRow('CNIC Expiry', emp['cnicExpiry'] ?? 'N/A', t),
-                                _buildDetailRow('Address', emp['currentAddress'] ?? 'N/A', t),
-
-                                if (emp['workScheduleOverride'] != null) ...[
-                                  const SizedBox(height: 20),
-                                  _buildDetailSectionHeader('Work Schedule (Override)', t),
-                                  _buildDetailRow('Winter shift', emp['workScheduleOverride']['winter'] ?? 'N/A', t),
-                                  _buildDetailRow('Summer shift', emp['workScheduleOverride']['summer'] ?? 'N/A', t),
-                                ],
-
-                                const SizedBox(height: 20),
-                                _buildDetailSectionHeader('Emergency Contacts', t),
-                                if (emp['emergencyContacts'] == null || (emp['emergencyContacts'] as List).isEmpty)
-                                  Text('No emergency contacts recorded.', style: TextStyle(color: t.textTertiary, fontSize: 12))
-                                else
-                                  ...(emp['emergencyContacts'] as List).map((ec) {
-                                    final c = Map<String, dynamic>.from(ec as Map);
-                                    return Container(
-                                      margin: const EdgeInsets.only(bottom: 6),
-                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                      decoration: BoxDecoration(color: t.bgCardAlt, borderRadius: BorderRadius.circular(8)),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(c['name'] ?? '', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
-                                              Text(c['relation'] ?? '', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                            ],
-                                          ),
-                                          Text(c['phone'] ?? '', style: TextStyle(color: t.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
-                                        ],
-                                      ),
-                                    );
-                                  }),
-
-                                const SizedBox(height: 30),
-                                if (isActive)
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red.withOpacity(0.12),
-                                      foregroundColor: Colors.red,
-                                      elevation: 0,
-                                      minimumSize: const Size.fromHeight(48),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: Colors.red, width: 0.5)),
-                                    ),
-                                    icon: const Icon(Icons.person_off_outlined),
-                                    label: const Text('Offboard Employee (Deactivate)', style: TextStyle(fontWeight: FontWeight.bold)),
-                                    onPressed: () => _showDeactivateDialog(drawerCtx, employeeId, setDrawerState),
-                                  )
-                                else
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                                    children: [
-                                      ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: t.accent.withOpacity(0.12),
-                                          foregroundColor: t.accent,
-                                          elevation: 0,
-                                          minimumSize: const Size.fromHeight(48),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide(color: t.accent, width: 0.5)),
-                                        ),
-                                        icon: const Icon(Icons.person_add_alt_1_outlined),
-                                        label: const Text('Reactivate Employee', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        onPressed: () async {
-                                          try {
-                                            final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
-                                            final employeeRecord = FinanceLocalStorage.getEmployee(employeeId)!;
-                                            employeeRecord['isActive'] = true;
-                                            employeeRecord['status'] = 'Active';
-                                            employeeRecord['exitDate'] = null;
-
-                                            await FinanceLocalStorage.saveEmployee(
-                                              branchId: widget.branchId,
-                                              data: employeeRecord,
-                                              performedBy: curUser,
-                                            );
-
-                                            await FinanceLocalStorage.logAction(
-                                              branchId: widget.branchId,
-                                              entityType: 'employee',
-                                              entityId: employeeId,
-                                              action: 'update',
-                                              performedBy: curUser,
-                                              reason: 'Reactivated employee profile.',
-                                            );
-
-                                            Navigator.pop(drawerCtx);
-                                            showCustomSnackBar(context, 'Employee reactivated successfully!');
-                                          } catch (e) {
-                                            showCustomSnackBar(drawerCtx, 'Failed to reactivate: $e', error: true);
-                                          }
-                                        },
-                                      ),
-                                      const SizedBox(height: 10),
-                                      ElevatedButton.icon(
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.red.withOpacity(0.12),
-                                          foregroundColor: Colors.red,
-                                          elevation: 0,
-                                          minimumSize: const Size.fromHeight(48),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: const BorderSide(color: Colors.red, width: 0.5)),
-                                        ),
-                                        icon: const Icon(Icons.delete_forever_outlined),
-                                        label: const Text('Delete Employee Profile (Permanent)', style: TextStyle(fontWeight: FontWeight.bold)),
-                                        onPressed: () => _confirmDeleteEmployee(drawerCtx, employeeId),
-                                      ),
-                                    ],
-                                  ),
-                                const SizedBox(height: 20),
-                              ],
-                            ),
-                          ),
-
-                          // Tab 2: Attendance Calendar
-                          SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildDetailSectionHeader('Attendance Record (Calendar)', t),
-                                const SizedBox(height: 10),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    IconButton(
-                                      icon: Icon(Icons.chevron_left, color: t.textPrimary),
-                                      onPressed: () {
-                                        setDrawerState(() {
-                                          calendarMonth = DateTime(calendarMonth.year, calendarMonth.month - 1, 1);
-                                        });
-                                      },
-                                    ),
-                                    Text(
-                                      DateFormat('MMMM yyyy').format(calendarMonth),
-                                      style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                                    ),
-                                    IconButton(
-                                      icon: Icon(Icons.chevron_right, color: t.textPrimary),
-                                      onPressed: calendarMonth.year >= DateTime.now().year && calendarMonth.month >= DateTime.now().month
-                                          ? null
-                                          : () {
-                                              setDrawerState(() {
-                                                calendarMonth = DateTime(calendarMonth.year, calendarMonth.month + 1, 1);
-                                              });
-                                            },
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                GridView.count(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  crossAxisCount: 7,
-                                  childAspectRatio: 1.5,
-                                  children: const ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((day) => Center(
-                                    child: Text(day, style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
-                                  )).toList(),
-                                ),
-                                const SizedBox(height: 4),
-                                _buildCalendarDaysGrid(employeeId, emp, calendarMonth, t),
-                                const SizedBox(height: 20),
-                              ],
-                            ),
-                          ),
-
-                          // Tab 3: Leave Quotas with Progress Bars
-                          SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _buildDetailSectionHeader('Annual Leave Balances (${DateTime.now().year})', t),
-                                const SizedBox(height: 14),
-                                Builder(
-                                  builder: (context) {
-                                    final usage = FinanceLocalStorage.getLeaveUsage(employeeId, DateTime.now().year);
-                                    final quotas = FinanceLocalStorage.getLeaveQuotas();
-
-                                    Widget _buildQuotaProgressRow(String type, double used, int quota, Color color) {
-                                      final remaining = (quota - used).clamp(0.0, quota.toDouble());
-                                      final progress = (used / quota).clamp(0.0, 1.0);
-                                      return Container(
-                                        margin: const EdgeInsets.only(bottom: 12),
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: t.bgCardAlt,
-                                          borderRadius: BorderRadius.circular(14),
-                                          border: Border.all(color: t.bgRule),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                Text(
-                                                  '${type.toUpperCase()} LEAVES',
-                                                  style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
-                                                ),
-                                                Text(
-                                                  'Used: ${used.toStringAsFixed(used % 1 == 0 ? 0 : 1)} / $quota  |  Remaining: ${remaining.toStringAsFixed(remaining % 1 == 0 ? 0 : 1)}',
-                                                  style: TextStyle(color: remaining > 0 ? t.accent : t.danger, fontSize: 11, fontWeight: FontWeight.bold),
-                                                ),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 8),
-                                            ClipRRect(
-                                              borderRadius: BorderRadius.circular(4),
-                                              child: LinearProgressIndicator(
-                                                value: progress,
-                                                minHeight: 8,
-                                                backgroundColor: t.bgCard,
-                                                valueColor: AlwaysStoppedAnimation<Color>(color),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }
-
-                                    return Column(
-                                      children: [
-                                        _buildQuotaProgressRow('Sick', usage['sick'] ?? 0.0, quotas['sick'] ?? 10, Colors.orange),
-                                        _buildQuotaProgressRow('Casual', usage['casual'] ?? 0.0, quotas['casual'] ?? 12, Colors.blue),
-                                        _buildQuotaProgressRow('Annual', usage['annual'] ?? 0.0, quotas['annual'] ?? 15, Colors.green),
-                                        if ((usage['unpaid'] ?? 0.0) > 0.0)
-                                          Container(
-                                            margin: const EdgeInsets.only(bottom: 6),
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                            decoration: BoxDecoration(
-                                              color: Colors.red.withOpacity(0.05),
-                                              borderRadius: BorderRadius.circular(10),
-                                              border: Border.all(color: Colors.red.withOpacity(0.1)),
-                                            ),
-                                            child: Row(
-                                              children: [
-                                                Container(
-                                                  width: 8,
-                                                  height: 8,
-                                                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                                ),
-                                                const SizedBox(width: 10),
-                                                Expanded(
-                                                  child: Text(
-                                                    'UNPAID LEAVE',
-                                                    style: TextStyle(color: Colors.red[800], fontSize: 11, fontWeight: FontWeight.bold),
-                                                  ),
-                                                ),
-                                                Text(
-                                                  'Used: ${(usage['unpaid'] ?? 0.0).toStringAsFixed((usage['unpaid'] ?? 0.0) % 1 == 0 ? 0 : 1)} days',
-                                                  style: TextStyle(color: Colors.red[800], fontWeight: FontWeight.bold, fontSize: 12),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                      ],
-                                    );
-                                  },
-                                ),
-                                const SizedBox(height: 20),
-                              ],
-                            ),
-                          ),
-
-                          // Tab 4: Ledger & History Logs
-                          SingleChildScrollView(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text('SALARY ADJUSTMENTS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.accent, letterSpacing: 1.2)),
-                                    if (isActive)
-                                      TextButton.icon(
-                                        onPressed: () => _openSalaryAdjustmentDialog(context, employeeId, salary, () {
-                                          setDrawerState(() {});
-                                        }),
-                                        icon: const Icon(Icons.trending_up, size: 14),
-                                        label: const Text('Adjust / Increment', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                                        style: TextButton.styleFrom(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                          minimumSize: Size.zero,
-                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                if (history.isEmpty)
-                                  Text('No salary adjustments recorded.', style: TextStyle(color: t.textTertiary, fontSize: 12))
-                                else
-                                  ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    itemCount: history.length,
-                                    itemBuilder: (ctx, idx) {
-                                      final h = history[idx];
-                                      final isRetro = h['isRetroactive'] == true;
-                                      return Card(
-                                        color: t.bgCardAlt,
-                                        elevation: 0,
-                                        margin: const EdgeInsets.only(bottom: 6),
-                                        child: ListTile(
-                                          dense: true,
-                                          title: Row(
-                                            children: [
-                                              Text('PKR ${NumberFormat('#,###').format(h['amount'])}', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
-                                              const SizedBox(width: 6),
-                                              if (isRetro)
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                                  decoration: BoxDecoration(color: Colors.purple.withOpacity(0.12), borderRadius: BorderRadius.circular(4)),
-                                                  child: const Text('RETROACTIVE', style: TextStyle(color: Colors.purple, fontSize: 8, fontWeight: FontWeight.bold)),
-                                                )
-                                            ],
-                                          ),
-                                          subtitle: Text('${h['reason']}\nApproved by: ${h['approvedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                          trailing: Text(DateFormat('yyyy-MM-dd').format(DateTime.parse(h['effectiveDate'])), style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                                        ),
-                                      );
-                                    },
-                                  ),
-
-                                const SizedBox(height: 20),
-                                _buildDetailSectionHeader('Branch Transfer History', t),
-                                if (transfers.isEmpty)
-                                  Text('No transfer logs found.', style: TextStyle(color: t.textTertiary, fontSize: 12))
-                                else
-                                  ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    itemCount: transfers.length,
-                                    itemBuilder: (ctx, idx) {
-                                      final tr = transfers[idx];
-                                      return Card(
-                                        color: t.bgCardAlt,
-                                        elevation: 0,
-                                        margin: const EdgeInsets.only(bottom: 6),
-                                        child: ListTile(
-                                          dense: true,
-                                          leading: const Icon(Icons.compare_arrows_rounded, color: Colors.blue),
-                                          title: Text('${tr['fromBranchId'].toString().toUpperCase()} ➔ ${tr['toBranchId'].toString().toUpperCase()}', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
-                                          subtitle: Text('${tr['reason']}\nRequested by: ${tr['requestedBy']}\nApproved by: ${tr['approvedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                          trailing: Text(DateFormat('yyyy-MM-dd').format(DateTime.parse(tr['effectiveDate'])), style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.w600)),
-                                        ),
-                                      );
-                                    },
-                                  ),
-
-                                const SizedBox(height: 20),
-                                _buildDetailSectionHeader('Profile Change History', t),
-                                if (auditLogs.isEmpty)
-                                  Text('No profile changes recorded.', style: TextStyle(color: t.textTertiary, fontSize: 12))
-                                else
-                                  ListView.builder(
-                                    shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    itemCount: auditLogs.length,
-                                    itemBuilder: (ctx, idx) {
-                                      final log = auditLogs[idx];
-                                      final action = log['action']?.toString().toUpperCase() ?? '';
-                                      final performedBy = log['performedBy'] ?? 'System';
-                                      final timestamp = log['timestamp'] != null 
-                                          ? DateFormat('yyyy-MM-dd HH:mm').format(DateTime.parse(log['timestamp']).toLocal()) 
-                                          : 'N/A';
-                                      final List changes = log['fieldChanges'] ?? [];
-
-                                      return Container(
-                                        margin: const EdgeInsets.only(bottom: 8),
-                                        padding: const EdgeInsets.all(10),
-                                        decoration: BoxDecoration(
-                                          color: t.bgCardAlt,
-                                          borderRadius: BorderRadius.circular(10),
-                                          border: Border.all(color: t.bgRule),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                              children: [
-                                                Text(
-                                                  action == 'CREATE' ? '🎉 Profile Created' : '📝 Profile Updated',
-                                                  style: TextStyle(
-                                                    fontSize: 12,
-                                                    color: action == 'CREATE' ? Colors.green : t.accent,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
-                                                Text(timestamp, style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                              ],
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Text('By: $performedBy', style: TextStyle(color: t.textSecondary, fontSize: 11, fontWeight: FontWeight.w600)),
-                                            if (changes.isNotEmpty) ...[
-                                              const SizedBox(height: 6),
-                                              Divider(color: t.bgRule, height: 1),
-                                              const SizedBox(height: 6),
-                                              ...changes.map((c) {
-                                                final field = c['field']?.toString() ?? '';
-                                                final oldVal = c['oldValue'] ?? 'None';
-                                                final newVal = c['newValue'] ?? 'None';
-
-                                                String fieldName = field;
-                                                if (field == 'relationshipName') fieldName = 'Father/Spouse Name';
-                                                if (field == 'relationshipType') fieldName = 'Relation';
-                                                if (field == 'dob') fieldName = 'Date of Birth';
-                                                if (field == 'cnicExpiry') fieldName = 'CNIC Expiry';
-                                                if (field == 'alternatePhone') fieldName = 'Alternate Phone';
-                                                if (field == 'maritalStatus') fieldName = 'Marital Status';
-                                                if (field == 'joiningDate') fieldName = 'Joining Date';
-                                                if (field == 'compensationType') fieldName = 'Pay Type';
-                                                if (field == 'currentSalary') fieldName = 'Base Salary';
-                                                if (field == 'bankName') fieldName = 'Bank Name';
-                                                if (field == 'bankAccount') fieldName = 'Account Number';
-                                                if (field == 'currentAddress') fieldName = 'Address';
-                                                if (field == 'winterShift') fieldName = 'Winter Shift';
-                                                if (field == 'summerShift') fieldName = 'Summer Shift';
-                                                if (field == 'gender') fieldName = 'Gender';
-
-                                                return Padding(
-                                                  padding: const EdgeInsets.symmetric(vertical: 2.0),
-                                                  child: Text(
-                                                    '• $fieldName: "$oldVal" ➔ "$newVal"',
-                                                    style: TextStyle(fontSize: 11, color: t.textPrimary),
-                                                  ),
-                                                );
-                                              }),
-                                            ]
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                const SizedBox(height: 20),
-                              ],
-                            ),
-                          ),
+                          Text(DateFormat('dd MMM yyyy').format(exitDate), style: TextStyle(color: t.textPrimary, fontSize: 13)),
+                          Icon(Icons.calendar_today_outlined, size: 16, color: t.accent),
                         ],
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Offboarding Reason', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: reason,
+                    dropdownColor: t.bgCard,
+                    style: TextStyle(color: t.textPrimary, fontSize: 13),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: t.bgCardAlt,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Resigned', child: Text('Resigned')),
+                      DropdownMenuItem(value: 'Terminated', child: Text('Terminated')),
+                      DropdownMenuItem(value: 'Contract Ended', child: Text('Contract Ended')),
+                      DropdownMenuItem(value: 'Retired', child: Text('Retired')),
+                      DropdownMenuItem(value: 'Other', child: Text('Other')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setDS(() => reason = val);
+                    },
+                  ),
+                ],
               ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dCtx),
+                  child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(dCtx);
+                    await FinanceLocalStorage.syncBiDirectionalOffboarding(
+                      employeeId: empId,
+                      performedBy: widget.userRole,
+                    );
+                    if (mounted) {
+                      setState(() {});
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
+                      );
+                    }
+                  },
+                  child: const Text('Confirm Offboard'),
+                ),
+              ],
             );
           },
-        ),
-      );
-    },
-  );
-}
+        );
+      },
+    );
+  }
 
   Map<String, dynamic> _previewProjectedArrears({
+
     required String employeeId,
     required double newSalary,
     required double oldSalary,

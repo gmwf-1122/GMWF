@@ -966,7 +966,7 @@ class _LoginPageState extends State<LoginPage> {
                             }
                           },
                           child: Image.asset(
-                            "assets/logo/gmwf-1.png",
+                            "assets/logo/gmwf-1.webp",
                             height: 120,
                             fit: BoxFit.contain,
                             errorBuilder: (_, _, _) => const Icon(

@@ -8,7 +8,9 @@ import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_loans_storage.dart';
+import '../../services/finance_ledger_storage.dart';
 import '../../services/local_storage_service.dart';
+
 import '../../services/permission_service.dart';
 import '../../services/payroll_calculator_service.dart';
 import 'package:collection/collection.dart';
@@ -253,143 +255,7 @@ class _PayrollTabState extends State<PayrollTab> {
     );
   }
 
-  Widget _buildFilterBar(RoleThemeData t, List<Map<String, dynamic>> candidates) {
-    final branchesBox = Hive.box(LocalStorageService.branchesBox);
-    final branchesList = branchesBox.values.map((v) => Map<String, dynamic>.from(v as Map)).toList();
-    final branchNames = {
-      'all': 'All Branches',
-      for (final b in branchesList)
-        b['id']?.toString() ?? '': b['name']?.toString() ?? (b['id']?.toString() ?? '')
-    };
 
-    final depts = candidates
-        .map((item) {
-          final empId = item['employeeId'] as String;
-          final emp = FinanceLocalStorage.getEmployee(empId);
-          final dept = emp?['department']?.toString() ?? 'Other';
-          return dept.trim().isEmpty ? 'Other' : dept.trim();
-        })
-        .where((dept) => dept.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    final deptOptions = ['all', ...depts];
-    final hasBranchFilter = widget.branchId == 'all';
-
-    String safeDeptFilter = _selectedDeptFilter;
-    if (!deptOptions.contains(safeDeptFilter)) {
-      final matched = deptOptions.firstWhere(
-        (d) => d.toLowerCase() == safeDeptFilter.toLowerCase(),
-        orElse: () => 'all',
-      );
-      safeDeptFilter = matched;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-      ),
-      child: Row(
-        children: [
-          if (hasBranchFilter) ...[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'BRANCH',
-                    style: TextStyle(
-                      color: t.textTertiary,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Container(
-                    height: 38,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
-                    ),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: branchNames.containsKey(_selectedBranchFilter) ? _selectedBranchFilter : 'all',
-                        isExpanded: true,
-                        icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
-                        style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => _selectedBranchFilter = val);
-                          }
-                        },
-                        items: branchNames.entries.map((entry) {
-                          return DropdownMenuItem<String>(
-                            value: entry.key,
-                            child: Text(entry.value, overflow: TextOverflow.ellipsis),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'DEPARTMENT',
-                  style: TextStyle(
-                    color: t.textTertiary,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  height: 38,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: safeDeptFilter,
-                      isExpanded: true,
-                      icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
-                      style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => _selectedDeptFilter = val);
-                        }
-                      },
-                      items: deptOptions.map((dept) {
-                        return DropdownMenuItem<String>(
-                          value: dept,
-                          child: Text(dept == 'all' ? 'All Departments' : dept, overflow: TextOverflow.ellipsis),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 
   String _formatDayCount(double value) => value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
 
@@ -487,6 +353,7 @@ class _PayrollTabState extends State<PayrollTab> {
         int unpaidCount = list.length - paidCount;
 
         return Column(
+
           children: [
             _buildMonthLockWarningIfNeeded(t),
 
@@ -561,207 +428,187 @@ class _PayrollTabState extends State<PayrollTab> {
                   ],
                 ),
               ),
-              _buildFilterBar(t, filteredBySearch),
-              (() {
-                debugPrint('PAYROLL DEBUG: list.length = ${list.length}');
-                final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
-                for (final item in list) {
-                  try {
-                    final empId = item['employeeId'] as String;
-                    final emp = FinanceLocalStorage.getEmployee(empId);
-                    final branchId = emp?['branchId']?.toString() ?? 'unknown';
-                    final dept = emp?['department']?.toString() ?? 'Other';
-                    final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
+              Expanded(
+                child: _buildPayrollGroupedListWidget(t, list),
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
 
-                    debugPrint('PAYROLL DEBUG: item empId=$empId emp=${emp != null} branchId=$branchId dept=$cleanDept');
+  Widget _buildPayrollGroupedListWidget(RoleThemeData t, List<Map<String, dynamic>> list) {
+    final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
+    for (final item in list) {
+      final empId = item['employeeId'] as String;
+      final emp = FinanceLocalStorage.getEmployee(empId);
+      final branchId = emp?['branchId']?.toString() ?? 'unknown';
+      final dept = emp?['department']?.toString() ?? 'Other';
+      final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
 
-                    grouped.putIfAbsent(branchId, () => {});
-                    grouped[branchId]!.putIfAbsent(cleanDept, () => []);
-                    grouped[branchId]![cleanDept]!.add(item);
-                  } catch (e, st) {
-                    debugPrint('PAYROLL DEBUG: EXCEPTION grouping item $item -> $e\n$st');
-                  }
-                }
+      grouped.putIfAbsent(branchId, () => {});
+      grouped[branchId]!.putIfAbsent(cleanDept, () => []);
+      grouped[branchId]![cleanDept]!.add(item);
+    }
 
-                debugPrint('PAYROLL DEBUG: grouped.keys = ${grouped.keys.toList()}');
+    final sortedBranches = grouped.keys.toList()..sort((a, b) {
+      if (a == 'unknown') return 1;
+      if (b == 'unknown') return -1;
+      return a.compareTo(b);
+    });
 
-                final sortedBranches = grouped.keys.toList()..sort((a, b) {
-                  if (a == 'unknown') return 1;
-                  if (b == 'unknown') return -1;
-                  return a.compareTo(b);
-                });
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      itemCount: sortedBranches.length,
+      itemBuilder: (ctx, bIdx) {
+        final branchId = sortedBranches[bIdx];
+        final depts = grouped[branchId]!;
+        final sortedDepts = FinanceLedgerStorage.sortDepartmentsCanonical(depts.keys);
 
-                debugPrint('PAYROLL DEBUG: sortedBranches = $sortedBranches');
+        final branchName = Hive.box(LocalStorageService.branchesBox).get(branchId)?['name'] ?? branchId;
+        final branchCol = _mutedColorForKey(branchName.toString());
 
-                return Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    itemCount: sortedBranches.length,
-                    itemBuilder: (ctx, bIdx) {
-                      final branchId = sortedBranches[bIdx];
-                      final depts = grouped[branchId]!;
-                      final sortedDepts = depts.keys.toList()..sort();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: branchCol.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: branchCol.withOpacity(0.12)),
+              ),
+              child: Row(
+                children: [
+                  Container(width: 6, height: 24, decoration: BoxDecoration(color: branchCol, borderRadius: BorderRadius.circular(2))),
+                  const SizedBox(width: 8),
+                  Text(
+                    branchName.toString().toUpperCase(),
+                    style: TextStyle(
+                      color: branchCol.withOpacity(0.95),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ...sortedDepts.map((deptName) {
+              final deptItems = depts[deptName]!;
 
-                      final branchName = Hive.box(LocalStorageService.branchesBox).get(branchId)?['name'] ?? branchId;
-
-                      final branchCol = _mutedColorForKey(branchName.toString());
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              return Card(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: t.bgRule),
+                ),
+                color: t.bgCard,
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: t.bgCardAlt,
+                        border: Border(bottom: BorderSide(color: t.bgRule)),
+                      ),
+                      child: Row(
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                            margin: const EdgeInsets.only(top: 12, bottom: 8),
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: branchCol.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: branchCol.withOpacity(0.12)),
-                            ),
-                            child: Row(
-                              children: [
-                                Container(width: 6, height: 24, decoration: BoxDecoration(color: branchCol, borderRadius: BorderRadius.circular(2))),
-                                const SizedBox(width: 8),
-                                Text(
-                                  branchName.toString().toUpperCase(),
-                                  style: TextStyle(
-                                    color: branchCol.withOpacity(0.95),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.0,
-                                  ),
-                                ),
-                              ],
+                          Icon(Icons.label_outline_rounded, color: branchCol.withOpacity(0.95), size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            deptName.toUpperCase(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: t.textPrimary,
                             ),
                           ),
-                          ...sortedDepts.map((deptName) {
-                            final deptItems = depts[deptName]!;
-
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 8),
-                              elevation: 0,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: BorderSide(color: t.bgRule),
-                              ),
-                              color: t.bgCard,
-                              clipBehavior: Clip.antiAlias,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: t.bgCardAlt,
-                                      border: Border(bottom: BorderSide(color: t.bgRule)),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Icon(Icons.label_outline_rounded, color: branchCol.withOpacity(0.95), size: 16),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          deptName.toUpperCase(),
-                                          style: TextStyle(
-                                            color: t.textPrimary,
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 11,
-                                            letterSpacing: 0.5,
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: branchCol.withOpacity(0.14),
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          child: Text(
-                                            '${deptItems.length} EMPLOYEES',
-                                            style: TextStyle(
-                                              color: branchCol.withOpacity(0.95),
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  ...deptItems.map((item) {
-                                    final empId = item['employeeId'] as String;
-                                    final emp = FinanceLocalStorage.getEmployee(empId) ?? {
-                                      'name': item['employeeName'],
-                                      'role': 'Employee',
-                                      'department': deptName,
-                                      'localId': empId,
-                                      'isActive': true,
-                                      'branchId': branchId,
-                                    };
-                                    final ps = PermissionService();
-
-                                    final payouts = ledgerBox.values.where((val) {
-                                      if (val is! Map) return false;
-                                      final entry = Map<String, dynamic>.from(val);
-                                      return entry['employeeId'] == empId &&
-                                             entry['monthKey'] == widget.monthKey &&
-                                             entry['type'] == 'payout' &&
-                                             entry['isVoided'] != true;
-                                    }).toList();
-
-                                    final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
-                                    final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
-                                    final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
-                                    final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
-
-                                    final isExpanded = _expandedRows.contains(empId);
-
-                                    final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
-
-                                    // Prefer authoritative values from calculated payroll item (service); fall back to attendance summary.
-                                    final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
-                                    final double baseSalary = (item['fullMonthWeightedSalary'] as num?)?.toDouble() ?? (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
-                                    final double baseSalaryEarned = (item['baseSalaryEarned'] as num?)?.toDouble() ?? (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
-                                    final double absenceDeductions = (item['absenceDeductions'] as num?)?.toDouble() ?? (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
-                                    final double overtimeBonusTotal = ((item['holidayBonus'] as num?)?.toDouble() ?? (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0) + ((item['sundayOvertimeBonus'] as num?)?.toDouble() ?? (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0);
-                                    final double netFromItem = (item['netSalary'] as num?)?.toDouble() ?? (summary['grossSalary'] as num?)?.toDouble() ?? 0.0;
-                                    final double netPayDisplay = isPaid
-                                        ? (payouts.isNotEmpty ? (payouts.first['amount'] as num).toDouble() : netFromItem)
-                                        : netFromItem;
-
-                                    return _buildPayrollRow(
-                                      t: t,
-                                      ps: ps,
-                                      emp: emp,
-                                      empId: empId,
-                                      isPaid: isPaid,
-                                      isLocked: isLocked,
-                                      netPayDisplay: netPayDisplay,
-                                      baseSalary: baseSalary,
-                                      baseSalaryEarned: baseSalaryEarned,
-                                      absenceDeductions: absenceDeductions,
-                                      overtimeBonusTotal: overtimeBonusTotal,
-                                      totalDays: (summary['totalDays'] as num?)?.toInt() ?? 30,
-                                      totalEmployedDays: (summary['totalEmployedDays'] as num?)?.toInt() ?? 30,
-                                      workingDays: (summary['workingDays'] as num?)?.toDouble() ?? 0.0,
-                                      absentDays: (summary['absentDays'] as num?)?.toDouble() ?? 0.0,
-                                      unpaidLeaves: (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0,
-                                      paidDaysStr: (((summary['totalEmployedDays'] as num? ?? 0) - (summary['absentDays'] as num? ?? 0) - (summary['unpaidLeaves'] as num? ?? 0))).toStringAsFixed(1).replaceAll('.0', ''),
-                                      sundayOvertimeDays: (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0,
-                                      advance: (item['advanceInstallment'] as num?)?.toDouble() ?? 0.0,
-                                      isExpanded: isExpanded,
-                                      payouts: payouts,
-                                    );
-                                  }),
-                                ],
-                              ),
-                            );
-                          }),
+                          const Spacer(),
+                          Text(
+                            '${deptItems.length} Employee${deptItems.length == 1 ? '' : 's'}',
+                            style: TextStyle(fontSize: 11, color: t.textTertiary),
+                          ),
                         ],
-                      );
-                    },
-                  ),
-                );
-              })(),
-            ],
+                      ),
+                    ),
+                    Column(
+                      children: deptItems.map((item) {
+                        final empId = item['employeeId'] as String;
+                        final emp = FinanceLocalStorage.getEmployee(empId) ?? {
+                          'name': item['employeeName'],
+                          'role': 'Employee',
+                          'department': deptName,
+                          'localId': empId,
+                          'isActive': true,
+                          'branchId': branchId,
+                        };
+                        final ps = PermissionService();
+                        final ledgerBox = FinanceLocalStorage.salaryLedgerBox;
+
+                        final payouts = ledgerBox.values.where((val) {
+                          if (val is! Map) return false;
+                          final entry = Map<String, dynamic>.from(val);
+                          return entry['employeeId'] == empId &&
+                                 entry['monthKey'] == widget.monthKey &&
+                                 entry['type'] == 'payout' &&
+                                 entry['isVoided'] != true;
+                        }).toList();
+
+                        final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
+                        final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
+                        final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
+                        final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
+
+                        final isExpanded = _expandedRows.contains(empId);
+                        final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
+
+                        final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
+                        final double baseSalary = (item['fullMonthWeightedSalary'] as num?)?.toDouble() ?? (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
+                        final double baseSalaryEarned = (item['baseSalaryEarned'] as num?)?.toDouble() ?? (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
+                        final double absenceDeductions = (item['absenceDeductions'] as num?)?.toDouble() ?? (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
+                        final double overtimeBonusTotal = ((item['holidayBonus'] as num?)?.toDouble() ?? (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0) + ((item['sundayOvertimeBonus'] as num?)?.toDouble() ?? (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0);
+                        final double netFromItem = (item['netSalary'] as num?)?.toDouble() ?? (summary['grossSalary'] as num?)?.toDouble() ?? 0.0;
+                        final double netPayDisplay = isPaid
+                            ? (payouts.isNotEmpty ? (payouts.first['amount'] as num).toDouble() : netFromItem)
+                            : netFromItem;
+
+                        return _buildPayrollRow(
+                          t: t,
+                          ps: ps,
+                          emp: emp,
+                          empId: empId,
+                          isPaid: isPaid,
+                          isLocked: isLocked,
+                          netPayDisplay: netPayDisplay,
+                          baseSalary: baseSalary,
+                          baseSalaryEarned: baseSalaryEarned,
+                          absenceDeductions: absenceDeductions,
+                          overtimeBonusTotal: overtimeBonusTotal,
+                          totalDays: (summary['totalDays'] as num?)?.toInt() ?? 30,
+                          totalEmployedDays: (summary['totalEmployedDays'] as num?)?.toInt() ?? 30,
+                          workingDays: (summary['workingDays'] as num?)?.toDouble() ?? 0.0,
+                          absentDays: (summary['absentDays'] as num?)?.toDouble() ?? 0.0,
+                          unpaidLeaves: (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0,
+                          paidDaysStr: (((summary['totalEmployedDays'] as num? ?? 0) - (summary['absentDays'] as num? ?? 0) - (summary['unpaidLeaves'] as num? ?? 0))).toStringAsFixed(1).replaceAll('.0', ''),
+                          sundayOvertimeDays: (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0,
+                          advance: (item['advanceInstallment'] as num?)?.toDouble() ?? 0.0,
+                          isExpanded: isExpanded,
+                          payouts: payouts,
+                        );
+                      }).toList(),
+                    ),
+
+                  ],
+                ),
+              );
+            }),
           ],
         );
       },

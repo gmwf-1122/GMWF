@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
+import 'dart:io';
 
 import '../models/module_registry.dart';
 import '../theme/app_theme.dart';
@@ -17,7 +18,9 @@ import '../widgets/global_module_wrapper.dart';
 import '../widgets/home_snapshot_widgets.dart';
 import '../services/sync_service.dart';
 import 'admin/data_cleanup_screen.dart';
+import '../services/role_simulator_service.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+
 import '../services/local_storage_service.dart';
 import '../services/image_upload_service.dart';
 import '../services/auto_update_service.dart';
@@ -52,41 +55,65 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   void refresh() { if (mounted) setState(() {}); }
   
   String get _userName {
-    final box = Hive.box('local_users');
     final email = widget.userData['email']?.toString();
-    Map<String, dynamic> data = widget.userData;
-    if (email != null) {
-      final user = box.get('user:$email');
-      if (user != null && user is Map) {
-        data = Map<String, dynamic>.from(user);
-      }
+    Map<String, dynamic> data = Map<String, dynamic>.from(widget.userData);
+    if (email != null && email.isNotEmpty) {
+      try {
+        if (Hive.isBoxOpen('local_users')) {
+          final user = Hive.box('local_users').get('user:${email.toLowerCase()}');
+          if (user != null && user is Map) {
+            data.addAll(Map<String, dynamic>.from(user));
+          }
+        }
+      } catch (_) {}
     }
     return resolveUserDisplayName(data);
   }
 
   String get _userPhotoUrl {
-    final box = Hive.box('local_users');
     final email = widget.userData['email']?.toString();
-    Map<String, dynamic> data = widget.userData;
-    if (email != null) {
-      final user = box.get('user:$email');
-      if (user != null && user is Map) {
-        data = Map<String, dynamic>.from(user);
-      }
+    Map<String, dynamic> data = Map<String, dynamic>.from(widget.userData);
+    if (email != null && email.isNotEmpty) {
+      try {
+        if (Hive.isBoxOpen('local_users')) {
+          final user = Hive.box('local_users').get('user:${email.toLowerCase()}');
+          if (user != null && user is Map) {
+            data.addAll(Map<String, dynamic>.from(user));
+          }
+        }
+      } catch (_) {}
     }
-    return (data['profilePictureUrl'] ?? data['photoUrl'] ?? data['avatarUrl'])?.toString() ?? '';
+    return (data['profileImage'] ?? data['profilePictureUrl'] ?? data['photoUrl'] ?? data['avatarUrl'])?.toString() ?? '';
   }
 
   String get _role {
-    final box = Hive.box('local_users');
+    String r = (widget.userData['role']?.toString() ?? '').toLowerCase().trim();
+    if (r.isNotEmpty && r != 'unknown') return r;
+
     final email = widget.userData['email']?.toString();
-    if (email != null) {
-      final user = box.get('user:$email');
-      if (user != null && user is Map) {
-        return (user['role'] as String? ?? 'unknown').toLowerCase();
-      }
+    if (email != null && email.isNotEmpty) {
+      try {
+        if (Hive.isBoxOpen('local_users')) {
+          final user = Hive.box('local_users').get('user:${email.toLowerCase()}');
+          if (user != null && user is Map) {
+            r = (user['role']?.toString() ?? '').toLowerCase().trim();
+            if (r.isNotEmpty && r != 'unknown') return r;
+          }
+        }
+      } catch (_) {}
     }
-    return (widget.userData['role'] as String? ?? 'unknown').toLowerCase();
+
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final currentUserData = Hive.box('app_settings').get('user_data');
+        if (currentUserData != null && currentUserData is Map) {
+          r = (currentUserData['role']?.toString() ?? '').toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown') return r;
+        }
+      }
+    } catch (_) {}
+
+    return r.isNotEmpty && r != 'unknown' ? r : 'admin';
   }
 
   DashboardCategoryFilter _selectedCategory = DashboardCategoryFilter.overall;
@@ -251,8 +278,13 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     _recomputeFilteredModules();
   }
 
+  static bool _hasRunFullBackgroundSync = false;
+
   Future<void> _startBackgroundFullSync() async {
+    if (_hasRunFullBackgroundSync || RoleSimulatorService.isSimulating) return;
+    _hasRunFullBackgroundSync = true;
     try {
+
       final snap = await FirebaseFirestore.instance.collection('branches').get();
       final branches = snap.docs.map((d) => d.id).toList();
 
@@ -444,7 +476,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     final roleTheme = RoleThemeData.fromString(_role);
 
     return ValueListenableBuilder(
-      valueListenable: Hive.box('app_settings').listenable(),
+      valueListenable: Hive.box('app_settings').listenable(keys: ['custom_accent_color']),
       builder: (context, Box box, child) {
         Color? customColor;
         
@@ -662,7 +694,7 @@ class _SidebarBrand extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: t.accent.withOpacity(dark ? 0.15 : 0.08),
+            color: t.accent.withValues(alpha: dark ? 0.15 : 0.08),
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: t.accent.withValues(alpha: 0.3)),
           ),
@@ -705,11 +737,21 @@ class _SidebarActions extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
       child: Column(children: [
+        if (RoleSimulatorService.canAccessSimulator(state.widget.userData['role']?.toString()))
+          _ActionTile(
+            icon: Icons.preview_rounded,
+            label: 'Role Simulator',
+            t: t,
+            dark: dark,
+            onTap: () => RoleSimulatorService.showRoleSelectorModal(context),
+          ),
         _ActionTile(
+
           icon: Icons.settings_outlined,
           label: 'Settings',
           t: t,
           dark: dark,
+
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -718,7 +760,7 @@ class _SidebarActions extends StatelessWidget {
             state.refresh();
           }),
         ),
-        if (state._isFullExecutive)
+        if ((state.widget.userData['role']?.toString().toLowerCase().contains('chairman') ?? false))
           _ActionTile(
             icon: Icons.cleaning_services_outlined,
             label: 'Data Integrity',
@@ -828,7 +870,8 @@ class _LogoPulse extends StatelessWidget {
         ),
         padding: const EdgeInsets.all(4),
         child: Image.asset(
-          'assets/logo/gmwf-1.png',
+          'assets/logo/gmwf-1.webp',
+          cacheWidth: 200,
           fit: BoxFit.contain,
         ),
       ),
@@ -1152,8 +1195,16 @@ class _MobileLayout extends StatelessWidget {
         ),
       ]),
       actions: [
+        if (RoleSimulatorService.canAccessSimulator(state._role))
+          IconButton(
+            tooltip: 'Live Role Simulator',
+            icon: const Icon(Icons.preview_rounded, color: Colors.amberAccent, size: 22),
+            onPressed: () => RoleSimulatorService.showRoleSelectorModal(context),
+          ),
         IconButton(
+
           icon: AnimatedSwitcher(
+
             duration: const Duration(milliseconds: 200),
             transitionBuilder: (child, anim) => RotationTransition(
               turns:
@@ -1503,7 +1554,7 @@ class _HeroHeader extends StatelessWidget {
   }
 }
 
-// ── Dark hero (Chairman / CEO / Global User) ──────────────────────────────────
+// ── Dark & Light Profile-Oriented Hero Header (Lag-free Executive Profile Layout) ─────────
 class _DarkHero extends StatelessWidget {
   final _GlobalModularDashboardState state;
   final RoleThemeData t;
@@ -1513,179 +1564,16 @@ class _DarkHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final dateStr = '${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}';
-    final isCeo = state._role == 'ceo';
-    final isChairman = state._role == 'chairman';
-    final hour = now.hour;
-
-    final greetingBadgeText = isCeo 
-        ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, CEO' 
-        : (isChairman ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, Chairman' : '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}');
-
-    final mainGreetingTitle = state._userName;
-
-    return Container(
-      margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 36 : 24, hPad, 0),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0D1117),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: t.accent.withValues(alpha: 0.25)),
-        boxShadow: [
-          BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 40, offset: const Offset(0, 14)),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Dynamic Time of Day Hero Image (Dawn, Morning, Afternoon, Evening, Dusk, Night)
-          const Positioned.fill(
-            child: _TimeOfDayHeroImage(),
-          ),
-          // Faded theme accent gradient overlay
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    t.accent.withValues(alpha: 0.98),
-                    t.accent.withValues(alpha: 0.88),
-                    t.accent.withValues(alpha: 0.75),
-                    t.accent.withValues(alpha: 0.60),
-                  ],
-                  stops: const [0.0, 0.35, 0.70, 1.0],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.all(isDesktop ? 28 : 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Top row: Greeting badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: t.accent.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
-                    boxShadow: [
-                      BoxShadow(color: t.accent.withValues(alpha: 0.08), blurRadius: 8)
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          gradient: t.accentGradient,
-                          shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.5), blurRadius: 4)],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        greetingBadgeText.toUpperCase(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 14),
-                // Greeting Name & User Photo Row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            mainGreetingTitle,
-                            style: TextStyle(
-                              color: const Color(0xFFE6EDF3),
-                              fontSize: isDesktop ? 30 : 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -1.0,
-                              height: 1.1,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            dateStr,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    _buildUserHeroAvatar(state._userPhotoUrl, state._userName, t, size: isDesktop ? 56 : 48),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                // Live stat pills
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _StatPill(
-                      label: isCeo ? 'CEO EXECUTIVE' : state._role.toUpperCase(),
-                      icon: isCeo ? Icons.workspace_premium_rounded : Icons.verified_user_rounded,
-                      t: t,
-                    ),
-                    _StatPill(
-                      label: '${state._availableModules.length} Modules',
-                      icon: Icons.grid_view_rounded,
-                      t: t,
-                    ),
-                    _StatPill(
-                      label: 'Global Access',
-                      icon: Icons.public_rounded,
-                      t: t,
-                    ),
-                    _StatPill(
-                      label: 'Live',
-                      icon: Icons.circle,
-                      t: t,
-                      pulse: true,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    return _buildProfileHeroCard(
+      state: state,
+      t: t,
+      isDesktop: isDesktop,
+      hPad: hPad,
+      isDark: true,
     );
   }
-
-  String _greetingEmoji(int hour) {
-    if (hour < 12) return '☀️';
-    if (hour < 17) return '🌤';
-    return '🌙';
-  }
-
-  String _timeOfDayString(int hour) {
-    if (hour < 12) return 'morning';
-    if (hour < 17) return 'afternoon';
-    return 'evening';
-  }
-
-  String _weekday(int d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d-1];
-  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
 }
 
-// ── Light hero (Manager / HQ / Branch / Admin / Supervisor) ──────────────────
 class _LightHero extends StatelessWidget {
   final _GlobalModularDashboardState state;
   final RoleThemeData t;
@@ -1695,162 +1583,385 @@ class _LightHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final dateStr = '${_weekday(now.weekday)}, ${now.day} ${_month(now.month)} ${now.year}';
-    final isCeo = state._role == 'ceo';
-    final isChairman = state._role == 'chairman';
-    final hour = now.hour;
+    return _buildProfileHeroCard(
+      state: state,
+      t: t,
+      isDesktop: isDesktop,
+      hPad: hPad,
+      isDark: false,
+    );
+  }
+}
 
-    final greetingBadgeText = isCeo 
-        ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, CEO' 
-        : (isChairman ? '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}, Chairman' : '${_greetingEmoji(hour)}  Good ${_timeOfDayString(hour)}');
+Widget _buildProfileHeroCard({
+  required _GlobalModularDashboardState state,
+  required RoleThemeData t,
+  required bool isDesktop,
+  required double hPad,
+  required bool isDark,
+}) {
+  final now = DateTime.now();
+  final dateStr = '${_weekdayFull(now.weekday)}, ${now.day} ${_monthFull(now.month)} ${now.year}';
+  final hour = now.hour;
 
-    final mainGreetingTitle = state._userName;
+  final isCeo = state._role == 'ceo';
+  final isChairman = state._role == 'chairman';
+  final isGreenTheme = isChairman || isCeo;
 
-    return Container(
-      margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 36 : 24, hPad, 0),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [t.accent, t.accentLight],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(color: t.accent.withValues(alpha: 0.35), blurRadius: 40, offset: const Offset(0, 14)),
-          BoxShadow(color: Colors.white.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2)),
-        ],
+  final timeOfDayUpper = _timeOfDayString(hour).toUpperCase();
+  final timeEmoji = (hour >= 18 || hour < 5) ? '🌙' : '☀️';
+
+  final greetingBadgeText = isChairman
+      ? '$timeEmoji GOOD $timeOfDayUpper, CHAIRMAN'
+      : (isCeo
+          ? '$timeEmoji GOOD $timeOfDayUpper, CEO'
+          : '$timeEmoji GOOD $timeOfDayUpper');
+
+  final String userPhotoUrl = state._userPhotoUrl;
+  final String userName = state._userName;
+  final String userRole = state._role.toUpperCase();
+
+  final avatarSize = isDesktop ? 76.0 : 64.0;
+
+  final List<Color> bgGradientColors = isGreenTheme
+      ? [const Color(0xFF021B14), const Color(0xFF052B20), const Color(0xFF032219)]
+      : [const Color(0xFF030D26), const Color(0xFF07173D), const Color(0xFF04102C)];
+
+  final cardBorderColor = isGreenTheme
+      ? const Color(0xFF0F4735)
+      : const Color(0xFF132A54);
+
+  return Container(
+    margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 24 : 16, hPad, 0),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        colors: bgGradientColors,
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Dynamic Time of Day Hero Image (Dawn, Morning, Afternoon, Evening, Dusk, Night)
-          const Positioned.fill(
-            child: _TimeOfDayHeroImage(),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(
+        color: cardBorderColor,
+        width: 1.5,
+      ),
+      boxShadow: [
+        BoxShadow(
+          color: bgGradientColors.first.withValues(alpha: 0.5),
+          blurRadius: 20,
+          offset: const Offset(0, 8),
+        ),
+      ],
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Stack(
+      children: [
+        // Background Custom Painter Graphic (Executive Ambient Mesh & Light Overlay)
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _ExecutiveModernMeshBackgroundPainter(isGreenTheme: isGreenTheme),
           ),
-          // Left-faded gradient so greeting text is readable while masjid on right is completely clear
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    t.accent.withValues(alpha: 0.98),
-                    t.accent.withValues(alpha: 0.88),
-                    t.accent.withValues(alpha: 0.75),
-                    t.accent.withValues(alpha: 0.60),
-                  ],
-                  stops: const [0.0, 0.35, 0.70, 1.0],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
+        ),
+
+        // Main Content Body
+        Padding(
+          padding: EdgeInsets.all(isDesktop ? 24 : 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Top Greeting Badge Pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isGreenTheme
+                      ? const Color(0xFF0A382A).withValues(alpha: 0.85)
+                      : const Color(0xFF0E2247).withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.16),
+                  ),
+                ),
+                child: Text(
+                  greetingBadgeText,
+                  style: TextStyle(
+                    color: isGreenTheme ? const Color(0xFFFBBF24) : Colors.white,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.all(isDesktop ? 28 : 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Greeting Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
-                  ),
-                  child: Text(
-                    greetingBadgeText.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Greeting Name & User Photo Row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            mainGreetingTitle,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: isDesktop ? 28 : 22,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.8,
-                              height: 1.1,
+              const SizedBox(height: 16),
+
+              // Profile Avatar, User Name & Date Row
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Avatar with Golden Outer Ring & Online Dot Indicator
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: const Color(0xFFF59E0B),
+                            width: 2.8,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFF59E0B).withValues(alpha: 0.35),
+                              blurRadius: 12,
+                              spreadRadius: 1,
                             ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            dateStr,
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12),
-                          ),
-                        ],
+                          ],
+                        ),
+                        child: _buildUserHeroAvatar(userPhotoUrl, userName, t, size: avatarSize),
                       ),
+                      Positioned(
+                        right: 1,
+                        bottom: 1,
+                        child: Container(
+                          width: 15,
+                          height: 15,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isGreenTheme ? const Color(0xFF021B14) : const Color(0xFF030D26),
+                              width: 2.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 18),
+                  // User Display Name & Date Subtitle
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          userName,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: isDesktop ? 25 : 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.4,
+                            height: 1.15,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 5),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.calendar_today_outlined,
+                              size: 13,
+                              color: Colors.white.withValues(alpha: 0.75),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              dateStr,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.85),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    _buildUserHeroAvatar(state._userPhotoUrl, state._userName, t, size: isDesktop ? 56 : 48),
-                  ],
-                ),
-                const SizedBox(height: 18),
-                // Role + module count pills
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: [
-                    _WhitePill(
-                      label: state._role.toUpperCase(),
-                      icon: Icons.verified_user_rounded,
-                      t: t,
-                    ),
-                    _WhitePill(
-                      label: '${state._availableModules.length} Modules',
-                      icon: Icons.grid_view_rounded,
-                      t: t,
-                    ),
-                  ],
-                ),
-              ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Bottom Metadata Badges Row
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _ExecutiveGlassPill(
+                    label: userRole,
+                    icon: (isChairman || isCeo)
+                        ? Icons.workspace_premium_rounded
+                        : Icons.shield_outlined,
+                    accentColor: const Color(0xFFF59E0B),
+                    isGreenTheme: isGreenTheme,
+                  ),
+                  _ExecutiveGlassPill(
+                    label: '${state._availableModules.length} Modules',
+                    icon: Icons.grid_view_rounded,
+                    accentColor: const Color(0xFF818CF8),
+                    isGreenTheme: isGreenTheme,
+                  ),
+                  _ExecutiveGlassPill(
+                    label: 'Global Access',
+                    icon: Icons.public_rounded,
+                    accentColor: const Color(0xFF38BDF8),
+                    isGreenTheme: isGreenTheme,
+                  ),
+                  _ExecutiveGlassPill(
+                    label: 'Live System',
+                    icon: Icons.bolt_rounded,
+                    accentColor: const Color(0xFFF59E0B),
+                    isGreenTheme: isGreenTheme,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _ExecutiveGlassPill extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color accentColor;
+  final bool isGreenTheme;
+
+  const _ExecutiveGlassPill({
+    required this.label,
+    required this.icon,
+    required this.accentColor,
+    required this.isGreenTheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        color: isGreenTheme
+            ? const Color(0xFF093326).withValues(alpha: 0.7)
+            : const Color(0xFF0E2147).withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.15),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: accentColor),
+          const SizedBox(width: 7),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
             ),
           ),
         ],
       ),
     );
   }
-
-  String _greetingEmoji(int hour) {
-    if (hour < 12) return '☀️';
-    if (hour < 17) return '🌤';
-    return '🌙';
-  }
-
-  String _timeOfDayString(int hour) {
-    if (hour < 12) return 'morning';
-    if (hour < 17) return 'afternoon';
-    return 'evening';
-  }
-
-  String _weekday(int d) => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][d-1];
-  String _month(int m) => ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1];
 }
 
-Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {double size = 52}) {
+// ── Custom Painter: Executive Ambient Mesh & Light Overlay ────────────────────
+class _ExecutiveModernMeshBackgroundPainter extends CustomPainter {
+  final bool isGreenTheme;
+
+  _ExecutiveModernMeshBackgroundPainter({required this.isGreenTheme});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. Ambient Primary Radial Light Glow (Top-Right)
+    final glow1Center = Offset(size.width * 0.88, size.height * 0.15);
+    final glow1Color = isGreenTheme
+        ? const Color(0xFF10B981).withValues(alpha: 0.22)
+        : const Color(0xFF38BDF8).withValues(alpha: 0.20);
+
+    final glow1Paint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          glow1Color,
+          glow1Color.withValues(alpha: 0.06),
+          Colors.transparent,
+        ],
+        stops: const [0.0, 0.55, 1.0],
+      ).createShader(Rect.fromCircle(center: glow1Center, radius: size.width * 0.42));
+
+    canvas.drawCircle(glow1Center, size.width * 0.42, glow1Paint);
+
+    // 2. Secondary Warm Gold Ambient Light Glow (Mid-Right)
+    final glow2Center = Offset(size.width * 0.72, size.height * 0.85);
+    final glow2Color = const Color(0xFFF59E0B).withValues(alpha: 0.14);
+
+    final glow2Paint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          glow2Color,
+          glow2Color.withValues(alpha: 0.03),
+          Colors.transparent,
+        ],
+        stops: const [0.0, 0.6, 1.0],
+      ).createShader(Rect.fromCircle(center: glow2Center, radius: size.width * 0.32));
+
+    canvas.drawCircle(glow2Center, size.width * 0.32, glow2Paint);
+
+    // 3. Subtle Sleek Modern Architectural Light Arcs
+    final linePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.04)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    final path1 = Path()
+      ..moveTo(size.width * 0.45, 0)
+      ..cubicTo(
+        size.width * 0.65, size.height * 0.35,
+        size.width * 0.75, size.height * 0.65,
+        size.width, size.height * 0.80,
+      );
+    canvas.drawPath(path1, linePaint);
+
+    final path2 = Path()
+      ..moveTo(size.width * 0.58, 0)
+      ..cubicTo(
+        size.width * 0.78, size.height * 0.40,
+        size.width * 0.88, size.height * 0.60,
+        size.width, size.height * 0.95,
+      );
+    canvas.drawPath(path2, linePaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+String _timeOfDayString(int hour) {
+  if (hour < 12) return 'morning';
+  if (hour < 17) return 'afternoon';
+  return 'evening';
+}
+
+String _weekdayFull(int d) => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d - 1];
+String _monthFull(int m) => ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1];
+
+Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {double size = 64}) {
   final str = photoUrl.trim();
   Widget child;
   if (str.isNotEmpty) {
     final bytes = ImageUploadService.decodeBase64ToBytes(str);
     if (bytes != null) {
-      child = Image.memory(bytes, width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _buildUserAvatarFallback(userName, t, size));
+      child = Image.memory(bytes, width: size, height: size, fit: BoxFit.cover, errorBuilder: (c, e, s) => _buildUserAvatarFallback(userName, t, size));
     } else if (str.startsWith('http://') || str.startsWith('https://')) {
-      child = Image.network(str, width: size, height: size, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _buildUserAvatarFallback(userName, t, size));
+      child = Image.network(str, width: size, height: size, fit: BoxFit.cover, errorBuilder: (c, e, s) => _buildUserAvatarFallback(userName, t, size));
+    } else if (File(str).existsSync()) {
+      child = Image.file(File(str), width: size, height: size, fit: BoxFit.cover, errorBuilder: (c, e, s) => _buildUserAvatarFallback(userName, t, size));
     } else {
       child = _buildUserAvatarFallback(userName, t, size);
     }
@@ -1863,12 +1974,12 @@ Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {
     height: size,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
-      border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 2.5),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.95), width: 3.0),
       boxShadow: [
         BoxShadow(
-          color: t.accent.withValues(alpha: 0.4),
-          blurRadius: 12,
-          offset: const Offset(0, 4),
+          color: Colors.black.withValues(alpha: 0.25),
+          blurRadius: 16,
+          offset: const Offset(0, 6),
         ),
       ],
     ),
@@ -1892,112 +2003,6 @@ Widget _buildUserAvatarFallback(String userName, RoleThemeData t, double size) {
   );
 }
 
-// ── Dynamic Time-of-Day Hero Image ───────────────────────────────────────────
-class _TimeOfDayHeroImage extends StatelessWidget {
-  const _TimeOfDayHeroImage();
-
-  /// Maps the current hour to one of 8 hero images in assets/hero/.
-  static String _heroAssetForHour(int hour) {
-    if (hour >= 5 && hour < 7)   return 'assets/hero/Dawn.png';
-    if (hour >= 7 && hour < 10)  return 'assets/hero/Morning.png';
-    if (hour >= 10 && hour < 13) return 'assets/hero/Noon.png';
-    if (hour >= 13 && hour < 16) return 'assets/hero/Afternoon.png';
-    if (hour >= 16 && hour < 18) return 'assets/hero/Dusk.png';
-    if (hour >= 18 && hour < 20) return 'assets/hero/Evening.png';
-    if (hour >= 20 && hour < 23) return 'assets/hero/Night.png';
-    return 'assets/hero/Midnight.png'; // 23–4
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final asset = _heroAssetForHour(DateTime.now().hour);
-    return Image.asset(
-      asset,
-      fit: BoxFit.fill,
-      errorBuilder: (context, error, stackTrace) => Image.asset(
-        'assets/hero.png',
-        fit: BoxFit.fill,
-      ),
-    );
-  }
-}
-
-// ── Shared pill widgets ───────────────────────────────────────────────────────
-
-class _StatPill extends StatefulWidget {
-  final String label;
-  final IconData icon;
-  final RoleThemeData t;
-  final bool pulse;
-  const _StatPill({required this.label, required this.icon,
-    required this.t, this.pulse = false});
-  @override State<_StatPill> createState() => _StatPillState();
-}
-
-class _StatPillState extends State<_StatPill> with SingleTickerProviderStateMixin {
-  late AnimationController _c;
-  late Animation<double> _a;
-  @override void initState() {
-    super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(seconds: 2));
-    _a = Tween<double>(begin: 0.4, end: 1.0)
-        .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
-    if (widget.pulse) _c.repeat(reverse: true);
-  }
-  @override void dispose() { _c.dispose(); super.dispose(); }
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: const Color(0xFF21262D),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: const Color(0xFF30363D)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        widget.pulse
-            ? AnimatedBuilder(
-                animation: _a,
-                builder: (_, _) => Opacity(
-                  opacity: _a.value,
-                  child: Icon(widget.icon, size: 8, color: widget.t.accent),
-                ))
-            : Icon(widget.icon, size: 12, color: widget.t.accent),
-        const SizedBox(width: 6),
-        Text(widget.label,
-          style: const TextStyle(color: Color(0xFFE6EDF3),
-            fontSize: 11, fontWeight: FontWeight.w700)),
-      ]),
-    );
-  }
-}
-
-class _WhitePill extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final RoleThemeData t;
-  const _WhitePill({required this.label, required this.icon, required this.t});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)
-        ],
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 13, color: Colors.white),
-        const SizedBox(width: 7),
-        Text(label, style: const TextStyle(color: Colors.white,
-          fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.5)),
-      ]),
-    );
-  }
-}
 
 
 
@@ -2100,7 +2105,7 @@ class _CategoryChips extends StatelessWidget {
         children: state._visibleCategories.map((cat) {
           final sel = state._selectedCategory == cat;
           final label = cat == DashboardCategoryFilter.overall
-              ? 'All'
+              ? 'Dashboard'
               : cat.name[0].toUpperCase() + cat.name.substring(1);
           return Padding(
             padding: const EdgeInsets.only(right: 8),
@@ -2438,8 +2443,7 @@ class _ModuleCardState extends State<_ModuleCard>
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeOutQuart,
-            transform: Matrix4.identity()
-              ..translate(0.0, _hov ? -8.0 : 0.0),
+            transform: Matrix4.translationValues(0.0, _hov ? -8.0 : 0.0, 0.0),
             decoration: BoxDecoration(
               color: dark 
                   ? (_hov ? const Color(0xFF1F2937) : const Color(0xFF0F172A))

@@ -469,6 +469,15 @@ class _UsersScreenState extends State<UsersScreen>
 
         var list = mergedMap.values.toList();
 
+        if (branchId != 'all' && branchId != 'global') {
+          final targetBranch = branchId.trim().toLowerCase();
+          list = list.where((item) {
+            final uBranch = (item['branchId'] ?? item['branch'] ?? '').toString().trim().toLowerCase();
+            if (uBranch.isEmpty) return true;
+            return uBranch == targetBranch || uBranch == 'all' || uBranch == 'global';
+          }).toList();
+        }
+
         if (_searchQuery.isNotEmpty) {
           list = list.where((item) {
             final username = (item['username'] as String?)?.toLowerCase() ?? '';
@@ -504,15 +513,24 @@ class _UsersScreenState extends State<UsersScreen>
         list.sort((a, b) => (a['username'] as String? ?? '').compareTo(b['username'] as String? ?? ''));
 
         bool isUserOnline(Map<String, dynamic> data) {
-          if (data['isOnline'] == true) return true;
-          final raw = data['lastOnlineAt'] ?? data['lastLoginAt'] ?? data['updatedAt'];
+          if (data['isOnline'] == false) return false;
+
+          final raw = data['lastSeen'] ?? data['lastOnlineAt'] ?? data['lastActiveAt'] ?? data['lastLoginAt'] ?? data['updatedAt'];
+          DateTime? lastActive;
           if (raw is Timestamp) {
-            return DateTime.now().difference(raw.toDate()).inMinutes <= 15;
+            lastActive = raw.toDate();
+          } else if (raw is DateTime) {
+            lastActive = raw;
           } else if (raw is String && raw.isNotEmpty) {
-            final dt = DateTime.tryParse(raw);
-            if (dt != null) return DateTime.now().difference(dt).inMinutes <= 15;
+            lastActive = DateTime.tryParse(raw);
           }
-          return false;
+
+          if (lastActive != null) {
+            final diffMinutes = DateTime.now().difference(lastActive).inMinutes;
+            return diffMinutes <= 2;
+          }
+
+          return data['isOnline'] == true;
         }
 
         String getDepartment(Map<String, dynamic> u) {
@@ -1676,7 +1694,7 @@ class _UsersScreenState extends State<UsersScreen>
   Stream<QuerySnapshot> _getFilteredStream(String branchId, String collection) {
     if (collection == 'users') {
       Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collection('users');
-      if (branchId != 'all' && branchId != 'global' && branchId != 'sialkot') {
+      if (branchId != 'all' && branchId != 'global') {
         q = q.where('branchId', isEqualTo: branchId);
       }
       return q.snapshots();

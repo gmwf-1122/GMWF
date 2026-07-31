@@ -299,7 +299,9 @@ _changeNotifier.value++;
 
   void _updateAttendanceSilent(String sId, String value) {
     _updateLocalSilent(sId, 'attendance', value);
-    if (value != 'present') {
+    if (value == 'leave') {
+      _updateLocalSilent(sId, 'uniform', 'leave');
+    } else if (value == 'absent') {
       _updateLocalSilent(sId, 'uniform', false);
     }
   }
@@ -2778,6 +2780,7 @@ class _StudentLogCard extends StatelessWidget {
                       _actionButton(context.isUrdu ? 'منظور' : 'Approve', Colors.green, () {
                         onUpdateLocal(sId, 'attendance', 'leave');
                         onUpdateLocal(sId, 'leaveStatus', 'approved');
+                        onUpdateLocal(sId, 'uniform', 'leave');
                       }),
                       const SizedBox(width: 6),
                       _actionButton(context.isUrdu ? 'مسترد' : 'Deny', Colors.red, () {
@@ -2795,7 +2798,9 @@ class _StudentLogCard extends StatelessWidget {
                 isGlobalUser: _isGlobalLevelUser(editorRole),
                 onChanged: isReadOnly ? null : (newAtt) {
                   onUpdateLocal(sId, 'attendance', newAtt);
-                  if (newAtt != 'present') {
+                  if (newAtt == 'leave') {
+                    onUpdateLocal(sId, 'uniform', 'leave');
+                  } else if (newAtt == 'absent') {
                     onUpdateLocal(sId, 'uniform', false);
                   }
                 },
@@ -2804,7 +2809,7 @@ class _StudentLogCard extends StatelessWidget {
               _switchCol(
                 context,
                 context.l.uniform,
-                uni,
+                (att == 'leave' || uni == true || uni == 'leave'),
                 (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
               ),
               _switchCol(
@@ -2921,6 +2926,7 @@ class _StudentLogCard extends StatelessWidget {
                   _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
                     onUpdateLocal(sId, 'attendance', 'leave');
                     onUpdateLocal(sId, 'leaveStatus', 'approved');
+                    onUpdateLocal(sId, 'uniform', 'leave');
                   }),
                   const SizedBox(width: 8),
                   _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
@@ -2936,7 +2942,9 @@ class _StudentLogCard extends StatelessWidget {
                 isGlobalUser: _isGlobalLevelUser(editorRole),
                 onChanged: isReadOnly ? null : (newAtt) {
                   onUpdateLocal(sId, 'attendance', newAtt);
-                  if (newAtt != 'present') {
+                  if (newAtt == 'leave') {
+                    onUpdateLocal(sId, 'uniform', 'leave');
+                  } else if (newAtt == 'absent') {
                     onUpdateLocal(sId, 'uniform', false);
                   }
                 },
@@ -2946,7 +2954,7 @@ class _StudentLogCard extends StatelessWidget {
             _switchCol(
               context,
               context.l.uniform,
-              uni,
+              (att == 'leave' || uni == true || uni == 'leave'),
               (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
             ),
             const SizedBox(width: 24),

@@ -239,7 +239,7 @@ class MadrassaReportHelper {
     final monthName = DateFormat('MMMM yyyy').format(DateTime(config.year, config.month));
     final workingDays = MadrassaFeeLogic.getWorkingDaysCount(config.year, config.month, holidays);
 
-    final logoData = await rootBundle.load('assets/logo/gmwf-1.jpg');
+    final logoData = await rootBundle.load('assets/logo/gmwf-1.webp');
     final logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
 
     String formatRatioCompact(String ratio) {
@@ -604,7 +604,7 @@ class MadrassaReportHelper {
 
     // Headers & Branding
     try {
-      final ByteData data = await rootBundle.load('assets/logo/gmwf-1.jpg');
+      final ByteData data = await rootBundle.load('assets/logo/gmwf-1.webp');
       final Uint8List imageBytes = data.buffer.asUint8List();
       (excel as dynamic).insertImage(sheetName, imageBytes, 0, 0);
     } catch (e) {
@@ -843,7 +843,7 @@ class MadrassaReportHelper {
 
     // Fetch assets concurrently to maximize speed and bypass slow network hangs
     final List<dynamic> results = await Future.wait([
-      rootBundle.load('assets/logo/gmwf-1.jpg'),
+      rootBundle.load('assets/logo/gmwf-1.webp'),
       fetchPhoto(),
     ]);
 
@@ -1206,7 +1206,7 @@ class MadrassaReportHelper {
 
     // Header Branding
     try {
-      final ByteData data = await rootBundle.load('assets/logo/gmwf-1.jpg');
+      final ByteData data = await rootBundle.load('assets/logo/gmwf-1.webp');
       final Uint8List imageBytes = data.buffer.asUint8List();
       (excel as dynamic).insertImage(sheetName, imageBytes, 0, 0);
     } catch (e) {
@@ -1365,7 +1365,7 @@ class MadrassaReportHelper {
 
     final dateStr = DateFormat('dd-MM-yyyy').format(selectedDate);
     final dateLabelStr = DateFormat('dd MMMM yyyy').format(selectedDate);
-    final logoData = await rootBundle.load('assets/logo/gmwf-1.jpg');
+    final logoData = await rootBundle.load('assets/logo/gmwf-1.webp');
     final logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
 
     // Calculate attendance stats

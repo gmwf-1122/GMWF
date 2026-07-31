@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
+import 'finance_ledger_storage.dart';
+
 
 class FinanceExpensesStorage {
   static const Uuid _uuid = Uuid();
@@ -62,6 +64,28 @@ class FinanceExpensesStorage {
 
   // ── CRUD Operations ────────────────────────────────────────────────────────
 
+
+  static String _getExpenseCoaCode(String category) {
+    final cat = category.toLowerCase();
+    if (cat.contains('utility') || cat.contains('electricity') || cat.contains('gas')) return '5020';
+    if (cat.contains('food') || cat.contains('kitchen') || cat.contains('dasterkhwaan')) return '5030';
+    if (cat.contains('medical') || cat.contains('dispensary') || cat.contains('medicine')) return '5040';
+    if (cat.contains('madrassa') || cat.contains('school') || cat.contains('education')) return '5050';
+    if (cat.contains('maintenance') || cat.contains('repair')) return '5060';
+    if (cat.contains('fuel') || cat.contains('transport')) return '5070';
+    return '5080'; // Miscellaneous
+  }
+
+  static String _getExpenseDeptId(String category) {
+    final cat = category.toLowerCase();
+    if (cat.contains('dispensary') || cat.contains('medical')) return 'DISPENSARY';
+    if (cat.contains('madrassa')) return 'MADRASSA';
+    if (cat.contains('school')) return 'SCHOOL';
+    if (cat.contains('food') || cat.contains('dasterkhwaan')) return 'DASTERKHWAAN';
+    if (cat.contains('office')) return 'OFFICE';
+    return 'ADMIN';
+  }
+
   static Future<void> saveExpense({
     required String branchId,
     required double amount,
@@ -71,6 +95,8 @@ class FinanceExpensesStorage {
     required String performedBy,
     required String performedByName,
     DateTime? date,
+    String? accountCode,    // Bank/Cash COA Code e.g. "1010", "1030"
+    String? departmentId,   // Canonical department ID
   }) async {
     final transactionDate = date ?? DateTime.now();
     final dateKey = DateFormat('yyyy-MM-dd').format(transactionDate);
@@ -84,12 +110,16 @@ class FinanceExpensesStorage {
 
     final id = _newLocalId();
     final now = _nowIso();
+    final amountMinor = (amount * 100).round();
+    final bankCoaCode = accountCode ?? '1030'; // Default Cash
+    final expenseCoaCode = _getExpenseCoaCode(category);
+    final dept = departmentId ?? _getExpenseDeptId(category);
 
     final expenseMap = {
       'id': id,
       'branchId': branchId,
       'amount': amount,
-      'amountMinor': (amount * 100).round(),
+      'amountMinor': amountMinor,
       'currency': 'PKR',
       'periodLocked': false,
       'eventVersion': 1,
@@ -97,6 +127,8 @@ class FinanceExpensesStorage {
       'category': category,
       'customCategory': customCategory,
       'description': description,
+      'accountCode': bankCoaCode,
+      'departmentId': dept,
       'date': transactionDate.toIso8601String(),
       'dateKey': dateKey,
       'performedBy': performedBy,
@@ -110,6 +142,28 @@ class FinanceExpensesStorage {
 
     final sanitized = _sanitize(expenseMap);
     await expensesBox.put(id, sanitized);
+
+    // ── ERP Double-Entry Journal Posting ────────────────────────────────────
+    try {
+      final entry = JournalEntry(
+        id: 'je_exp_$id',
+        date: dateKey,
+        postedAt: now,
+        sourceType: JournalSourceType.expense.toCode(),
+        sourceRefId: id,
+        branchId: branchId,
+        departmentId: dept,
+        description: 'Expense [$category]: $description',
+        createdBy: performedByName,
+        lines: [
+          JournalLine(accountCode: expenseCoaCode, debit: amountMinor, credit: 0, memo: 'Expense $category'),
+          JournalLine(accountCode: bankCoaCode, debit: 0, credit: amountMinor, memo: 'Paid from Org Account $bankCoaCode'),
+        ],
+      );
+      await FinanceLedgerStorage.postJournalEntry(entry);
+    } catch (e) {
+      debugPrint('[Expense Ledger Posting Warning] $e');
+    }
 
     // Enqueue for background upload
     await LocalStorageService.enqueueSync({
@@ -143,6 +197,12 @@ class FinanceExpensesStorage {
       }
     }
 
+    final amountMinor = (localRecord['amountMinor'] as num?)?.toInt() ?? ((localRecord['amount'] as num?)?.toDouble() ?? 0.0 * 100).round();
+    final bankCoaCode = localRecord['accountCode']?.toString() ?? '1030';
+    final category = localRecord['category']?.toString() ?? 'General';
+    final expenseCoaCode = _getExpenseCoaCode(category);
+    final dept = localRecord['departmentId']?.toString() ?? 'ADMIN';
+
     final updatedMap = Map<String, dynamic>.from(localRecord)
       ..['isVoided'] = true
       ..['voidedBy'] = voidedBy
@@ -155,6 +215,30 @@ class FinanceExpensesStorage {
     final sanitized = _sanitize(updatedMap);
     await expensesBox.put(expenseId, sanitized);
 
+    // ── ERP Double-Entry Journal Reversal ───────────────────────────────────
+    try {
+      final dateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final reversalEntry = JournalEntry(
+        id: 'je_rev_exp_$expenseId',
+        date: dateKey,
+        postedAt: _nowIso(),
+        sourceType: JournalSourceType.adjustment.toCode(),
+        sourceRefId: expenseId,
+        reversalOf: 'je_exp_$expenseId',
+        branchId: branchId,
+        departmentId: dept,
+        description: 'REVERSAL of Expense #$expenseId ($voidReason)',
+        createdBy: voidedBy,
+        lines: [
+          JournalLine(accountCode: bankCoaCode, debit: amountMinor, credit: 0, memo: 'Restore Bank/Cash Balance'),
+          JournalLine(accountCode: expenseCoaCode, debit: 0, credit: amountMinor, memo: 'Reverse Expense $category'),
+        ],
+      );
+      await FinanceLedgerStorage.postJournalEntry(reversalEntry);
+    } catch (e) {
+      debugPrint('[Expense Reversal Posting Warning] $e');
+    }
+
     // Enqueue for background void upload
     await LocalStorageService.enqueueSync({
       'type': 'void_expense',
@@ -166,6 +250,7 @@ class FinanceExpensesStorage {
 
     debugPrint('[ExpensesStorage] Expense voided locally & sync enqueued: $expenseId');
   }
+
 
   // ── Queries and Summaries ──────────────────────────────────────────────────
 

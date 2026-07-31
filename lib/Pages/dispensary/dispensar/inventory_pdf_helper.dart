@@ -70,7 +70,7 @@ class InventoryPdfHelper {
     required String branchName,
   }) async {
     // ── Logo ─────────────────────────────────────────────────────────────
-    final logoBytes = await _loadAsset('assets/logo/gmwf-1.png');
+    final logoBytes = await _loadAsset('assets/logo/gmwf-1.webp');
     final pw.MemoryImage? logo =
         logoBytes.isNotEmpty ? pw.MemoryImage(logoBytes) : null;
 

@@ -704,12 +704,12 @@ class _HeroHeader extends StatelessWidget {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.asset(
-                            'assets/logo/gmwf-1.png',
-                            width: 42, height: 42,
+                            'assets/logo/gmwf-1.webp',
+                            width: 58, height: 58,
                             fit: BoxFit.contain,
                             errorBuilder: (_, _, _) => const Icon(
                                 Icons.restaurant_rounded,
-                                color: Colors.white70, size: 24),
+                                color: Colors.white70, size: 32),
                           ),
                         ),
                         const SizedBox(width: 12),

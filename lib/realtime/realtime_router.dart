@@ -166,6 +166,66 @@ Serial: ${data['serial'] ?? 'N/A'}
         await _handleDeleteStockItem(data);
         break;
 
+      // ── ATTENDANCE EVENTS ──────────────────────────────────────────────────
+      case RealtimeEvents.saveBiometricLog:
+      case RealtimeEvents.saveEmployeeAttendance:
+      case RealtimeEvents.saveFacultyAttendance:
+      case RealtimeEvents.saveStudentAttendance:
+        await _handleAttendanceEvent(type, data);
+        break;
+
+      // ── MADRASSA & SCHOOL EVENTS ───────────────────────────────────────────
+      case RealtimeEvents.saveMadrassaAdmission:
+      case RealtimeEvents.saveMadrassaFee:
+      case RealtimeEvents.saveMadrassaHifzProgress:
+      case RealtimeEvents.saveExamResult:
+        await _handleMadrassaEvent(type, data);
+        break;
+
+      // ── FINANCE EVENTS ────────────────────────────────────────────────────
+      case RealtimeEvents.saveExpense:
+      case RealtimeEvents.deleteExpense:
+      case RealtimeEvents.saveLoan:
+      case RealtimeEvents.deleteLoan:
+      case RealtimeEvents.saveFinanceEntry:
+        await _handleFinanceEvent(type, data);
+        break;
+
+      // ── DONATION EVENTS ───────────────────────────────────────────────────
+      case RealtimeEvents.saveDonationReceipt:
+      case RealtimeEvents.saveDonor:
+      case RealtimeEvents.saveDonationCollection:
+        await _handleDonationEvent(type, data);
+        break;
+
+      // ── DASTERKHWAAN EVENTS ───────────────────────────────────────────────
+      case RealtimeEvents.saveDasterkhwanEntry:
+      case RealtimeEvents.saveDasterkhwanStock:
+      case RealtimeEvents.saveOfficeBoyToken:
+      case RealtimeEvents.saveKitchenServeLog:
+        await _handleDasterkhwanEvent(type, data);
+        break;
+
+      // ── LIBRARY EVENTS ───────────────────────────────────────────────────
+      case RealtimeEvents.saveLibraryBook:
+      case RealtimeEvents.saveLibraryIssue:
+      case RealtimeEvents.deleteLibraryBook:
+        await _handleLibraryEvent(type, data);
+        break;
+
+      // ── FACULTY & STAFF EVENTS ────────────────────────────────────────────
+      case RealtimeEvents.saveFaculty:
+      case RealtimeEvents.saveStaffProfile:
+        await _handleStaffEvent(type, data);
+        break;
+
+      // ── SUPERVISOR EVENTS ─────────────────────────────────────────────────
+      case RealtimeEvents.saveSupervisorAction:
+      case RealtimeEvents.approveEditRequest:
+      case RealtimeEvents.rejectEditRequest:
+        await _handleSupervisorEvent(type, data);
+        break;
+
       case 'welcome':
       case 'identify_request':
       case 'identified':
@@ -510,6 +570,113 @@ Serial: ${data['serial'] ?? 'N/A'}
     if (medicineId != null && medicineId.isNotEmpty) {
       await LocalStorageService.deleteLocalStockItem(medicineId);
       if (kDebugMode) print('✅ STOCK ITEM DELETED via LAN → $medicineId');
+    }
+  }
+
+  // ── Module Handlers for Local Hive Tier 1 Save ───────────────────────────
+
+  static Future<void> _handleAttendanceEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('attendance_box');
+      final id = data['id']?.toString() ?? data['punchId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ ATTENDANCE EVENT saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleAttendanceEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleMadrassaEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final boxName = type == RealtimeEvents.saveMadrassaFee ? 'madrassa_fees' : 'madrassa_box';
+      final box = await LocalStorageService.openBoxSafe(boxName);
+      final id = data['id']?.toString() ?? data['receiptNo']?.toString() ?? data['admissionNo']?.toString() ?? 'mad_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ MADRASSA EVENT saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleMadrassaEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleFinanceEvent(String type, Map<String, dynamic> data) async {
+    try {
+      String boxName = 'finance_entries';
+      if (type == RealtimeEvents.saveExpense || type == RealtimeEvents.deleteExpense) {
+        boxName = 'finance_expenses';
+      } else if (type == RealtimeEvents.saveLoan || type == RealtimeEvents.deleteLoan) {
+        boxName = 'finance_loans';
+      }
+      final box = await LocalStorageService.openBoxSafe(boxName);
+      final id = data['id']?.toString() ?? 'fin_${DateTime.now().microsecondsSinceEpoch}';
+      if (type == RealtimeEvents.deleteExpense || type == RealtimeEvents.deleteLoan) {
+        await box.delete(id);
+        if (kDebugMode) print('✅ FINANCE ITEM DELETED via LAN → $type ($id)');
+      } else {
+        await box.put(id, LocalStorageService.sanitize(data));
+        if (kDebugMode) print('✅ FINANCE EVENT saved via LAN → $type ($id)');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleFinanceEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleDonationEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('donations_box');
+      final id = data['id']?.toString() ?? data['receiptNumber']?.toString() ?? 'don_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ DONATION EVENT saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleDonationEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleDasterkhwanEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('dasterkhwaan_entries');
+      final id = data['id']?.toString() ?? 'das_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ DASTERKHWAAN EVENT saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleDasterkhwanEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleSupervisorEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('local_edit_requests');
+      final id = data['requestId']?.toString() ?? data['id']?.toString() ?? 'sup_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ SUPERVISOR EVENT saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleSupervisorEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleLibraryEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('library_box');
+      final id = data['id']?.toString() ?? data['bookId']?.toString() ?? 'lib_${DateTime.now().microsecondsSinceEpoch}';
+      if (type == RealtimeEvents.deleteLibraryBook) {
+        await box.delete(id);
+        if (kDebugMode) print('✅ LIBRARY BOOK DELETED via LAN → $id');
+      } else {
+        await box.put(id, LocalStorageService.sanitize(data));
+        if (kDebugMode) print('✅ LIBRARY EVENT saved via LAN → $type ($id)');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleLibraryEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleStaffEvent(String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe(LocalStorageService.usersBox);
+      final id = data['uid']?.toString() ?? data['id']?.toString() ?? 'usr_${DateTime.now().microsecondsSinceEpoch}';
+      await box.put(id, LocalStorageService.sanitize(data));
+      if (kDebugMode) print('✅ STAFF/FACULTY PROFILE saved via LAN → $type ($id)');
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleStaffEvent error: $e');
     }
   }
 }

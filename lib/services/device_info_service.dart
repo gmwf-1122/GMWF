@@ -251,4 +251,16 @@ class DeviceInfoService {
       debugPrint('[DeviceInfoService] Failed to mark user offline: $e');
     }
   }
+
+  /// Periodically touches user presence timestamp in Firestore
+  static Future<void> touchPresence() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null || uid.isEmpty) return;
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'isOnline': true,
+        'lastSeen': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
 }

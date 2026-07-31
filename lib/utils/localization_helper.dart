@@ -68,6 +68,24 @@ class AppLocalizations {
     'simulate_crash': {'en': 'Simulate a Crash', 'ur': 'کریش کی نقل کریں'},
     'app_version': {'en': 'App Version', 'ur': 'ایپ ورژن'},
     'build_type': {'en': 'Build Type', 'ur': 'تعمیر کی قسم'},
+
+    // Navigation & Dashboards
+    'dashboard': {'en': 'Dashboard', 'ur': 'ڈیش بورڈ'},
+    'overall': {'en': 'Overall Overview', 'ur': 'مجموعی جائزہ'},
+    'office': {'en': 'Office Management', 'ur': 'دفتر کا انتظام'},
+    'dispensary': {'en': 'Dispensary', 'ur': 'ڈسپنسیری'},
+    'dasterkhwaan': {'en': 'Dasterkhwaan', 'ur': 'دسترحوان'},
+    'madrassa': {'en': 'Madrassa', 'ur': 'مدرسہ'},
+    'school': {'en': 'School', 'ur': 'سکول'},
+    'dark_mode': {'en': 'Dark Mode', 'ur': 'ڈارک موڈ'},
+    'light_mode': {'en': 'Light Mode', 'ur': 'لائٹ موڈ'},
+    'donations': {'en': 'Donations', 'ur': 'عطیات'},
+    'finance': {'en': 'Finance & Accounts', 'ur': 'مالیات اور حسابات'},
+    'inventory': {'en': 'Inventory', 'ur': 'انوینٹری'},
+    'patients': {'en': 'Patients', 'ur': 'مریض'},
+    'students': {'en': 'Students', 'ur': 'طلبہ'},
+    'reports': {'en': 'Reports', 'ur': 'رپورٹس'},
+    'quick_actions': {'en': 'Quick Actions', 'ur': 'فوری اقدامات'},
   };
 
   static String translate(String key, {required String language}) {
@@ -85,6 +103,9 @@ extension LocalizationContext on BuildContext {
   }
 
   bool get isUrdu {
-    return false;
+    if (!Hive.isBoxOpen('app_settings')) return false;
+    final language = Hive.box('app_settings').get('language', defaultValue: 'en') as String;
+    return language == 'ur';
   }
 }
+

@@ -8,6 +8,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/theme/app_theme.dart';
 
 class PatientList extends StatefulWidget {
   final String branchId;
@@ -331,24 +332,20 @@ class _PatientListState extends State<PatientList>
                                     final isSmallest = isPending &&
                                         serial == smallestPendingSerial;
 
-                                    return Card(
-                                      elevation: isSelected ? 8 : 2,
-                                      color: isSelected
-                                          ? Colors.teal.shade50
-                                          : Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(
-                                            isMobile ? 12 : 16),
-                                        side: BorderSide(
-                                          color: isSelected
-                                              ? _teal
-                                              : Colors.transparent,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      margin: EdgeInsets.symmetric(
-                                          vertical: isMobile ? 4 : 6),
-                                      child: ListTile(
+                                     return Container(
+                                       margin: EdgeInsets.symmetric(
+                                           vertical: isMobile ? 4 : 6),
+                                       decoration: Neumorphic3DStyle.raisedDecoration(
+                                         isDark: false,
+                                         backgroundColor: isSelected
+                                             ? Colors.teal.shade50
+                                             : Colors.white,
+                                         borderRadius: isMobile ? 12 : 16,
+                                         borderColor: isSelected ? _teal : const Color(0xFFE2E8F0),
+                                         accentColor: _teal,
+                                         showGlow: isSelected,
+                                       ),
+                                       child: ListTile(
                                         dense: isMobile,
                                         contentPadding:
                                             EdgeInsets.symmetric(

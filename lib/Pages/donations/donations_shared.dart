@@ -1558,12 +1558,12 @@ class PdfAssetCache {
   static Future<void> preload() async {
     try {
       // Use gmwf-1.png (880KB) for watermarks (supports transparency)
-      logo      ??= (await rootBundle.load('assets/logo/gmwf-1.png')).buffer.asUint8List();
+      logo      ??= (await rootBundle.load('assets/logo/gmwf-1.webp')).buffer.asUint8List();
       // Use gmwf-1.png (880KB) for small logos (faster & smaller)
-      logoJpg   ??= (await rootBundle.load('assets/logo/gmwf-1.png')).buffer.asUint8List();
+      logoJpg   ??= (await rootBundle.load('assets/logo/gmwf-1.webp')).buffer.asUint8List();
       
-      qrAnjuman ??= (await rootBundle.load('assets/qr/anjuman.png')).buffer.asUint8List();
-      qrGm      ??= (await rootBundle.load('assets/qr/gm.png')).buffer.asUint8List();
+      qrAnjuman ??= (await rootBundle.load('assets/qr/anjuman.webp')).buffer.asUint8List();
+      qrGm      ??= (await rootBundle.load('assets/qr/gm.webp')).buffer.asUint8List();
     } catch (e) {
       debugPrint('[PDF Cache] Preload error: $e');
     }
@@ -2078,17 +2078,17 @@ Future<Uint8List> buildBankSlipPdf({
 }) async {
   Uint8List? logoBytes, qrGmBytes, qrAnjumanBytes;
   try {
-    final b = await rootBundle.load('assets/LOGO/gmwf-1.png');
+    final b = await rootBundle.load('assets/logo/gmwf-1.webp');
     logoBytes = b.buffer.asUint8List();
   } catch (_) {}
   // Anjuman QR → gulzarmadina.com
   try {
-    final b = await rootBundle.load('assets/qr/anjuman.png');
+    final b = await rootBundle.load('assets/qr/anjuman.webp');
     qrAnjumanBytes = b.buffer.asUint8List();
   } catch (_) {}
   // GMWF QR → gmwf.pk
   try {
-    final b = await rootBundle.load('assets/qr/gm.png');
+    final b = await rootBundle.load('assets/qr/gm.webp');
     qrGmBytes = b.buffer.asUint8List();
   } catch (_) {}
 
@@ -2619,7 +2619,7 @@ void showReceiptShareSheet(
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Image.asset('assets/logo/gmwf-1.jpg', height: 32),
+                  Image.asset('assets/logo/gmwf-1.webp', height: 32),
                   const Text('Share Receipt', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.gray900)),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
@@ -2671,7 +2671,7 @@ void showReceiptShareSheet(
                     _premiumShareBtn(
                       label: 'WhatsApp',
                       color: const Color(0xFF25D366),
-                      asset: 'assets/icons/WA.png',
+                      asset: 'assets/icons/WA.webp',
                       onTap: () async {
                         final msg = buildThankYouMessage(
                           donorName:     donorName,

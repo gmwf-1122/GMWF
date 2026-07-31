@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gmwf/services/sync_service.dart';
+import '../realtime/realtime_manager.dart';
+import '../realtime/realtime_events.dart';
 
 class LocalStorageService {
   // ── Box names ──────────────────────────────────────────────────────────────
@@ -54,6 +56,14 @@ class LocalStorageService {
   static const String biometricCredentialsBox = 'local_biometric_credentials';
   static const String unmappedPunchesBox = 'local_unmapped_punches';
 
+  // ── ERP Double-Entry Ledger Boxes ───────────────────────────────────────────
+  static const String chartOfAccountsBox  = 'org_chart_of_accounts';
+  static const String orgBankAccountsBox  = 'org_bank_accounts';
+  static const String journalEntriesBox   = 'local_finance_journal_entries';
+  static const String journalIndexBox     = 'local_finance_journal_index';
+  static const String departmentMapBox    = 'local_finance_department_map';
+
+
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -66,18 +76,17 @@ class LocalStorageService {
         throw Exception("Timeout opening Hive box: $name");
       });
     } catch (e) {
-      debugPrint('[LocalStorageService] openBoxSafe error for "$name": $e');
-      final err = e.toString();
-      // If we see "unknown typeId" or "register an adapter", the box contains 
-      // data we can no longer read. We must reset it to allow app startup.
-      if (err.contains('typeId') || err.contains('adapter') || err.contains('Adapter')) {
-        debugPrint('[LocalStorageService] Resetting corrupted box "$name"...');
+      debugPrint('[LocalStorageService] openBoxSafe error for "$name": $e. Attempting box reset...');
+      try {
         await Hive.deleteBoxFromDisk(name);
         return await Hive.openBox<T>(name);
+      } catch (err) {
+        debugPrint('[LocalStorageService] Failed to reset box "$name": $err');
+        rethrow;
       }
-      rethrow;
     }
   }
+
 
   static Future<void> init() async {
     debugPrint('[LocalStorageService.init] Opening all Hive boxes...');
@@ -121,7 +130,13 @@ class LocalStorageService {
       biometricDevicesBox,
       biometricCredentialsBox,
       unmappedPunchesBox,
+      chartOfAccountsBox,
+      orgBankAccountsBox,
+      journalEntriesBox,
+      journalIndexBox,
+      departmentMapBox,
     ];
+
 
     for (final name in boxNames) {
       await openBoxSafe(name);
@@ -136,6 +151,31 @@ class LocalStorageService {
     }
 
     debugPrint('[LocalStorageService.init] All Hive boxes opened safely.');
+    
+    // Asynchronously compact local storage boxes to free disk space
+    compactAllBoxes();
+  }
+
+  static Future<void> compactAllBoxes() async {
+    final boxNames = [
+      usersBox, patientsBox, entriesBox, syncBox, prescriptionsBox, branchCacheBox,
+      stockBox, branchesBox, dispensaryBox, donationsBox, donorsBox,
+      medicineRestrictionsBox, reportsCacheBox, 'app_settings', 'app_flags',
+      'local_submissions', 'server_sync_queue', 'local_edit_requests',
+      employeesBox, salaryHistoryBox, attendanceBox, salaryLedgerBox,
+      financeSettingsBox, branchTransfersBox, auditLogsBox,
+      madrassaStudentsBox, madrassaLogsBox, madrassaHolidaysBox, financeHolidaysBox,
+      financeLoansBox, expensesBox,
+    ];
+
+    for (final name in boxNames) {
+      try {
+        if (Hive.isBoxOpen(name)) {
+          await Hive.box(name).compact();
+        }
+      } catch (_) {}
+    }
+    debugPrint('[LocalStorageService] All Hive boxes compacted.');
   }
 
 
@@ -339,6 +379,20 @@ class LocalStorageService {
     
     // Trigger sync upload immediately in background
     SyncService().triggerUpload();
+
+    // Dispatch to Branch Server over LAN WebSocket (Tier 2)
+    try {
+      final evtType = actionCopy['type']?.toString();
+      if (evtType != null && evtType.isNotEmpty) {
+        RealtimeManager().sendMessage({
+          'event_type': evtType,
+          'data': actionCopy['data'] ?? actionCopy,
+          'branchId': actionCopy['branchId'],
+        });
+      }
+    } catch (e) {
+      debugPrint('[SyncQueue] LAN dispatch notice: $e');
+    }
   }
 
   static Map<String, Map<String, dynamic>> getAllSync() {

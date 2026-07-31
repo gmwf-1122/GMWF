@@ -305,7 +305,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Image.asset('assets/logo/gmwf-1.png',
+                    Image.asset('assets/logo/gmwf-1.webp',
                         height: isMobile ? 80 : 100),
                     const SizedBox(height: 16),
                     Text(

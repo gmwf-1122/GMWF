@@ -33,7 +33,14 @@ class RoleThemeScope extends InheritedWidget {
         } catch (_) {}
       }
     }
-    return RoleThemeData.of(of(context), resolvedColor);
+    RoleThemeData data = RoleThemeData.of(of(context), resolvedColor);
+    if (Hive.isBoxOpen('app_settings')) {
+      final isDarkMode = Hive.box('app_settings').get('is_dark_mode', defaultValue: false) as bool;
+      if (isDarkMode) {
+        data = data.toDarkMode();
+      }
+    }
+    return data;
   }
 
   @override
@@ -96,21 +103,27 @@ class RolePageScaffold extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Themed card container
+// Soft UI (Neumorphism 2.0) 3D Card Container
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RoleCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
   final double radius;
   final bool showGlow;
+  final VoidCallback? onTap;
+  final Gradient? gradient;
 
   const RoleCard({
     super.key,
     required this.child,
     this.padding,
+    this.margin,
     this.radius = 16,
     this.showGlow = false,
+    this.onTap,
+    this.gradient,
   });
 
   @override
@@ -120,30 +133,149 @@ class RoleCard extends StatelessWidget {
     if (radius == 16 && Hive.isBoxOpen('app_settings')) {
       resolvedRadius = Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as double;
     }
-    return Container(
+
+    final isDark = t.isDarkCanvas;
+
+    final List<BoxShadow> neumorphicShadows = isDark
+        ? [
+            // Dark Mode Neumorphic 2.0 dual shadows
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.65),
+              blurRadius: 18,
+              spreadRadius: 1,
+              offset: const Offset(6, 8),
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.08),
+              blurRadius: 12,
+              spreadRadius: -1,
+              offset: const Offset(-4, -4),
+            ),
+            if (showGlow)
+              BoxShadow(
+                color: t.accent.withValues(alpha: 0.28),
+                blurRadius: 24,
+                spreadRadius: 2,
+                offset: const Offset(0, 6),
+              ),
+          ]
+        : [
+            // Light Mode Neumorphic 2.0 dual shadows (prominent 3D depth)
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 18,
+              spreadRadius: 1,
+              offset: const Offset(7, 8),
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.95),
+              blurRadius: 14,
+              spreadRadius: -1,
+              offset: const Offset(-6, -6),
+            ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+            if (showGlow)
+              BoxShadow(
+                color: t.accent.withValues(alpha: 0.22),
+                blurRadius: 24,
+                spreadRadius: 2,
+                offset: const Offset(0, 8),
+              ),
+          ];
+
+    final cardContent = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: margin,
       padding: padding ?? const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: t.bgCard,
+        color: gradient == null ? t.bgCard : null,
+        gradient: gradient,
         borderRadius: BorderRadius.circular(resolvedRadius),
-        border: Border.all(color: t.bgRule, width: 1.0),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-          if (showGlow)
-            BoxShadow(
-              color: t.accent.withValues(alpha: 0.08),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
-            ),
-        ],
+        border: Border.all(
+          color: isDark ? t.bgRule : t.bgRule.withValues(alpha: 0.7),
+          width: 1.2,
+        ),
+        boxShadow: neumorphicShadows,
       ),
       child: child,
     );
+
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(resolvedRadius),
+        child: cardContent,
+      );
+    }
+
+    return cardContent;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reusable Neumorphic 3D Container
+// ─────────────────────────────────────────────────────────────────────────────
+
+class NeumorphicContainer extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
+  final double radius;
+  final bool showGlow;
+  final VoidCallback? onTap;
+  final Color? color;
+
+  const NeumorphicContainer({
+    super.key,
+    required this.child,
+    this.padding,
+    this.margin,
+    this.radius = 16,
+    this.showGlow = false,
+    this.onTap,
+    this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    final isDark = t.isDarkCanvas;
+    double resolvedRadius = radius;
+    if (radius == 16 && Hive.isBoxOpen('app_settings')) {
+      resolvedRadius = Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as double;
+    }
+
+    final dec = Neumorphic3DStyle.raisedDecoration(
+      isDark: isDark,
+      backgroundColor: color ?? t.bgCard,
+      borderRadius: resolvedRadius,
+      accentColor: t.accent,
+      showGlow: showGlow,
+    );
+
+    final content = AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: margin,
+      padding: padding ?? const EdgeInsets.all(16),
+      decoration: dec,
+      child: child,
+    );
+
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(resolvedRadius),
+        child: content,
+      );
+    }
+    return content;
+  }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Themed text field decoration

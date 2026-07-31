@@ -434,7 +434,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         toolbarHeight: 56,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.png', height: 32),
+          Image.asset('assets/logo/gmwf-1.webp', height: 32),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -503,7 +503,7 @@ class _DoctorScreenState extends State<DoctorScreen>
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.webp', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(

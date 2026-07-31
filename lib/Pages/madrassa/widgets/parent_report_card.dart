@@ -2920,11 +2920,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     } catch (_) {}
 
     final remainingLines = (8640 - totalMemorized).clamp(0, 8640);
-    final double effectiveRate = isStatusOnLeave ? 0.0 : (hasActiveRecentPace ? recentDailyRate : (overallAvg >= 0.3 ? overallAvg : 0.0));
-    final bool isPaused = isStatusOnLeave || (!hasActiveRecentPace && overallAvg < 0.3);
+    final double effectiveRate = isStatusOnLeave ? 0.0 : (hasActiveRecentPace ? recentDailyRate : overallAvg);
+    final bool isPaused = isStatusOnLeave;
     final bool isLowPace = !isPaused && effectiveRate < 1.0;
 
-    final int? estimatedDays = (!isPaused && !isLowPace && effectiveRate >= 1.0 && remainingLines > 0)
+    final int? estimatedDays = (!isPaused && effectiveRate >= 0.1 && remainingLines > 0)
         ? (remainingLines / effectiveRate).ceil()
         : null;
 
@@ -2932,7 +2932,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     if (isPaused) {
       estCompletionStr = context.isUrdu ? 'رخصت (رفتار رکی ہوئی ہے)' : 'Paused (On Leave)';
     } else if (isLowPace) {
-      estCompletionStr = context.isUrdu ? 'کارکردگی کم ہے (رفتار بڑھائیں)' : 'Pace low (Needs active pace)';
+      estCompletionStr = context.isUrdu ? 'ابتدائی رفتار' : 'Building Pace';
     } else if (estimatedDays != null) {
       final completionDate = DateTime.now().add(Duration(days: estimatedDays.clamp(1, 1095)));
       estCompletionStr = DateFormat('MMM yyyy').format(completionDate);
@@ -3086,7 +3086,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     List<DateTime>? holidays,
   }) {
     final name = studentData['name'] ?? studentData['fullName'] ?? 'Student';
-    final photoUrl = studentData['photoUrl'] as String?;
+    final photoUrl = (studentData['photoBase64'] ??
+            studentData['photoUrl'] ??
+            studentData['photo'] ??
+            studentData['image'] ??
+            studentData['studentPhotoBase64'])
+        ?.toString();
 
     return Container(
       width: double.infinity,
@@ -3143,19 +3148,25 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       ),
                     );
                   } else if (str != null && str.startsWith('http')) {
-                    return Image.network(
-                      str,
-                      fit: BoxFit.cover,
-                      width: 56,
-                      height: 56,
-                      errorBuilder: (_, __, ___) => Container(
-                        color: const Color(0xFFDDF4EA),
-                        alignment: Alignment.center,
-                        child: Text(
-                          name.isNotEmpty ? name[0] : '?',
-                          style: const TextStyle(color: Color(0xFF1E5B48), fontSize: 22, fontWeight: FontWeight.bold),
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Container(
+                          color: const Color(0xFFDDF4EA),
+                          alignment: Alignment.center,
+                          child: Text(
+                            name.isNotEmpty ? name[0] : '?',
+                            style: const TextStyle(color: Color(0xFF1E5B48), fontSize: 22, fontWeight: FontWeight.bold),
+                          ),
                         ),
-                      ),
+                        Image.network(
+                          str,
+                          fit: BoxFit.cover,
+                          width: 56,
+                          height: 56,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ],
                     );
                   }
                   return Container(
@@ -3351,8 +3362,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     final uniformCard = _statusPill(
       icon: Icons.checkroom_rounded,
       label: context.t('Cleanliness'),
-      value: currentStatus != 'present' ? context.t('Absent') : (uniformOk ? context.t('Clean') : context.t('Unclean')),
-      color: currentStatus != 'present' ? ParentReportCard.errorColor : (uniformOk ? Colors.blue : ParentReportCard.errorColor),
+      value: (currentStatus == 'leave' || currentStatus == 'leave_requested')
+          ? context.t('Leave')
+          : (currentStatus != 'present'
+              ? context.t('Absent')
+              : (uniformOk ? context.t('Clean') : context.t('Unclean'))),
+      color: (currentStatus == 'leave' || currentStatus == 'leave_requested')
+          ? Colors.orange
+          : (currentStatus != 'present'
+              ? ParentReportCard.errorColor
+              : (uniformOk ? Colors.blue : ParentReportCard.errorColor)),
       onTap: () => setState(() => _selectedTab = 1),
     );
     final replyCard = _statusPill(
@@ -3841,8 +3860,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: _quranTile(
                   icon: Icons.speed_rounded,
                   label: context.t('Weekly Pace'),
-                  value: overallPace >= 0.3 ? '${paceWeekly.toStringAsFixed(1)} lines/wk' : (context.isUrdu ? 'ترقی رکی ہوئی' : 'Paused'),
-                  sub: overallPace >= 0.3 ? '${overallPace.toStringAsFixed(1)} lines/day avg' : (context.isUrdu ? 'رخصت پر مطلع' : 'On Leave'),
+                  value: (selectedDateLog['attendance'] == 'leave' || selectedDateLog['attendance'] == 'leave_requested')
+                      ? (context.isUrdu ? 'ترقی رکی ہوئی' : 'Paused')
+                      : (paceWeekly > 0 ? '${paceWeekly.toStringAsFixed(1)} lines/wk' : (context.isUrdu ? 'شروعاتی رفتار' : 'Building Pace')),
+                  sub: (selectedDateLog['attendance'] == 'leave' || selectedDateLog['attendance'] == 'leave_requested')
+                      ? (context.isUrdu ? 'رخصت پر مطلع' : 'On Leave')
+                      : (overallPace > 0 ? '${overallPace.toStringAsFixed(1)} lines/day avg' : (context.isUrdu ? 'روزانہ کارکردگی' : 'Daily Progress')),
                   color: ParentReportCard.primaryColor,
                 ),
               ),
@@ -3851,12 +3874,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: _quranTile(
                   icon: Icons.event_repeat_rounded,
                   label: context.t('Est. Completion'),
-                  value: (daysRemaining <= 0 || overallPace < 1.0)
-                      ? (overallPace < 0.1 ? (context.isUrdu ? 'روک دیا گیا' : 'Paused') : (context.isUrdu ? 'کم رفتار' : 'Low Pace'))
-                      : (daysRemaining > 1095
-                          ? '~3.0 yrs'
-                          : (daysRemaining < 365 ? '${(daysRemaining / 30).toStringAsFixed(1)} mos' : '${(daysRemaining / 365).toStringAsFixed(1)} yrs')),
-                  sub: estCompletionStr,
+                  value: (selectedDateLog['attendance'] == 'leave' || selectedDateLog['attendance'] == 'leave_requested')
+                      ? (context.isUrdu ? 'روک دیا گیا' : 'Paused')
+                      : (daysRemaining <= 0 || overallPace < 0.1
+                          ? (context.isUrdu ? 'ابتدائی کارکردگی' : 'Building Pace')
+                          : (daysRemaining > 1095
+                              ? '~3.0 yrs'
+                              : (daysRemaining < 365 ? '${(daysRemaining / 30).toStringAsFixed(1)} mos' : '${(daysRemaining / 365).toStringAsFixed(1)} yrs'))),
+                  sub: (selectedDateLog['attendance'] == 'leave' || selectedDateLog['attendance'] == 'leave_requested')
+                      ? (context.isUrdu ? 'رخصت (رفتار رکی ہوئی ہے)' : 'Paused (On Leave)')
+                      : estCompletionStr,
                   color: ParentReportCard.accentColor,
                 ),
               ),
@@ -4884,6 +4911,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           uniText = context.isUrdu ? 'رخصت' : 'Leave';
           uniColor = Colors.amber.shade700;
           uniIcon = Icons.offline_pin_rounded;
+          dailyEarned += dailyUniReward;
         } else {
           uniText = context.isUrdu ? 'غیر حاضر' : 'Absent';
           uniColor = const Color(0xFFE84B4B);
@@ -5509,25 +5537,40 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
     // Month gain calculation
     final selectedMonthStart = DateTime(_selectedYear, _selectedMonth, 1);
-    int prevMonthLines = prevHifzLines;
-    final sortedDescLogs = [...allLogs]..sort((a, b) => b.id.compareTo(a.id));
-    for (var logDoc in sortedDescLogs) {
+    final monthKeyStr = DateFormat('yyyy-MM').format(DateTime(_selectedYear, _selectedMonth));
+    final monthLogsFiltered = allLogs.where((l) => l.id.startsWith(monthKeyStr)).toList();
+
+    int prevMonthLines = -1;
+    final sortedAllDescLogs = [...allLogs]..sort((a, b) => b.id.compareTo(a.id));
+    for (var logDoc in sortedAllDescLogs) {
       final logDate = DateTime.tryParse(logDoc.id);
       if (logDate != null && logDate.isBefore(selectedMonthStart)) {
         final logMap = logDoc.data() as Map<String, dynamic>?;
         final lines = logMap?[widget.studentId]?['currentLines'] as int?;
-        if (lines != null) { prevMonthLines = lines; break; }
+        if (lines != null && lines > 0) {
+          prevMonthLines = lines;
+          break;
+        }
       }
     }
-    final monthKeyStr = DateFormat('yyyy-MM').format(DateTime(_selectedYear, _selectedMonth));
-    final monthLogsFiltered = allLogs.where((l) => l.id.startsWith(monthKeyStr)).toList();
-    final sortedMonthLogs = [...monthLogsFiltered]..sort((a, b) => b.id.compareTo(a.id));
+
     int monthGain = 0;
-    if (sortedMonthLogs.isNotEmpty) {
-      final latestMap = sortedMonthLogs.first.data() as Map<String, dynamic>?;
-      final studentLatestLog = latestMap?[widget.studentId] as Map<String, dynamic>?;
-      final latestLines = studentLatestLog?['currentLines'] as int? ?? currentTotalLines;
-      monthGain = latestLines - prevMonthLines;
+    if (monthLogsFiltered.isNotEmpty) {
+      final sortedMonthAsc = [...monthLogsFiltered]..sort((a, b) => a.id.compareTo(b.id));
+
+      final firstMap = sortedMonthAsc.first.data() as Map<String, dynamic>?;
+      final firstLogLines = firstMap?[widget.studentId]?['currentLines'] as int?;
+
+      final lastMap = sortedMonthAsc.last.data() as Map<String, dynamic>?;
+      final lastLogLines = lastMap?[widget.studentId]?['currentLines'] as int?;
+
+      final int startLines = (prevMonthLines != -1)
+          ? prevMonthLines
+          : (firstLogLines ?? prevHifzLines);
+
+      final int endLines = (lastLogLines != null) ? lastLogLines : currentTotalLines;
+
+      monthGain = (endLines - startLines).clamp(0, 8640);
     }
 
     // Congrats & nearing completion
@@ -6327,7 +6370,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           )
                         : Padding(
                             padding: const EdgeInsets.all(8.0),
-                            child: Image.asset('assets/logo/gmwf-1.png', fit: BoxFit.contain),
+                            child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
                           ),
                     title: widget.allDocs.length <= 1
                         ? Column(

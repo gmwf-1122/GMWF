@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.2.7
+version: 1.2.9
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -54,6 +54,7 @@ dependencies:
   archive: ^3.6.1
   pdf: ^3.11.0
   url_launcher: ^6.3.2
+  open_filex: ^4.5.0
   file_picker: ^10.3.8
   image_picker: ^1.2.1
   image_cropper: ^11.0.0
@@ -90,7 +91,7 @@ dev_dependencies:
 
 flutter_native_splash:
   color: "#F1F8E9"
-  image: assets/logo/gmwf.png
+  image: assets/logo/gmwf_splash.png
   android: true
   ios: true
   web: true
@@ -101,7 +102,7 @@ flutter_native_splash:
   ios_content_mode: center
   
   android_12:
-    image: assets/logo/gmwf.png
+    image: assets/logo/gmwf_splash.png
     icon_background_color: "#F1F8E9"
 
 flutter_launcher_icons:
@@ -124,25 +125,17 @@ flutter:
         - asset: assets/fonts/Amiri-Regular.ttf
 
   assets:
-    - assets/icons/eye_close.png
-    - assets/icons/eye_open.png
-    - assets/logo/agmp.png
-    - assets/logo/gmwf.jpg
-    - assets/logo/gmwf.png
-    - assets/logo/gmwf-1.png
-    - assets/logo/twt_logo.png
-    - assets/logo/gmwf-1.jpg
-    - assets/icons/WA.png
-    - assets/images/1.jpg
-    - assets/images/1.webp
-    - assets/images/2.jpg
-    - assets/images/3.jpg
-    - assets/images/moon.png
-    - assets/images/rx.png
-    - assets/qr/anjuman.png
-    - assets/qr/gm.png
-    - assets/hero.png
-    - assets/heroes.png
-    - assets/hero/
+    - assets/icons/eye_close.webp
+    - assets/icons/eye_open.webp
+    - assets/icons/WA.webp
+    - assets/logo/agmp.webp
+    - assets/logo/gmwf_splash.webp
+    - assets/logo/gmwf-1.webp
+    - assets/logo/twt_logo.webp
+    - assets/images/moon.webp
+    - assets/images/rx.webp
+    - assets/qr/
     - assets/fonts/NooriNastaliq.ttf
     - assets/fonts/Amiri-Regular.ttf
+    - assets/Banks Logos/
+

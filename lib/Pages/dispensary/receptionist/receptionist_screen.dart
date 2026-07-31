@@ -507,7 +507,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         toolbarHeight: 56,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.png', height: 32),
+          Image.asset('assets/logo/gmwf-1.webp', height: 32),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -594,7 +594,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.webp', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(
@@ -777,7 +777,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 ? Opacity(
                     opacity: 0.12,
                     child: Image.asset(
-                      'assets/logo/gmwf-1.png',
+                      'assets/logo/gmwf-1.webp',
                       height: isMobile ? 40 : 54,
                     ),
                   )
@@ -807,7 +807,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     ),
                     // ── Top-right icon/logo ───────────────────────────────
                     if (isImage)
-                      Image.asset('assets/logo/gmwf-1.png',
+                      Image.asset('assets/logo/gmwf-1.webp',
                           height: isMobile ? 14 : 18)
                     else if (icon != null)
                       Icon(icon,

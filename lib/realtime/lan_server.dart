@@ -13,6 +13,7 @@
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 
 import '../config/constants.dart';
@@ -23,6 +24,7 @@ class LanServer {
   final List<WebSocket>                      _clients    = [];
   final Map<String, WebSocket>               _socketById = {};
   final Map<WebSocket, Map<String, dynamic>> _clientInfo = {};
+  final Map<WebSocket, String>               _clientIps  = {};
 
   final int port;
 
@@ -78,8 +80,9 @@ class LanServer {
 
         if (WebSocketTransformer.isUpgradeRequest(request)) {
           try {
+            final clientIp = request.connectionInfo?.remoteAddress.address ?? '';
             final socket = await WebSocketTransformer.upgrade(request);
-            _addClient(socket);
+            _addClient(socket, clientIp);
           } catch (e) {
             print('WebSocket upgrade failed: $e');
             request.response
@@ -88,6 +91,22 @@ class LanServer {
               ..close();
           }
         } else {
+          // Serve Flutter Web static files if build/web exists, or return health check
+          final pathStr = request.uri.path == '/' ? '/index.html' : request.uri.path;
+          final webDir  = Directory('build/web');
+          final webFile = File('${webDir.path}$pathStr');
+
+          if (await webDir.exists() && await webFile.exists()) {
+            try {
+              request.response.headers
+                ..add('Access-Control-Allow-Origin', '*')
+                ..add('Access-Control-Allow-Private-Network', 'true')
+                ..contentType = _getContentType(pathStr);
+              await webFile.openRead().pipe(request.response);
+              return;
+            } catch (_) {}
+          }
+
           // HTTP health-check — LanDiscovery._verify() looks for 'GMWF'.
           request.response
             ..headers.add('Access-Control-Allow-Origin', '*')
@@ -159,13 +178,16 @@ class LanServer {
   }
 
   // ── Add client ─────────────────────────────────────────────────────────────
-  void _addClient(WebSocket socket) {
+  void _addClient(WebSocket socket, [String ipAddress = '']) {
     final socketId = socket.hashCode.toString();
     _clients.add(socket);
     _socketById[socketId] = socket;
+    if (ipAddress.isNotEmpty) {
+      _clientIps[socket] = ipAddress;
+    }
 
     print('╔════════════════════════════════════════════════════════════╗');
-    print('║ NEW CLIENT CONNECTED  Socket: $socketId  '
+    print('║ NEW CLIENT CONNECTED  Socket: $socketId IP: ${ipAddress.isEmpty ? 'Unknown' : ipAddress} '
         'Total: ${_clients.length}');
     print('╚════════════════════════════════════════════════════════════╝');
 
@@ -210,19 +232,52 @@ class LanServer {
             ? data['username'] as String
             : role ?? 'unknown';
 
+        final socketIp = _clientIps[socket] ?? '';
+        final payloadIp = (data['ipAddress'] ?? data['ip'] ?? data['deviceIp'] ?? '').toString().trim();
+        final ipAddress = socketIp.isNotEmpty
+            ? socketIp
+            : (payloadIp.isNotEmpty ? payloadIp : '127.0.0.1');
+
         if (role != null && branchId != null) {
+          final normRole = role.toLowerCase().trim();
+          final normBranch = branchId.toLowerCase().trim();
+
+          // DEDUPLICATION: Remove any stale socket for the same clientId or same role+username+branch
+          final staleSockets = <WebSocket>[];
+          _clientInfo.forEach((ws, oldInfo) {
+            if (ws != socket) {
+              final sameClient = clientId != null && clientId.isNotEmpty && oldInfo['clientId'] == clientId;
+              final sameIdentity = oldInfo['role'] == normRole &&
+                  oldInfo['branchId'] == normBranch &&
+                  oldInfo['username'] == username;
+              if (sameClient || sameIdentity) {
+                staleSockets.add(ws);
+              }
+            }
+          });
+
+          for (final oldWs in staleSockets) {
+            try { oldWs.close(); } catch (_) {}
+            _clients.remove(oldWs);
+            _socketById.remove(oldWs.hashCode.toString());
+            _clientInfo.remove(oldWs);
+            _clientIps.remove(oldWs);
+            onClientDisconnected?.call(oldWs.hashCode.toString());
+          }
+
           final info = {
-            'role':        role.toLowerCase().trim(),
-            'branchId':    branchId.toLowerCase().trim(),
+            'role':        normRole,
+            'branchId':    normBranch,
             'username':    username,
             'clientId':    clientId,
+            'ipAddress':   ipAddress,
             'identified':  true,
             'connectedAt': DateTime.now().toIso8601String(),
           };
           _clientInfo[socket] = info;
 
           print('╔════════════════════════════════════════════════════════════╗');
-          print('║ CLIENT IDENTIFIED  Socket: $socketId');
+          print('║ CLIENT IDENTIFIED  Socket: $socketId  IP: $ipAddress');
           print('║ Role: $role  Branch: $branchId  Username: $username');
           print('║ Total identified: ${_clientInfo.length}');
           print('╚════════════════════════════════════════════════════════════╝');
@@ -388,16 +443,20 @@ class LanServer {
     if (forwarded > 0) print('[LanServer] Broadcast → $forwarded client(s)');
   }
 
-  /// Returns metadata (including username) for all identified clients.
+  /// Returns metadata (including username and IP address) for all identified clients.
   List<Map<String, dynamic>> getConnectedClients() {
     return _clientInfo.entries.map((e) {
       final socketId = e.key.hashCode.toString();
       return {
-        'socketId': socketId,
-        'role':     e.value['role'],
-        'branchId': e.value['branchId'],
-        'username': e.value['username'],
-        'clientId': e.value['clientId'],
+        'socketId':  socketId,
+        'role':      e.value['role'],
+        'branchId':  e.value['branchId'],
+        'username':  e.value['username'],
+        'clientId':  e.value['clientId'],
+        'ipAddress': e.value['ipAddress'] ?? _clientIps[e.key] ?? '127.0.0.1',
+        'deviceOs':  e.value['deviceOs'] ?? (kIsWeb ? 'Chrome Web' : 'Windows PC'),
+
+        'appVersion': e.value['appVersion'] ?? 'v2.4.0',
       };
     }).toList();
   }
@@ -440,5 +499,17 @@ class LanServer {
     }
     _server = null;
     print('[LanServer] Fully stopped');
+  }
+
+  ContentType _getContentType(String path) {
+    if (path.endsWith('.html')) return ContentType.html;
+    if (path.endsWith('.js')) return ContentType('application', 'javascript', charset: 'utf-8');
+    if (path.endsWith('.css')) return ContentType('text', 'css', charset: 'utf-8');
+    if (path.endsWith('.png')) return ContentType('image', 'png');
+    if (path.endsWith('.jpg') || path.endsWith('.jpeg')) return ContentType('image', 'jpeg');
+    if (path.endsWith('.svg')) return ContentType('image', 'svg+xml');
+    if (path.endsWith('.json')) return ContentType.json;
+    if (path.endsWith('.wasm')) return ContentType('application', 'wasm');
+    return ContentType.binary;
   }
 }

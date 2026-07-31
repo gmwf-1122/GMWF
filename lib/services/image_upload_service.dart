@@ -1,7 +1,7 @@
-// lib/services/image_upload_service.dart
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
@@ -57,24 +57,37 @@ class ImageUploadService {
     int quality = 70,
   }) async {
     try {
+      bool isDesktop = false;
+      try {
+        if (!kIsWeb) {
+          isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+        }
+      } catch (_) {}
+
       XFile? file;
+      if (isDesktop && source == ImageSource.camera) {
+        debugPrint('[ImageUploadService] Camera hardware capture is unsupported natively on desktop. Directing to FilePicker.');
+        return await pickDocumentFile(allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp']);
+      }
+
       try {
         file = await _picker.pickImage(
           source: source,
           maxWidth: maxWidth.toDouble(),
           maxHeight: maxHeight.toDouble(),
           imageQuality: quality,
-        );
+        ).timeout(const Duration(seconds: 12));
       } catch (e) {
-        debugPrint('[ImageUploadService] Primary pick image error for source $source: $e. Falling back...');
-        // Fallback for Windows desktop or platforms where camera plugin throws UnimplementedError
+        debugPrint('[ImageUploadService] Primary pick image failed for source $source: $e. Falling back to FilePicker...');
         try {
-          file = await _picker.pickImage(
-            source: ImageSource.gallery,
-            maxWidth: maxWidth.toDouble(),
-            maxHeight: maxHeight.toDouble(),
-            imageQuality: quality,
-          );
+          if (source == ImageSource.camera) {
+            file = await _picker.pickImage(
+              source: ImageSource.gallery,
+              maxWidth: maxWidth.toDouble(),
+              maxHeight: maxHeight.toDouble(),
+              imageQuality: quality,
+            ).timeout(const Duration(seconds: 10));
+          }
         } catch (_) {}
       }
 
@@ -83,7 +96,7 @@ class ImageUploadService {
         return processBytesToBase64(bytes, quality: quality, maxWidth: maxWidth, maxHeight: maxHeight);
       }
 
-      // Secondary fallback via FilePicker for Windows/Desktop if ImagePicker returned null/failed
+      // Secondary fallback via FilePicker for Desktop/Web if ImagePicker returned null/failed
       return await pickDocumentFile(allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'bmp']);
     } catch (e) {
       debugPrint('[ImageUploadService] Pick image error: $e');
@@ -164,12 +177,12 @@ class ImageUploadService {
   static Uint8List? decodeBase64ToBytes(String? input) {
     if (input == null || input.isEmpty) return null;
     try {
-      String clean = input;
+      String clean = input.trim();
       if (clean.contains(',')) {
         clean = clean.split(',').last;
       }
       clean = clean.replaceAll(RegExp(r'\s+'), '');
-      return base64Decode(clean);
+      return base64Decode(base64.normalize(clean));
     } catch (e) {
       debugPrint('[ImageUploadService] Base64 decode error: $e');
       return null;

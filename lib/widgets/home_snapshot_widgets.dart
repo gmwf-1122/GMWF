@@ -102,18 +102,8 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
           width: _hov ? 2.0 : 1.2,
         ),
         boxShadow: _hov
-            ? [
-                BoxShadow(
-                    color: categoryColor.withValues(alpha: 0.22),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8)),
-              ]
-            : [
-                BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3)),
-              ],
+            ? Neumorphic3DStyle.raisedShadows(isDark: isDark, depth: 1.25, accentColor: categoryColor, showGlow: true)
+            : Neumorphic3DStyle.raisedShadows(isDark: isDark, depth: 0.9),
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20.8),
@@ -435,7 +425,7 @@ class HomePatientDonutCard extends StatelessWidget {
         color: t.bgCard,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4))],
+        boxShadow: Neumorphic3DStyle.raisedShadows(isDark: t.isDarkCanvas, depth: 0.9),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('Patients by Category',
@@ -503,9 +493,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
         color: t.bgCard,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: t.bgRule),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
-        ],
+        boxShadow: Neumorphic3DStyle.raisedShadows(isDark: t.isDarkCanvas, depth: 0.9),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1995,137 +1983,147 @@ class QuickActionsRow extends StatelessWidget {
           BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Quick Actions',
-              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-          const SizedBox(height: DS.s1),
-          Expanded(
-            child: GridView.builder(
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: MediaQuery.of(context).size.width > 900 ? 6 : (MediaQuery.of(context).size.width > 600 ? 4 : 3),
-                crossAxisSpacing: 8,
-                mainAxisSpacing: 8,
-                childAspectRatio: 1.45,
-              ),
-              itemCount: activeActions.length,
-              itemBuilder: (context, index) {
-                final action = activeActions[index];
-                final mainModuleId = (action['id'] == 'employee_attendance')
-                    ? 'finance'
-                    : ((action['id'] == 'madrassa_attendance' || action['id'] == 'madrassa_students' || action['id'] == 'add_student' || action['id'] == 'madrassa_report')
-                        ? 'madrassa'
-                        : ((action['id'] == 'school_attendance' || action['id'] == 'school_teacher_attendance' || action['id'] == 'school')
-                            ? 'school_module'
-                            : action['id']));
-                final baseModule = availableModules.firstWhere(
-                  (m) => m.id == mainModuleId || (mainModuleId == 'patients_registration' && m.id == 'patient_register_standalone') || (mainModuleId == 'school_module' && (m.id == 'school_attendance' || m.id == 'school_teacher_attendance' || m.id == 'school_module')),
-                  orElse: () => availableModules.firstWhere((m) => m.id == mainModuleId, orElse: () => availableModules.first),
-                );
-                
-                // Construct custom copy of the module with modified builder
-                var module = baseModule;
-                if (action['id'] == 'employee_attendance') {
-                  module = baseModule.copyWith(
-                    title: 'Employee Attendance',
-                    builder: (context, data) => FinancePage(
-                      branchId: data['branchId'] ?? 'all',
-                      isAdmin: true,
-                      initialTabIndex: 1,
-                    ),
-                  );
-                } else if (action['id'] == 'madrassa_students') {
-                  module = baseModule.copyWith(
-                    title: 'Madrassa Students',
-                    builder: (context, data) {
-                      final branchId = data['branchId'] ?? 'unknown';
-                      final username = data['name'] ?? data['username'] ?? 'User';
-                      final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
-                      final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
-                      return MadrassaDashboard(
-                        branchId: branchId,
-                        username: username,
-                        role: role,
-                        isAdmin: isAdmin,
-                        initialIndex: isAdmin ? 2 : 1,
-                      );
-                    },
-                  );
-                } else if (action['id'] == 'madrassa_attendance') {
-                  module = baseModule.copyWith(
-                    title: 'Madrassa Attendance',
-                    builder: (context, data) {
-                      final branchId = data['branchId'] ?? 'unknown';
-                      final username = data['name'] ?? data['username'] ?? 'User';
-                      final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
-                      final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
-                      return MadrassaDashboard(
-                        branchId: branchId,
-                        username: username,
-                        role: role,
-                        isAdmin: isAdmin,
-                        initialIndex: isAdmin ? 1 : 0,
-                      );
-                    },
-                  );
-                } else if (action['id'] == 'school_attendance') {
-                  module = baseModule.copyWith(
-                    title: 'School Student Attendance',
-                    builder: (context, data) => SchoolDashboard(
-                      branchId: data['branchId'] ?? 'all',
-                      username: data['name'] ?? data['username'] ?? 'User',
-                      role: data['role'] ?? 'School Admin',
-                      initialTabIndex: 1,
-                    ),
-                  );
-                } else if (action['id'] == 'school_teacher_attendance') {
-                  module = baseModule.copyWith(
-                    title: 'School Faculty Attendance',
-                    builder: (context, data) => SchoolDashboard(
-                      branchId: data['branchId'] ?? 'all',
-                      username: data['name'] ?? data['username'] ?? 'User',
-                      role: data['role'] ?? 'School Admin',
-                      initialTabIndex: 2,
-                    ),
-                  );
-                }
-                
-                final color = action['color'] as Color;
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final crossAxisCount = MediaQuery.of(context).size.width > 900 ? 6 : (MediaQuery.of(context).size.width > 600 ? 4 : 3);
+          final rowCount = (activeActions.length / crossAxisCount).ceil();
+          final availableHeight = constraints.maxHeight - 36;
+          final calcExtent = ((availableHeight - (rowCount - 1) * 8) / rowCount).clamp(54.0, 84.0);
 
-                return InkWell(
-                  onTap: () => onOpenModule(module),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: color.withValues(alpha: 0.12)),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(action['icon'] as IconData, color: color, size: 18),
-                        const SizedBox(height: 4),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 4),
-                            child: Text(
-                              action['label'] as String,
-                              style: TextStyle(color: color, fontSize: 9.5, fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Quick Actions',
+                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              const SizedBox(height: DS.s2),
+              Expanded(
+                child: GridView.builder(
+                  physics: const BouncingScrollPhysics(),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    mainAxisExtent: calcExtent,
                   ),
-                );
-              },
-            ),
-          ),
-        ],
+                  itemCount: activeActions.length,
+                  itemBuilder: (context, index) {
+                    final action = activeActions[index];
+                    final mainModuleId = (action['id'] == 'employee_attendance')
+                        ? 'finance'
+                        : ((action['id'] == 'madrassa_attendance' || action['id'] == 'madrassa_students' || action['id'] == 'add_student' || action['id'] == 'madrassa_report')
+                            ? 'madrassa'
+                            : ((action['id'] == 'school_attendance' || action['id'] == 'school_teacher_attendance' || action['id'] == 'school')
+                                ? 'school_module'
+                                : action['id']));
+                    final baseModule = availableModules.firstWhere(
+                      (m) => m.id == mainModuleId || (mainModuleId == 'patients_registration' && m.id == 'patient_register_standalone') || (mainModuleId == 'school_module' && (m.id == 'school_attendance' || m.id == 'school_teacher_attendance' || m.id == 'school_module')),
+                      orElse: () => availableModules.firstWhere((m) => m.id == mainModuleId, orElse: () => availableModules.first),
+                    );
+                    
+                    // Construct custom copy of the module with modified builder
+                    var module = baseModule;
+                    if (action['id'] == 'employee_attendance') {
+                      module = baseModule.copyWith(
+                        title: 'Employee Attendance',
+                        builder: (context, data) => FinancePage(
+                          branchId: data['branchId'] ?? 'all',
+                          isAdmin: true,
+                          initialTabIndex: 1,
+                        ),
+                      );
+                    } else if (action['id'] == 'madrassa_students') {
+                      module = baseModule.copyWith(
+                        title: 'Madrassa Students',
+                        builder: (context, data) {
+                          final branchId = data['branchId'] ?? 'unknown';
+                          final username = data['name'] ?? data['username'] ?? 'User';
+                          final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
+                          final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
+                          return MadrassaDashboard(
+                            branchId: branchId,
+                            username: username,
+                            role: role,
+                            isAdmin: isAdmin,
+                            initialIndex: isAdmin ? 2 : 1,
+                          );
+                        },
+                      );
+                    } else if (action['id'] == 'madrassa_attendance') {
+                      module = baseModule.copyWith(
+                        title: 'Madrassa Attendance',
+                        builder: (context, data) {
+                          final branchId = data['branchId'] ?? 'unknown';
+                          final username = data['name'] ?? data['username'] ?? 'User';
+                          final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
+                          final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
+                          return MadrassaDashboard(
+                            branchId: branchId,
+                            username: username,
+                            role: role,
+                            isAdmin: isAdmin,
+                            initialIndex: isAdmin ? 1 : 0,
+                          );
+                        },
+                      );
+                    } else if (action['id'] == 'school_attendance') {
+                      module = baseModule.copyWith(
+                        title: 'School Student Attendance',
+                        builder: (context, data) => SchoolDashboard(
+                          branchId: data['branchId'] ?? 'all',
+                          username: data['name'] ?? data['username'] ?? 'User',
+                          role: data['role'] ?? 'School Admin',
+                          initialTabIndex: 1,
+                        ),
+                      );
+                    } else if (action['id'] == 'school_teacher_attendance') {
+                      module = baseModule.copyWith(
+                        title: 'School Faculty Attendance',
+                        builder: (context, data) => SchoolDashboard(
+                          branchId: data['branchId'] ?? 'all',
+                          username: data['name'] ?? data['username'] ?? 'User',
+                          role: data['role'] ?? 'School Admin',
+                          initialTabIndex: 2,
+                        ),
+                      );
+                    }
+                    
+                    final color = action['color'] as Color;
+
+                    return InkWell(
+                      onTap: () => onOpenModule(module),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.05),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: color.withValues(alpha: 0.15)),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(action['icon'] as IconData, color: color, size: 22),
+                            const SizedBox(height: 4),
+                            Flexible(
+                              child: Text(
+                                action['label'] as String,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w800, height: 1.1),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -2152,16 +2150,16 @@ class SnapshotDashboardData {
 }
 
 Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> userData) async {
-  final role = (userData['role'] as String? ?? 'unknown').toLowerCase();
-  final isGlobal = ['ceo', 'chairman', 'global user'].contains(role);
-  final isFullExec = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'manager', 'hq manager'].contains(role);
+  final role = (userData['role'] as String? ?? 'unknown').toLowerCase().trim();
+  final isGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin'].contains(role);
+  final isFullExec = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'manager', 'hq manager', 'hqmanager', 'hq_manager', 'hq'].contains(role);
   final isGlobalExec = isGlobal || isFullExec;
   
   final String userBranchId = (userData['branchId'] as String? ?? '').toLowerCase().trim();
   
   if (isGlobalExec) {
     // 1. Get all branch IDs
-    final branchIds = RecentActivityService.getAllBranchIds();
+    final branchIds = await RecentActivityService.getAllBranchIdsAsync();
     
     // 2. Fetch today-vs-yesterday per branch
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
@@ -2191,7 +2189,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     final chartPoints = await fetchChartPoints(branchIds, weeks: 5);
     
     // 5. Fetch recent activity (cross-branch)
-    final recentActivities = RecentActivityService.getRecentActivity(limit: 15);
+    final recentActivities = await RecentActivityService.getRecentActivityAsync(limit: 15);
     
     return SnapshotDashboardData(
       todayCombined: todayCombined,
@@ -2212,7 +2210,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     final chartPoints = await fetchChartPoints([branchId], weeks: 5);
     
     // 3. Fetch recent activity (branch-locked)
-    final recentActivities = RecentActivityService.getRecentActivity(branchId: branchId, limit: 15);
+    final recentActivities = await RecentActivityService.getRecentActivityAsync(branchId: branchId, limit: 15);
     
     return SnapshotDashboardData(
       todayCombined: todayStats,

@@ -1286,7 +1286,7 @@ class _PatientFormState extends State<PatientForm> {
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Image.asset('assets/logo/gmwf.png', width: 52, height: 52),
+                Image.asset('assets/logo/gmwf-1.webp', width: 52, height: 52),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -1331,14 +1331,14 @@ class _PatientFormState extends State<PatientForm> {
                 const SizedBox(width: 8),
                 Transform.rotate(
                   angle: -0.10,
-                  child: Image.asset('assets/images/moon.png', width: 48, height: 48),
+                  child: Image.asset('assets/images/moon.webp', width: 48, height: 48),
                 ),
               ],
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Image.asset('assets/logo/gmwf.png', width: 110, height: 110),
+                Image.asset('assets/logo/gmwf-1.webp', width: 110, height: 110),
                 Expanded(
                   child: Column(
                     children: [
@@ -1376,7 +1376,7 @@ class _PatientFormState extends State<PatientForm> {
                 ),
                 Transform.rotate(
                   angle: -0.4,
-                  child: Image.asset('assets/images/moon.png', width: 96, height: 96),
+                  child: Image.asset('assets/images/moon.webp', width: 96, height: 96),
                 ),
               ],
             ),
@@ -2100,7 +2100,7 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Image.asset('assets/logo/gmwf.png', height: 36, errorBuilder: (_, __, ___) => const Icon(Icons.medical_services, color: Color(0xFF00695C))),
+                  Image.asset('assets/logo/gmwf-1.webp', height: 36, errorBuilder: (_, __, ___) => const Icon(Icons.medical_services, color: Color(0xFF00695C))),
                   const Text(
                     'Print & Share Slip',
                     style: TextStyle(

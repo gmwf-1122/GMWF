@@ -121,9 +121,48 @@ class MadrassaLocalStorage {
         await box.putAll(studentUpdates);
       }
       await box.flush();
-      debugPrint('[MadrassaLocalStorage] Downloaded and cached ${snap.docs.length} students.');
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] Error downloading students: $e');
+    }
+  }
+
+  static List<Map<String, dynamic>> getStudentsForGuardian(String branchId, List<String> studentIds) {
+    final List<Map<String, dynamic>> result = [];
+    for (final id in studentIds) {
+      final data = getStudentCached(branchId, id);
+      if (data != null) {
+        final m = Map<String, dynamic>.from(data);
+        m['id'] = id;
+        result.add(m);
+      }
+    }
+    return result;
+  }
+
+  static Future<void> downloadStudentsForGuardian(String branchId, List<String> studentIds) async {
+    if (studentIds.isEmpty) return;
+    try {
+      final Map<String, dynamic> updates = {};
+      for (final id in studentIds) {
+        final doc = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchId)
+            .collection('madrassa_students')
+            .doc(id)
+            .get();
+        if (doc.exists && doc.data() != null) {
+          final key = _studentKey(branchId, doc.id);
+          updates[key] = _sanitize(doc.data()!);
+        }
+      }
+      if (updates.isNotEmpty) {
+        final box = _getStudentsBox();
+        await box.putAll(updates);
+        await box.flush();
+      }
+      debugPrint('[MadrassaLocalStorage] Downloaded ${updates.length} scoped guardian students.');
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Error downloading scoped guardian students: $e');
     }
   }
 

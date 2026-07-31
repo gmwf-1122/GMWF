@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -11,11 +12,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../realtime/realtime_manager.dart';
+import '../realtime/connection_manager.dart';
 import '../realtime/lan_host_manager.dart';
 import '../services/local_storage_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/device_info_service.dart';
-import '../config/constants.dart';
+import '../services/offline_auth_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -68,10 +70,30 @@ class AuthService {
           .get();
       if (query.docs.isNotEmpty) throw Exception('Username taken');
 
-      final cred = await _auth.createUserWithEmailAndPassword(
-        email: lowerEmail,
-        password: password,
-      );
+      final currentAdminUser = _auth.currentUser;
+      UserCredential cred;
+      if (currentAdminUser != null) {
+        FirebaseApp secondaryApp;
+        try {
+          secondaryApp = Firebase.app('SecondaryRegistrationApp');
+        } catch (_) {
+          secondaryApp = await Firebase.initializeApp(
+            name: 'SecondaryRegistrationApp',
+            options: Firebase.app().options,
+          );
+        }
+        final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+        cred = await secondaryAuth.createUserWithEmailAndPassword(
+          email: lowerEmail,
+          password: password,
+        );
+        await secondaryAuth.signOut();
+      } else {
+        cred = await _auth.createUserWithEmailAndPassword(
+          email: lowerEmail,
+          password: password,
+        );
+      }
       final user = cred.user;
       if (user == null) throw Exception('Sign up failed: User is null');
 
@@ -139,7 +161,24 @@ class AuthService {
             .set(userData);
       }
 
-      await _cacheUserDataLocally(userData);
+      if (currentAdminUser == null) {
+        await _cacheUserDataLocally(userData);
+      } else {
+        try {
+          final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+          await box.put('user:${userData['email']}', userData);
+          if (userData['uid'] != null) {
+            await box.put('user:${userData['uid']}', userData);
+          }
+        } catch (_) {}
+      }
+
+      await OfflineAuthService.saveCredentials(
+        usernameOrEmail: lowerEmail,
+        password: password,
+        userData: userData,
+        setAsLastLoggedIn: currentAdminUser == null,
+      );
 
       // Automatic Unified Employee Sync:
       // If user role is an employee/staff role, automatically create/sync Employee profile in Finance & HR
@@ -222,34 +261,26 @@ class AuthService {
       // ── Role-specific setup ────────────────────────────────────────────────
       // IMPORTANT: none of these throw — failures are logged and swallowed so
       // the caller always gets a valid User back.
-      if (role == 'receptionist') {
+      if (role == 'server') {
         try {
-          await LanHostManager.startHost(forceRefreshIp: true);
+          debugPrint('[AuthService] Dedicated Branch Server detected for role=server');
+          // ZkTeco biometric listener is started on the server machine
+          // (ZkTecoNetworkService.startServer() imported where needed)
         } catch (e) {
-          debugPrint('[AuthService] LanHostManager.startHost failed (non-fatal): $e');
+          debugPrint('[AuthService] Server engine start notice: $e');
         }
-      } else if (role != 'admin' && role != 'chairman' && role != 'ceo' && role != 'hq manager' && role != 'server') {
-        // Try to initialise realtime — but missing IP is NOT a fatal error.
-        String? ip = serverIp?.trim();
-        if (ip == null || ip.isEmpty) {
-          final box = Hive.box('app_settings');
-          ip = box.get('receptionist_server_ip') as String?;
-        }
-
-        if (ip != null && ip.isNotEmpty) {
-          try {
-            await RealtimeManager().initialize(
-              role: role,
-              branchId: branchId,
-              serverIp: ip,
-              port: AppNetwork.websocketPort,
-            );
-          } catch (e) {
-            debugPrint('[AuthService] RealtimeManager.initialize failed (non-fatal): $e');
-          }
-        } else {
-          // No server IP yet — ConnectionManager's auto-discovery will handle it.
-          debugPrint('[AuthService] No server IP found — realtime will connect via auto-discovery');
+      } else {
+        // All client roles (receptionist, doctor, dispenser, supervisor, finance, donations, teacher, madrassa, school, etc.)
+        // connect silently to the central Branch Server via ConnectionManager & RealtimeManager.
+        try {
+          final username = user.displayName ?? user.email?.split('@').first ?? role;
+          ConnectionManager().start(
+            role: role,
+            branchId: branchId,
+            username: username,
+          );
+        } catch (e) {
+          debugPrint('[AuthService] ConnectionManager.start failed (non-fatal): $e');
         }
       }
 
@@ -301,6 +332,9 @@ class AuthService {
     try { await FirebaseAuth.instance.signOut(); }
     catch (e) { debugPrint('[AuthService] Firebase signOut error (ignored): $e'); }
 
+    try { await OfflineAuthService.clearCachedUserData(); }
+    catch (e) { debugPrint('[AuthService] OfflineAuthService clear error (ignored): $e'); }
+
     try { await LanHostManager.stopHost(); }
     catch (e) { debugPrint('[AuthService] LanHostManager.stopHost error (ignored): $e'); }
 
@@ -309,7 +343,8 @@ class AuthService {
 
     try {
       final box = Hive.box('app_settings');
-      await box.clear();
+      await box.delete('user_data');
+      await box.delete('currentUser');
     } catch (e) { debugPrint('[AuthService] Hive clear error (ignored): $e'); }
 
     debugPrint('[AuthService] Sign out complete');

@@ -37,6 +37,9 @@ import '../realtime/lan_server.dart';
 import '../config/constants.dart';
 import '../utils/network_utils.dart';
 import '../services/local_storage_service.dart';
+import '../widgets/department_activity_widget.dart';
+import '../widgets/multi_server_control_widget.dart';
+import '../services/multi_server_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected client model
@@ -47,7 +50,13 @@ class ConnectedClient {
   final String branchId;
   final String? clientId;
   final String? username;
-  final DateTime connectedAt;
+  final String deviceOs;
+  final String appVersion;
+  final String ipAddress;
+  String currentActivity;
+  DateTime connectedAt;
+  DateTime lastActiveAt;
+  int messagesCount;
   bool isActive;
 
   ConnectedClient({
@@ -56,9 +65,15 @@ class ConnectedClient {
     required this.branchId,
     this.clientId,
     this.username,
+    this.deviceOs = 'Windows PC',
+    this.appVersion = 'v2.4.0',
+    this.ipAddress = '192.168.1.x',
+    this.currentActivity = 'Active on Network',
     required this.connectedAt,
+    DateTime? lastActiveAt,
+    this.messagesCount = 0,
     this.isActive = true,
-  });
+  }) : lastActiveAt = lastActiveAt ?? connectedAt;
 
   IconData get icon {
     switch (role.toLowerCase()) {
@@ -66,6 +81,17 @@ class ConnectedClient {
       case 'doctor':       return Icons.local_hospital;
       case 'dispenser':
       case 'pharmacist':   return Icons.medication;
+      case 'supervisor':   return Icons.admin_panel_settings;
+      case 'finance manager':
+      case 'finance':      return Icons.account_balance;
+      case 'donations':    return Icons.volunteer_activism;
+      case 'teacher':
+      case 'faculty':
+      case 'madrassa':
+      case 'school':       return Icons.school;
+      case 'library':      return Icons.local_library;
+      case 'dasterkhwaan': return Icons.soup_kitchen;
+      case 'attendance':   return Icons.fingerprint;
       case 'server':       return Icons.dns;
       default:             return Icons.devices;
     }
@@ -77,6 +103,17 @@ class ConnectedClient {
       case 'doctor':       return const Color(0xFF4CAF50);
       case 'dispenser':
       case 'pharmacist':   return const Color(0xFFFF9800);
+      case 'supervisor':   return const Color(0xFFE91E63);
+      case 'finance manager':
+      case 'finance':      return const Color(0xFF009688);
+      case 'donations':    return const Color(0xFF9C27B0);
+      case 'teacher':
+      case 'faculty':
+      case 'madrassa':
+      case 'school':       return const Color(0xFF3F51B5);
+      case 'library':      return const Color(0xFF795548);
+      case 'dasterkhwaan': return const Color(0xFFFF5722);
+      case 'attendance':   return const Color(0xFF673AB7);
       case 'server':       return const Color(0xFF9C27B0);
       default:             return const Color(0xFF607D8B);
     }
@@ -115,6 +152,7 @@ class _ServerDashboardWithSyncState
     extends State<ServerDashboardWithSync> {
   bool _isAuthenticated = false;
   bool _isRunning       = false;
+  int  _selectedTab     = 0;
   String? _serverIp;
   DateTime? _startTime;
   final List<String> _activityLog = [];
@@ -251,11 +289,17 @@ class _ServerDashboardWithSyncState
             branchId:    info['branchId'] as String? ?? widget.branchId,
             clientId:    info['clientId'] as String?,
             username:    info['username'] as String?,
+            deviceOs:    info['deviceOs'] as String? ?? info['platform'] as String? ?? (kIsWeb ? 'Chrome Web' : 'Windows PC'),
+
+            appVersion:  info['appVersion'] as String? ?? 'v2.4.0',
+            ipAddress:   info['ipAddress'] as String? ?? info['deviceIp'] as String? ?? '192.168.1.x',
+            currentActivity: 'Connected to Branch Server',
             connectedAt: DateTime.now(),
           );
         });
         final name = info['username'] ?? info['role'];
-        _addLog('🟢 Connected: $name (${info['role']} / ${info['branchId']})');
+        final clientIp = info['ipAddress'] ?? info['deviceIp'] ?? '127.0.0.1';
+        _addLog('🟢 Connected: $name (${info['role']} / ${info['branchId']}) - IP: $clientIp');
       };
 
       _server!.onClientDisconnected = (socketId) {
@@ -267,8 +311,26 @@ class _ServerDashboardWithSyncState
       };
 
       _server!.onMessageReceived = (message) {
-        _addLog('📨 ${message['event_type']}: '
-            'from ${message['_senderUsername'] ?? message['_senderRole']}');
+        final rawType = message['event_type']?.toString() ?? message['type']?.toString() ?? 'activity';
+        final sender = message['_senderUsername'] ?? message['_senderRole'] ?? message['username'] ?? 'Client';
+        final socketId = message['_socketId']?.toString();
+        final clientId = message['_clientId']?.toString();
+
+        if (rawType != 'ping' && rawType != 'pong' && rawType != 'identify' && rawType != 'identified') {
+          _addLog('📨 $rawType: from $sender');
+        }
+
+        if (mounted) {
+          setState(() {
+            for (final entry in _connectedClients.entries) {
+              if (entry.key == socketId || entry.value.clientId == clientId || entry.value.username == sender) {
+                entry.value.messagesCount++;
+                entry.value.lastActiveAt = DateTime.now();
+                entry.value.currentActivity = _describeActivity(rawType, message['data']);
+              }
+            }
+          });
+        }
       };
 
       await _server!.start(_serverIp);
@@ -288,12 +350,22 @@ class _ServerDashboardWithSyncState
           _addLog('❌ Sync error: $error');
         },
         onMessageReceived: (message) {
-          _addLog('📨 ${message['event_type']}: '
-              '${message['_senderUsername'] ?? message['_senderRole']}');
+          final rawType = message['event_type']?.toString() ?? message['type']?.toString() ?? 'activity';
+          if (rawType != 'ping' && rawType != 'pong' && rawType != 'identify' && rawType != 'identified') {
+            _addLog('📨 $rawType: ${message['_senderUsername'] ?? message['_senderRole'] ?? message['username']}');
+          }
         },
       );
 
+
       await _syncManager!.start();
+
+      MultiServerService().startHeartbeatLoop(
+        branchId: widget.branchId,
+        roleSupplier: () => 'primary',
+        clientsSupplier: () => _connectedClients.length,
+        queueSupplier: () => _syncManager?.queueSize ?? 0,
+      );
 
       setState(() {
         _isRunning = true;
@@ -334,6 +406,7 @@ class _ServerDashboardWithSyncState
   Future<void> _stopServer() async {
     try {
       _udpBroadcastTimer?.cancel();
+      await MultiServerService().stopHeartbeat(widget.branchId);
       await _syncManager?.stop();
       await _server?.stop();
       setState(() {
@@ -449,6 +522,47 @@ class _ServerDashboardWithSyncState
     if (confirmed == true) await _logout();
   }
 
+  static String _describeActivity(String type, dynamic data) {
+    final map = data is Map ? Map<String, dynamic>.from(data) : {};
+    switch (type) {
+      case 'save_entry':
+      case 'token_created':
+        return 'Issued Token #${map['serial'] ?? 'N/A'} (${map['queueType'] ?? 'Zakat'})';
+      case 'save_prescription':
+      case 'prescription_created':
+        return 'Created Prescription for Token #${map['serial'] ?? 'N/A'}';
+      case 'dispense_completed':
+        return 'Completed Dispensing for Token #${map['serial'] ?? 'N/A'}';
+      case 'save_biometric_log':
+      case 'save_employee_attendance':
+      case 'save_faculty_attendance':
+      case 'save_student_attendance':
+        return 'Recorded Attendance Punch (${map['entityName'] ?? map['pin'] ?? 'Biometric'})';
+      case 'save_madrassa_fee':
+        return 'Collected Madrassa Fee Receipt #${map['receiptNo'] ?? 'N/A'}';
+      case 'save_madrassa_admission':
+        return 'Registered Madrassa Student (${map['studentName'] ?? 'New Student'})';
+      case 'save_expense':
+        return 'Recorded Expense (${map['category'] ?? map['title'] ?? 'Office Expense'})';
+      case 'save_loan':
+        return 'Issued Loan Transaction (${map['employeeName'] ?? 'Employee'})';
+      case 'save_donation_receipt':
+        return 'Generated Donation Receipt #${map['receiptNumber'] ?? 'N/A'}';
+      case 'save_dasterkhwan_entry':
+      case 'save_office_boy_token':
+      case 'save_kitchen_serve_log':
+        return 'Logged Dasterkhwaan Kitchen Meal Token';
+      case 'save_library_book':
+      case 'save_library_issue':
+        return 'Issued Library Book (${map['bookTitle'] ?? 'Library Catalog'})';
+      case 'save_supervisor_action':
+      case 'approve_edit_request':
+        return 'Supervisor Edit/Approval Action';
+      default:
+        return 'Processing $type';
+    }
+  }
+
   Future<void> _logout() async {
     if (_isRunning) await _stopServer();
     try {
@@ -545,8 +659,77 @@ class _ServerDashboardWithSyncState
             ),
           ),
           child: SafeArea(
-            child: _isRunning ? _buildRunningView() : _buildStoppedView(),
+            child: !_isRunning
+                ? _buildStoppedView()
+                : Column(
+                    children: [
+                      // Sub-navigation Tab Bar
+                      Container(
+                        color: const Color(0xFF1F2937).withValues(alpha: 0.6),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              _navTabChip(0, 'Live Server Matrix', Icons.dns_rounded),
+                              const SizedBox(width: 8),
+                              _navTabChip(1, 'Multi-Server Cluster', Icons.hub_rounded),
+                              const SizedBox(width: 8),
+                              _navTabChip(2, 'Department Progress', Icons.domain_rounded),
+                              const SizedBox(width: 8),
+                              _navTabChip(3, 'Data Archive', Icons.storage_rounded),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Divider(height: 1, color: Colors.white10),
+
+                      // Tab View Content
+                      Expanded(
+                        child: IndexedStack(
+                          index: _selectedTab,
+                          children: [
+                            _buildRunningView(),
+                            MultiServerControlWidget(branchId: widget.branchId, onTriggerSync: _manualSync),
+                            DepartmentActivityWidget(branchId: widget.branchId),
+                            ServerDataViewer(branchId: widget.branchId),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navTabChip(int index, String label, IconData icon) {
+    final isSelected = _selectedTab == index;
+    return InkWell(
+      onTap: () => setState(() => _selectedTab = index),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blueAccent : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? Colors.blueAccent : Colors.white10),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.white70),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? Colors.white : Colors.white70,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -587,19 +770,13 @@ class _ServerDashboardWithSyncState
   }
 
   Widget _buildConnectedClientsPanel() {
-    const roleOrder = ['receptionist', 'doctor', 'dispenser', 'pharmacist', 'server'];
-
     final roleCounts = <String, int>{};
     for (final c in _connectedClients.values) {
-      roleCounts[c.role] = (roleCounts[c.role] ?? 0) + 1;
+      roleCounts[c.role.toLowerCase()] = (roleCounts[c.role.toLowerCase()] ?? 0) + 1;
     }
 
     final sortedClients = _connectedClients.values.toList()
-      ..sort((a, b) {
-        final ai = roleOrder.indexOf(a.role);
-        final bi = roleOrder.indexOf(b.role);
-        return (ai == -1 ? 99 : ai).compareTo(bi == -1 ? 99 : bi);
-      });
+      ..sort((a, b) => b.lastActiveAt.compareTo(a.lastActiveAt));
 
     return Card(
       child: Padding(
@@ -611,27 +788,47 @@ class _ServerDashboardWithSyncState
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(color: Colors.blueAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                child: const Icon(Icons.people_alt, color: Colors.blueAccent, size: 24),
+                child: const Icon(Icons.hub_rounded, color: Colors.blueAccent, size: 24),
               ),
               const SizedBox(width: 16),
-              const Text('Active Connections', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Active Branch Network Nodes', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const SizedBox(height: 2),
+                  Text('Realtime WebSocket Client Connections & Live Activity', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.5))),
+                ],
+              ),
               const Spacer(),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                decoration: BoxDecoration(color: Colors.blueAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
-                child: Text('${_connectedClients.length} Node${_connectedClients.length == 1 ? '' : 's'}',
-                  style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [Colors.blueAccent, Colors.purpleAccent]),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [BoxShadow(color: Colors.blueAccent.withValues(alpha: 0.3), blurRadius: 8)],
+                ),
+                child: Text('${_connectedClients.length} Connected Node${_connectedClients.length == 1 ? '' : 's'}',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             ]),
-            const SizedBox(height: 24),
-            Row(children: [
-              _buildRoleSummaryChip('Receptionist', roleCounts['receptionist'] ?? 0, Colors.lightBlueAccent, Icons.person_pin_circle),
-              const SizedBox(width: 12),
-              _buildRoleSummaryChip('Doctor', roleCounts['doctor'] ?? 0, Colors.greenAccent, Icons.local_hospital),
-              const SizedBox(width: 12),
-              _buildRoleSummaryChip('Dispenser', (roleCounts['dispenser'] ?? 0) + (roleCounts['pharmacist'] ?? 0), Colors.orangeAccent, Icons.medication),
-            ]),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                _buildRoleSummaryChip('Supervisor', roleCounts['supervisor'] ?? 0, const Color(0xFFE91E63), Icons.admin_panel_settings),
+                _buildRoleSummaryChip('Receptionist', roleCounts['receptionist'] ?? 0, const Color(0xFF2196F3), Icons.person_pin_circle),
+                _buildRoleSummaryChip('Doctor', roleCounts['doctor'] ?? 0, const Color(0xFF4CAF50), Icons.local_hospital),
+                _buildRoleSummaryChip('Dispenser', (roleCounts['dispenser'] ?? 0) + (roleCounts['pharmacist'] ?? 0), const Color(0xFFFF9800), Icons.medication),
+                _buildRoleSummaryChip('Finance', (roleCounts['finance manager'] ?? 0) + (roleCounts['finance'] ?? 0), const Color(0xFF009688), Icons.account_balance),
+                _buildRoleSummaryChip('Donations', roleCounts['donations'] ?? 0, const Color(0xFF9C27B0), Icons.volunteer_activism),
+                _buildRoleSummaryChip('Madrassa & School', (roleCounts['teacher'] ?? 0) + (roleCounts['madrassa'] ?? 0) + (roleCounts['school'] ?? 0), const Color(0xFF3F51B5), Icons.school),
+                _buildRoleSummaryChip('Library', roleCounts['library'] ?? 0, const Color(0xFF795548), Icons.local_library),
+                _buildRoleSummaryChip('Dasterkhwaan', roleCounts['dasterkhwaan'] ?? 0, const Color(0xFFFF5722), Icons.soup_kitchen),
+                _buildRoleSummaryChip('Attendance', roleCounts['attendance'] ?? 0, const Color(0xFF673AB7), Icons.fingerprint),
+              ],
+            ),
+            const SizedBox(height: 20),
             const Divider(color: Colors.white10),
             const SizedBox(height: 16),
             if (sortedClients.isEmpty)
@@ -639,9 +836,11 @@ class _ServerDashboardWithSyncState
                 padding: const EdgeInsets.symmetric(vertical: 40),
                 child: Center(
                   child: Column(children: [
-                    Icon(Icons.radar, size: 60, color: Colors.white.withValues(alpha: 0.1)),
+                    Icon(Icons.radar_rounded, size: 64, color: Colors.blueAccent.withValues(alpha: 0.2)),
                     const SizedBox(height: 16),
-                    Text('Awaiting Connections...', style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 16)),
+                    Text('Scanning for LAN Branch Clients...', style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 16, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    Text('Client apps across the branch will automatically connect when opened.', style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 12)),
                   ]),
                 ),
               )
@@ -654,22 +853,23 @@ class _ServerDashboardWithSyncState
   }
 
   Widget _buildRoleSummaryChip(String label, int count, Color color, IconData icon) {
+    final bool active = count > 0;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: count > 0 ? color.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.02),
+        color: active ? color.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: count > 0 ? color.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.05)),
+        border: Border.all(color: active ? color.withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.05)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, size: 18, color: count > 0 ? color : Colors.white30),
+        Icon(icon, size: 16, color: active ? color : Colors.white30),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: count > 0 ? Colors.white : Colors.white54)),
-        const SizedBox(width: 12),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: active ? Colors.white : Colors.white54)),
+        const SizedBox(width: 10),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          decoration: BoxDecoration(color: count > 0 ? color : Colors.white10, borderRadius: BorderRadius.circular(10)),
-          child: Text('$count', style: const TextStyle(color: Colors.black87, fontSize: 12, fontWeight: FontWeight.bold)),
+          decoration: BoxDecoration(color: active ? color : Colors.white10, borderRadius: BorderRadius.circular(10)),
+          child: Text('$count', style: TextStyle(color: active ? Colors.white : Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
         ),
       ]),
     );
@@ -677,48 +877,99 @@ class _ServerDashboardWithSyncState
 
   Widget _buildClientRow(ConnectedClient client) {
     final duration  = DateTime.now().difference(client.connectedAt);
-    final connected = duration.inMinutes > 0 ? '${duration.inMinutes}m' : '${duration.inSeconds}s';
+    final connected = duration.inMinutes > 0 ? '${duration.inMinutes}m ${duration.inSeconds % 60}s' : '${duration.inSeconds}s';
     final Color cColor = client.color == const Color(0xFF607D8B) ? Colors.cyanAccent : client.color;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: cColor.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cColor.withValues(alpha: 0.2)),
+        color: cColor.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cColor.withValues(alpha: 0.25)),
       ),
-      child: Row(children: [
-        Container(
-          width: 42, height: 42,
-          decoration: BoxDecoration(color: cColor.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-          child: Icon(client.icon, color: cColor, size: 24),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48, height: 48,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(colors: [cColor, cColor.withValues(alpha: 0.6)]),
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [BoxShadow(color: cColor.withValues(alpha: 0.3), blurRadius: 8)],
+            ),
+            child: Icon(client.icon, color: Colors.white, size: 26),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(client.displayName, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
+                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(color: cColor.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                      child: Text(client.role.toUpperCase(), style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: cColor)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Icon(Icons.computer_rounded, size: 14, color: Colors.white.withValues(alpha: 0.5)),
+                    const SizedBox(width: 4),
+                    Text('${client.deviceOs} • ${client.appVersion}', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.6))),
+                    const SizedBox(width: 12),
+                    Icon(Icons.lan_rounded, size: 14, color: Colors.white.withValues(alpha: 0.5)),
+                    const SizedBox(width: 4),
+                    Text('IP: ${client.ipAddress}', style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.6), fontFamily: 'monospace')),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bolt_rounded, size: 14, color: Colors.amberAccent),
+                      const SizedBox(width: 6),
+                      Text('Current Activity: ', style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.5))),
+                      Text(client.currentActivity, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.amberAccent)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(client.displayName, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 15)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(12)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.greenAccent)),
+                  const SizedBox(width: 6),
+                  const Text('CONNECTED', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                ]),
+              ),
+              const SizedBox(height: 8),
+              Text('${client.messagesCount} msgs', style: const TextStyle(fontSize: 12, color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text('Node: ${client.branchId}', style: TextStyle(fontSize: 12, color: Colors.white60)),
+              Text('Uptime: $connected', style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.4), fontFamily: 'monospace')),
             ],
           ),
-        ),
-        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.greenAccent)),
-              const SizedBox(width: 6),
-              const Text('Uplink', style: TextStyle(color: Colors.greenAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-            ]),
-          ),
-          const SizedBox(height: 6),
-          Text('T+ $connected', style: TextStyle(fontSize: 11, color: Colors.white30, fontFamily: 'monospace')),
-        ]),
-      ]),
+        ],
+      ),
     );
   }
 
@@ -950,7 +1201,12 @@ class _ServerDashboardWithSyncState
               _buildStatCard('SERVER IP', _serverIp ?? 'Unknown', Icons.settings_ethernet, [Colors.blueAccent, Colors.cyanAccent]),
               _buildStatCard('UPTIME', _formatUptime(), Icons.timer_outlined, [Colors.purpleAccent, Colors.pinkAccent]),
               _buildStatCard('ACTIVE NODES', _connectedClients.length.toString(), Icons.hub, [Colors.greenAccent, Colors.tealAccent]),
-              _buildStatCard('DATA SYNCED', _syncedToday.toString(), Icons.cloud_done_outlined, [Colors.orangeAccent, Colors.deepOrangeAccent]),
+              _buildStatCard(
+                'DATA SYNCED',
+                '$_syncedToday (${_syncQueueSize}q)',
+                Icons.cloud_done_outlined,
+                [Colors.orangeAccent, Colors.deepOrangeAccent],
+              ),
             ],
           ),
 
@@ -974,7 +1230,19 @@ class _ServerDashboardWithSyncState
                             child: const Icon(Icons.sensors, size: 24, color: Colors.greenAccent),
                           ),
                           const SizedBox(width: 16),
-                          const Text('Network Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Network Details & Activity Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+                              const SizedBox(height: 2),
+                              Text(
+                                _lastSyncTime != null
+                                    ? 'Last Sync: ${DateFormat('hh:mm:ss a').format(_lastSyncTime!)}'
+                                    : 'Realtime Server Log & LAN Sync Stream',
+                                style: const TextStyle(fontSize: 12, color: Colors.white54),
+                              ),
+                            ],
+                          ),
                         ]),
                         const SizedBox(height: 24),
                         Container(
@@ -1055,8 +1323,11 @@ class _ServerDashboardWithSyncState
                               Color textColor = Colors.white70;
                               if (log.contains('❌') || log.contains('🔴')) {
                                 textColor = Colors.redAccent;
-                              } else if (log.contains('✅') || log.contains('🟢')) textColor = Colors.greenAccent;
-                              else if (log.contains('⚠️')) textColor = Colors.amberAccent;
+                              } else if (log.contains('✅') || log.contains('🟢')) {
+                                textColor = Colors.greenAccent;
+                              } else if (log.contains('⚠️')) {
+                                textColor = Colors.amberAccent;
+                              }
                               
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1181,6 +1452,7 @@ class ServerSyncManager {
   void _queueForSync(Map<String, dynamic> message) {
     final eventType = message['event_type'] as String?;
     if (eventType == null ||
+        eventType == 'unknown' ||
         eventType == 'ping' ||
         eventType == 'pong' ||
         eventType == 'identify' ||
@@ -1188,6 +1460,7 @@ class ServerSyncManager {
         eventType == 'client_count_update') {
       return;
     }
+
 
     try {
       final box = Hive.box(LocalStorageService.syncBox);
@@ -1368,10 +1641,11 @@ class ServerSyncManager {
           final syncItem = Map<String, dynamic>.from(item);
           final type     = syncItem['type'] as String?;
           final data     = syncItem['data'];
-          if (type == null || data == null) {
+          if (type == null || type == 'unknown' || data == null) {
             await box.delete(key);
             continue;
           }
+
 
           final resolvedBranchId =
               (syncItem['branchId'] as String?)?.trim().isNotEmpty == true

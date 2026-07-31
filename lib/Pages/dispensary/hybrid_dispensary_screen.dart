@@ -344,7 +344,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(
           children: [
-            Image.asset('assets/logo/gmwf-1.png', height: isMobile ? 45 : 55),
+            Image.asset('assets/logo/gmwf-1.webp', height: isMobile ? 45 : 55),
             const SizedBox(width: 16),
             Expanded(
               child: Column(

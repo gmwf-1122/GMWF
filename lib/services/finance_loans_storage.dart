@@ -1,10 +1,14 @@
 // lib/services/finance_loans_storage.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
+import 'finance_ledger_storage.dart';
+
+
 
 /// Tracks employee loans/advances completely separately from salary.
 /// A loan's balance never affects payroll math — repayments are their
@@ -199,8 +203,32 @@ class FinanceLoansStorage {
           '${repaymentType == 'fixed' ? ' (fixed installment PKR ${usualInstallment.toStringAsFixed(0)}/mo)' : ' (flexible repayment)'}',
     );
 
+    // ── ERP Double-Entry Journal Posting ────────────────────────────────────
+    try {
+      final principalMinor = (principal * 100).round();
+      final bankCoaCode = '1030'; // Default Cash in Hand
+      final entry = JournalEntry(
+        id: 'je_loan_$id',
+        date: DateFormat('yyyy-MM-dd').format(issued),
+        postedAt: now,
+        sourceType: JournalSourceType.loanDisbursement.toCode(),
+        sourceRefId: id,
+        branchId: branchId,
+        description: 'Loan Disbursement to $employeeName ($reason)',
+        createdBy: performedBy,
+        lines: [
+          JournalLine(accountCode: '1040', debit: principalMinor, credit: 0, memo: 'Employee Loan Receivable'),
+          JournalLine(accountCode: bankCoaCode, debit: 0, credit: principalMinor, memo: 'Disbursed from Org Account $bankCoaCode'),
+        ],
+      );
+      await FinanceLedgerStorage.postJournalEntry(entry);
+    } catch (e) {
+      debugPrint('[Loan Ledger Posting Warning] $e');
+    }
+
     return id;
   }
+
 
   // -- Record a repayment against a loan ------------------------------------
   static Future<String> recordPayment({
@@ -286,8 +314,32 @@ class FinanceLoansStorage {
           '${newBalance <= 0.01 ? ' (loan fully closed)' : ' (remaining: PKR ${newBalance.toStringAsFixed(0)})'}',
     );
 
+    // ── ERP Double-Entry Journal Posting ────────────────────────────────────
+    try {
+      final amountMinor = (amount * 100).round();
+      final bankCoaCode = '1030'; // Default Cash
+      final entry = JournalEntry(
+        id: 'je_repay_$paymentId',
+        date: DateFormat('yyyy-MM-dd').format(payDate),
+        postedAt: now,
+        sourceType: JournalSourceType.loanRepayment.toCode(),
+        sourceRefId: paymentId,
+        branchId: loan['branchId']?.toString() ?? 'all',
+        description: 'Loan Repayment from ${loan['employeeName']} ($note)',
+        createdBy: performedBy,
+        lines: [
+          JournalLine(accountCode: bankCoaCode, debit: amountMinor, credit: 0, memo: 'Receive Repayment to Org Account $bankCoaCode'),
+          JournalLine(accountCode: '1040', debit: 0, credit: amountMinor, memo: 'Reduce Employee Loan Receivable'),
+        ],
+      );
+      await FinanceLedgerStorage.postJournalEntry(entry);
+    } catch (e) {
+      debugPrint('[Repayment Ledger Posting Warning] $e');
+    }
+
     return paymentId;
   }
+
 
   // -- Void a mistaken payment entry ----------------------------------------
   static Future<void> voidPayment({

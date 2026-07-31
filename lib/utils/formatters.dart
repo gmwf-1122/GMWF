@@ -49,30 +49,35 @@ class DateInputFormatter extends TextInputFormatter {
   }
 }
 
-/// Resolves a user's display name prioritizing username unless a custom name is explicitly provided.
+/// Resolves a user's display name prioritizing explicit full name or username.
 String resolveUserDisplayName(Map<String, dynamic>? data, {String fallback = 'User'}) {
   if (data == null) return fallback;
-  final username = (data['username'] ?? '').toString().trim();
-  final name = (data['name'] ?? '').toString().trim();
-  final role = (data['role'] ?? '').toString().trim();
+  final name = (data['name'] ?? data['fullName'] ?? data['displayName'] ?? '').toString().trim();
+  final username = (data['username'] ?? data['userName'] ?? '').toString().trim();
+  final email = (data['email'] ?? '').toString().trim();
 
-  final isGenericOrRoleName = name.isEmpty ||
-      name.toLowerCase() == username.toLowerCase() ||
-      name.toLowerCase() == role.toLowerCase() ||
-      ['user', 'admin', 'ceo', 'chairman', 'hq manager', 'branch manager', 'manager', 'supervisor', 'doctor', 'dispenser', 'receptionist', 'madrassa admin', 'school admin', 'global user', 'office boy', 'kitchen staff', 'staff'].contains(name.toLowerCase());
-
-  if (!isGenericOrRoleName) {
+  // Return non-empty real name if it exists and is not literally 'User' or 'Unknown'
+  if (name.isNotEmpty &&
+      name.toLowerCase() != 'user' &&
+      name.toLowerCase() != 'unknown' &&
+      name.toLowerCase() != 'unknown user') {
     return name;
   }
-  if (username.isNotEmpty) {
+
+  // Return non-empty username if it exists and is not literally 'user' or 'unknown'
+  if (username.isNotEmpty &&
+      username.toLowerCase() != 'user' &&
+      username.toLowerCase() != 'unknown' &&
+      username.toLowerCase() != 'unknown user') {
     return username;
   }
-  if (name.isNotEmpty) {
-    return name;
-  }
-  final email = (data['email'] ?? '').toString().trim();
+
   if (email.contains('@')) {
-    return email.split('@').first;
+    final parts = email.split('@').first;
+    if (parts.isNotEmpty) {
+      return parts[0].toUpperCase() + parts.substring(1);
+    }
   }
-  return fallback;
+
+  return name.isNotEmpty ? name : fallback;
 }

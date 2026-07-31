@@ -26,6 +26,7 @@ import '../pages/request.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
 import '../pages/madrassa/madrassa_guardian_screen.dart';
 import '../pages/school/school_dashboard.dart';
+import '../pages/welfare/ramadan_welfare_screen.dart';
 import '../pages/users.dart';
 
 enum ModuleCategory {
@@ -267,6 +268,19 @@ class ModuleRegistry {
       category: ModuleCategory.office,
     ),
     AppModule(
+      id: 'ramadan_welfare',
+      title: 'Ramadan Rations & Libaas',
+      description: 'Welfare data entry, CNIC scanner & dynamic winner lucky draw',
+      icon: Icons.card_giftcard_rounded,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: false,
+      builder: (context, data) => RamadanWelfareScreen(
+        branchId: data['branchId'] ?? 'sialkot',
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
       id: 'patients_list',
       title: 'Patients',
       description: 'Complete patient medical records database',
@@ -330,14 +344,14 @@ class ModuleRegistry {
       id: 'server_sync',
       title: 'Server Control',
       description: 'System-wide data synchronization and monitoring',
-      icon: Icons.sync_problem_rounded,
+      icon: Icons.dns_rounded,
       requiredPermission: AppPermission.viewExecutiveDashboard,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
       builder: (context, data) => ServerDashboardWithSync(
         branchId: data['branchId'] ?? 'unknown',
       ),
-      category: ModuleCategory.dispensary,
+      category: ModuleCategory.office,
     ),
     AppModule(
       id: 'reports',
@@ -358,8 +372,8 @@ class ModuleRegistry {
     ),
     AppModule(
       id: 'finance',
-      title: 'Finance',
-      description: 'Manage employees, track attendance, and handle payroll',
+      title: 'Finance & HR Payroll',
+      description: 'Employees, Staff Attendance, Loans & Advances, Payroll & Expenses',
       icon: Icons.monetization_on_outlined,
       requiredPermission: AppPermission.manageFinance,
       isBranchDependent: true,

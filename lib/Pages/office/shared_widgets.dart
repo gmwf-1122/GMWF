@@ -9,6 +9,8 @@ import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../services/image_upload_service.dart';
+import '../../widgets/bank_logo_widget.dart';
+
 
 Widget buildFormField({
   required TextEditingController controller,
@@ -159,11 +161,27 @@ Widget buildDropdownField({
         filled: false,
       ),
       style: TextStyle(color: theme.textPrimary, fontSize: 13),
-      items: items.map((i) => DropdownMenuItem(value: i, child: Text(i))).toList(),
+      items: items.map((i) {
+        final isBank = label.toLowerCase().contains('bank') && !i.startsWith('+');
+        return DropdownMenuItem(
+          value: i,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isBank) ...[
+                BankLogoWidget(bankName: i, size: 20),
+                const SizedBox(width: 8),
+              ],
+              Text(i, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        );
+      }).toList(),
       onChanged: onChanged,
     ),
   );
 }
+
 
 void showAddCustomDialog({
   required BuildContext context,

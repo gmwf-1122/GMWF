@@ -425,6 +425,173 @@ class FinanceReportHelper {
     } catch (_) {}
   }
 
+  // ── 1c. Individual Loan Statement PDF ────────────────────────────────────────
+  static Future<void> exportLoanStatementPdf(Map<String, dynamic> loan) async {
+    try {
+      final empName = loan['employeeName']?.toString() ?? 'Employee';
+      final empId = loan['employeeId']?.toString() ?? '';
+      final emp = FinanceLocalStorage.getEmployee(empId);
+      final branchId = loan['branchId']?.toString() ?? emp?['branchId']?.toString() ?? 'HQ';
+      final role = emp?['role']?.toString() ?? 'Staff';
+      final dept = emp?['department']?.toString() ?? 'N/A';
+
+      final principalMinor = (loan['principalMinor'] as num?)?.toInt() ?? ((loan['principal'] as num?)?.toDouble() ?? 0.0 * 100).round();
+      final payments = List<Map<String, dynamic>>.from(
+        (loan['payments'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)),
+      );
+      final activePayments = payments.where((p) => p['isVoided'] != true).toList();
+      final activeRepayments = activePayments.where((p) => p['type'] != 'topup' && p['type'] != 'loan_issue').toList();
+
+      int paidMinor = 0;
+      for (final p in activeRepayments) {
+        paidMinor += (p['amountMinor'] as num?)?.toInt() ?? ((p['amount'] as num?)?.toDouble() ?? 0.0 * 100).round();
+      }
+      final outstandingMinor = (principalMinor - paidMinor).clamp(0, 9999999999);
+      final isClosed = loan['status'] == 'closed' || outstandingMinor <= 0;
+
+      final pdf = pw.Document();
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (context) => [
+            // Header
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
+                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('LOAN & REPAYMENT STATEMENT',
+                        style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: PdfColors.teal700)),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
+                        style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                    pw.Text('Status: ${isClosed ? "PAID OFF / CLOSED" : "ACTIVE LOAN"}',
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                          color: isClosed ? PdfColors.green : PdfColors.orange,
+                        )),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.SizedBox(height: 14),
+
+            // Profile Summary Grid
+            pw.Text('BORROWER PROFILE & LOAN DETAILS',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.SizedBox(height: 6),
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              children: [
+                _buildPdfRow('Employee Name', empName, 'Branch / Dept', '${branchId.toUpperCase()} • $dept'),
+                _buildPdfRow('Job Role', role, 'Repayment Structure', loan['repaymentType'] == 'fixed' ? 'Fixed Monthly Installments' : 'Flexible Repayments'),
+                _buildPdfRow('Date Issued', loan['dateIssued'] != null ? DateFormat('yyyy-MM-dd').format(DateTime.parse(loan['dateIssued'])) : 'N/A', 'Loan Reference ID', loan['id']?.toString() ?? 'N/A'),
+              ],
+            ),
+            pw.SizedBox(height: 16),
+
+            // Metrics Grid
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.teal700, width: 1),
+              children: [
+                pw.TableRow(
+                  decoration: const pw.BoxDecoration(color: PdfColors.teal50),
+                  children: [
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Column(
+                        children: [
+                          pw.Text('TOTAL PRINCIPAL', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+                          pw.SizedBox(height: 4),
+                          pw.Text('PKR ${_fmtCurrency(principalMinor / 100)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+                        ],
+                      ),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Column(
+                        children: [
+                          pw.Text('TOTAL REPAID', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
+                          pw.SizedBox(height: 4),
+                          pw.Text('PKR ${_fmtCurrency(paidMinor / 100)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
+                        ],
+                      ),
+                    ),
+                    pw.Padding(
+                      padding: const pw.EdgeInsets.all(8),
+                      child: pw.Column(
+                        children: [
+                          pw.Text('OUTSTANDING BALANCE', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: outstandingMinor > 0 ? PdfColors.orange900 : PdfColors.grey700)),
+                          pw.SizedBox(height: 4),
+                          pw.Text('PKR ${_fmtCurrency(outstandingMinor / 100)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: outstandingMinor > 0 ? PdfColors.orange900 : PdfColors.grey700)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 20),
+
+            // Ledger Transactions History Table
+            pw.Text('COMPLETE PAYMENT & REPAYMENT HISTORY LOG',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.SizedBox(height: 6),
+            if (activePayments.isEmpty)
+              pw.Text('No payment transactions logged.', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey))
+            else
+              pw.TableHelper.fromTextArray(
+                border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+                cellStyle: const pw.TextStyle(fontSize: 8),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey100),
+                headers: ['Transaction Date', 'Type', 'Amount (PKR)', 'Reference / Note', 'Recorded By'],
+                data: activePayments.map((p) {
+                  final pDate = p['date'] != null ? DateFormat('yyyy-MM-dd HH:mm').format(DateTime.parse(p['date'])) : 'N/A';
+                  final amt = (p['amountMinor'] as num?)?.toInt() ?? ((p['amount'] as num?)?.toDouble() ?? 0.0 * 100).round();
+                  final isTopup = p['type'] == 'topup' || p['type'] == 'loan_issue';
+                  final note = p['note']?.toString() ?? '';
+
+                  return [
+                    pDate,
+                    isTopup ? 'Loan Top-up (+)' : 'Repayment (-)',
+                    'PKR ${_fmtCurrency(amt / 100)}',
+                    note.isEmpty ? 'N/A' : note,
+                    p['recordedBy']?.toString() ?? 'System',
+                  ];
+                }).toList(),
+              ),
+          ],
+        ),
+      );
+
+      final pdfBytes = await pdf.save();
+      final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final safeName = empName.replaceAll(RegExp(r'[^\w\s\-]'), '').replaceAll(' ', '_').toLowerCase();
+
+      await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Loan Statement PDF',
+        fileName: 'loan_statement_${safeName}_$dateStr.pdf',
+        bytes: pdfBytes,
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+    } catch (_) {}
+  }
+
+
   static pw.TableRow _buildPdfRow(String label1, String val1, String label2, String val2) {
     return pw.TableRow(
       children: [

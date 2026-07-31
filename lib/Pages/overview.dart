@@ -299,7 +299,7 @@ class _OverviewScreenState extends State<OverviewScreen>
               )
             : null,
         title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.png', height: 26, width: 26),
+          Image.asset('assets/logo/gmwf-1.webp', height: 26, width: 26),
           const SizedBox(width: 10),
           Text(
             role.name.toUpperCase(),
@@ -647,7 +647,7 @@ class _OverviewHeader extends StatelessWidget {
                     ],
                   ),
                   child: Image.asset(
-                    'assets/logo/gmwf-1.png',
+                    'assets/logo/gmwf-1.webp',
                     height: isMobile ? 36 : 42,
                     width: isMobile ? 36 : 42,
                     fit: BoxFit.contain,

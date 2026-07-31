@@ -10,6 +10,8 @@ import 'package:uuid/uuid.dart';
 import '../models/biometric_device_config.dart';
 import '../models/biometric_credential.dart';
 import 'local_storage_service.dart';
+import '../realtime/realtime_events.dart';
+import '../realtime/realtime_manager.dart';
 
 class ZkTecoNetworkService {
   static const int defaultHttpPort = 8088;
@@ -208,8 +210,17 @@ class ZkTecoNetworkService {
       await _saveUnmappedPunch(punchRecord);
     }
 
-    // Broadcast realtime event to UI
+    // Broadcast realtime event to UI & LAN Server
     _punchStreamController.add(punchRecord);
+
+    try {
+      RealtimeManager().sendMessage({
+        'event_type': RealtimeEvents.saveBiometricLog,
+        'data': punchRecord,
+      });
+    } catch (e) {
+      debugPrint('[ZkTecoNetworkService] Realtime broadcast notice: $e');
+    }
   }
 
   static Future<void> _routePunchToModule(

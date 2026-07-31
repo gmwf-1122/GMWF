@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../services/image_upload_service.dart';
 
 class StudentProgressDialog extends StatefulWidget {
   final String studentName;
@@ -178,23 +179,30 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                           child: CircleAvatar(
                             radius: 36,
                             backgroundColor: const Color(0xFF006666),
-                            backgroundImage: (widget.photoUrl != null &&
-                                    widget.photoUrl!.isNotEmpty)
-                                ? NetworkImage(widget.photoUrl!)
-                                : null,
-                            child: (widget.photoUrl == null ||
-                                    widget.photoUrl!.isEmpty)
-                                ? Text(
-                                    widget.studentName.isNotEmpty
-                                        ? widget.studentName[0].toUpperCase()
-                                        : '?',
-                                    style: const TextStyle(
-                                      fontSize: 28,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                            child: ClipOval(
+                              child: () {
+                                final photoStr = widget.photoUrl?.trim();
+                                final bytes = ImageUploadService.decodeBase64ToBytes(photoStr);
+                                if (bytes != null) {
+                                  return Image.memory(bytes, fit: BoxFit.cover, width: 72, height: 72);
+                                } else if (photoStr != null && photoStr.startsWith('http')) {
+                                  return Image.network(
+                                    photoStr,
+                                    fit: BoxFit.cover,
+                                    width: 72,
+                                    height: 72,
+                                    errorBuilder: (_, __, ___) => Text(
+                                      widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : '?',
+                                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
                                     ),
-                                  )
-                                : null,
+                                  );
+                                }
+                                return Text(
+                                  widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : '?',
+                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                                );
+                              }(),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 16),

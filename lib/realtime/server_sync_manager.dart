@@ -392,6 +392,51 @@ class ServerSyncManager {
       case RealtimeEvents.savePrescription:
         _handlePrescriptionRestriction(data, msg);
         break;
+
+      // ── ATTENDANCE ────────────────────────────────────────────────────────
+      case RealtimeEvents.saveBiometricLog:
+      case RealtimeEvents.saveEmployeeAttendance:
+      case RealtimeEvents.saveFacultyAttendance:
+      case RealtimeEvents.saveStudentAttendance:
+        _saveAttendance(type, data, msg, user: user);
+        break;
+
+      // ── MADRASSA & SCHOOL ──────────────────────────────────────────────────
+      case RealtimeEvents.saveMadrassaAdmission:
+      case RealtimeEvents.saveMadrassaFee:
+      case RealtimeEvents.saveMadrassaHifzProgress:
+      case RealtimeEvents.saveExamResult:
+        _saveMadrassa(type, data, msg, user: user);
+        break;
+
+      // ── FINANCE ───────────────────────────────────────────────────────────
+      case RealtimeEvents.saveExpense:
+      case RealtimeEvents.deleteExpense:
+      case RealtimeEvents.saveLoan:
+      case RealtimeEvents.deleteLoan:
+      case RealtimeEvents.saveFinanceEntry:
+        _saveFinance(type, data, msg, user: user);
+        break;
+
+      // ── DONATIONS ─────────────────────────────────────────────────────────
+      case RealtimeEvents.saveDonationReceipt:
+      case RealtimeEvents.saveDonor:
+      case RealtimeEvents.saveDonationCollection:
+        _saveDonation(type, data, msg, user: user);
+        break;
+
+      // ── DASTERKHWAAN ──────────────────────────────────────────────────────
+      case RealtimeEvents.saveDasterkhwanEntry:
+      case RealtimeEvents.saveDasterkhwanStock:
+        _saveDasterkhwan(type, data, msg, user: user);
+        break;
+
+      // ── SUPERVISOR ────────────────────────────────────────────────────────
+      case RealtimeEvents.saveSupervisorAction:
+      case RealtimeEvents.approveEditRequest:
+      case RealtimeEvents.rejectEditRequest:
+        _saveSupervisor(type, data, msg, user: user);
+        break;
     }
   }
 
@@ -683,6 +728,84 @@ class ServerSyncManager {
       'dateKey':  dateKey,
       'serial':   serial,
       'data':     record,
+    });
+  }
+
+  void _saveAttendance(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['id']?.toString() ?? data['punchId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': 'save_attendance',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
+    });
+  }
+
+  void _saveMadrassa(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['id']?.toString() ?? data['receiptNo']?.toString() ?? data['admissionNo']?.toString() ?? 'mad_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': 'save_madrassa',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
+    });
+  }
+
+  void _saveFinance(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['id']?.toString() ?? 'fin_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': eventType.contains('delete') ? 'delete_finance' : 'save_finance',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
+    });
+  }
+
+  void _saveDonation(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['id']?.toString() ?? data['receiptNumber']?.toString() ?? 'don_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': 'save_donation',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
+    });
+  }
+
+  void _saveDasterkhwan(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['id']?.toString() ?? 'das_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': 'save_dasterkhwan',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
+    });
+  }
+
+  void _saveSupervisor(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final id = data['requestId']?.toString() ?? data['id']?.toString() ?? 'sup_${DateTime.now().microsecondsSinceEpoch}';
+    final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+    _enqueue({
+      'type': 'save_supervisor',
+      'subType': eventType,
+      'branchId': branchId,
+      'docId': id,
+      'data': rec,
     });
   }
 
@@ -1020,6 +1143,81 @@ class ServerSyncManager {
         });
         break;
 
+      case 'save_attendance':
+        final docId = op['docId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
+        final today = _todayKey();
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('attendance').doc(today)
+            .collection('records').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'save_madrassa':
+        final docId = op['docId']?.toString() ?? 'mad_${DateTime.now().microsecondsSinceEpoch}';
+        final subType = op['subType']?.toString() ?? '';
+        final coll = subType == RealtimeEvents.saveMadrassaFee ? 'fees' : 'records';
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('madrassa').doc(coll)
+            .collection('items').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'save_finance':
+        final docId = op['docId']?.toString() ?? 'fin_${DateTime.now().microsecondsSinceEpoch}';
+        final subType = op['subType']?.toString() ?? '';
+        String coll = 'ledger';
+        if (subType.contains('expense')) coll = 'expenses';
+        else if (subType.contains('loan')) coll = 'loans';
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('finance').doc(coll)
+            .collection('records').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'delete_finance':
+        final docId = op['docId']?.toString();
+        if (docId != null) {
+          final subType = op['subType']?.toString() ?? '';
+          String coll = 'ledger';
+          if (subType.contains('expense')) coll = 'expenses';
+          else if (subType.contains('loan')) coll = 'loans';
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('finance').doc(coll)
+              .collection('records').doc(docId)
+              .delete();
+        }
+        break;
+
+      case 'save_donation':
+        final docId = op['docId']?.toString() ?? 'don_${DateTime.now().microsecondsSinceEpoch}';
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('donations').doc('receipts')
+            .collection('records').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'save_dasterkhwan':
+        final docId = op['docId']?.toString() ?? 'das_${DateTime.now().microsecondsSinceEpoch}';
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('dasterkhwaan').doc('entries')
+            .collection('records').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'save_supervisor':
+        final docId = op['docId']?.toString() ?? 'sup_${DateTime.now().microsecondsSinceEpoch}';
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('edit_requests').doc(docId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
       default:
         debugPrint('[SSM] Unknown op type: $type');
     }
@@ -1050,6 +1248,10 @@ class ServerSyncManager {
       _downloadPrescriptions(),
       _downloadTodayTokens(),
       _downloadTodayDispensary(),
+      _downloadAttendance(),
+      _downloadMadrassa(),
+      _downloadFinance(),
+      _downloadDonations(),
     ]);
   }
 
@@ -1282,6 +1484,87 @@ class ServerSyncManager {
         daysCovered: days,
       );
       debugPrint('[SSM] 💊 Multi-day restriction applied: $pId ($days days)');
+    }
+  }
+
+  // ── Additional Module Download Methods ──────────────────────────────────────
+
+  Future<void> _downloadAttendance() async {
+    if (_branchId == null || !_running) return;
+    try {
+      final today = _todayKey();
+      final snap = await _db
+          .collection('branches').doc(_branchId)
+          .collection('attendance').doc(today)
+          .collection('records').get();
+
+      final box = await LocalStorageService.openBoxSafe('attendance_box');
+      for (final doc in snap.docs) {
+        box.put(doc.id, LocalStorageService.sanitize(doc.data()));
+      }
+      debugPrint('[SSM] Downloaded ${snap.docs.length} attendance records for $_branchId');
+    } catch (e) {
+      debugPrint('[SSM] _downloadAttendance error: $e');
+    }
+  }
+
+  Future<void> _downloadMadrassa() async {
+    if (_branchId == null || !_running) return;
+    try {
+      final feesSnap = await _db
+          .collection('branches').doc(_branchId)
+          .collection('madrassa').doc('fees')
+          .collection('items').get();
+
+      final feesBox = await LocalStorageService.openBoxSafe('madrassa_fees');
+      for (final doc in feesSnap.docs) {
+        feesBox.put(doc.id, LocalStorageService.sanitize(doc.data()));
+      }
+      debugPrint('[SSM] Downloaded ${feesSnap.docs.length} madrassa fee records for $_branchId');
+    } catch (e) {
+      debugPrint('[SSM] _downloadMadrassa error: $e');
+    }
+  }
+
+  Future<void> _downloadFinance() async {
+    if (_branchId == null || !_running) return;
+    try {
+      for (final coll in ['expenses', 'loans', 'ledger']) {
+        final snap = await _db
+            .collection('branches').doc(_branchId)
+            .collection('finance').doc(coll)
+            .collection('records').get();
+
+        String boxName = 'finance_entries';
+        if (coll == 'expenses') boxName = 'finance_expenses';
+        else if (coll == 'loans') boxName = 'finance_loans';
+
+        final box = await LocalStorageService.openBoxSafe(boxName);
+        for (final doc in snap.docs) {
+          box.put(doc.id, LocalStorageService.sanitize(doc.data()));
+        }
+      }
+      debugPrint('[SSM] Downloaded finance records for $_branchId');
+    } catch (e) {
+      debugPrint('[SSM] _downloadFinance error: $e');
+    }
+  }
+
+  Future<void> _downloadDonations() async {
+    if (_branchId == null || !_running) return;
+    try {
+      final snap = await _db
+          .collection('branches').doc(_branchId)
+          .collection('donations').doc('receipts')
+          .collection('records').get();
+
+      final box = await LocalStorageService.openBoxSafe('donations_box');
+      for (final doc in snap.docs) {
+        box.put(doc.id, LocalStorageService.sanitize(doc.data()));
+      }
+      debugPrint('[SSM] Downloaded ${snap.docs.length} donation records for $_branchId');
+    } catch (e) {
+      debugPrint('[SSM] _downloadDonations error: $e');
     }
   }
 }

@@ -163,7 +163,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                     automaticallyImplyLeading: false,
                     title: Row(
                       children: [
-                        Image.asset('assets/logo/gmwf-1.png', height: 28),
+                        Image.asset('assets/logo/gmwf-1.webp', height: 28),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -261,7 +261,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                     automaticallyImplyLeading: false,
                     title: Row(
                       children: [
-                        Image.asset('assets/logo/gmwf-1.png', height: 28),
+                        Image.asset('assets/logo/gmwf-1.webp', height: 28),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -350,7 +350,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                     automaticallyImplyLeading: false,
                     title: Row(
                       children: [
-                        Image.asset('assets/logo/gmwf-1.png', height: 32),
+                        Image.asset('assets/logo/gmwf-1.webp', height: 32),
                         const SizedBox(width: 12),
                         Flexible(
                           child: Text(
@@ -440,7 +440,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                                 leading: Column(
                                   children: [
                                     const SizedBox(height: 24),
-                                    Image.asset('assets/logo/gmwf-1.png', height: 36),
+                                    Image.asset('assets/logo/gmwf-1.webp', height: 36),
                                     const SizedBox(height: 8),
                                     Text(
                                       context.l.appName,

@@ -411,7 +411,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
-      valueListenable: Hive.box('app_settings').listenable(),
+      valueListenable: Hive.box('app_settings').listenable(keys: [
+        'custom_accent_color',
+        'card_radius',
+        'is_dark_mode',
+        'language',
+        'font_scale',
+      ]),
       builder: (context, Box box, child) {
         final colorHex = box.get('custom_accent_color') as String?;
 
@@ -424,22 +430,30 @@ class MyApp extends StatelessWidget {
         }
 
         final cardRadius = box.get('card_radius', defaultValue: 16.0) as double;
+        final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
+        final language = box.get('language', defaultValue: 'en') as String;
         final fontFamily = GoogleFonts.dmSans().fontFamily;
+        final isUrdu = language == 'ur';
 
         return MaterialApp(
           navigatorKey: navigatorKey,
           title: 'GM-D',
           debugShowCheckedModeBanner: false,
+          themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
+          locale: Locale(language),
           theme: ThemeData(
             useMaterial3: true,
+            brightness: Brightness.light,
             fontFamily: fontFamily,
             colorScheme: ColorScheme.fromSeed(
               seedColor: seedColor,
               primary: seedColor,
               secondary: AppColors.navy,
+              brightness: Brightness.light,
             ),
-            scaffoldBackgroundColor: AppColors.gray50,
+            scaffoldBackgroundColor: const Color(0xFFEAEFF5),
             cardTheme: CardThemeData(
+              elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(cardRadius),
               ),
@@ -452,7 +466,7 @@ class MyApp extends StatelessWidget {
             inputDecorationTheme: InputDecorationTheme(
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(cardRadius),
                 borderSide: const BorderSide(color: AppColors.gray200, width: 1.5),
@@ -463,7 +477,7 @@ class MyApp extends StatelessWidget {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(cardRadius),
-                borderSide: BorderSide(color: seedColor, width: 1.5),
+                borderSide: BorderSide(color: seedColor, width: 2.0),
               ),
               labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray600),
               hintStyle: const TextStyle(fontSize: 14, color: AppColors.gray400),
@@ -473,8 +487,10 @@ class MyApp extends StatelessWidget {
                 backgroundColor: seedColor,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
                 textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                elevation: 3,
+                shadowColor: seedColor.withValues(alpha: 0.35),
               ),
             ),
             outlinedButtonTheme: OutlinedButtonThemeData(
@@ -497,17 +513,75 @@ class MyApp extends StatelessWidget {
               },
             ),
           ),
+          darkTheme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            fontFamily: fontFamily,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: seedColor,
+              primary: seedColor,
+              secondary: AppColors.navy,
+              brightness: Brightness.dark,
+            ),
+            scaffoldBackgroundColor: const Color(0xFF090C10),
+            cardTheme: CardThemeData(
+              elevation: 0,
+              color: const Color(0xFF161B22),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+              ),
+            ),
+            dialogTheme: DialogThemeData(
+              backgroundColor: const Color(0xFF161B22),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+              ),
+            ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: const Color(0xFF21262D),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: const BorderSide(color: Color(0xFF30363D), width: 1.5),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: const BorderSide(color: Color(0xFF30363D), width: 1.5),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(cardRadius),
+                borderSide: BorderSide(color: seedColor, width: 2.0),
+              ),
+              labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF8B949E)),
+              hintStyle: const TextStyle(fontSize: 14, color: Color(0xFF6E7681)),
+            ),
+            elevatedButtonTheme: ElevatedButtonThemeData(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: seedColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+                textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                elevation: 3,
+                shadowColor: seedColor.withValues(alpha: 0.4),
+              ),
+            ),
+          ),
           builder: (context, child) {
             final mediaQuery = MediaQuery.of(context);
             final scale = Hive.isBoxOpen('app_settings')
                 ? Hive.box('app_settings').get('font_scale', defaultValue: 1.0) as double
                 : 1.0;
 
-            final adjustedChild = MediaQuery(
-              data: mediaQuery.copyWith(
-                textScaler: TextScaler.linear(scale),
+            final adjustedChild = Directionality(
+              textDirection: isUrdu ? TextDirection.rtl : TextDirection.ltr,
+              child: MediaQuery(
+                data: mediaQuery.copyWith(
+                  textScaler: TextScaler.linear(scale),
+                ),
+                child: child!,
               ),
-              child: child!,
             );
 
             if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
@@ -531,30 +605,7 @@ class MyApp extends StatelessWidget {
           initialRoute: '/',
           routes: {
             '/': (context) => const InitializationScreen(),
-            '/home': (context) => StreamBuilder<User?>(
-                  stream: FirebaseAuth.instance.authStateChanges(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const GmwfLoadingView();
-                    }
-                    if (snapshot.hasData && snapshot.data != null) {
-                      return HomeRouter(user: snapshot.data!);
-                    }
-
-                    return FutureBuilder<Map<String, dynamic>?>(
-                      future: offline_auth.OfflineAuthService.getCachedUserData(),
-                      builder: (context, cachedSnap) {
-                        if (cachedSnap.connectionState == ConnectionState.waiting) {
-                          return const GmwfLoadingView();
-                        }
-                        if (cachedSnap.hasData && cachedSnap.data != null) {
-                          return HomeRouter(user: null, localUser: cachedSnap.data!);
-                        }
-                        return const LoginPage();
-                      },
-                    );
-                  },
-                ),
+            '/home': (context) => const AuthHomeWrapper(),
             '/login': (context) => const LoginPage(),
             '/admin': (context) => const OverviewScreen(),
             '/chairman': (context) => const OverviewScreen(),
@@ -569,6 +620,46 @@ class MyApp extends StatelessWidget {
                   as Map<String, dynamic>?;
               return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
             },
+          },
+        );
+      },
+    );
+  }
+}
+
+class AuthHomeWrapper extends StatefulWidget {
+  const AuthHomeWrapper({super.key});
+
+  @override
+  State<AuthHomeWrapper> createState() => _AuthHomeWrapperState();
+}
+
+class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
+  late final Stream<User?> _authStream = FirebaseAuth.instance.authStateChanges();
+  late final Future<Map<String, dynamic>?> _cachedUserFuture = offline_auth.OfflineAuthService.getCachedUserData();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<User?>(
+      stream: _authStream,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const GmwfLoadingView();
+        }
+        if (snapshot.hasData && snapshot.data != null) {
+          return HomeRouter(user: snapshot.data!);
+        }
+
+        return FutureBuilder<Map<String, dynamic>?>(
+          future: _cachedUserFuture,
+          builder: (context, cachedSnap) {
+            if (cachedSnap.connectionState == ConnectionState.waiting) {
+              return const GmwfLoadingView();
+            }
+            if (cachedSnap.hasData && cachedSnap.data != null) {
+              return HomeRouter(user: null, localUser: cachedSnap.data!);
+            }
+            return const LoginPage();
           },
         );
       },

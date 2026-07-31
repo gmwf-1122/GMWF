@@ -505,6 +505,27 @@ class SyncService {
             batch.set(_db.collection('global_audit_logs').doc(logId), data, SetOptions(merge: true));
             await batch.commit();
           }
+          else if (type == 'save_journal_entry') {
+            final data    = Map<String, dynamic>.from(action['data'] ?? {});
+            final entryId = action['entryId'] as String?;
+            final bId     = action['branchId'] as String? ?? branchId;
+            if (entryId != null && data.isNotEmpty) {
+              final batch = _db.batch();
+              if (bId != 'all') {
+                batch.set(_db.collection('branches').doc(bId).collection('journal_entries').doc(entryId), data, SetOptions(merge: true));
+              }
+              batch.set(_db.collection('global_journal_entries').doc(entryId), data, SetOptions(merge: true));
+              await batch.commit();
+            }
+          }
+          else if (type == 'save_org_bank_account') {
+            final data      = Map<String, dynamic>.from(action['data'] ?? {});
+            final accountId = action['accountId'] as String?;
+            if (accountId != null && data.isNotEmpty) {
+              await _db.collection('global_org_bank_accounts').doc(accountId).set(data, SetOptions(merge: true));
+            }
+          }
+
           else if (type == 'save_donor') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
             final donorId = action['donorId'] as String?;

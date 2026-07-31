@@ -13,6 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/finance_ledger_storage.dart';
+
 import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
 import 'shared_widgets.dart';
@@ -207,10 +209,13 @@ void openEmployeeFormSheet(
             if (!rolesList.contains(role)) rolesList.add(role);
             if (!rolesList.contains('+ Add Custom Role...')) rolesList.add('+ Add Custom Role...');
 
-            final List<String> deptsList = ['Administration', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School'];
-            deptsList.addAll(FinanceLocalStorage.getCustomDepartments());
+            final List<String> deptsList = FinanceLedgerStorage.sortDepartmentsCanonical(
+              ['Administration Staff', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
+                ..addAll(FinanceLocalStorage.getCustomDepartments())
+            );
             if (!deptsList.contains(department)) deptsList.add(department);
             if (!deptsList.contains('+ Add Custom Department...')) deptsList.add('+ Add Custom Department...');
+
 
             return Align(
               alignment: Alignment.bottomCenter,

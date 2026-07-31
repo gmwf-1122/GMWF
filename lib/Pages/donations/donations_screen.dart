@@ -253,7 +253,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                     borderRadius: BorderRadius.circular(6),
                   ),
                   padding: const EdgeInsets.all(3),
-                  child: Image.asset('assets/logo/gmwf-1.png', fit: BoxFit.contain),
+                  child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -447,7 +447,7 @@ class _Header extends StatelessWidget {
               ],
             ),
             padding: const EdgeInsets.all(4),
-            child: Image.asset('assets/logo/gmwf-1.png', fit: BoxFit.contain),
+            child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
           ),
           const SizedBox(width: 16),
           _Avatar(username: username, roleColor: rc),

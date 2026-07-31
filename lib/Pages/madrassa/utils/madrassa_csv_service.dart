@@ -216,7 +216,7 @@ class MadrassaCsvService {
         sb.writeln([
           _esc(date),
           _esc(student?['name'] ?? log['studentName'] ?? ''),
-          _esc((log['uniform'] ?? false).toString()),
+          _esc((isLeave || log['uniform'] == true || log['uniform'] == 'leave').toString()),
           _esc('false'),
           _esc(isLeave.toString()),
           _esc((log['ptm'] ?? false).toString()),

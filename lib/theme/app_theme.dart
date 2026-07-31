@@ -96,6 +96,36 @@ class RoleThemeData {
     this.isDarkCanvas = false,
   });
 
+  RoleThemeData toDarkMode() {
+    return RoleThemeData(
+      roleLabel: roleLabel,
+      bg: const Color(0xFF0D1117),
+      bgCard: const Color(0xFF161B22),
+      bgCardAlt: const Color(0xFF21262D),
+      bgRule: const Color(0xFF30363D),
+      accent: accent,
+      accentLight: accentLight,
+      accentMuted: accentMuted,
+      accentGradient: accentGradient,
+      glassTint: glassTint,
+      textPrimary: const Color(0xFFF0F6FC),
+      textSecondary: const Color(0xFF8B949E),
+      textTertiary: const Color(0xFF6E7681),
+      danger: danger,
+      zakat: zakat,
+      nonZakat: nonZakat,
+      gmwf: gmwf,
+      cardFillTokens: cardFillTokens,
+      cardFillPrescriptions: cardFillPrescriptions,
+      cardFillDispensary: cardFillDispensary,
+      chartBar1: chartBar1,
+      chartBar2: chartBar2,
+      chartBar3: chartBar3,
+      chartGrid: const Color(0xFF30363D),
+      isDarkCanvas: true,
+    );
+  }
+
   // ── Chairman – charcoal-navy canvas, soft brass-gold accent ──────────────
   // Refined, low-saturation gold instead of a bright/neon gold — reads as
   // understated institutional authority rather than "flashy."
@@ -914,3 +944,92 @@ class RatioBar extends StatelessWidget {
                 fontWeight: FontWeight.w700)),
       ]);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Soft UI (Neumorphism 2.0) 3D Shadow Helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+class Neumorphic3DStyle {
+  static List<BoxShadow> raisedShadows({
+    required bool isDark,
+    Color? accentColor,
+    double depth = 1.0,
+    bool showGlow = false,
+  }) {
+    if (isDark) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.65),
+          blurRadius: (18 * depth).clamp(4.0, 36.0),
+          spreadRadius: 1,
+          offset: Offset(6 * depth, 8 * depth),
+        ),
+        BoxShadow(
+          color: Colors.white.withValues(alpha: 0.08),
+          blurRadius: (12 * depth).clamp(3.0, 24.0),
+          spreadRadius: -1,
+          offset: Offset(-4 * depth, -4 * depth),
+        ),
+        if (showGlow && accentColor != null)
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.28),
+            blurRadius: 24,
+            spreadRadius: 2,
+            offset: const Offset(0, 6),
+          ),
+      ];
+    } else {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.12),
+          blurRadius: (18 * depth).clamp(4.0, 36.0),
+          spreadRadius: 1,
+          offset: Offset(7 * depth, 8 * depth),
+        ),
+        BoxShadow(
+          color: Colors.white.withValues(alpha: 0.95),
+          blurRadius: (14 * depth).clamp(3.0, 28.0),
+          spreadRadius: -1,
+          offset: Offset(-6 * depth, -6 * depth),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.03),
+          blurRadius: 4,
+          offset: const Offset(0, 2),
+        ),
+        if (showGlow && accentColor != null)
+          BoxShadow(
+            color: accentColor.withValues(alpha: 0.20),
+            blurRadius: 24,
+            spreadRadius: 2,
+            offset: const Offset(0, 8),
+          ),
+      ];
+    }
+  }
+
+  static BoxDecoration raisedDecoration({
+    required bool isDark,
+    required Color backgroundColor,
+    required double borderRadius,
+    Color? borderColor,
+    Color? accentColor,
+    double depth = 1.0,
+    bool showGlow = false,
+  }) {
+    return BoxDecoration(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(borderRadius),
+      border: Border.all(
+        color: borderColor ?? (isDark ? const Color(0xFF30363D) : const Color(0xFFE2E8F0)),
+        width: 1.2,
+      ),
+      boxShadow: raisedShadows(
+        isDark: isDark,
+        accentColor: accentColor,
+        depth: depth,
+        showGlow: showGlow,
+      ),
+    );
+  }
+}

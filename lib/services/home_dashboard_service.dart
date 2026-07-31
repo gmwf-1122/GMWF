@@ -10,6 +10,7 @@
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../widgets/dashboard_widgets.dart';
 import 'local_storage_service.dart';
 import 'donations_local_storage.dart';
@@ -32,6 +33,28 @@ class _CachedLocalBranchStats {
 String _dayKey(String branchId, DateTime day) =>
     '${branchId.toLowerCase().trim()}|${DateFormat('yyyy-MM-dd').format(day)}';
 
+bool _isSameDate(dynamic rawDate, String ymd, String dmyy) {
+  if (rawDate == null) return false;
+  final str = rawDate.toString().trim();
+  if (str.startsWith(ymd)) return true;
+  if (str == dmyy) return true;
+  try {
+    final dt = DateTime.tryParse(str);
+    if (dt != null) {
+      final formatted = DateFormat('yyyy-MM-dd').format(dt);
+      if (formatted == ymd) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+bool _isMatchingBranch(String docBranchId, String targetBranchId) {
+  final b1 = docBranchId.toLowerCase().trim();
+  final b2 = targetBranchId.toLowerCase().trim();
+  if (b2 == 'all' || b2 == 'hq' || b2 == 'gujrat') return true;
+  return b1 == b2 || b1.isEmpty || b1 == 'all';
+}
+
 /// Computes branch statistics from local Hive data (local_entries, local_donations, and historical branch cache).
 /// Falls back to Firestore only if local data is completely empty, with a short timeout.
 Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async {
@@ -53,8 +76,8 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
       for (final val in donBox.values) {
         if (val is Map) {
           final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
-          final d = val['date']?.toString();
-          if (b == bId && d == dateKeyYmd) {
+          final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
+          if (_isMatchingBranch(b, bId) && _isSameDate(d, dateKeyYmd, dateKeyDmyy)) {
             final status = val['status']?.toString().toLowerCase();
             final syncStatus = val['syncStatus']?.toString().toLowerCase();
             if (status == 'deleted' || syncStatus == 'deleted') continue;
@@ -186,7 +209,7 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
     debugPrint('Error loading employee attendance stats: $e');
   }
 
-  final res = BranchStats(
+  BranchStats res = BranchStats(
     zakat: z,
     nonZakat: nz,
     gmwf: gm,
@@ -201,8 +224,73 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
     gmwfRevenue: gmRev,
     employeeAttendance: empAttendance,
   );
+
+  // If all local numbers are 0 (e.g. fresh Chrome Web session without offline Hive storage), attempt a quick Firestore fetch
+  if (z == 0 && nz == 0 && donTotal == 0 && dispRev == 0 && empAttendance == 0) {
+    try {
+      final fsRes = await _fetchFirestoreBranchStats(bId, date);
+      if (fsRes != null) {
+        res = fsRes;
+      }
+    } catch (_) {}
+  }
+
   _localStatsTTLCache[cacheTTLKey] = _CachedLocalBranchStats(res);
   return res;
+}
+
+Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) async {
+  try {
+    final bId = branchId.toLowerCase().trim();
+    final dateKeyYmd = DateFormat('yyyy-MM-dd').format(date);
+    int donTotal = 0;
+    int empAtt = 0;
+
+    try {
+      final donSnap = await FirebaseFirestore.instance
+          .collection('donations')
+          .get()
+          .timeout(const Duration(seconds: 4));
+      for (final doc in donSnap.docs) {
+        final val = doc.data();
+        final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+        final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
+        if (_isMatchingBranch(b, bId) && _isSameDate(d, dateKeyYmd, DateFormat('ddMMyy').format(date))) {
+          final status = val['status']?.toString().toLowerCase();
+          if (status == 'deleted') continue;
+          final amt = val['amount'];
+          final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+          donTotal += amtDouble.toInt();
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final userSnap = await FirebaseFirestore.instance
+          .collection('users')
+          .get()
+          .timeout(const Duration(seconds: 4));
+      empAtt = userSnap.docs.length;
+    } catch (_) {}
+
+    return BranchStats(
+      zakat: 0,
+      nonZakat: 0,
+      gmwf: 0,
+      dispensed: 0,
+      prescribed: 0,
+      dasterkhwaan: 0,
+      dasterkhwaanServed: 0,
+      donations: donTotal,
+      dispensaryRevenue: 0,
+      zakatRevenue: 0,
+      nonZakatRevenue: 0,
+      gmwfRevenue: 0,
+      employeeAttendance: empAtt,
+    );
+  } catch (_) {
+    return null;
+  }
 }
 
 /// Fetches stats for a single historical day (e.g. yesterday) for one
@@ -407,17 +495,140 @@ class RecentActivityService {
     return list;
   }
 
-  static List<String> getAllBranchIds() {
-    final box = Hive.box(LocalStorageService.branchesBox);
-    final ids = box.keys
-        .where((k) => k.toString().startsWith('branch:'))
-        .map((k) => k.toString().replaceFirst('branch:', '').toLowerCase().trim())
-        .where((id) => id.isNotEmpty && id != 'all')
-        .toList();
-    if (ids.isEmpty) {
-      return ['gujrat'];
+  static Future<List<RecentActivity>> getRecentActivityAsync({String? branchId, int limit = 20}) async {
+    List<RecentActivity> list = getRecentActivity(branchId: branchId, limit: limit);
+
+    if (list.isEmpty) {
+      try {
+        final donSnap = await FirebaseFirestore.instance
+            .collection('donations')
+            .limit(limit)
+            .get()
+            .timeout(const Duration(seconds: 4));
+        for (final doc in donSnap.docs) {
+          final data = doc.data();
+          final bId = (data['branchId'] as String? ?? '').toLowerCase().trim();
+          if (branchId != null && bId != branchId.toLowerCase().trim() && branchId != 'all') continue;
+
+          final dtStr = data['timestamp'] ?? data['lastUpdatedAt'] ?? data['date'];
+          DateTime dt = DateTime.now();
+          if (dtStr != null) {
+            dt = DateTime.tryParse(dtStr.toString()) ?? DateTime.now();
+          }
+
+          final donor = data['donorName']?.toString() ?? 'Walk-in Donor';
+          final amt = (data['amount'] as num?)?.toDouble() ?? 0.0;
+          final rcpt = data['receiptNo']?.toString() ?? '';
+
+          list.add(RecentActivity(
+            id: 'don_${doc.id}',
+            title: 'Donation of PKR ${amt.toStringAsFixed(0)}',
+            subtitle: 'Received from $donor (Rcpt: $rcpt)',
+            timestamp: dt,
+            type: 'donation',
+            branchId: bId,
+            branchName: resolveBranchName(bId),
+            amount: amt,
+            status: data['status']?.toString(),
+          ));
+        }
+      } catch (_) {}
+
+      try {
+        final entriesSnap = await FirebaseFirestore.instance
+            .collectionGroup('entries')
+            .limit(limit)
+            .get()
+            .timeout(const Duration(seconds: 4));
+        for (final doc in entriesSnap.docs) {
+          final data = doc.data();
+          final bId = (data['branchId'] as String? ?? '').toLowerCase().trim();
+          if (branchId != null && bId != branchId.toLowerCase().trim() && branchId != 'all') continue;
+
+          final dtStr = data['createdAt'] ?? data['timestamp'];
+          DateTime dt = DateTime.now();
+          if (dtStr != null) {
+            dt = DateTime.tryParse(dtStr.toString()) ?? DateTime.now();
+          }
+
+          final serial = data['serial']?.toString() ?? doc.id;
+          final pName = data['patientName']?.toString() ?? 'Unknown Patient';
+          final qType = (data['queueType'] as String? ?? 'zakat').toUpperCase();
+          final status = data['status']?.toString() ?? 'issued';
+
+          list.add(RecentActivity(
+            id: 'tok_${doc.id}',
+            title: 'Token #$serial Issued',
+            subtitle: 'Patient: $pName ($qType)',
+            timestamp: dt,
+            type: 'token',
+            branchId: bId,
+            branchName: resolveBranchName(bId),
+            status: status,
+          ));
+        }
+      } catch (_) {}
+
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      if (list.length > limit) {
+        list = list.sublist(0, limit);
+      }
     }
-    return ids;
+
+    return list;
+  }
+
+  static List<String> getAllBranchIds() {
+    final Set<String> idsSet = {'gujrat'};
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+        final box = Hive.box(LocalStorageService.branchesBox);
+        for (final k in box.keys) {
+          final id = k.toString().replaceFirst('branch:', '').toLowerCase().trim();
+          if (id.isNotEmpty && id != 'all') idsSet.add(id);
+        }
+      }
+    } catch (_) {}
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final box = Hive.box(LocalStorageService.entriesBox);
+        for (final val in box.values) {
+          if (val is Map) {
+            final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+            if (b.isNotEmpty && b != 'all' && b != 'unknown') idsSet.add(b);
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+        final box = Hive.box(DonationsLocalStorage.donationsBox);
+        for (final val in box.values) {
+          if (val is Map) {
+            final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+            if (b.isNotEmpty && b != 'all' && b != 'unknown') idsSet.add(b);
+          }
+        }
+      }
+    } catch (_) {}
+
+    return idsSet.toList();
+  }
+
+  static Future<List<String>> getAllBranchIdsAsync() async {
+    final idsSet = Set<String>.from(getAllBranchIds());
+    if (idsSet.length <= 1) {
+      try {
+        final snap = await FirebaseFirestore.instance.collection('branches').get().timeout(const Duration(seconds: 4));
+        for (final doc in snap.docs) {
+          final id = doc.id.toLowerCase().trim();
+          if (id.isNotEmpty && id != 'all') idsSet.add(id);
+        }
+      } catch (_) {}
+    }
+    return idsSet.toList();
   }
 }
 

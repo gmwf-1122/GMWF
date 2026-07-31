@@ -89,7 +89,7 @@ class SchoolOverviewView extends StatelessWidget {
                                       ClipRRect(
                                         borderRadius: BorderRadius.circular(8),
                                         child: Image.asset(
-                                          'assets/logo/gmwf-1.png',
+                                          'assets/logo/gmwf-1.webp',
                                           height: 38,
                                           width: 38,
                                           fit: BoxFit.contain,
@@ -111,7 +111,7 @@ class SchoolOverviewView extends StatelessWidget {
                                       ClipRRect(
                                         borderRadius: BorderRadius.circular(8),
                                         child: Image.asset(
-                                          'assets/logo/twt_logo.png',
+                                          'assets/logo/twt_logo.webp',
                                           height: 38,
                                           width: 38,
                                           fit: BoxFit.contain,

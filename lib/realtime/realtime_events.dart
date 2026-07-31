@@ -38,6 +38,50 @@ class RealtimeEvents {
   static const String tokenExceptionRequest = 'token_exception_request';
   static const String tokenExceptionApproved = 'token_exception_approved';
 
+  // ---- Attendance Events ----
+  static const String saveBiometricLog = 'save_biometric_log';
+  static const String saveEmployeeAttendance = 'save_employee_attendance';
+  static const String saveFacultyAttendance = 'save_faculty_attendance';
+  static const String saveStudentAttendance = 'save_student_attendance';
+
+  // ---- Madrassa & School Events ----
+  static const String saveMadrassaAdmission = 'save_madrassa_admission';
+  static const String saveMadrassaFee = 'save_madrassa_fee';
+  static const String saveMadrassaHifzProgress = 'save_madrassa_hifz_progress';
+  static const String saveExamResult = 'save_exam_result';
+
+  // ---- Finance Events ----
+  static const String saveExpense = 'save_expense';
+  static const String deleteExpense = 'delete_expense';
+  static const String saveLoan = 'save_loan';
+  static const String deleteLoan = 'delete_loan';
+  static const String saveFinanceEntry = 'save_finance_entry';
+
+  // ---- Donations Events ----
+  static const String saveDonationReceipt = 'save_donation_receipt';
+  static const String saveDonor = 'save_donor';
+  static const String saveDonationCollection = 'save_donation_collection';
+
+  // ---- Dasterkhwaan Events ----
+  static const String saveDasterkhwanEntry = 'save_dasterkhwan_entry';
+  static const String saveDasterkhwanStock = 'save_dasterkhwan_stock';
+  static const String saveOfficeBoyToken = 'save_office_boy_token';
+  static const String saveKitchenServeLog = 'save_kitchen_serve_log';
+
+  // ---- Library Events ----
+  static const String saveLibraryBook = 'save_library_book';
+  static const String saveLibraryIssue = 'save_library_issue';
+  static const String deleteLibraryBook = 'delete_library_book';
+
+  // ---- Faculty & Staff Events ----
+  static const String saveFaculty = 'save_faculty';
+  static const String saveStaffProfile = 'save_staff_profile';
+
+  // ---- Supervisor Events ----
+  static const String saveSupervisorAction = 'save_supervisor_action';
+  static const String approveEditRequest = 'approve_edit_request';
+  static const String rejectEditRequest = 'reject_edit_request';
+
   // ---- Connection events ----
   static const String clientConnected = 'client_connected';
   static const String clientDisconnected = 'client_disconnected';

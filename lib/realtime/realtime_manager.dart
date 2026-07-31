@@ -141,18 +141,30 @@ class RealtimeManager {
     int    port     = 53281,
     String? username,
   }) async {
+    final normRole = role.trim().toLowerCase();
+    final normBranch = branchId.trim().toLowerCase();
+    final normIp = serverIp.trim();
+
+    if (_isConnected && _serverIp == normIp && _role == normRole && _branchId == normBranch) {
+      if (username != null && username.trim().isNotEmpty) {
+        _username = username.trim();
+      }
+      return;
+    }
+
     await dispose();
 
-    _role     = role.trim().toLowerCase();
-    _branchId = branchId.trim().toLowerCase();
-    _serverIp = serverIp.trim();
+    _role     = normRole;
+    _branchId = normBranch;
+    _serverIp = normIp;
     _port     = port;
     _username = username?.trim();
     _serverIdentified = false;
     _flushedOnConnect = false;
 
-    _clientId =
-        '${DateTime.now().millisecondsSinceEpoch}_${_role}_${Random().nextInt(9999)}';
+    if (_clientId == null || _clientId!.isEmpty) {
+      _clientId = '${DateTime.now().millisecondsSinceEpoch}_${_role}_${Random().nextInt(9999)}';
+    }
 
     if (kDebugMode) {
       print('[RealtimeManager] Initializing: role=$_role branch=$_branchId username=$_username');
@@ -196,6 +208,13 @@ class RealtimeManager {
         }
       }
 
+      // Attach listener FIRST before sending identify payload so no responses are lost
+      _channelSub = _channel!.stream.listen(
+        _onMessage,
+        onError: (_) => _handleDisconnect(),
+        onDone:  ()  => _handleDisconnect(),
+      );
+
       final identifyMsg = {
         'event_type': 'identify',
         'role':       _role,
@@ -206,15 +225,8 @@ class RealtimeManager {
       };
       _channel!.sink.add(jsonEncode(identifyMsg));
 
-      await Future.delayed(const Duration(milliseconds: 300));
-
-      _channelSub = _channel!.stream.listen(
-        _onMessage,
-        onError: (_) => _handleDisconnect(),
-        onDone:  ()  => _handleDisconnect(),
-      );
-
       _isConnected = true;
+      _lastPong = DateTime.now();
       _reconnectAttempts = 0;
       _startPingTimer();
       _startAckFlushTimer();
@@ -409,10 +421,17 @@ class RealtimeManager {
     final isAck  = normalized['event_type'] == 'ack_serials';
     final isHandshake = normalized['event_type'] == 'identify' ||
                         normalized['event_type'] == 'identified';
+    final isUnknown = normalized['event_type'] == 'unknown' && normalized['type'] == null;
+
+    if (isUnknown) {
+      if (kDebugMode) print('[RealtimeManager] ⚠️ Suppressing message with missing/unknown event_type');
+      return;
+    }
 
     // [FIX-P1] Write to Hive outbox FIRST (skip ping/ack/handshake).
     String? outboxKey;
     if (!isPing && !isAck && !isHandshake) {
+
       try {
         outboxKey = 'outbox_${DateTime.now().microsecondsSinceEpoch}';
         final outboxEntry = Map<String, dynamic>.from(normalized);
@@ -620,7 +639,8 @@ class RealtimeManager {
     copy['_senderRole']   ??= _role;
     copy['_senderBranch'] ??= _branchId;
     copy['_username']     ??= _username ?? _role;
-    copy['event_type']    ??= 'unknown';
+    copy['event_type']    ??= copy['type'] ?? 'activity';
+
     copy['_timestamp']      = DateTime.now().millisecondsSinceEpoch;
     copy['_messageId']    ??= _generateMessageId();
 

@@ -665,29 +665,51 @@ class _TokensTab extends StatelessWidget {
               children: [
             Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-              Row(children: [
-                if (Navigator.canPop(context)) ...[
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
-                    onPressed: () => Navigator.maybePop(context),
-                  ),
-                  const SizedBox(width: 8),
-                ],
-                Column(crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                  const Text('Active Tokens',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5)),
-                  Text(username,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700)),
-                ]),
-              ]),
+                  Row(children: [
+                    if (Navigator.canPop(context)) ...[
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                        onPressed: () => Navigator.maybePop(context),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/logo/gmwf-1.webp',
+                          width: 54,
+                          height: 54,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => const Icon(
+                            Icons.restaurant_rounded,
+                            color: Colors.white70,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      const Text('Active Tokens',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5)),
+                      Text(username,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700)),
+                    ]),
+                  ]),
               _logoutBtn(onLogout),
             ]),
             const SizedBox(height: 16),
@@ -895,6 +917,28 @@ class _CookingTab extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                     ],
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/logo/gmwf-1.webp',
+                          width: 54,
+                          height: 54,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => const Icon(
+                            Icons.restaurant_rounded,
+                            color: Colors.white70,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     Column(crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       const Text('Food Log',
@@ -1542,6 +1586,28 @@ class _HistoryTabState extends State<_HistoryTab> {
                       ),
                       const SizedBox(width: 8),
                     ],
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/logo/gmwf-1.webp',
+                          width: 54,
+                          height: 54,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => const Icon(
+                            Icons.restaurant_rounded,
+                            color: Colors.white70,
+                            size: 28,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
                     Column(crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       const Text('Daily History',

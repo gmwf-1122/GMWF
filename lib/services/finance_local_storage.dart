@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
 import 'finance_loans_storage.dart';
+import 'finance_ledger_storage.dart';
+
 
 class FinanceLocalStorage {
   static const Uuid _uuid = Uuid();
@@ -348,7 +350,23 @@ class FinanceLocalStorage {
     }
   }
 
+  static String getBranchName(String branchId) {
+
+    if (branchId.isEmpty || branchId == 'all') return 'All Branches';
+    if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+      final box = Hive.box(LocalStorageService.branchesBox);
+      final raw = box.get(branchId) ?? box.get('branch:$branchId');
+      if (raw is Map) {
+        final name = (raw['name'] ?? raw['branchName'] ?? raw['label'])?.toString();
+        if (name != null && name.isNotEmpty) return name;
+      }
+    }
+    if (branchId.toLowerCase() == 'gujrat' || branchId.toLowerCase() == 'guj') return 'Gujrat';
+    return branchId;
+  }
+
   static List<Map<String, dynamic>> getEmployees(String branchId) {
+
     final list = <Map<String, dynamic>>[];
     final isGlobal = branchId == 'all' || branchId.isEmpty;
 
@@ -615,7 +633,14 @@ class FinanceLocalStorage {
     final history = getSalaryHistory(employeeId);
     if (history.isEmpty) {
       final emp = getEmployee(employeeId);
-      return (emp?['currentSalary'] as num?)?.toDouble() ?? 0.0;
+      if (emp == null) return 0.0;
+      if (emp['currentSalary'] != null) {
+        return (emp['currentSalary'] as num).toDouble();
+      }
+      if (emp['currentSalaryMinor'] != null) {
+        return (emp['currentSalaryMinor'] as num).toDouble() / 100.0;
+      }
+      return 0.0;
     }
 
     final targetDate = DateTime(date.year, date.month, date.day);
@@ -628,12 +653,21 @@ class FinanceLocalStorage {
 
       final effDay = DateTime(effDate.year, effDate.month, effDate.day);
       if (effDay.isBefore(targetDate) || effDay.isAtSameMomentAs(targetDate)) {
-        return (h['amount'] as num).toDouble();
+        final amt = h['amount'];
+        final amtMinor = h['amountMinor'];
+        if (amt != null) return (amt as num).toDouble();
+        if (amtMinor != null) return (amtMinor as num).toDouble() / 100.0;
       }
     }
 
-    return (history.last['amount'] as num).toDouble();
+    final last = history.last;
+    final amt = last['amount'];
+    final amtMinor = last['amountMinor'];
+    if (amt != null) return (amt as num).toDouble();
+    if (amtMinor != null) return (amtMinor as num).toDouble() / 100.0;
+    return 0.0;
   }
+
 
   // Helper to find salary rate active for a specific monthKey
   static double getSalaryRateForMonth(String employeeId, String monthKey) {
@@ -1100,29 +1134,12 @@ class FinanceLocalStorage {
     // Determine the cutoff date for this month calculation
     DateTime cutoffDate;
     final endOfMonth = DateTime(yr, mo, daysInMonth);
-    if (todayDateOnly.isAfter(endOfMonth)) {
+    if (todayDateOnly.isAfter(endOfMonth) || todayDateOnly.isBefore(DateTime(yr, mo, 1))) {
       cutoffDate = endOfMonth;
-    } else if (todayDateOnly.isBefore(DateTime(yr, mo, 1))) {
-      int maxRecordDay = 0;
-      for (var d = 1; d <= daysInMonth; d++) {
-        final dd = d.toString().padLeft(2, '0');
-        if (attendanceBox.containsKey('${employeeId}_$monthKey-$dd')) {
-          maxRecordDay = d;
-        }
-      }
-      cutoffDate = DateTime(yr, mo, maxRecordDay);
     } else {
-      int maxRecordDay = todayDateOnly.day;
-      for (var d = 1; d <= daysInMonth; d++) {
-        final dd = d.toString().padLeft(2, '0');
-        if (attendanceBox.containsKey('${employeeId}_$monthKey-$dd')) {
-          if (d > maxRecordDay) {
-            maxRecordDay = d;
-          }
-        }
-      }
-      cutoffDate = DateTime(yr, mo, maxRecordDay);
+      cutoffDate = todayDateOnly;
     }
+
 
     for (var d = 1; d <= daysInMonth; d++) {
       final dd = d.toString().padLeft(2, '0');

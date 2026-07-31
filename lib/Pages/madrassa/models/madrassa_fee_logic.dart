@@ -45,9 +45,13 @@ class MadrassaFeeLogic {
       if (data != null) {
         final sLog = _asStringMap(data[studentId]);
         if (sLog != null) {
-          if (sLog['attendance'] == 'present') presentDays++;
-          if (sLog['attendance'] == 'leave') leaveDays++;
-          if (sLog['uniform'] == true) uniformDays++;
+          final att = sLog['attendance']?.toString();
+          final uni = sLog['uniform'];
+          if (att == 'present') presentDays++;
+          if (att == 'leave') leaveDays++;
+          // When a student is on leave, uniform is marked as leave/waived as well,
+          // so they are not fined and receive the uniform fee deduction reward.
+          if (uni == true || uni == 'leave' || att == 'leave') uniformDays++;
           if (sLog['parentReplied'] == true) messageDays++;
           if (sLog['ptm'] == true) ptmAttended = true;
         }

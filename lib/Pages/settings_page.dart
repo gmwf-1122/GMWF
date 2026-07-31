@@ -1,8 +1,8 @@
-// lib/pages/settings_page.dart
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' hide TextDirection;
-import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -10,11 +10,10 @@ import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../utils/localization_helper.dart';
 import '../services/local_storage_service.dart';
-import '../services/sync_service.dart';
 import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
-import 'admin/data_cleanup_screen.dart';
 import '../services/auto_update_service.dart';
+import '../services/image_upload_service.dart';
 import '../widgets/update_dialog_widget.dart';
 
 
@@ -30,9 +29,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late Box _settingsBox;
   late TextEditingController _terminalIdController;
-  
-  bool _isSyncing = false;
-  int _pendingSyncCount = 0;
 
   @override
   void initState() {
@@ -43,7 +39,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _terminalIdController = TextEditingController(text: currentTid);
     
     _terminalIdController.addListener(_onTerminalIdChanged);
-    _updatePendingSyncCount();
   }
 
   @override
@@ -58,296 +53,87 @@ class _SettingsPageState extends State<SettingsPage> {
     _settingsBox.put('terminal_id', text);
   }
 
-  void _updatePendingSyncCount() {
-    if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-      setState(() {
-        _pendingSyncCount = Hive.box(LocalStorageService.syncBox).length;
-      });
+  ImageProvider? _getProfileImageProvider(String? photoStr) {
+    if (photoStr == null || photoStr.trim().isEmpty) return null;
+    final s = photoStr.trim();
+    if (s.startsWith('data:image') || s.length > 200) {
+      try {
+        final base64Str = s.contains(',') ? s.split(',').last : s;
+        final bytes = base64Decode(base64Str.replaceAll(RegExp(r'\s+'), ''));
+        return MemoryImage(bytes);
+      } catch (_) {}
     }
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      return NetworkImage(s);
+    }
+    try {
+      if (File(s).existsSync()) {
+        return FileImage(File(s));
+      }
+    } catch (_) {}
+    return null;
   }
 
-  Future<void> _triggerManualSync() async {
-    setState(() => _isSyncing = true);
+  Future<void> _pickProfilePicture(BuildContext context) async {
+    final source = await ImageUploadService.showSourceDialog(context, title: 'Choose Profile Photo');
+    if (source == null) return;
+
+    final base64Img = await ImageUploadService.pickAndProcessImage(source: source, maxWidth: 512, maxHeight: 512);
+    if (base64Img == null || base64Img.isEmpty) return;
+
+    setState(() {
+      widget.userData['profileImage'] = base64Img;
+      widget.userData['photoUrl'] = base64Img;
+      widget.userData['profilePictureUrl'] = base64Img;
+    });
+
+    await LocalStorageService.saveLocalUser(widget.userData);
+    await offline_auth.OfflineAuthService.updateCachedUserData(widget.userData);
+
     try {
-      await SyncService().triggerUpload();
-      _updatePendingSyncCount();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.tr('sync_completed')),
-            backgroundColor: Colors.green,
-          ),
-        );
+      final uid = (FirebaseAuth.instance.currentUser?.uid ?? widget.userData['uid'] ?? widget.userData['id'])?.toString();
+      if (uid != null && uid.isNotEmpty) {
+        final updateData = {
+          'profileImage': base64Img,
+          'photoUrl': base64Img,
+          'profilePictureUrl': base64Img,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+
+        await FirebaseFirestore.instance.collection('users').doc(uid).set(updateData, SetOptions(merge: true));
+
+        final branchId = widget.userData['branchId']?.toString();
+        if (branchId != null && branchId.isNotEmpty && branchId != 'all' && branchId != 'unknown') {
+          await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchId)
+              .collection('users')
+              .doc(uid)
+              .set(updateData, SetOptions(merge: true));
+        }
+
+        try {
+          final cgSnap = await FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('uid', isEqualTo: uid)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          for (final doc in cgSnap.docs) {
+            await doc.reference.set(updateData, SetOptions(merge: true));
+          }
+        } catch (_) {}
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sync failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSyncing = false);
-      }
+      debugPrint('[SettingsPage] Error uploading profile photo to cloud: $e');
     }
-  }
 
-  Future<void> _forceFullRefresh(String branchId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final t = RoleThemeScope.dataOf(context);
-        return AlertDialog(
-          backgroundColor: t.bgCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(
-            context.tr('confirm'),
-            style: _getStyle(t, size: 18, weight: FontWeight.bold),
-          ),
-          content: Text(
-            'Are you sure you want to force a full database redownload? This will fetch all records from the server and may take a few minutes.',
-            style: _getStyle(t, size: 14),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary)),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: t.accent,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              child: Text(context.tr('confirm')),
-            ),
-          ],
-        );
-      }
-    );
-
-    if (confirmed == true) {
-      setState(() => _isSyncing = true);
-      try {
-        await SyncService().forceFullRefresh(branchId);
-        _updatePendingSyncCount();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Full database refresh completed successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Refresh failed: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() => _isSyncing = false);
-        }
-      }
-    }
-  }
-
-  Future<void> _factoryReset() async {
-    final doubleConfirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final t = RoleThemeScope.dataOf(context);
-        return AlertDialog(
-          backgroundColor: t.bgCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: t.danger, size: 28),
-              const SizedBox(width: 12),
-              Text(
-                'CRITICAL WARNING!',
-                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This action is irreversible. It will wipe all local Hive boxes and reset the application to its initial state.',
-                style: _getStyle(t, size: 14),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Please type "WIPE" to confirm factory reset:',
-                style: _getStyle(t, size: 12, weight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                onChanged: (val) {
-                  if (val.trim().toUpperCase() == 'WIPE') {
-                    Navigator.pop(context, true);
-                  }
-                },
-                decoration: roleInputDecoration(context, label: "Type WIPE to reset", icon: Icons.delete_forever_outlined),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary)),
-            ),
-          ],
-        );
-      }
-    );
-
-    if (doubleConfirmed == true) {
-      await LocalStorageService.clearAllData();
-      if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/', (_) => false);
-      }
-    }
-  }
-
-  Future<void> _clearFinanceAndDonationsData() async {
-    final doubleConfirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final t = RoleThemeScope.dataOf(context);
-        return AlertDialog(
-          backgroundColor: t.bgCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: t.danger, size: 28),
-              const SizedBox(width: 12),
-              Text(
-                'WIPE FINANCE & DONATIONS',
-                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'This will delete all local employee list, attendance sheets, salary ledger records, expenses, and donors/donations database. Other data like patients, dispensary, and stock will not be affected.',
-                style: _getStyle(t, size: 14),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Please type "WIPE" to confirm:',
-                style: _getStyle(t, size: 12, weight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                onChanged: (val) {
-                  if (val.trim().toUpperCase() == 'WIPE') {
-                    Navigator.pop(context, true);
-                  }
-                },
-                decoration: roleInputDecoration(context, label: "Type WIPE to confirm", icon: Icons.delete_forever_outlined),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary)),
-            ),
-          ],
-        );
-      }
-    );
-
-    if (doubleConfirmed == true) {
-      setState(() => _isSyncing = true);
-      try {
-        final boxesToClear = [
-          LocalStorageService.donationsBox,
-          LocalStorageService.donorsBox,
-          LocalStorageService.employeesBox,
-          LocalStorageService.salaryHistoryBox,
-          LocalStorageService.attendanceBox,
-          LocalStorageService.salaryLedgerBox,
-          LocalStorageService.branchTransfersBox,
-          LocalStorageService.expensesBox,
-          LocalStorageService.financeLoansBox,
-          LocalStorageService.financeHolidaysBox,
-          LocalStorageService.financeSettingsBox,
-        ];
-        
-        for (final boxName in boxesToClear) {
-          if (Hive.isBoxOpen(boxName)) {
-            final box = Hive.box(boxName);
-            await box.clear();
-          } else {
-            final box = await Hive.openBox(boxName);
-            await box.clear();
-            await box.close();
-          }
-        }
-
-        // Also clean the sync queue for any finance/donation tasks to prevent syncing them to firebase
-        if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-          final syncBox = Hive.box(LocalStorageService.syncBox);
-          final keysToRemove = [];
-          for (var i = 0; i < syncBox.length; i++) {
-            final key = syncBox.keyAt(i);
-            final val = syncBox.get(key);
-            if (val is Map) {
-              final type = val['type']?.toString() ?? '';
-              if (type.contains('employee') ||
-                  type.contains('attendance') ||
-                  type.contains('salary') ||
-                  type.contains('expense') ||
-                  type.contains('donation') ||
-                  type.contains('donor')) {
-                keysToRemove.add(key);
-              }
-            }
-          }
-          for (final k in keysToRemove) {
-            await syncBox.delete(k);
-          }
-        }
-
-        _updatePendingSyncCount();
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Finance and Donation data has been cleared from local database.'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to clear: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() => _isSyncing = false);
-        }
-      }
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Profile picture updated successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
     }
   }
 
@@ -658,19 +444,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _infoItem(RoleThemeData t, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600, fontSize: 13.5)),
-          Text(value, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w700, fontSize: 13.5)),
-        ],
-      ),
-    );
-  }
-
   void _showEditProfileDialog(BuildContext context, RoleThemeData t, Map<String, dynamic> userData, String userName, String email) {
     final nameController = TextEditingController(text: userName);
     final emailController = TextEditingController(text: email);
@@ -745,39 +518,40 @@ class _SettingsPageState extends State<SettingsPage> {
               await LocalStorageService.saveLocalUser(userData);
               await offline_auth.OfflineAuthService.updateCachedUserData(userData);
 
-              // Update online in Firebase Firestore if online
+              // Update online in Firebase Firestore
               try {
-                final currentUser = FirebaseAuth.instance.currentUser;
-                if (currentUser != null) {
-                  final uid = currentUser.uid;
-                  final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
-                  final userDoc = await userRef.get();
-                  if (userDoc.exists) {
-                    await userRef.set({
-                      'name': newName,
-                      'username': newName,
-                      'email': newEmail,
-                      if (nameChanged) 'nameHistory': userData['nameHistory'],
-                    }, SetOptions(merge: true));
-                  }
+                final uid = (FirebaseAuth.instance.currentUser?.uid ?? userData['uid'] ?? userData['id'])?.toString();
+                if (uid != null && uid.isNotEmpty) {
+                  final updateData = {
+                    'name': newName,
+                    'username': newName,
+                    'email': newEmail,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                    if (nameChanged) 'nameHistory': userData['nameHistory'],
+                  };
 
-                  final branchId = userData['branchId'] as String?;
-                  if (branchId != null && branchId.isNotEmpty) {
-                    final branchUserRef = FirebaseFirestore.instance
+                  await FirebaseFirestore.instance.collection('users').doc(uid).set(updateData, SetOptions(merge: true));
+
+                  final branchId = userData['branchId']?.toString();
+                  if (branchId != null && branchId.isNotEmpty && branchId != 'all' && branchId != 'unknown') {
+                    await FirebaseFirestore.instance
                         .collection('branches')
                         .doc(branchId)
                         .collection('users')
-                        .doc(uid);
-                    final branchUserDoc = await branchUserRef.get();
-                    if (branchUserDoc.exists) {
-                      await branchUserRef.set({
-                        'name': newName,
-                        'username': newName,
-                        'email': newEmail,
-                        if (nameChanged) 'nameHistory': userData['nameHistory'],
-                      }, SetOptions(merge: true));
-                    }
+                        .doc(uid)
+                        .set(updateData, SetOptions(merge: true));
                   }
+
+                  try {
+                    final cgSnap = await FirebaseFirestore.instance
+                        .collectionGroup('users')
+                        .where('uid', isEqualTo: uid)
+                        .get()
+                        .timeout(const Duration(seconds: 4));
+                    for (final doc in cgSnap.docs) {
+                      await doc.reference.set(updateData, SetOptions(merge: true));
+                    }
+                  } catch (_) {}
                 }
               } catch (e) {
                 debugPrint('[SettingsPage] Error syncing profile to Firebase: $e');
@@ -809,116 +583,222 @@ class _SettingsPageState extends State<SettingsPage> {
     final oldPwCtrl = TextEditingController();
     final newPwCtrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
+    bool showOldPw = false;
+    bool showNewPw = false;
+    bool isSubmitting = false;
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: t.bgCard,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            Icon(Icons.lock_outline_rounded, color: t.accent),
-            const SizedBox(width: 12),
-            Text(
-              context.tr('change_password'),
-              style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w900, fontSize: 18),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: t.bgCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+            title: Row(
+              children: [
+                Icon(Icons.lock_outline_rounded, color: t.accent),
+                const SizedBox(width: 12),
+                Text(
+                  context.tr('change_password'),
+                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w900, fontSize: 18),
+                ),
+              ],
             ),
-          ],
-        ),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: oldPwCtrl,
-                obscureText: true,
-                style: TextStyle(color: t.textPrimary),
-                decoration: roleInputDecoration(context, label: "Old Password", icon: Icons.lock_open_rounded),
-                validator: (v) => (v == null || v.isEmpty) ? "Required" : null,
+            content: Form(
+              key: formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: oldPwCtrl,
+                    obscureText: !showOldPw,
+                    style: TextStyle(color: t.textPrimary),
+                    decoration: roleInputDecoration(
+                      context, 
+                      label: "Old Password", 
+                      icon: Icons.lock_open_rounded
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          showOldPw ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          color: t.accent.withValues(alpha: 0.8),
+                          size: 20,
+                        ),
+                        onPressed: () => setDialogState(() => showOldPw = !showOldPw),
+                      ),
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? "Old password is required" : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: newPwCtrl,
+                    obscureText: !showNewPw,
+                    style: TextStyle(color: t.textPrimary),
+                    decoration: roleInputDecoration(
+                      context, 
+                      label: "New Password", 
+                      icon: Icons.lock_outline_rounded
+                    ).copyWith(
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          showNewPw ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                          color: t.accent.withValues(alpha: 0.8),
+                          size: 20,
+                        ),
+                        onPressed: () => setDialogState(() => showNewPw = !showNewPw),
+                      ),
+                    ),
+                    validator: (v) => (v == null || v.trim().length < 6) ? "Minimum 6 characters required" : null,
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: newPwCtrl,
-                obscureText: true,
-                style: TextStyle(color: t.textPrimary),
-                decoration: roleInputDecoration(context, label: "New Password", icon: Icons.lock_outline_rounded),
-                validator: (v) => (v == null || v.length < 6) ? "Min 6 characters" : null,
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.pop(context),
+                child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary, fontWeight: FontWeight.bold)),
+              ),
+              ElevatedButton(
+                onPressed: isSubmitting ? null : () async {
+                  if (!formKey.currentState!.validate()) return;
+                  
+                  final email = (widget.userData['email'] as String? ?? widget.userData['username'] as String? ?? '').trim();
+                  if (email.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("❌ Email/Username not found on this profile!"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  final oldPw = oldPwCtrl.text.trim();
+                  final newPw = newPwCtrl.text.trim();
+
+                  if (oldPw == newPw) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("⚠️ New password must be different from old password!"),
+                        backgroundColor: Colors.orange,
+                      ),
+                    );
+                    return;
+                  }
+
+                  setDialogState(() => isSubmitting = true);
+
+                  try {
+                    // Check online authentication if current user is logged into Firebase
+                    final currentUser = FirebaseAuth.instance.currentUser;
+                    bool firebaseAuthUpdated = false;
+
+                    if (currentUser != null && currentUser.email != null) {
+                      try {
+                        final cred = EmailAuthProvider.credential(
+                          email: currentUser.email!,
+                          password: oldPw,
+                        );
+                        await currentUser.reauthenticateWithCredential(cred);
+                        await currentUser.updatePassword(newPw);
+                        firebaseAuthUpdated = true;
+                      } on FirebaseAuthException catch (e) {
+                        setDialogState(() => isSubmitting = false);
+                        if (context.mounted) {
+                          final errMsg = e.code == 'wrong-password' || e.code == 'invalid-credential'
+                              ? "❌ Incorrect old password! Please re-type your current password."
+                              : (e.message ?? "Failed to update Firebase Auth password.");
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(errMsg), backgroundColor: Colors.red),
+                          );
+                        }
+                        return;
+                      }
+                    } else {
+                      // Validate against stored local credentials if Firebase currentUser is null or offline
+                      final cachedPw = await offline_auth.OfflineAuthService.getStoredPassword(email);
+                      final profilePw = widget.userData['password'] as String?;
+                      
+                      final expectedPw = (cachedPw != null && cachedPw.isNotEmpty) ? cachedPw : profilePw;
+                      if (expectedPw != null && expectedPw.isNotEmpty && expectedPw != oldPw) {
+                        setDialogState(() => isSubmitting = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("❌ Incorrect old password! Please check your credentials."),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                    }
+
+                    // Sync to Firestore documents if online user ID exists
+                    if (currentUser != null) {
+                      final userId = currentUser.uid;
+                      final branchId = widget.userData['branchId'] as String? ?? '';
+                      final updateMap = {
+                        'password': newPw,
+                        'updatedAt': FieldValue.serverTimestamp(),
+                      };
+                      await FirebaseFirestore.instance.collection('users').doc(userId).update(updateMap).catchError((_) {});
+                      if (branchId.isNotEmpty && branchId != 'all') {
+                        await FirebaseFirestore.instance
+                            .collection('branches')
+                            .doc(branchId)
+                            .collection('users')
+                            .doc(userId)
+                            .update(updateMap)
+                            .catchError((_) {});
+                      }
+                    }
+
+                    // Update local storage in Hive and FlutterSecureStorage
+                    widget.userData['password'] = newPw;
+                    await LocalStorageService.saveLocalUser(widget.userData);
+                    await offline_auth.OfflineAuthService.updateCachedPassword(newPw, usernameOrEmail: email);
+                    await offline_auth.OfflineAuthService.saveCredentials(
+                      usernameOrEmail: email, 
+                      password: newPw, 
+                      userData: widget.userData
+                    );
+
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            firebaseAuthUpdated
+                                ? "✅ Password changed successfully in Cloud & Local storage!"
+                                : "✅ Password changed successfully in local database!"
+                          ),
+                          backgroundColor: Colors.green,
+                          duration: const Duration(seconds: 4),
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    setDialogState(() => isSubmitting = false);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("❌ Failed to change password: $e"), backgroundColor: Colors.red),
+                      );
+                    }
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: t.accent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: isSubmitting
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : Text(context.tr('confirm'), style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(context.tr('cancel'), style: TextStyle(color: t.textTertiary, fontWeight: FontWeight.bold)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (!formKey.currentState!.validate()) return;
-              
-              final email = widget.userData['email'] as String?;
-              if (email == null || email.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Email not found on this profile"), backgroundColor: Colors.red),
-                );
-                return;
-              }
-
-              // Check connectivity
-              final currentUser = FirebaseAuth.instance.currentUser;
-              if (currentUser == null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Password change requires online connectivity"), backgroundColor: Colors.red),
-                );
-                return;
-              }
-
-              try {
-                final cred = EmailAuthProvider.credential(
-                  email: email.toLowerCase().trim(),
-                  password: oldPwCtrl.text.trim(),
-                );
-                await currentUser.reauthenticateWithCredential(cred);
-                await currentUser.updatePassword(newPwCtrl.text.trim());
-
-                // Update cached offline password
-                await offline_auth.OfflineAuthService.updateCachedPassword(
-                  newPwCtrl.text.trim(),
-                  usernameOrEmail: email.toLowerCase().trim(),
-                );
-
-                if (context.mounted) {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("✅ Password changed successfully!"), backgroundColor: Colors.green),
-                  );
-                }
-              } on FirebaseAuthException catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(e.code == 'wrong-password' ? "Incorrect old password" : e.message ?? "Failed to change password"),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Unexpected error: $e"), backgroundColor: Colors.red),
-                  );
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: t.accent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: Text(context.tr('confirm'), style: const TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -927,12 +807,17 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final roleStr = (widget.userData['role'] as String? ?? 'admin').toLowerCase().trim();
     final roleTheme = RoleThemeData.fromString(roleStr);
-    final isFullExecutive = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'manager', 'hq manager'].contains(roleStr);
 
     return RoleThemeScope(
       role: roleTheme,
       child: ValueListenableBuilder(
-        valueListenable: Hive.box('app_settings').listenable(),
+        valueListenable: Hive.box('app_settings').listenable(keys: [
+          'custom_accent_color',
+          'card_radius',
+          'is_dark_mode',
+          'language',
+          'font_scale',
+        ]),
         builder: (context, Box box, child) {
           final t = RoleThemeScope.dataOf(context);
           final isDesktop = MediaQuery.of(context).size.width >= 900;
@@ -941,19 +826,21 @@ class _SettingsPageState extends State<SettingsPage> {
           final rawRole = widget.userData['role'] as String? ?? 'staff';
           final role = rawRole.toLowerCase() == 'madrassa parent' ? 'GUARDIAN' : rawRole.toUpperCase();
           final branch = widget.userData['branchName'] ?? 'All Branches';
-          final branchId = widget.userData['branchId'] as String? ?? '';
 
           final initials = userName.isNotEmpty
               ? userName.split(' ').map((e) => e[0]).take(2).join().toUpperCase()
               : 'U';
 
-          final activePrinter = box.get('printer_mode', defaultValue: 'pdf') as String;
-          final activeWidth = box.get('receipt_width', defaultValue: '80mm') as String;
+          final profileImgStr = (widget.userData['profileImage'] ?? widget.userData['profilePictureUrl'] ?? widget.userData['photoUrl'])?.toString();
+          final profileProvider = _getProfileImageProvider(profileImgStr);
+
           final activeRadius = box.get('card_radius', defaultValue: 16.0) as double;
           final activeFontScale = box.get('font_scale', defaultValue: 1.0) as double;
+          final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
+          final activeLanguage = box.get('language', defaultValue: 'en') as String;
 
           return Directionality(
-            textDirection: TextDirection.ltr,
+            textDirection: activeLanguage == 'ur' ? TextDirection.rtl : TextDirection.ltr,
             child: Scaffold(
               backgroundColor: t.bg,
               appBar: AppBar(
@@ -999,12 +886,70 @@ class _SettingsPageState extends State<SettingsPage> {
                             children: [
                               Row(
                                 children: [
-                                  CircleAvatar(
-                                    radius: 36,
-                                    backgroundColor: t.accent.withOpacity(0.12),
-                                    child: Text(
-                                      initials,
-                                      style: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: 24),
+                                  GestureDetector(
+                                    onTap: () => _pickProfilePicture(context),
+                                    child: Stack(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: LinearGradient(
+                                              colors: [t.accent, t.accent.withValues(alpha: 0.35)],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: t.accent.withValues(alpha: 0.35),
+                                                blurRadius: 20,
+                                                offset: const Offset(0, 6),
+                                              ),
+                                            ],
+                                          ),
+                                          child: CircleAvatar(
+                                            radius: 60,
+                                            backgroundColor: isDarkMode ? const Color(0xFF161B22) : Colors.white,
+                                            backgroundImage: profileProvider,
+                                            child: profileProvider == null
+                                                ? Text(
+                                                    initials,
+                                                    style: TextStyle(
+                                                      color: t.accent,
+                                                      fontWeight: FontWeight.w900,
+                                                      fontSize: 36,
+                                                    ),
+                                                  )
+                                                : null,
+                                          ),
+                                        ),
+                                        Positioned(
+                                          bottom: 2,
+                                          right: 2,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(7),
+                                            decoration: BoxDecoration(
+                                              color: t.accent,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: isDarkMode ? const Color(0xFF161B22) : Colors.white,
+                                                width: 2.5,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: t.accent.withValues(alpha: 0.4),
+                                                  blurRadius: 8,
+                                                ),
+                                              ],
+                                            ),
+                                            child: const Icon(
+                                              Icons.camera_alt_rounded,
+                                              color: Colors.white,
+                                              size: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                   const SizedBox(width: 20),
@@ -1017,16 +962,23 @@ class _SettingsPageState extends State<SettingsPage> {
                                             Expanded(
                                               child: Text(
                                                 userName,
-                                                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w900, fontSize: 18),
+                                                style: TextStyle(
+                                                  color: t.textPrimary,
+                                                  fontWeight: FontWeight.w900,
+                                                  fontSize: 20,
+                                                  letterSpacing: -0.3,
+                                                ),
                                                 overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                             IconButton(
-                                              icon: Icon(Icons.edit_note_rounded, color: t.accent, size: 24),
+                                              icon: Icon(Icons.edit_note_rounded, color: t.accent, size: 26),
                                               onPressed: () => _showEditProfileDialog(context, t, widget.userData, userName, email),
+                                              tooltip: 'Edit Profile',
                                             ),
                                           ],
                                         ),
+                                        const SizedBox(height: 2),
                                         Text(
                                           email,
                                           style: TextStyle(color: t.textTertiary, fontSize: 13.5),
@@ -1054,11 +1006,11 @@ class _SettingsPageState extends State<SettingsPage> {
                                   final info = await AutoUpdateService.checkForUpdates();
                                   if (context.mounted) {
                                     if (info != null && info.hasUpdate) {
-                                      UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+                                      UpdateDialogWidget.showUpdateDialogIfNeeded(context, manualCheck: true);
                                     } else {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Your GMWF Platform is up to date (v1.2.6)!'),
+                                        SnackBar(
+                                          content: Text('Your GMWF Platform is up to date (v${AutoUpdateService.currentVersion})!'),
                                           backgroundColor: Colors.green,
                                         ),
                                       );
@@ -1325,315 +1277,53 @@ class _SettingsPageState extends State<SettingsPage> {
                                 }, 
                                 (scale) => box.put('font_scale', scale)
                               ),
-                            ],
-                          ),
-                        ),
+                              _divider(t),
 
-                        // DEVICES & PRINTERS SECTION
-                        _sectionLabel(t, 'devices_printer'),
-                        RoleCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.print_outlined, color: t.accent),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    context.tr('printer_mode'),
-                                    style: _getStyle(t, size: 14, weight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              DropdownButtonFormField<String>(
-                                dropdownColor: t.bgCard,
-                                initialValue: activePrinter,
-                                items: [
-                                  DropdownMenuItem(value: 'pdf', child: Text(context.tr('standard_pdf'), style: TextStyle(color: t.textPrimary))),
-                                  DropdownMenuItem(value: 'thermal', child: Text(context.tr('thermal_receipt'), style: TextStyle(color: t.textPrimary))),
-                                ],
+                              // 4. Dark Mode / Light Mode Toggle
+                              SwitchListTile(
+                                value: isDarkMode,
+                                activeThumbColor: t.accent,
                                 onChanged: (val) async {
-                                  if (val != null) {
-                                    await box.put('printer_mode', val);
-                                  }
+                                  await box.put('is_dark_mode', val);
+                                  setState(() {});
                                 },
-                                decoration: roleInputDecoration(context, label: "Mode Selection", icon: Icons.settings_input_hdmi_outlined),
-                              ),
-                              if (activePrinter == 'thermal') ...[
-                                const SizedBox(height: 20),
-                                Text(
-                                  context.tr('receipt_width'),
-                                  style: _getStyle(t, size: 13, weight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 8),
-                                DropdownButtonFormField<String>(
-                                  dropdownColor: t.bgCard,
-                                  initialValue: activeWidth,
-                                  items: [
-                                    DropdownMenuItem(value: '58mm', child: Text('58 mm (Standard)', style: TextStyle(color: t.textPrimary))),
-                                    DropdownMenuItem(value: '80mm', child: Text('80 mm (Wide)', style: TextStyle(color: t.textPrimary))),
-                                  ],
-                                  onChanged: (val) async {
-                                    if (val != null) {
-                                      await box.put('receipt_width', val);
-                                    }
-                                  },
-                                  decoration: roleInputDecoration(context, label: "Width Selection", icon: Icons.aspect_ratio_outlined),
-                                ),
-                              ],
-                              _divider(t),
-                              Text(
-                                context.tr('terminal_id'),
-                                style: _getStyle(t, size: 13, weight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: _terminalIdController,
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9]')),
-                                  LengthLimitingTextInputFormatter(4),
-                                ],
-                                style: TextStyle(color: t.textPrimary),
-                                decoration: roleInputDecoration(
-                                  context,
-                                  label: "Configure 4-digit terminal ID code",
-                                  icon: Icons.device_hub_outlined,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // DATABASE & SYNC SECTION
-                        _sectionLabel(t, 'database_sync'),
-                        RoleCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(Icons.cloud_sync_outlined, color: t.accent),
-                                      const SizedBox(width: 8),
-                                      Text(
-                                        context.tr('sync_queue'),
-                                        style: _getStyle(t, size: 14, weight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: _pendingSyncCount > 0 ? t.danger.withOpacity(0.12) : Colors.green.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      '$_pendingSyncCount ${context.tr('pending')}',
-                                      style: TextStyle(
-                                        color: _pendingSyncCount > 0 ? t.danger : Colors.green,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 12.5,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 20),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: _isSyncing ? null : _triggerManualSync,
-                                      icon: _isSyncing
-                                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                                          : const Icon(Icons.cloud_upload_outlined),
-                                      label: Text(context.tr('manual_upload')),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: t.accent,
-                                        foregroundColor: Colors.white,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton.icon(
-                                      onPressed: _isSyncing ? null : () => _forceFullRefresh(branchId),
-                                      icon: const Icon(Icons.sync_outlined),
-                                      label: Text(context.tr('db_refresh')),
-                                      style: OutlinedButton.styleFrom(
-                                        side: BorderSide(color: t.accent, width: 1.5),
-                                        foregroundColor: t.accent,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (isFullExecutive) ...[
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton.icon(
-                                        onPressed: () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(builder: (_) => const DataCleanupScreen()),
-                                        ),
-                                        icon: const Icon(Icons.cleaning_services_outlined),
-                                        label: const Text('Data Integrity & Cleanup'),
-                                        style: OutlinedButton.styleFrom(
-                                          side: BorderSide(color: t.accent, width: 1.5),
-                                          foregroundColor: t.accent,
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                          padding: const EdgeInsets.symmetric(vertical: 14),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                              _divider(t),
-                              Text(
-                                "Clear Finance & Donations Data",
-                                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 13.5),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                "Wipe all local employees, attendance history, payroll ledger, expenses, and donation records.",
-                                style: TextStyle(color: t.textTertiary, fontSize: 12),
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: _clearFinanceAndDonationsData,
-                                      icon: const Icon(Icons.money_off_rounded),
-                                      label: const Text('Clear Finance & Donations'),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.orange.shade800,
-                                        foregroundColor: Colors.white,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              _divider(t),
-                              Text(
-                                "Factory Data Reset",
-                                style: TextStyle(color: t.danger, fontWeight: FontWeight.bold, fontSize: 13.5),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                "Clear all cached documents, patient entries, and login parameters from the local disk.",
-                                style: TextStyle(color: t.textTertiary, fontSize: 12),
-                              ),
-                              const SizedBox(height: 16),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: _factoryReset,
-                                      icon: const Icon(Icons.delete_forever_outlined),
-                                      label: Text(context.tr('factory_wipe')),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: t.danger,
-                                        foregroundColor: Colors.white,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(vertical: 14),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // APPLICATION DIAGNOSTICS & SYSTEM INFO
-                        _sectionLabel(t, 'diagnostics'),
-                        RoleCard(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _infoItem(t, context.tr('app_version'), "2.1.3 (RTL Single-Page)"),
-                              _divider(t),
-                              _infoItem(t, context.tr('build_type'), "Production Stable"),
-                              _divider(t),
-                              _infoItem(t, context.tr('last_sync'), DateFormat('MMM dd, hh:mm a').format(DateTime.now())),
-                              _divider(t),
-                              ListTile(
-                                onTap: () async {
-                                  await Sentry.captureMessage(
-                                    'Manual Test: Sentry is working for ${widget.userData['role']} at ${widget.userData['branchId']}',
-                                    level: SentryLevel.info,
-                                  );
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('✅ Test event sent to Sentry dashboard!'),
-                                        backgroundColor: Colors.green,
-                                      ),
-                                    );
-                                  }
-                                },
-                                leading: Container(
+                                secondary: Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: Colors.blue.withOpacity(0.1),
+                                    color: t.accent.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(Icons.radar_rounded, color: Colors.blue, size: 20),
+                                  child: Icon(
+                                    isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded,
+                                    color: t.accent,
+                                    size: 20,
+                                  ),
                                 ),
                                 title: Text(
-                                  context.tr('test_crash'),
-                                  style: _getStyle(t, size: 14, weight: FontWeight.w700),
+                                  'Dark Mode',
+                                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
                                 ),
-                                trailing: Icon(
-                                  Icons.chevron_right_rounded, 
-                                  color: t.textTertiary
+                                subtitle: Text(
+                                  isDarkMode ? 'Dark charcoal theme active' : 'Light surface theme active',
+                                  style: TextStyle(color: t.textSecondary, fontSize: 12),
                                 ),
                                 contentPadding: EdgeInsets.zero,
                               ),
                               _divider(t),
-                              ListTile(
-                                onTap: () {
-                                  throw StateError(
-                                    'Intentional Test Crash — Branch: ${widget.userData['branchId']}, Role: ${widget.userData['role']}',
-                                  );
-                                },
-                                leading: Container(
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Icon(Icons.bug_report_outlined, color: Colors.red, size: 20),
-                                ),
-                                title: Text(
-                                  context.tr('simulate_crash'),
-                                  style: _getStyle(t, size: 14, weight: FontWeight.w700),
-                                ),
-                                trailing: Icon(
-                                  Icons.chevron_right_rounded, 
-                                  color: t.textTertiary
-                                ),
-                                contentPadding: EdgeInsets.zero,
+
+                              // 5. App Language Selector
+                              _buildSegmentedSelector<String>(
+                                t, 
+                                'language', 
+                                activeLanguage, 
+                                {
+                                  'en': 'English 🇬🇧',
+                                  'ur': 'اردو 🇵🇰',
+                                }, 
+                                (lang) async {
+                                  await box.put('language', lang);
+                                  setState(() {});
+                                }
                               ),
                             ],
                           ),
@@ -1641,7 +1331,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         const SizedBox(height: 36),
                         Center(
                           child: Text(
-                            "GMWF System Hub v2.1.3\nDesign & Theming by Antigravity Studio",
+                            "GMWF System Hub v${AutoUpdateService.currentVersion}\nDesign & Theming by Antigravity Studio",
                             textAlign: TextAlign.center,
                             style: TextStyle(color: t.textTertiary, fontSize: 11, fontWeight: FontWeight.w500, height: 1.5),
                           ),

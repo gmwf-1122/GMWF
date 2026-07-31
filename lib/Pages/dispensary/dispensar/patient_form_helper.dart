@@ -148,7 +148,7 @@ class PatientFormHelper {
   // ====================== FONT HELPERS ======================
   static Future<pw.Font> getNooriFont() async {
     try {
-      final data = await rootBundle.load('assets/fonts/Noori.ttf');
+      final data = await rootBundle.load('assets/fonts/NooriNastaliq.ttf');
       return pw.Font.ttf(data);
     } catch (_) {
       return pw.Font.helvetica();
@@ -174,7 +174,7 @@ class PatientFormHelper {
     required String branchName,
   }) async {
     final english = await getEnglishFont();
-    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.png');
+    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.webp');
 
     final isPhysio = data['isPhysiotherapist'] == true;
     final labTests = (data['labResults'] ?? []) as List;
@@ -709,9 +709,9 @@ class PatientFormHelper {
     final pdf = pw.Document();
     final english = await getEnglishFont();
     final urdu = await getNooriFont();
-    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.png');
-    final moonBytes = await loadAssetBytes('assets/images/moon.png');
-    final rxBytes = await loadAssetBytes('assets/images/rx.png');
+    final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.webp');
+    final moonBytes = await loadAssetBytes('assets/images/moon.webp');
+    final rxBytes = await loadAssetBytes('assets/images/rx.webp');
     final doctorName = data['doctorName']?.toString() ?? '';
     final patientName = data['patientName']?.toString() ?? '';
     final diagnosis = data['diagnosis']?.toString() ?? '';

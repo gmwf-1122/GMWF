@@ -1,6 +1,7 @@
 // lib/widgets/update_dialog_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../services/auto_update_service.dart';
 import '../theme/role_theme_provider.dart';
 
@@ -12,7 +13,27 @@ class UpdateDialogWidget extends StatefulWidget {
     required this.updateInfo,
   });
 
-  static Future<void> showUpdateDialogIfNeeded(BuildContext context, {bool isServerMode = false}) async {
+  static Future<void> showUpdateDialogIfNeeded(
+    BuildContext context, {
+    bool isServerMode = false,
+    bool manualCheck = false,
+  }) async {
+    if (!manualCheck) {
+      try {
+        final box = Hive.isBoxOpen('app_settings') ? Hive.box('app_settings') : await Hive.openBox('app_settings');
+        final snoozedUntilStr = box.get('update_snoozed_until') as String?;
+        if (snoozedUntilStr != null) {
+          final snoozedUntil = DateTime.parse(snoozedUntilStr);
+          if (DateTime.now().isBefore(snoozedUntil)) {
+            debugPrint('[UpdateDialogWidget] Update prompt snoozed until $snoozedUntil');
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('[UpdateDialogWidget] Error reading snooze setting: $e');
+      }
+    }
+
     final updateInfo = await AutoUpdateService.checkForUpdates();
     if (updateInfo != null && updateInfo.hasUpdate) {
       if (isServerMode) {
@@ -47,7 +68,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
       _statusMessage = 'Connecting...';
     });
 
-    await AutoUpdateService.downloadAndInstallUpdate(
+    final success = await AutoUpdateService.downloadAndInstallUpdate(
       widget.updateInfo.downloadUrl,
       onProgress: (progress, statusMessage) {
         if (mounted) {
@@ -59,12 +80,33 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
       },
     );
 
-    if (mounted && !widget.updateInfo.forceUpdate) {
+    if (!success && mounted) {
+      setState(() {
+        _isDownloading = false;
+        if (_statusMessage.isEmpty || _statusMessage.startsWith('Downloading') || _statusMessage.startsWith('Connecting')) {
+          _statusMessage = 'Download failed. Please check internet connection and try again.';
+        }
+      });
+    }
+
+    if (mounted && success && !widget.updateInfo.forceUpdate) {
       // Auto close dialog after installer launches if non-mandatory
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) Navigator.maybePop(context);
       });
     }
+  }
+
+  void _snoozeUpdate() {
+    try {
+      final snoozeUntil = DateTime.now().add(const Duration(hours: 24));
+      if (Hive.isBoxOpen('app_settings')) {
+        Hive.box('app_settings').put('update_snoozed_until', snoozeUntil.toIso8601String());
+      }
+    } catch (e) {
+      debugPrint('[UpdateDialogWidget] Error saving snooze timestamp: $e');
+    }
+    Navigator.pop(context);
   }
 
   @override
@@ -104,7 +146,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                       ],
                     ),
                     child: Image.asset(
-                      'assets/logo/gmwf-1.png',
+                      'assets/logo/gmwf-1.webp',
                       fit: BoxFit.contain,
                     ),
                   ),
@@ -218,24 +260,26 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                 const SizedBox(height: 16),
               ],
 
-              // Live Download Progress Bar when active
-              if (_isDownloading) ...[
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: LinearProgressIndicator(
-                    value: _downloadProgress > 0 ? _downloadProgress : null,
-                    backgroundColor: t.accent.withValues(alpha: 0.12),
-                    color: t.accent,
-                    minHeight: 8,
+              // Live Download Progress Bar when active or status message present
+              if (_isDownloading || _statusMessage.isNotEmpty) ...[
+                if (_isDownloading) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: LinearProgressIndicator(
+                      value: _downloadProgress > 0 ? _downloadProgress : null,
+                      backgroundColor: t.accent.withValues(alpha: 0.12),
+                      color: t.accent,
+                      minHeight: 8,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
+                  const SizedBox(height: 10),
+                ],
                 Text(
                   _statusMessage,
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: t.accent,
+                    color: _isDownloading ? t.accent : Colors.red,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -248,7 +292,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                   if (!widget.updateInfo.forceUpdate && !_isDownloading) ...[
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: _snoozeUpdate,
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -281,7 +325,9 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            _isDownloading ? 'Downloading...' : 'Update Now',
+                            _isDownloading
+                                ? (_downloadProgress >= 1.0 ? 'Installing...' : 'Downloading...')
+                                : 'Update Now',
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                         ],

@@ -14,8 +14,10 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'widgets/parent_report_card.dart';
 import 'madrassa_strings.dart';
+import 'utils/madrassa_local_storage.dart';
 import '../../services/offline_auth_service.dart';
 import '../../services/image_upload_service.dart';
+import '../../theme/role_theme_provider.dart';
 import '../login_page.dart';
 
 class MadrassaGuardianScreen extends StatefulWidget {
@@ -106,13 +108,36 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
   }
 
   Future<List<DocumentSnapshot>> _fetchStudents(
-      String branchId, List<String> ids) {
-    return Future.wait(ids.map((id) => FirebaseFirestore.instance
-        .collection('branches')
-        .doc(branchId)
-        .collection('madrassa_students')
-        .doc(id)
-        .get()));
+      String branchId, List<String> ids) async {
+    if (ids.isEmpty) return [];
+
+    // Trigger scoped download only for linked children to optimize payload & ensure privacy
+    try {
+      await MadrassaLocalStorage.downloadStudentsForGuardian(branchId, ids);
+    } catch (_) {}
+
+    try {
+      final snaps = await Future.wait(ids.map((id) => FirebaseFirestore.instance
+          .collection('branches')
+          .doc(branchId)
+          .collection('madrassa_students')
+          .doc(id)
+          .get()));
+      for (final s in snaps) {
+        if (s.exists && s.data() != null) {
+          await MadrassaLocalStorage.cacheStudent(branchId, s.id, s.data()!);
+        }
+      }
+      return snaps;
+    } catch (e) {
+      debugPrint('[MadrassaGuardianScreen] Firestore fetch failed (offline mode): $e');
+      return Future.wait(ids.map((id) => FirebaseFirestore.instance
+          .collection('branches')
+          .doc(branchId)
+          .collection('madrassa_students')
+          .doc(id)
+          .get(const GetOptions(source: Source.cache))));
+    }
   }
 
   bool _isAdminViewing() {
@@ -199,21 +224,21 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
   }
 
   Future<void> _showStudentPickerDialog(BuildContext context, String branchId) async {
-    final snap = await FirebaseFirestore.instance
-        .collection('branches')
-        .doc(branchId)
-        .collection('madrassa_students')
-        .get();
+    List<Map<String, dynamic>> localList = MadrassaLocalStorage.getAllStudentsCached(branchId);
+    if (localList.isEmpty) {
+      await MadrassaLocalStorage.downloadStudents(branchId);
+      localList = MadrassaLocalStorage.getAllStudentsCached(branchId);
+    } else {
+      // Background refresh to keep cache updated without blocking UI
+      MadrassaLocalStorage.downloadStudents(branchId);
+    }
 
     if (!mounted) return;
 
-    final allDocs = snap.docs;
-    final allStudents = List<QueryDocumentSnapshot>.from(allDocs)
+    final allStudents = List<Map<String, dynamic>>.from(localList)
       ..sort((a, b) {
-        final aMap = a.data() as Map<String, dynamic>;
-        final bMap = b.data() as Map<String, dynamic>;
-        final aVal = int.tryParse(aMap['rollNumber']?.toString() ?? '') ?? 999999;
-        final bVal = int.tryParse(bMap['rollNumber']?.toString() ?? '') ?? 999999;
+        final aVal = int.tryParse(a['rollNumber']?.toString() ?? '') ?? 999999;
+        final bVal = int.tryParse(b['rollNumber']?.toString() ?? '') ?? 999999;
         return aVal.compareTo(bVal);
       });
 
@@ -232,8 +257,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
         return StatefulBuilder(
           builder: (ctx, setStateDialog) {
             final query = searchCtrl.text.toLowerCase().trim();
-            final filteredStudents = allStudents.where((s) {
-              final d = (s.data() as Map<String, dynamic>?) ?? {};
+            final filteredStudents = allStudents.where((d) {
               final name = (d['name'] as String? ?? '').toLowerCase();
               final rollNumber = (d['rollNumber'] as String? ?? '').toLowerCase();
               return name.contains(query) || rollNumber.contains(query);
@@ -248,67 +272,51 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: const Color(0xFF0F6C5A).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(16)),
-                          child: const Icon(Icons.person_search_rounded, color: Color(0xFF0F6C5A), size: 24),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(context.t('Guardian Portal'), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: const Color(0xFF1A1C1E), fontFamily: context.isUrdu ? 'Noori' : null)),
-                              Text(context.t('Select student to preview'), style: TextStyle(fontSize: 12, color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null)),
-                            ],
-                          ),
-                        ),
-                      ],
+                    Text(
+                      context.t('Select Student'),
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F6C5A)),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: searchCtrl,
                       decoration: InputDecoration(
                         hintText: context.t('Search by name or roll number...'),
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: searchCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () {
-                                  searchCtrl.clear();
-                                  setStateDialog(() {});
-                                },
-                              )
-                            : null,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        prefixIcon: const Icon(Icons.search, color: Color(0xFF0F6C5A)),
+                        filled: true,
+                        fillColor: const Color(0xFFF8F9FD),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
                       ),
-                      onChanged: (val) {
-                        setStateDialog(() {});
-                      },
+                      onChanged: (_) => setStateDialog(() {}),
                     ),
                     const SizedBox(height: 16),
                     Flexible(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 320),
+                      child: SizedBox(
+                        width: double.maxFinite,
                         child: filteredStudents.isEmpty
                             ? Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 32.0),
-                                child: Center(child: Text(context.t('No matching students found.'), style: TextStyle(color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null))),
+                                padding: const EdgeInsets.all(24),
+                                child: Center(child: Text(context.t('No matching students found.'))),
                               )
                             : ListView.separated(
                                 shrinkWrap: true,
                                 itemCount: filteredStudents.length,
                                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                                 itemBuilder: (_, i) {
-                                  final s = filteredStudents[i];
-                                  final d = (s.data() as Map<String, dynamic>?) ?? {};
+                                  final d = filteredStudents[i];
+                                  final sId = d['id'] ?? d['docId'] ?? d['studentId'] ?? '';
+                                  final photoUrl = (d['photoBase64'] ??
+                                          d['photoUrl'] ??
+                                          d['photo'] ??
+                                          d['image'] ??
+                                          d['studentPhotoBase64'])
+                                      ?.toString();
+                                  final photoStr = photoUrl?.trim();
+                                  final bytes = ImageUploadService.decodeBase64ToBytes(photoStr);
+
                                   return InkWell(
                                     onTap: () {
                                       setState(() {
-                                        _adminPreviewStudentId = s.id;
+                                        _adminPreviewStudentId = sId;
                                         _adminPreviewStudentData = d;
                                       });
                                       Navigator.pop(ctx);
@@ -324,39 +332,37 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                                       child: Row(
                                         children: [
                                           CircleAvatar(
+                                            radius: 22,
                                             backgroundColor: const Color(0xFF0F6C5A),
-                                            child: Text(d['name']?[0] ?? '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                            child: ClipOval(
+                                              child: () {
+                                                if (bytes != null) {
+                                                  return Image.memory(bytes, fit: BoxFit.cover, width: 44, height: 44);
+                                                } else if (photoStr != null && photoStr.startsWith('http')) {
+                                                  return Image.network(
+                                                    photoStr,
+                                                    fit: BoxFit.cover,
+                                                    width: 44,
+                                                    height: 44,
+                                                    errorBuilder: (_, __, ___) => Text(
+                                                      d['name']?[0] ?? '?',
+                                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                                    ),
+                                                  );
+                                                }
+                                                return Text(
+                                                  d['name']?[0] ?? '?',
+                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                                );
+                                              }(),
+                                            ),
                                           ),
                                           const SizedBox(width: 16),
                                           Expanded(
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                Row(
-                                                  children: [
-                                                    Flexible(
-                                                      child: Text(
-                                                        d['name'] ?? '',
-                                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                                                        overflow: TextOverflow.ellipsis,
-                                                      ),
-                                                    ),
-                                                    if ((d['status'] ?? 'active').toString() != 'active') ...[
-                                                      const SizedBox(width: 8),
-                                                      Container(
-                                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                        decoration: BoxDecoration(
-                                                          color: Colors.orange.shade100,
-                                                          borderRadius: BorderRadius.circular(6),
-                                                        ),
-                                                        child: Text(
-                                                          (d['status'] ?? 'INACTIVE').toString().replaceAll('_', ' ').toUpperCase(),
-                                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ],
-                                                ),
+                                                Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                                                 Text('Roll: ${d['rollNumber'] ?? "?"} • Guardian: ${d['guardianName'] ?? "?"}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
                                               ],
                                             ),
@@ -794,7 +800,12 @@ class _FamilySummaryView extends StatelessWidget {
                         final name = d['name'] ?? 'Student';
                         final rollNumber = d['rollNumber'] ?? '?';
                         final className = d['class'] ?? 'Hifz';
-                        final photoUrl = d['photoUrl']?.toString();
+                        final photoUrl = (d['photoBase64'] ??
+                                d['photoUrl'] ??
+                                d['photo'] ??
+                                d['image'] ??
+                                d['studentPhotoBase64'])
+                            ?.toString();
 
                         final currentLines = int.tryParse(d['currentLines']?.toString() ?? '0') ?? 0;
                         final prevLines = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
@@ -822,7 +833,7 @@ class _FamilySummaryView extends StatelessWidget {
                           if (prevCumulativeLines == -1) {
                             prevCumulativeLines = prevLines;
                           }
-                          sabakDelta = todayCumulativeLines - prevCumulativeLines;
+                          sabakDelta = (todayCumulativeLines - prevCumulativeLines).clamp(0, 8640);
                         }
 
                         final hasTodayLog = todayStudentLog != null;
@@ -875,15 +886,11 @@ class _FamilySummaryView extends StatelessWidget {
                           );
                         }
 
-                        return Card(
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                            side: const BorderSide(color: Color(0xFFE2E8F0)),
-                          ),
+                        return NeumorphicContainer(
+                          radius: 20,
                           color: Colors.white,
                           child: Padding(
-                            padding: const EdgeInsets.all(20),
+                            padding: const EdgeInsets.all(4),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [

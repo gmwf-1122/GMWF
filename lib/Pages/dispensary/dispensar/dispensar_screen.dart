@@ -331,7 +331,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
         toolbarHeight: 60,
         iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.png', height: 36),
+          Image.asset('assets/logo/gmwf-1.webp', height: 36),
           const SizedBox(width: 10),
           const Expanded(
             child: Text(
@@ -387,7 +387,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
       toolbarHeight: 100,
       iconTheme: const IconThemeData(color: Colors.white),
       title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.png', height: 60),
+        Image.asset('assets/logo/gmwf-1.webp', height: 60),
         const SizedBox(width: 16),
         Expanded(
           child: Column(

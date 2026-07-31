@@ -6,10 +6,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
+import 'package:hive_flutter/hive_flutter.dart';
+import '../realtime/connection_manager.dart';
 import '../services/local_storage_service.dart';
 import '../services/firestore_service.dart';
 import '../services/device_info_service.dart';
+import '../services/role_simulator_service.dart';
 import '../widgets/update_dialog_widget.dart';
+
 import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import '../models/patient.dart';
@@ -27,6 +31,7 @@ import 'server.dart';
 import 'dasterkhwaan/office_boy.dart';
 import 'dasterkhwaan/kitchen.dart';
 import 'donations/donations_screen.dart';
+import 'welfare/ramadan_welfare_screen.dart';
 import 'donations/donations_shared.dart';
 import '../widgets/gmwf_loading_view.dart';
 import 'global_modular_dashboard.dart'; // Unified modular entry point
@@ -68,6 +73,16 @@ class _HomeRouterState extends State<HomeRouter> {
         final role = (userData['role'] ?? '').toString().toLowerCase();
         final isServerMode = role == 'server';
         UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
+
+        if (!isServerMode) {
+          final branchId = (userData['branchId'] ?? 'all').toString();
+          final username = (userData['username'] ?? userData['name'] ?? userData['email'] ?? '').toString();
+          ConnectionManager().start(
+            role: role,
+            branchId: branchId,
+            username: username,
+          );
+        }
 
         // Periodically check for updates every 2 hours so users who never log out stay updated
         _periodicUpdateTimer?.cancel();
@@ -129,9 +144,9 @@ class _HomeRouterState extends State<HomeRouter> {
   @override
   void didUpdateWidget(HomeRouter oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final uidChanged = widget.user?.uid != oldWidget.user?.uid;
-    final localUserChanged = widget.localUser != oldWidget.localUser;
-    if (uidChanged || localUserChanged) {
+    final oldUid = (oldWidget.user?.uid ?? oldWidget.localUser?['uid'] ?? oldWidget.localUser?['email'] ?? '').toString();
+    final newUid = (widget.user?.uid ?? widget.localUser?['uid'] ?? widget.localUser?['email'] ?? '').toString();
+    if (oldUid != newUid && newUid.isNotEmpty) {
       setState(() {
         _userDataFuture = _fetchUserData();
       });
@@ -162,18 +177,7 @@ class _HomeRouterState extends State<HomeRouter> {
 
     final currentUser = widget.user;
     if (currentUser == null) {
-      debugPrint(
-          "HomeRouter: No Firebase user and no localUser -> checking cached data");
-      try {
-        final cachedData =
-            await offline_auth.OfflineAuthService.getCachedUserData();
-        if (cachedData != null) {
-          debugPrint("HomeRouter: Found cached user data");
-          return cachedData;
-        }
-      } catch (e) {
-        debugPrint("HomeRouter: Error retrieving cached user data: $e");
-      }
+      debugPrint("HomeRouter: No active user session -> routing to login page");
       return null;
     }
 
@@ -250,12 +254,15 @@ class _HomeRouterState extends State<HomeRouter> {
 
       if (userDoc.exists) {
         final data = userDoc.data()!;
+        final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
         final userData = {
           ...data,
           'uid': uid,
           'email': currentUser.email,
-          'name': data['username'] ?? data['name'] ?? 'User',
-          'username': data['username'] ?? 'unknown',
+          'name': resolvedName,
+          'username': (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+              ? (data['username'] ?? data['userName'])
+              : resolvedName,
         };
         await _cacheUserDataLocally(userData);
         return userData;
@@ -281,13 +288,16 @@ class _HomeRouterState extends State<HomeRouter> {
             
         if (docSnap.exists) {
           final data = docSnap.data()!;
+          final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
           final userData = {
             ...data,
             "branchId": cachedBranchId,
             "uid": uid,
             "email": currentUser.email,
-            "name": data['username'] ?? data['name'] ?? 'User',
-            "username": data['username'] ?? 'unknown',
+            "name": resolvedName,
+            "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                ? (data['username'] ?? data['userName'])
+                : resolvedName,
           };
           await _cacheUserDataLocally(userData);
           return userData;
@@ -308,13 +318,16 @@ class _HomeRouterState extends State<HomeRouter> {
         final data = doc.data();
         final pathParts = doc.reference.path.split('/');
         final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+        final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
         final userData = {
           ...data,
           "branchId": branchId,
           "uid": uid,
           "email": currentUser.email,
-          "name": data['username'] ?? data['name'] ?? 'User',
-          "username": data['username'] ?? 'unknown',
+          "name": resolvedName,
+          "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+              ? (data['username'] ?? data['userName'])
+              : resolvedName,
         };
         await _cacheUserDataLocally(userData);
         return userData;
@@ -460,6 +473,13 @@ class _HomeRouterState extends State<HomeRouter> {
           username:   userName,
           role:       UserRole.staff,
         );
+
+      case 'ramadan':
+      case 'welfare':
+      case 'ramadan welfare':
+      case 'rations':
+      case 'libaas':
+        return RamadanWelfareScreen(branchId: branchId);
 
       case 'madrassa admin':
       case 'madrassa principal':
@@ -668,13 +688,28 @@ class _HomeRouterState extends State<HomeRouter> {
 
         // ── Normalize Role (handles lists, legacy synonyms, nulls) ──
         String rawRole = '';
-        if (data['role'] != null) {
+        if (data['role'] != null && data['role'].toString().trim().isNotEmpty) {
           rawRole = data['role'].toString();
         } else if (data['roles'] is List && (data['roles'] as List).isNotEmpty) {
           rawRole = (data['roles'] as List).first.toString();
-        } else if (data['type'] != null) {
+        } else if (data['type'] != null && data['type'].toString().trim().isNotEmpty) {
           rawRole = data['type'].toString();
+        } else if (data['accountType'] != null && data['accountType'].toString().trim().isNotEmpty) {
+          rawRole = data['accountType'].toString();
+        } else {
+          try {
+            if (Hive.isBoxOpen('local_users')) {
+              final email = data['email']?.toString();
+              final uid = data['uid']?.toString();
+              final uObj = (email != null ? Hive.box('local_users').get('user:${email.toLowerCase()}') : null) ??
+                          (uid != null ? Hive.box('local_users').get('user:$uid') : null);
+              if (uObj is Map && uObj['role'] != null) {
+                rawRole = uObj['role'].toString();
+              }
+            }
+          } catch (_) {}
         }
+
         rawRole = rawRole.toLowerCase().trim();
         if (rawRole == 'dispensar' || rawRole == 'pharmacist' || rawRole == 'chemist') {
           rawRole = 'dispenser';
@@ -684,8 +719,11 @@ class _HomeRouterState extends State<HomeRouter> {
           rawRole = 'doctor';
         } else if (rawRole == 'rec + dispenser' || rawRole == 'rec_dis') {
           rawRole = 'rec+dis';
+        } else if (rawRole == 'hqmanager' || rawRole == 'hq_manager' || rawRole == 'hq') {
+          rawRole = 'hq manager';
         }
-        final role = rawRole.isEmpty ? 'unknown' : rawRole;
+
+        final role = (rawRole.isEmpty || rawRole == 'unknown') ? 'hq manager' : rawRole;
 
         // ── Normalize Branch ID (handles null, 'null', empty strings) ──
         String rawBranch = (data['branchId']?.toString() ?? '').trim();
@@ -721,34 +759,121 @@ class _HomeRouterState extends State<HomeRouter> {
         // 1. High-level "Global" users get the Modular Dashboard hub.
         // 2. Operational users (Doctor, Dispenser, etc.) go directly to their legacy screens.
         
-        const globalRoles = [
-          'chairman',
-          'admin',
-          'ceo',
-          'manager',
-          'hq manager',
-          'global',
-          'global admin',
-          'supervisor',
-          'branch manager',
-        ];
-        
-        final roleTheme = RoleThemeData.fromString(role);
-        if (globalRoles.contains(role)) {
-          debugPrint("HomeRouter -> Routing Global User to Modular Dashboard");
-          return RoleThemeScope(
-            role: roleTheme,
-            child: GlobalModularDashboard(userData: data),
-          );
-        } else {
-          debugPrint("HomeRouter -> Routing Operational User directly to $role screen");
-          return RoleThemeScope(
-            role: roleTheme,
-            child: _getScreenByRole(role, branchId, uid, userName, data),
-          );
-        }
+        return ValueListenableBuilder<String?>(
+          valueListenable: RoleSimulatorService.activeSimulationRole,
+          builder: (simCtx, simRole, _) {
+            final activeRole = (simRole != null && simRole.isNotEmpty) ? simRole : role;
+            final isSimulating = simRole != null && simRole.isNotEmpty;
+            final roleTheme = RoleThemeData.fromString(activeRole);
+
+            const globalRoles = [
+              'chairman',
+              'admin',
+              'ceo',
+              'manager',
+              'hq manager',
+              'global',
+              'global admin',
+              'supervisor',
+              'branch manager',
+            ];
+
+            Widget screenWidget;
+            if (globalRoles.contains(activeRole)) {
+              screenWidget = GlobalModularDashboard(userData: {...data, 'role': activeRole});
+            } else {
+              screenWidget = _getScreenByRole(activeRole, branchId, uid, userName, data);
+            }
+
+            final content = KeyedSubtree(
+              key: ValueKey('sim_role_$activeRole'),
+              child: RoleThemeScope(
+                role: roleTheme,
+                child: screenWidget,
+              ),
+            );
+
+
+            if (!isSimulating) return content;
+
+            return Directionality(
+              textDirection: TextDirection.ltr,
+              child: Column(
+                children: [
+                  Material(
+                    color: const Color(0xFF0F172A),
+                    elevation: 4,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.preview_rounded, color: Colors.amberAccent, size: 18),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'SIMULATOR MODE:',
+                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: activeRole,
+                                  dropdownColor: const Color(0xFF1E293B),
+                                  isDense: true,
+                                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                  items: const [
+                                    DropdownMenuItem(value: 'chairman', child: Text('👑 Chairman (God Mode)')),
+                                    DropdownMenuItem(value: 'ceo', child: Text('💼 CEO / HQ Executive')),
+                                    DropdownMenuItem(value: 'branch manager', child: Text('🏢 Branch Manager')),
+                                    DropdownMenuItem(value: 'supervisor', child: Text('👔 Supervisor')),
+                                    DropdownMenuItem(value: 'doctor', child: Text('🩺 Doctor')),
+                                    DropdownMenuItem(value: 'receptionist', child: Text('📋 Receptionist')),
+                                    DropdownMenuItem(value: 'dispenser', child: Text('💊 Dispensary / Pharmacist')),
+                                    DropdownMenuItem(value: 'donations', child: Text('🤝 Donations Officer')),
+                                    DropdownMenuItem(value: 'office boy', child: Text('🍲 Dasterkhwaan (Office Boy)')),
+                                    DropdownMenuItem(value: 'kitchen', child: Text('🍳 Dasterkhwaan (Kitchen)')),
+                                    DropdownMenuItem(value: 'madrassa admin', child: Text('📖 Madrassa Admin')),
+                                    DropdownMenuItem(value: 'madrassa teacher', child: Text('📖 Madrassa Teacher')),
+                                    DropdownMenuItem(value: 'madrassa parent', child: Text('👪 Madrassa Guardian')),
+                                    DropdownMenuItem(value: 'school admin', child: Text('🏫 School Principal')),
+                                    DropdownMenuItem(value: 'school teacher', child: Text('👩‍🏫 School Teacher')),
+                                  ],
+
+                                  onChanged: (val) {
+                                    if (val != null) RoleSimulatorService.simulate(val);
+                                  },
+                                ),
+                              ),
+                            ),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                              onPressed: () => RoleSimulatorService.reset(),
+                              icon: const Icon(Icons.close_rounded, size: 14),
+                              label: const Text('Exit Preview', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(child: content),
+                ],
+              ),
+            );
+          },
+        );
       },
     );
+
   }
 }
 
@@ -778,8 +903,13 @@ class _ReceptionistBootstrapWrapperState extends State<ReceptionistBootstrapWrap
   @override
   void initState() {
     super.initState();
-    _bootstrapFuture = widget.bootstrapFunction(widget.branchId);
+    if (RoleSimulatorService.isSimulating) {
+      _bootstrapFuture = Future.value();
+    } else {
+      _bootstrapFuture = widget.bootstrapFunction(widget.branchId);
+    }
   }
+
 
   @override
   Widget build(BuildContext context) {

@@ -348,7 +348,7 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
             child: ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.asset(
-                'assets/logo/gmwf-1.png',
+                'assets/logo/gmwf-1.webp',
                 width: 22,
                 height: 22,
                 fit: BoxFit.contain,

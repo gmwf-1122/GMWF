@@ -9,7 +9,7 @@ class CustomTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
-      valueListenable: Hive.box('app_settings').listenable(),
+      valueListenable: Hive.box('app_settings').listenable(keys: ['custom_accent_color']),
       builder: (context, Box box, child) {
         final colorHex = box.get('custom_accent_color') as String?;
         Color barColor = const Color(0xFF00695C); // default teal
@@ -35,8 +35,9 @@ class CustomTitleBar extends StatelessWidget {
                       child: Row(
                         children: [
                           Image.asset(
-                            'assets/logo/gmwf-1.png',
+                            'assets/logo/gmwf-1.webp',
                             height: 20,
+                            cacheHeight: 60,
                             errorBuilder: (context, error, stackTrace) =>
                                 const Icon(Icons.business, color: Colors.white, size: 20),
                           ),

@@ -18,6 +18,19 @@ class OfflineAuthService {
   static String _pwKey(String u)   => 'pw__${u.trim().toLowerCase()}';
   static String _dataKey(String u) => 'ud__${u.trim().toLowerCase()}';
 
+  /// Clears active login session flags so logging out does not auto-login to a previous user.
+  static Future<void> clearCachedUserData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyLastUsername);
+      await prefs.remove(_keyHasLoggedIn);
+      await prefs.remove(_keyLastLoginTime);
+      debugPrint('[OfflineAuth] Cleared cached active session user data');
+    } catch (e) {
+      debugPrint('[OfflineAuth] Error clearing cached user data: $e');
+    }
+  }
+
   // ✅ FIX: Added resetOnError + IOSOptions for better cross-platform reliability.
   // resetOnError: true ensures keystore corruption (common after OS updates) 
   // doesn't permanently block storage — it resets and allows fresh writes.
@@ -73,9 +86,10 @@ class OfflineAuthService {
     required String usernameOrEmail,
     required String password,
     required Map<String, dynamic> userData,
+    bool setAsLastLoggedIn = true,
   }) async {
     final key = usernameOrEmail.trim().toLowerCase();
-    debugPrint('[OfflineAuth] Saving credentials for: $key');
+    debugPrint('[OfflineAuth] Saving credentials for: $key (setAsLastLoggedIn: $setAsLastLoggedIn)');
 
     try {
       // Write password
@@ -87,7 +101,6 @@ class OfflineAuthService {
         debugPrint('[OfflineAuth] ❌ Password verification failed — storage may be unavailable');
         return false;
       }
-      debugPrint('[OfflineAuth] Password saved and verified');
 
       // Write user data blob
       await _secureWrite(_dataKey(key), jsonEncode(userData));
@@ -99,17 +112,16 @@ class OfflineAuthService {
         return false;
       }
 
-      // Update shared prefs — always overwrite with the CURRENT user
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool(_keyHasLoggedIn, true);
-      await prefs.setString(_keyLastUsername, key);
-      await prefs.setString(_keyLastLoginTime, DateTime.now().toIso8601String());
+      if (setAsLastLoggedIn) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_keyHasLoggedIn, true);
+        await prefs.setString(_keyLastUsername, key);
+        await prefs.setString(_keyLastLoginTime, DateTime.now().toIso8601String());
+      }
 
       debugPrint('[OfflineAuth] ✅ Credentials saved and verified for $key');
       return true;
     } catch (e) {
-      // ✅ FIX: Return false instead of rethrowing — the caller should
-      // show a warning but NOT block the user from logging in online.
       debugPrint('[OfflineAuth] ❌ Save failed: $e');
       return false;
     }
@@ -196,6 +208,16 @@ class OfflineAuthService {
       debugPrint('[OfflineAuth] User data updated in cache for $key');
     } catch (e) {
       debugPrint('[OfflineAuth] updateCachedUserData error: $e');
+    }
+  }
+
+  /// Retrieves stored password for a specific user.
+  static Future<String?> getStoredPassword(String usernameOrEmail) async {
+    try {
+      final key = usernameOrEmail.trim().toLowerCase();
+      return await _secureRead(_pwKey(key));
+    } catch (_) {
+      return null;
     }
   }
 

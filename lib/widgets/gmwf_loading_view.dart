@@ -134,9 +134,10 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                     );
                   },
                   child: Image.asset(
-                    'assets/logo/gmwf-1.png',
+                    'assets/logo/gmwf-1.webp',
                     width: logoSize,
                     height: logoSize,
+                    cacheWidth: 400,
                     fit: BoxFit.contain,
                     errorBuilder: (_, _, _) => Icon(
                       Icons.local_pharmacy,

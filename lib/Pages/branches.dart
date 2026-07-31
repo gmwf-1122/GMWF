@@ -1240,7 +1240,7 @@ class _BranchesState extends ConsumerState<Branches>
         ),
         child: type == 'gmwf'
             ? Row(mainAxisSize: MainAxisSize.min, children: [
-                Image.asset("assets/logo/gmwf.png", height: 12, width: 12),
+                Image.asset("assets/logo/gmwf-1.webp", height: 12, width: 12),
                 const SizedBox(width: 4),
                 Text('GMWF', style: TextStyle(
                     color: selected ? chipColor : t.textSecondary,

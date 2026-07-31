@@ -549,7 +549,7 @@ class _InventoryPageState extends State<InventoryPage>
             child: Row(
               children: [
                 Image.asset(
-                  'assets/logo/gmwf-1.png',
+                  'assets/logo/gmwf-1.webp',
                   width: 42,
                   height: 42,
                   errorBuilder: (context, error, stackTrace) {

@@ -13,18 +13,21 @@ import '../../services/finance_local_storage.dart';
 import '../../services/finance_loans_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/sync_service.dart';
-import '../../widgets/global_module_wrapper.dart';
 import 'attendance_tab.dart';
 import 'employees_tab.dart';
 import 'payroll_tab.dart';
 import 'audit_trail_tab.dart';
 import 'expenses_tab.dart';
 import 'loans_tab.dart';
-import 'exports_tab.dart';
 import 'employee_form_sheet.dart';
 import 'holiday_manager_dialog.dart';
 import 'finance_report_helper.dart';
 import 'shared_widgets.dart';
+import '../../services/finance_ledger_storage.dart';
+import 'finance_overview_dashboard.dart';
+import 'report_builder_page.dart';
+import 'bank_accounts_sheet.dart';
+
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const _kAccent     = Color(0xFF0F9A7A);
@@ -77,7 +80,9 @@ class _FinancePageState extends State<FinancePage> {
     _syncBox = Hive.box(LocalStorageService.syncBox);
     _updateSyncCount();
     _syncBox.listenable().addListener(_updateSyncCount);
+    FinanceLedgerStorage.initEngine();
     _loadBranches();
+
   }
 
   @override
@@ -246,11 +251,16 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
-  static const _sectionTitles = ['Employees', 'Attendance', 'Payroll', 'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'];
-  static const _sectionIcons = [
-    Icons.people_outline, Icons.today_outlined, Icons.receipt_long_outlined,
-    Icons.credit_card_outlined, Icons.payments_outlined, Icons.history_edu_outlined, Icons.download_outlined
+  static const _sectionTitles = [
+    'Overview & Treasury', 'Employees', 'Attendance', 'Payroll',
+    'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'
   ];
+  static const _sectionIcons = [
+    Icons.dashboard_outlined, Icons.people_outline, Icons.today_outlined,
+    Icons.receipt_long_outlined, Icons.credit_card_outlined, Icons.payments_outlined,
+    Icons.history_edu_outlined, Icons.account_balance_outlined
+  ];
+
 
   Widget _buildDesktopHeader(BuildContext ctx, bool canViewAudits) {
     return Container(
@@ -378,29 +388,38 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
-  Widget _iconBtn(IconData icon, String tip, VoidCallback onTap) {
-    return Tooltip(
-      message: tip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 36, height: 36,
-          decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-          child: Icon(icon, size: 18, color: _kTextSecondary),
-        ),
-      ),
-    );
+
+
+  int _getMobileNavIndex(int selectedIndex) {
+    switch (selectedIndex) {
+      case 2: return 0; // Attendance
+      case 3: return 1; // Payroll
+      case 4: return 2; // Loans
+      case 1: return 3; // Employees
+      default: return 0;
+    }
+  }
+
+  int _getTabFromMobileNavIndex(int mobileNavIndex) {
+    switch (mobileNavIndex) {
+      case 0: return 2; // Attendance
+      case 1: return 3; // Payroll
+      case 2: return 4; // Loans
+      case 3: return 1; // Employees
+      default: return 2;
+    }
   }
 
   // ── Mobile layout ──────────────────────────────────────────────────────────
   Widget _buildMobile(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
+    final titleText = _sectionTitles.elementAtOrNull(_selectedIndex) ?? 'Finance & HR';
+
     return Scaffold(
       backgroundColor: _kBg,
       appBar: AppBar(
         leading: Builder(
           builder: (drawerCtx) => IconButton(
-            icon: const Icon(Icons.menu, color: _kTextSecondary),
+            icon: const Icon(Icons.menu_rounded, color: _kTextSecondary),
             onPressed: () => Scaffold.of(drawerCtx).openDrawer(),
           ),
         ),
@@ -409,14 +428,14 @@ class _FinancePageState extends State<FinancePage> {
         titleSpacing: 0,
         title: Row(children: [
           Image.asset(
-            'assets/logo/gmwf-1.png',
+            'assets/logo/gmwf-1.webp',
             width: 32,
             height: 32,
             fit: BoxFit.contain,
           ),
           const SizedBox(width: 10),
-          const Expanded(child: Text('Finance & HR',
-              style: TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 16), overflow: TextOverflow.ellipsis)),
+          Expanded(child: Text(titleText,
+              style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 16), overflow: TextOverflow.ellipsis)),
           if (_branches.isNotEmpty) _buildBranchDropdown(),
           const SizedBox(width: 8),
         ]),
@@ -453,8 +472,8 @@ class _FinancePageState extends State<FinancePage> {
       bottomNavigationBar: Container(
         decoration: const BoxDecoration(color: _kBgCard, border: Border(top: BorderSide(color: _kBorder))),
         child: BottomNavigationBar(
-          currentIndex: _selectedIndex.clamp(0, 4),
-          onTap: (i) => setState(() => _selectedIndex = i),
+          currentIndex: _getMobileNavIndex(_selectedIndex),
+          onTap: (i) => setState(() => _selectedIndex = _getTabFromMobileNavIndex(i)),
           type: BottomNavigationBarType.fixed,
           backgroundColor: _kBgCard,
           selectedItemColor: _kAccent,
@@ -463,11 +482,10 @@ class _FinancePageState extends State<FinancePage> {
           unselectedFontSize: 10,
           elevation: 0,
           items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.people_outline), activeIcon: Icon(Icons.people_rounded), label: 'Employees'),
             BottomNavigationBarItem(icon: Icon(Icons.today_outlined), activeIcon: Icon(Icons.today_rounded), label: 'Attendance'),
             BottomNavigationBarItem(icon: Icon(Icons.receipt_long_outlined), activeIcon: Icon(Icons.receipt_long_rounded), label: 'Payroll'),
             BottomNavigationBarItem(icon: Icon(Icons.credit_card_outlined), activeIcon: Icon(Icons.credit_card_rounded), label: 'Loans'),
-            BottomNavigationBarItem(icon: Icon(Icons.payments_outlined), activeIcon: Icon(Icons.payments_rounded), label: 'Expenses'),
+            BottomNavigationBarItem(icon: Icon(Icons.people_outline), activeIcon: Icon(Icons.people_rounded), label: 'Employees'),
           ],
         ),
       ),
@@ -572,13 +590,20 @@ class _FinancePageState extends State<FinancePage> {
   Widget _buildContent(String userRole, bool canViewAudits) {
     switch (_selectedIndex) {
       case 0:
+        return FinanceOverviewDashboard(
+          branchId: _activeBranchId,
+          userRole: userRole,
+          onNavigateToTab: (idx) => setState(() => _selectedIndex = idx),
+          onOpenBankAccounts: () => BankAccountsSheet.show(context, onSaved: () => setState(() {})),
+        );
+      case 1:
         return EmployeesTab(
           branchId: _activeBranchId,
           userRole: userRole,
           openEmployeeForm: _openEmployeeForm,
           branches: _branches,
         );
-      case 1:
+      case 2:
         return AttendanceTab(
           branchId: _activeBranchId,
           date: _attendanceDate,
@@ -586,7 +611,7 @@ class _FinancePageState extends State<FinancePage> {
           onAddEmployee: () => _openEmployeeForm(context, null),
           departmentFilter: _selectedDeptFilter,
         );
-      case 2:
+      case 3:
         return PayrollTab(
           branchId: _activeBranchId,
           monthKey: _payrollMonthKey,
@@ -594,23 +619,23 @@ class _FinancePageState extends State<FinancePage> {
           userRole: userRole,
           departmentFilter: _selectedDeptFilter,
         );
-      case 3:
+      case 4:
         return LoansTab(
           branchId: _activeBranchId,
           userRole: userRole,
           departmentFilter: _selectedDeptFilter,
         );
-      case 4:
+      case 5:
         return ExpensesTab(
           branchId: _activeBranchId,
           userRole: userRole,
         );
-      case 5:
+      case 6:
         return canViewAudits
             ? AuditTrailTab(branchId: _activeBranchId, searchQuery: '', onSearchChanged: (_) {})
             : _buildLockedAudit();
-      case 6:
-        return ExportsTab(
+      case 7:
+        return ReportBuilderPage(
           branchId: _activeBranchId,
           userRole: userRole,
           branches: _branches,
@@ -619,6 +644,7 @@ class _FinancePageState extends State<FinancePage> {
         return const SizedBox.shrink();
     }
   }
+
 
   Widget _buildLockedAudit() => const Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -658,9 +684,12 @@ class _FinancePageState extends State<FinancePage> {
   }
 
   Widget _exportView(BuildContext dCtx) {
-    String selType = 'branch', selMonth = _payrollMonthKey, selDept = 'Dispensary';
-    final depts = ['Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School']
-      ..addAll(FinanceLocalStorage.getCustomDepartments());
+    String selType = 'branch', selMonth = _payrollMonthKey, selDept = 'Administration Staff';
+    final depts = FinanceLedgerStorage.sortDepartmentsCanonical(
+      ['Administration Staff', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
+        ..addAll(FinanceLocalStorage.getCustomDepartments())
+    );
+
     return StatefulBuilder(builder: (ctx, setS) {
       return SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -800,9 +829,21 @@ class _FinanceSidebar extends StatelessWidget {
     this.isMobile = false,
   });
 
-  static const _labels = ['Employees', 'Attendance', 'Payroll', 'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'];
-  static const _icons  = [Icons.people_outline, Icons.today_outlined, Icons.receipt_long_outlined, Icons.credit_card_outlined, Icons.payments_outlined, Icons.history_edu_outlined, Icons.download_outlined];
-  static const _iconsA = [Icons.people_rounded, Icons.today_rounded, Icons.receipt_long_rounded, Icons.credit_card_rounded, Icons.payments_rounded, Icons.history_edu_rounded, Icons.download_rounded];
+  static const _labels = [
+    'Overview', 'Employees', 'Attendance', 'Payroll',
+    'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'
+  ];
+  static const _icons  = [
+    Icons.dashboard_outlined, Icons.people_outline, Icons.today_outlined,
+    Icons.receipt_long_outlined, Icons.credit_card_outlined, Icons.payments_outlined,
+    Icons.history_edu_outlined, Icons.account_balance_outlined
+  ];
+  static const _iconsA = [
+    Icons.dashboard_rounded, Icons.people_rounded, Icons.today_rounded,
+    Icons.receipt_long_rounded, Icons.credit_card_rounded, Icons.payments_rounded,
+    Icons.history_edu_rounded, Icons.account_balance_rounded
+  ];
+
 
   @override
   Widget build(BuildContext context) {
@@ -819,7 +860,7 @@ class _FinanceSidebar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(14, 16, 10, 14),
           child: Row(children: [
             Image.asset(
-              'assets/logo/gmwf-1.png',
+              'assets/logo/gmwf-1.webp',
               width: 32,
               height: 32,
               fit: BoxFit.contain,

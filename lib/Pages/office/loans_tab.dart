@@ -6,8 +6,12 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/finance_loans_storage.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/finance_ledger_storage.dart';
 import '../../services/permission_service.dart';
+
+import 'finance_report_helper.dart';
 import 'shared_widgets.dart';
+
 
 const _kAccent = Color(0xFF10B981);
 const _kBg = Color(0xFFF8FAFC);
@@ -106,11 +110,10 @@ class _LoansTabState extends State<LoansTab> {
     final depts = allEmployees
         .map((e) => e['department']?.toString() ?? 'Other')
         .map((dept) => dept.trim().isEmpty ? 'Other' : dept.trim())
-        .where((dept) => dept.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    final deptOptions = ['all', ...depts];
+        .where((dept) => dept.isNotEmpty);
+    final sortedDepts = FinanceLedgerStorage.sortDepartmentsCanonical(depts);
+    final deptOptions = ['all', ...sortedDepts];
+
     final branchesBox = Hive.box(LocalStorageService.branchesBox);
     final branchesList = branchesBox.values.map((v) => Map<String, dynamic>.from(v as Map)).toList();
     final branchNames = {
@@ -304,18 +307,25 @@ class _LoansTabState extends State<LoansTab> {
                     final loan = filtered[idx];
                     final isSel = _selectedLoan?['id'] == loan['id'];
                     final pMinor = (loan['principalMinor'] as num?)?.toInt() ?? 0;
-                    final outstandingMinor = (FinanceLoansStorage.getOutstandingBalance(loan['employeeId'])) * 100; // outstanding is dynamic in PKR, converting back to paisa
                     final isClosed = loan['status'] == 'closed';
 
+
+
                     return ListTile(
-                      tileColor: isSel ? const Color(0xFFECFDF5) : _kBgCard,
+                      tileColor: isClosed
+                          ? const Color(0xFFF1F5F9)
+                          : (isSel ? const Color(0xFFECFDF5) : _kBgCard),
                       title: Text(
                         loan['employeeName'] ?? 'Unknown Employee',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: _kTextPrimary),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isClosed ? _kTextSecondary : _kTextPrimary,
+                          decoration: isClosed ? TextDecoration.lineThrough : null,
+                        ),
                       ),
                       subtitle: Text(
                         'Issued: ${DateFormat('yyyy-MM-dd').format(DateTime.parse(loan['dateIssued']))}',
-                        style: const TextStyle(color: _kTextSecondary, fontSize: 11),
+                        style: TextStyle(color: isClosed ? _kTextTertiary : _kTextSecondary, fontSize: 11),
                       ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -323,21 +333,25 @@ class _LoansTabState extends State<LoansTab> {
                         children: [
                           Text(
                             _formatPaisa(pMinor),
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: _kTextPrimary),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              color: isClosed ? _kTextTertiary : _kTextPrimary,
+                            ),
                           ),
                           const SizedBox(height: 2),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isClosed ? Colors.grey[200] : const Color(0xFFD1FAE5),
+                              color: isClosed ? const Color(0xFFE2E8F0) : const Color(0xFFD1FAE5),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
-                              isClosed ? 'Closed' : 'Active',
+                              isClosed ? 'PAID OFF / CLOSED' : 'Active',
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
-                                color: isClosed ? Colors.grey[600] : _kAccent,
+                                color: isClosed ? const Color(0xFF64748B) : _kAccent,
                               ),
                             ),
                           ),
@@ -377,22 +391,46 @@ class _LoansTabState extends State<LoansTab> {
       (loan['payments'] as List? ?? []).map((e) => Map<String, dynamic>.from(e as Map)),
     );
     final activePayments = payments.where((p) => p['isVoided'] != true).toList();
-    final voidedPayments = payments.where((p) => p['isVoided'] == true).toList();
     final activeRepayments = activePayments.where((p) => p['type'] != 'topup' && p['type'] != 'loan_issue').toList();
+
 
     final pMinor = (loan['principalMinor'] as num?)?.toInt() ?? 0;
     int paidMinor = 0;
     for (final p in activeRepayments) {
       paidMinor += (p['amountMinor'] as num?)?.toInt() ?? 0;
     }
-    final outstandingMinor = pMinor - paidMinor;
-    final isClosed = loan['status'] == 'closed';
+    final outstandingMinor = (pMinor - paidMinor).clamp(0, 9999999999);
+    final isClosed = loan['status'] == 'closed' || outstandingMinor <= 0;
 
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Closed Loan Banner
+          if (isClosed) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFCBD5E1)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20),
+                  SizedBox(width: 10),
+                  Text(
+                    '🎉 LOAN FULLY REPAID & CLOSED — Balance is 0 PKR',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF334155)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // Header info
           Row(
             children: [
@@ -402,7 +440,11 @@ class _LoansTabState extends State<LoansTab> {
                   children: [
                     Text(
                       loan['employeeName'] ?? 'Employee Details',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: _kTextPrimary),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: isClosed ? _kTextSecondary : _kTextPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -412,6 +454,20 @@ class _LoansTabState extends State<LoansTab> {
                   ],
                 ),
               ),
+
+              // Download Statement PDF Button
+              OutlinedButton.icon(
+                onPressed: () => FinanceReportHelper.exportLoanStatementPdf(loan),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: _kAccent,
+                  side: const BorderSide(color: _kAccent),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                label: const Text('Download PDF', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              const SizedBox(width: 8),
+
               if (!isClosed && (access == FinanceAccess.full || access == FinanceAccess.requestOnly)) ...[
                 ElevatedButton.icon(
                   onPressed: () => _showRecordRepaymentDialog(loan, outstandingMinor, access),
@@ -429,6 +485,7 @@ class _LoansTabState extends State<LoansTab> {
             ],
           ),
           const SizedBox(height: 24),
+
 
           // Cards Row
           Row(
