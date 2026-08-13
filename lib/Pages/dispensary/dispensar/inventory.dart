@@ -11,10 +11,14 @@ import 'package:rxdart/rxdart.dart';
 import 'dart:async';
 import 'inventory_update.dart';
 import 'medicine_ledger.dart';
+import 'universal_proforma_sheet.dart';
 import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/global_module_wrapper.dart';
 import 'package:gmwf/widgets/app_back_button.dart';
+import 'package:gmwf/widgets/camp_selector_chip.dart';
+import 'package:gmwf/utils/string_similarity_helper.dart';
 import 'inventory_pdf_helper.dart';
 
 class InventoryPage extends StatefulWidget {
@@ -64,7 +68,54 @@ class _InventoryPageState extends State<InventoryPage>
   static const _border = Color(0xFFB2DFDB);
   static const _shadow = Color(0x1800695C);
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   bool get _isManager => !widget.isAdmin && !widget.isDispenser;
+  bool get _isSupervisorOrReadOnly => widget.isSupervisor || widget.isReadOnly;
+
+  /// Direct edit is strictly reserved for Doctors, Admins, Global Admins, Chairmen, HQ Managers & Supervisors.
+  /// Dispensers are explicitly barred from direct edits and must use "Update Stock" for approval.
+  /// Direct edit is strictly reserved for Doctors, Admins, Global Admins, Chairmen, HQ Managers & Supervisors.
+  /// Dispensers are explicitly barred from direct edits and must use "Update Stock" for approval.
+  bool get _isDirectEditAllowed {
+    if (widget.isReadOnly) return false;
+    if (widget.isDispenser) return false;
+    return widget.isAdmin || widget.isDoctor || widget.isSupervisor;
+  }
+
+  bool get _canRegisterMedicine {
+    if (widget.isReadOnly) return false;
+    if (widget.isAdmin || widget.isSupervisor) return true;
+
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data');
+        if (uData is Map && uData['canRegisterMedicine'] == true) {
+          return true;
+        }
+      }
+    } catch (_) {}
+
+    final normBranchId = widget.branchId.toLowerCase().trim();
+    final activeCamp = (CampSessionService.getActiveCamp() ?? '').toLowerCase().trim();
+    final branchName = _getBranchName().toLowerCase().trim();
+
+    final isGujrat = normBranchId.contains('gujrat') || activeCamp.contains('gujrat') || branchName.contains('gujrat');
+
+    if (isGujrat) {
+      if (widget.isDoctor) return true;
+      if (widget.isDispenser) return false;
+    }
+
+    return true;
+  }
 
   static const _editRequestTypes = {'edit_medicine', 'delete_medicine'};
 
@@ -76,11 +127,14 @@ class _InventoryPageState extends State<InventoryPage>
         'Drip' => const Color(0xFF00695C),
         'Drip Set' => const Color(0xFF00838F),
         'Syringe' => const Color(0xFFAD1457),
+        'Cannula' => const Color(0xFFD81B60),
+        'Needle' => const Color(0xFF8E24AA),
         'Nebulization' => const Color(0xFF283593),
+        'Dressing Item' => const Color(0xFF455A64),
+        'Consumables' => const Color(0xFF00796B),
         _ => const Color(0xFF37474F),
       };
 
-  // 4 tabs: Stock | Pending | Log | History
   late final TabController _tabCtrl;
   final _searchCtrl = TextEditingController();
   String _filterType = 'All';
@@ -107,17 +161,15 @@ class _InventoryPageState extends State<InventoryPage>
 
   final List<String> _types = [
     'All', 'Tablet', 'Capsule', 'Syrup', 'Injection',
-    'Drip', 'Drip Set', 'Syringe', 'Nebulization', 'Others',
+    'Drip', 'Drip Set', 'Syringe', 'Cannula', 'Needle', 'Nebulization', 'Dressing Item', 'Consumables', 'Others',
   ];
-
-  bool get _isSupervisorOrReadOnly => widget.isSupervisor || widget.isReadOnly;
 
   @override
   void initState() {
     super.initState();
     final tabCount = _isSupervisorOrReadOnly
-        ? 5
-        : (widget.isDispenser ? 6 : 7);
+        ? 6
+        : (_canRegisterMedicine ? 8 : 7);
     _tabCtrl = TabController(length: tabCount, vsync: this);
     _tabCtrl.addListener(() {
       if (mounted && !_tabCtrl.indexIsChanging) {
@@ -128,12 +180,17 @@ class _InventoryPageState extends State<InventoryPage>
     _initSync();
 
     // Cache database loading
-    Hive.box(LocalStorageService.stockBox).listenable().addListener(_loadDataFromHive);
+    Hive.box(LocalStorageService.stockBox).listenable().addListener(_debouncedLoadDataFromHive);
     _loadDataFromHive();
   }
 
   void _initSync() {
-    // 1. Background Sync: Keep Hive updated with any remote changes from Firestore
+    // 1. Download full inventory to ensure all stock items exist in local Hive cache
+    LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
+      if (mounted) _loadDataFromHive();
+    });
+
+    // 2. Real-time Live Listener: Scoped to updates while view is active
     _fireInvSub = FirebaseFirestore.instance
         .collection('branches')
         .doc(widget.branchId)
@@ -148,6 +205,7 @@ class _InventoryPageState extends State<InventoryPage>
               {...change.doc.data() as Map<String, dynamic>, 'id': change.doc.id, 'branchId': widget.branchId});
         }
       }
+      if (mounted) _loadDataFromHive();
     });
 
     // 2. Merged Log: Combine Cloud Logs + Local Pending Sync items
@@ -196,7 +254,8 @@ class _InventoryPageState extends State<InventoryPage>
 
   @override
   void dispose() {
-    Hive.box(LocalStorageService.stockBox).listenable().removeListener(_loadDataFromHive);
+    _debounceLoadTimer?.cancel();
+    Hive.box(LocalStorageService.stockBox).listenable().removeListener(_debouncedLoadDataFromHive);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _fireInvSub?.cancel();
@@ -221,16 +280,47 @@ class _InventoryPageState extends State<InventoryPage>
     }
   }
 
+  Timer? _debounceLoadTimer;
+
+  void _debouncedLoadDataFromHive() {
+    _debounceLoadTimer?.cancel();
+    _debounceLoadTimer = Timer(const Duration(milliseconds: 150), () {
+      if (mounted) _loadDataFromHive();
+    });
+  }
+
   void _loadDataFromHive() {
     final box = Hive.box(LocalStorageService.stockBox);
-    final raw = box.values
+    final normBranch = widget.branchId.toLowerCase().trim();
+    final allMapDocs = box.values
         .whereType<Map>()
         .map((v) => Map<String, dynamic>.from(v))
-        .where((v) => v['branchId'] == widget.branchId)
         .toList();
+
+    var filtered = allMapDocs.where((v) {
+      final b = v['branchId']?.toString().toLowerCase().trim();
+      if (b == null || b.isEmpty) return true; // Branch stock fallback
+      return b == normBranch ||
+          b == 'branch_$normBranch' ||
+          'branch_$b' == normBranch ||
+          (normBranch.isNotEmpty && b.contains(normBranch)) ||
+          (b.isNotEmpty && normBranch.contains(b));
+    }).toList();
+
+    final activeCamp = CampSessionService.getActiveCamp();
+    if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
+      final normCamp = activeCamp.replaceAll(RegExp(r'[^a-z0-9]'), '');
+      filtered = filtered.where((v) {
+        final rawD = (v['dispensaryId'] ?? v['campId'])?.toString().toLowerCase().trim();
+        if (rawD == null || rawD.isEmpty || rawD == 'all' || rawD == 'main') return true;
+        final normD = rawD.replaceAll(RegExp(r'[^a-z0-9]'), '');
+        return normD == normCamp || normD.contains(normCamp) || normCamp.contains(normD);
+      }).toList();
+    }
+
     if (mounted) {
       setState(() {
-        _rawItems = raw;
+        _rawItems = filtered;
         _processData();
       });
     }
@@ -247,14 +337,33 @@ class _InventoryPageState extends State<InventoryPage>
     _groupedBatches = batches;
 
     var preFiltered = batches.where((b) {
+      final qty = (b['quantity'] as num?)?.toInt() ?? 0;
+      if (qty < 0) return false;
+
       final name = b['name'].toString().toLowerCase();
       final formula = (b['formula'] ?? '').toString().toLowerCase();
-      final barcode = (b['barcode'] ?? '').toString().toLowerCase();
+      final barcode = (b['barcode'] ?? b['code'] ?? '').toString().toLowerCase();
       final type = b['type'];
-      final query = _searchCtrl.text.toLowerCase();
+      final query = _searchCtrl.text.trim().toLowerCase();
       return (name.contains(query) || formula.contains(query) || barcode.contains(query)) &&
           (_filterType == 'All' || type == _filterType);
     }).toList();
+
+    if (preFiltered.isEmpty && _searchCtrl.text.trim().length >= 3) {
+      final query = _searchCtrl.text.trim().toLowerCase();
+      preFiltered = batches.where((b) {
+        final qty = (b['quantity'] as num?)?.toInt() ?? 0;
+        if (qty < 0) return false;
+        final name = b['name'].toString().toLowerCase();
+        final formula = (b['formula'] ?? '').toString().toLowerCase();
+        final type = b['type'];
+        final matchesType = _filterType == 'All' || type == _filterType;
+        if (!matchesType) return false;
+        final simName = StringSimilarityHelper.calculateSimilarity(query, name);
+        final simForm = StringSimilarityHelper.calculateSimilarity(query, formula);
+        return simName >= 0.55 || simForm >= 0.55;
+      }).toList();
+    }
 
     _updateBatchKeys(preFiltered);
 
@@ -310,6 +419,7 @@ class _InventoryPageState extends State<InventoryPage>
       await InventoryPdfHelper.exportInventoryChecklistPdf(
         items: _groupedBatches,
         branchName: _getBranchName(),
+        context: context,
       );
     } catch (e) {
       if (mounted) {
@@ -378,6 +488,8 @@ class _InventoryPageState extends State<InventoryPage>
       'Drip' => FontAwesomeIcons.bottleDroplet,
       'Drip Set' => FontAwesomeIcons.kitMedical,
       'Syringe' => FontAwesomeIcons.syringe,
+      'Cannula' => FontAwesomeIcons.kitMedical,
+      'Needle' => FontAwesomeIcons.syringe,
       'Nebulization' => FontAwesomeIcons.wind,
       _ => FontAwesomeIcons.pills,
     };
@@ -453,7 +565,7 @@ class _InventoryPageState extends State<InventoryPage>
       final qty = _asInt(data['quantity']);
       final price = _parsePrice(data['price']);
       final formula = (data['formula'] ?? '').toString().trim();
-      final barcode = (data['barcode'] ?? '').toString().trim();
+      final barcode = (data['barcode'] ?? data['code'] ?? '').toString().trim();
 
       String monthYear = '';
       if (expiry.length == 10 && expiry[2] == '-' && expiry[5] == '-') {
@@ -532,7 +644,8 @@ class _InventoryPageState extends State<InventoryPage>
     final List<Map<String, dynamic>> menuItems = [
       {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
       if (!_isSupervisorOrReadOnly) {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
-      if (!_isSupervisorOrReadOnly && !widget.isDispenser) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
+      if (_canRegisterMedicine) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
+      {'label': 'Proforma Sheet', 'icon': Icons.list_alt_rounded},
       {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
       {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
       {'label': 'Log', 'icon': Icons.history_edu_rounded},
@@ -540,7 +653,7 @@ class _InventoryPageState extends State<InventoryPage>
     ];
 
     return Container(
-      color: Colors.white,
+      color: _isDark ? const Color(0xFF1E293B) : Colors.white,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -568,10 +681,10 @@ class _InventoryPageState extends State<InventoryPage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Gulzar Madina',
                         style: TextStyle(
-                          color: _tealDark,
+                          color: _isDark ? Colors.white : _tealDark,
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.5,
@@ -579,8 +692,8 @@ class _InventoryPageState extends State<InventoryPage>
                       ),
                       Text(
                         '${_getBranchName()} Inventory',
-                        style: const TextStyle(
-                          color: _textLight,
+                        style: TextStyle(
+                          color: _isDark ? const Color(0xFF94A3B8) : _textLight,
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
@@ -592,7 +705,7 @@ class _InventoryPageState extends State<InventoryPage>
               ],
             ),
           ),
-          const Divider(height: 1),
+          Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
           const SizedBox(height: 12),
           Expanded(
             child: ListView.builder(
@@ -604,15 +717,18 @@ class _InventoryPageState extends State<InventoryPage>
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
                   decoration: BoxDecoration(
-                    color: isActive ? _teal : Colors.transparent,
+                    color: isActive
+                        ? (_isDark ? const Color(0xFF0F766E) : _teal)
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: InkWell(
                     onTap: () {
                       _tabCtrl.animateTo(index);
-                      setState(() {});
                       if (MediaQuery.of(context).size.width < 800) {
-                        Navigator.pop(context);
+                        Navigator.of(context).maybePop();
+                      } else {
+                        if (mounted) setState(() {});
                       }
                     },
                     borderRadius: BorderRadius.circular(8),
@@ -622,14 +738,18 @@ class _InventoryPageState extends State<InventoryPage>
                         children: [
                           Icon(
                             item['icon'] as IconData,
-                            color: isActive ? Colors.white : _textMid,
+                            color: isActive
+                                ? Colors.white
+                                : (_isDark ? const Color(0xFF94A3B8) : _textMid),
                             size: 16,
                           ),
                           const SizedBox(width: 12),
                           Text(
                             item['label'] as String,
                             style: TextStyle(
-                              color: isActive ? Colors.white : _textDark,
+                              color: isActive
+                                  ? Colors.white
+                                  : (_isDark ? const Color(0xFFCBD5E1) : _textDark),
                               fontSize: 13,
                               fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
                             ),
@@ -642,7 +762,7 @@ class _InventoryPageState extends State<InventoryPage>
               },
             ),
           ),
-          const Divider(height: 1),
+          Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
           Container(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -650,10 +770,10 @@ class _InventoryPageState extends State<InventoryPage>
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _teal.withValues(alpha: 0.1),
+                    color: _isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.store_rounded, color: _teal, size: 18),
+                  child: Icon(Icons.store_rounded, color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 18),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -662,17 +782,17 @@ class _InventoryPageState extends State<InventoryPage>
                     children: [
                       Text(
                         _getBranchName(),
-                        style: const TextStyle(
-                          color: _textDark,
+                        style: TextStyle(
+                          color: _isDark ? Colors.white : _textDark,
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const Text(
+                      Text(
                         'v2.6.1',
                         style: TextStyle(
-                          color: _textLight,
+                          color: _isDark ? const Color(0xFF64748B) : _textLight,
                           fontSize: 10,
                           fontWeight: FontWeight.w500,
                         ),
@@ -695,9 +815,12 @@ class _InventoryPageState extends State<InventoryPage>
     final bool isMobile = screenWidth < 800;
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: _isDark ? const Color(0xFF0F172A) : _bg,
       appBar: (!widget.isEmbedded && !isWrapped) ? _buildAppBar(isMobile: isMobile) : null,
-      drawer: (isMobile && !widget.isDispenser) ? Drawer(child: _buildSidebarContent(context)) : null,
+      drawer: (isMobile && !widget.isDispenser) ? Drawer(
+        backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        child: _buildSidebarContent(context),
+      ) : null,
       floatingActionButton: (_isSupervisorOrReadOnly || widget.isAdmin || screenWidth > 800)
           ? null
           : FloatingActionButton.extended(
@@ -722,8 +845,8 @@ class _InventoryPageState extends State<InventoryPage>
             Container(
               width: 220,
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(right: BorderSide(color: Colors.grey.shade200, width: 1)),
+                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                border: Border(right: BorderSide(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1)),
               ),
               child: _buildSidebarContent(context),
             ),
@@ -741,7 +864,7 @@ class _InventoryPageState extends State<InventoryPage>
                           isEmbedded: true,
                           showMode: 1,
                         ),
-                      if (!_isSupervisorOrReadOnly && !widget.isDispenser)
+                      if (_canRegisterMedicine)
                         InventoryUpdatePage(
                           branchId: widget.branchId,
                           isAdmin: widget.isAdmin,
@@ -750,6 +873,12 @@ class _InventoryPageState extends State<InventoryPage>
                           isEmbedded: true,
                           showMode: 2,
                         ),
+                      UniversalProformaSheetPage(
+                        branchId: widget.branchId,
+                        isAdmin: widget.isAdmin,
+                        isDispenser: widget.isDispenser,
+                        isEmbedded: true,
+                      ),
                       MedicineLedgerPage(
                         branchId: widget.branchId,
                         isEmbedded: true,
@@ -786,11 +915,11 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   PreferredSizeWidget _buildAppBar({bool isMobile = false}) => AppBar(
-        backgroundColor: _teal,
+        backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
         elevation: 1,
         toolbarHeight: 55,
         automaticallyImplyLeading: false,
-        leading: (!widget.isEmbedded)
+        leading: (!widget.isEmbedded && Navigator.canPop(context))
             ? const AppBackButton(color: Colors.white)
             : (isMobile && !widget.isDispenser
                 ? Builder(
@@ -800,6 +929,7 @@ class _InventoryPageState extends State<InventoryPage>
                     ),
                   )
                 : null),
+        iconTheme: const IconThemeData(color: Colors.white),
         title: Row(children: [
           const Icon(FontAwesomeIcons.pills,
               color: Colors.white70, size: 14),
@@ -811,6 +941,12 @@ class _InventoryPageState extends State<InventoryPage>
                   fontWeight: FontWeight.bold)),
         ]),
         actions: [
+          CampSelectorChip(
+            onCampChanged: (newCamp) {
+              _loadDataFromHive();
+            },
+          ),
+          const SizedBox(width: 6),
           ValueListenableBuilder(
             valueListenable: Hive.box(LocalStorageService.syncBox).listenable(),
             builder: (context, Box box, _) {
@@ -954,24 +1090,24 @@ class _InventoryPageState extends State<InventoryPage>
         child: Container(
           height: 38,
           decoration: BoxDecoration(
-            color: _white,
+            color: _isDark ? const Color(0xFF334155) : _white,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.grey.shade200, width: 1),
+            border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
           ),
           child: TextField(
             controller: _searchCtrl,
-            cursorColor: _teal,
+            cursorColor: _isDark ? const Color(0xFF38BDF8) : _teal,
             onChanged: (_) => setState(() {
               _displayLimit = 50;
               _processData();
             }),
-            style: const TextStyle(fontSize: 13, color: _textDark),
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded, color: _textLight, size: 18),
+            style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.search_rounded, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
               hintText: 'Search name, formula or barcode (Tap row to edit)...',
-              hintStyle: TextStyle(color: _textLight, fontSize: 11.5),
+              hintStyle: TextStyle(color: _isDark ? const Color(0xFF64748B) : _textLight, fontSize: 11.5),
               border: InputBorder.none,
-              contentPadding: EdgeInsets.symmetric(vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
           ),
         ),
@@ -981,14 +1117,15 @@ class _InventoryPageState extends State<InventoryPage>
         height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: _white,
+          color: _isDark ? const Color(0xFF334155) : _white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade200, width: 1),
+          border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: _filterType,
-            icon: const Icon(Icons.arrow_drop_down, color: _textLight),
+            dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight),
             onChanged: (val) {
               if (val != null) {
                 setState(() {
@@ -1001,7 +1138,7 @@ class _InventoryPageState extends State<InventoryPage>
             items: _types
                 .map((t) => DropdownMenuItem(
                       value: t,
-                      child: Text(t, style: const TextStyle(fontSize: 12.5, color: _textDark)),
+                      child: Text(t, style: TextStyle(fontSize: 12.5, color: _isDark ? Colors.white : _textDark)),
                     ))
                 .toList(),
           ),
@@ -1012,14 +1149,15 @@ class _InventoryPageState extends State<InventoryPage>
         height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: _white,
+          color: _isDark ? const Color(0xFF334155) : _white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey.shade200, width: 1),
+          border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: _filterBatch,
-            icon: const Icon(Icons.arrow_drop_down, color: _textLight),
+            dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight),
             onChanged: (val) {
               if (val != null) {
                 setState(() {
@@ -1032,13 +1170,57 @@ class _InventoryPageState extends State<InventoryPage>
             items: _batchKeys
                 .map((b) => DropdownMenuItem(
                       value: b,
-                      child: Text(b, style: const TextStyle(fontSize: 12.5, color: _textDark)),
+                      child: Text(b, style: TextStyle(fontSize: 12.5, color: _isDark ? Colors.white : _textDark)),
                     ))
                 .toList(),
           ),
         ),
       ),
+      const SizedBox(width: 8),
+      CampSelectorChip(
+        textColor: _isDark ? Colors.white : _textDark,
+        bgColor: _isDark ? const Color(0xFF334155) : _white,
+        borderColor: _isDark ? const Color(0xFF475569) : Colors.grey.shade200,
+        onCampChanged: (newCamp) {
+          setState(() {
+            _loadDataFromHive();
+          });
+        },
+      ),
     ];
+
+    // Universal Proforma Sheet Button
+    widgets.add(const SizedBox(width: 8));
+    widgets.add(
+      ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _teal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          elevation: 2,
+        ),
+        onPressed: () async {
+          final res = await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => UniversalProformaSheetPage(
+                branchId: widget.branchId,
+                isDispenser: widget.isDispenser,
+                isAdmin: widget.isAdmin,
+              ),
+            ),
+          );
+          if (res == true) {
+            _loadDataFromHive();
+          }
+        },
+        icon: const Icon(FontAwesomeIcons.fileExcel, size: 14, color: Colors.white),
+        label: const Text(
+          'Proforma Sheet',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+        ),
+      ),
+    );
 
     // Download PDF button
     widgets.add(const SizedBox(width: 8));
@@ -1080,8 +1262,40 @@ class _InventoryPageState extends State<InventoryPage>
             ),
     );
 
+    if (_canRegisterMedicine) {
+      widgets.add(const SizedBox(width: 8));
+      widgets.add(
+        ElevatedButton.icon(
+          onPressed: () {
+            final menuItems = [
+              {'label': 'Stock'},
+              if (!_isSupervisorOrReadOnly) {'label': 'Update Stock'},
+              if (_canRegisterMedicine) {'label': 'Register Medicine'},
+            ];
+            final regIdx = menuItems.indexWhere((m) => m['label'] == 'Register Medicine');
+            if (regIdx != -1 && regIdx < _tabCtrl.length) {
+              _tabCtrl.animateTo(regIdx);
+              setState(() {});
+            }
+          },
+          icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 16),
+          label: const Text(
+            'Register Medicine',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.teal.shade800,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            minimumSize: const Size(0, 38),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+    }
+
     return Container(
-      color: _bg,
+      color: _isDark ? const Color(0xFF0F172A) : _bg,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       child: Row(children: widgets),
     );
@@ -1197,9 +1411,9 @@ class _InventoryPageState extends State<InventoryPage>
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: _white,
+        color: _isDark ? const Color(0xFF1E293B) : _white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200, width: 1),
+        border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.02),
@@ -1248,8 +1462,8 @@ class _InventoryPageState extends State<InventoryPage>
                 ),
                 Text(
                   label,
-                  style: const TextStyle(
-                    color: _textLight,
+                  style: TextStyle(
+                    color: _isDark ? const Color(0xFF94A3B8) : _textLight,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
@@ -1266,7 +1480,7 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       height: 24,
       width: 1,
-      color: Colors.grey.shade200,
+      color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200,
       margin: const EdgeInsets.symmetric(horizontal: 16),
     );
   }
@@ -1339,7 +1553,7 @@ class _InventoryPageState extends State<InventoryPage>
       children: [
         Container(
           height: 38,
-          color: _teal,
+          color: _isDark ? const Color(0xFF0F766E) : _teal,
           child: Row(
               children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
         ),
@@ -1354,12 +1568,12 @@ class _InventoryPageState extends State<InventoryPage>
                   width: w,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   alignment: Alignment.center,
-                  color: Colors.white,
+                  color: _isDark ? const Color(0xFF1E293B) : Colors.white,
                   child: Text(
                     data.length >= totalCount
                         ? 'Showing all $totalCount medicines'
                         : 'Loading more...',
-                    style: const TextStyle(color: _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+                    style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                 );
               }
@@ -1367,14 +1581,18 @@ class _InventoryPageState extends State<InventoryPage>
               final qty = b['quantity'] as int;
               final type = b['type'] as String;
               final price = b['price'] as double;
-              final barcode = (b['barcode'] as String? ?? '').trim();
+              final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
               final lowStock = qty < 10;
               final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
               final expText = _formatDate(b['expiryDate'] as String?);
               final isWarning = lowStock || expSoon;
-              final rowColor = isWarning
-                  ? const Color(0xFFFFF5F5)
-                  : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA));
+              final rowColor = _isDark
+                  ? (isWarning
+                      ? const Color(0xFF2D1214)
+                      : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
+                  : (isWarning
+                      ? const Color(0xFFFFF5F5)
+                      : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA)));
 
               final rowContent = Container(
                 decoration: BoxDecoration(
@@ -1382,8 +1600,8 @@ class _InventoryPageState extends State<InventoryPage>
                   border: Border(
                     bottom: BorderSide(
                         color: isWarning
-                            ? _red.withValues(alpha: 0.15)
-                            : Colors.grey.shade100,
+                            ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
+                            : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
                         width: 1.0),
                   ),
                 ),
@@ -1393,7 +1611,7 @@ class _InventoryPageState extends State<InventoryPage>
                       _dCell(
                           cols[0].w,
                           Text('${i + 1}',
-                              style: const TextStyle(color: _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
+                              style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
                       _dCell(
                           cols[1].w,
                           Row(children: [
@@ -1401,13 +1619,15 @@ class _InventoryPageState extends State<InventoryPage>
                               child: RichText(
                                 overflow: TextOverflow.ellipsis,
                                 text: TextSpan(
-                                  style: const TextStyle(fontSize: 13, color: _textDark),
+                                  style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
                                   children: [
                                     TextSpan(
                                       text: b['name'] ?? '',
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
-                                        color: isWarning ? _red.withValues(alpha: 0.9) : _textDark,
+                                        color: _isDark
+                                            ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
+                                            : (isWarning ? _red.withValues(alpha: 0.9) : _textDark),
                                       ),
                                     ),
                                     if (b['formula'] != null && (b['formula'] as String).isNotEmpty) ...[
@@ -1415,7 +1635,9 @@ class _InventoryPageState extends State<InventoryPage>
                                       TextSpan(
                                         text: '(${b['formula']})',
                                         style: TextStyle(
-                                          color: isWarning ? _red.withValues(alpha: 0.7) : _textLight,
+                                          color: _isDark
+                                              ? (isWarning ? const Color(0xFFFCA5A5) : const Color(0xFF94A3B8))
+                                              : (isWarning ? _red.withValues(alpha: 0.7) : _textLight),
                                           fontWeight: FontWeight.normal,
                                           fontSize: 12,
                                         ),
@@ -1431,23 +1653,27 @@ class _InventoryPageState extends State<InventoryPage>
                       _dCell(
                           cols[4].w,
                           Text(b['dose'] ?? '—',
-                              style: const TextStyle(color: _textDark, fontSize: 12.5))),
+                              style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5))),
                       _dCell(
                           cols[5].w,
                           Text(NumberFormat('#,###').format(qty),
                               style: TextStyle(
-                                  color: lowStock ? _red : _textDark,
+                                  color: _isDark
+                                      ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
+                                      : (lowStock ? _red : _textDark),
                                   fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
                                   fontSize: 12.5))),
                       _dCell(
                           cols[6].w,
                           Text(_fmtPrice(price),
-                              style: const TextStyle(color: _textDark, fontSize: 12.5, fontWeight: FontWeight.w500))),
+                              style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5, fontWeight: FontWeight.w500))),
                       _dCell(
                           cols[7].w,
                           Text(expText,
                               style: TextStyle(
-                                  color: expSoon ? _red : _textDark,
+                                  color: _isDark
+                                      ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
+                                      : (expSoon ? _red : _textDark),
                                   fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
                                   fontSize: 12.5))),
                       _dCell(
@@ -1461,8 +1687,23 @@ class _InventoryPageState extends State<InventoryPage>
               );
 
               return InkWell(
-                  onTap: _isSupervisorOrReadOnly ? null : () => _showEditSheet(b),
-                  hoverColor: const Color(0xFFF3F7F6),
+                  onTap: _isDirectEditAllowed
+                      ? () => _showEditSheet(b)
+                      : () {
+                          if (widget.isDispenser && mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: const Text(
+                                  '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                                backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                                duration: const Duration(seconds: 3),
+                              ),
+                            );
+                          }
+                        },
+                  hoverColor: _isDark ? const Color(0xFF334155) : const Color(0xFFF3F7F6),
                   child: rowContent,
                 );
             },
@@ -1474,9 +1715,9 @@ class _InventoryPageState extends State<InventoryPage>
     final cardContent = Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200, width: 1.5),
+        border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1.5),
         boxShadow: [
           BoxShadow(
             color: _shadow.withValues(alpha: 0.04),
@@ -1514,7 +1755,7 @@ class _InventoryPageState extends State<InventoryPage>
                 data.length >= totalCount
                     ? 'Showing all $totalCount medicines'
                     : 'Loading more...',
-                style: const TextStyle(color: _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
               ),
             );
           }
@@ -1522,7 +1763,7 @@ class _InventoryPageState extends State<InventoryPage>
           final qty = _asInt(b['quantity']);
           final type = b['type']?.toString() ?? '';
           final price = _parsePrice(b['price']);
-          final barcode = (b['barcode']?.toString() ?? '').trim();
+          final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
           final lowStock = qty < 10;
           final expSoon = _isExpiringSoon(b['expiryDate']?.toString());
           final expText = _formatDate(b['expiryDate']?.toString());
@@ -1533,19 +1774,21 @@ class _InventoryPageState extends State<InventoryPage>
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isWarning ? const Color(0xFFFFEBEE) : _white,
+              color: _isDark
+                  ? (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B))
+                  : (isWarning ? const Color(0xFFFFEBEE) : _white),
               borderRadius: BorderRadius.circular(12),
               border: Border(
-                top: isWarning ? const BorderSide(color: _red, width: 3) : const BorderSide(color: Color(0xFFE0E0E0), width: 0.8),
-                left: isWarning ? const BorderSide(color: _red, width: 5) : const BorderSide(color: Color(0xFFE0E0E0), width: 0.8),
-                right: isWarning ? const BorderSide(color: _red, width: 1) : const BorderSide(color: Color(0xFFE0E0E0), width: 0.8),
-                bottom: isWarning ? const BorderSide(color: _red, width: 1) : const BorderSide(color: Color(0xFFE0E0E0), width: 0.8),
+                top: isWarning ? BorderSide(color: _isDark ? const Color(0xFFFF6B6B) : _red, width: 3) : BorderSide(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0), width: 0.8),
+                left: isWarning ? BorderSide(color: _isDark ? const Color(0xFFFF6B6B) : _red, width: 5) : BorderSide(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0), width: 0.8),
+                right: isWarning ? BorderSide(color: _isDark ? const Color(0xFFFF6B6B) : _red, width: 1) : BorderSide(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0), width: 0.8),
+                bottom: isWarning ? BorderSide(color: _isDark ? const Color(0xFFFF6B6B) : _red, width: 1) : BorderSide(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0), width: 0.8),
               ),
               boxShadow: [
                 BoxShadow(
                     color: isWarning
-                        ? _red.withValues(alpha: 0.18)
-                        : _shadow,
+                        ? (_isDark ? Colors.red.withValues(alpha: 0.3) : _red.withValues(alpha: 0.18))
+                        : (_isDark ? Colors.black26 : _shadow),
                     blurRadius: isWarning ? 10 : 6,
                     offset: const Offset(0, 3))
               ],
@@ -1558,12 +1801,12 @@ class _InventoryPageState extends State<InventoryPage>
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                           color: isWarning
-                              ? _red.withValues(alpha: 0.1)
-                              : _green50,
+                              ? (_isDark ? Colors.red.withValues(alpha: 0.2) : _red.withValues(alpha: 0.1))
+                              : (_isDark ? const Color(0xFF334155) : _green50),
                           borderRadius: BorderRadius.circular(8)),
                       child: _typeIconWidget(type,
                           size: 13,
-                          color: isWarning ? _red : null),
+                          color: isWarning ? (_isDark ? const Color(0xFFFF6B6B) : _red) : (_isDark ? const Color(0xFF38BDF8) : null)),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -1572,7 +1815,9 @@ class _InventoryPageState extends State<InventoryPage>
                       children: [
                         Text('${i + 1}. ${b['name']}',
                             style: TextStyle(
-                                color: isWarning ? _red : _textDark,
+                                color: _isDark
+                                    ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
+                                    : (isWarning ? _red : _textDark),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13.5)),
                       ],
@@ -1583,9 +1828,9 @@ class _InventoryPageState extends State<InventoryPage>
                   Wrap(spacing: 8, runSpacing: 6, children: [
                     _typePill(type),
                     if ((b['dose'] ?? '').toString().isNotEmpty)
-                      _infoBadge(b['dose'].toString(), _textMid),
+                      _infoBadge(b['dose'].toString(), _isDark ? const Color(0xFF94A3B8) : _textMid),
                     if (barcode.isNotEmpty)
-                      _infoBadge(barcode, _indigo, icon: Icons.qr_code_rounded),
+                      _infoBadge(barcode, _isDark ? const Color(0xFF38BDF8) : _indigo, icon: Icons.qr_code_rounded),
                     _priceBadge(price),
                     _expBadge(expText, expSoon),
                     if (lowStock || expSoon)
@@ -1595,30 +1840,46 @@ class _InventoryPageState extends State<InventoryPage>
           );
 
           return GestureDetector(
-                onTap: _isSupervisorOrReadOnly ? null : () => _showEditSheet(b), child: card);
+                onTap: _isDirectEditAllowed
+                    ? () => _showEditSheet(b)
+                    : () {
+                        if (widget.isDispenser && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text(
+                                '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                              ),
+                              backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        }
+                      },
+                child: card);
         },
       );
 
   // Small pill showing the batch barcode (or a muted placeholder when absent)
   Widget _barcodeCell(String barcode) {
     if (barcode.isEmpty) {
-      return Text('—', style: TextStyle(color: _textLight.withValues(alpha: 0.6), fontSize: 12.5));
+      return Text('—', style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight.withValues(alpha: 0.6), fontSize: 12.5));
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: _indigo.withValues(alpha: 0.08),
+        color: _isDark ? const Color(0xFF0C4A6E) : _indigo.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _indigo.withValues(alpha: 0.25)),
+        border: Border.all(color: _isDark ? const Color(0xFF0284C7) : _indigo.withValues(alpha: 0.25)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        const Icon(Icons.qr_code_rounded, size: 12, color: _indigo),
+        Icon(Icons.qr_code_rounded, size: 12, color: _isDark ? const Color(0xFF38BDF8) : _indigo),
         const SizedBox(width: 4),
         Flexible(
           child: Text(
             barcode,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _indigo, fontSize: 11, fontWeight: FontWeight.w600),
+            style: TextStyle(color: _isDark ? const Color(0xFF7DD3FC) : _indigo, fontSize: 11, fontWeight: FontWeight.bold),
           ),
         ),
       ]),
@@ -1626,6 +1887,17 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   void _showEditSheet(Map<String, dynamic> batchData) {
+    if (!_isDirectEditAllowed) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🔒 Direct editing is restricted for Dispensers. Use "Update Stock" for Supervisor approval.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
     final docIds =
         List<String>.from(batchData['_docIds'] as List? ?? []);
     if (docIds.isEmpty) return;
@@ -2505,6 +2777,10 @@ class _InventoryPageState extends State<InventoryPage>
                   style: TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 12))),
           DataColumn(
+              label: Text('Camp',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 12))),
+          DataColumn(
               label: Text('Barcode',
                   style: TextStyle(
                       fontWeight: FontWeight.bold, fontSize: 12))),
@@ -2523,6 +2799,8 @@ class _InventoryPageState extends State<InventoryPage>
         ],
         rows: items.map((m) {
           final p = _parsePrice(m['price']);
+          final campId = (m['dispensaryId'] ?? m['campId'] ?? 'all').toString();
+          final campLabel = CampSessionService.getCampLabel(campId);
           return DataRow(cells: [
             DataCell(Text(m['name']?.toString() ?? '—',
                 style: const TextStyle(
@@ -2536,6 +2814,16 @@ class _InventoryPageState extends State<InventoryPage>
             ])),
             DataCell(Text(m['dose']?.toString() ?? '—',
                 style: const TextStyle(fontSize: 12))),
+            DataCell(Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: _teal.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _teal.withValues(alpha: 0.3)),
+              ),
+              child: Text(campLabel,
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal)),
+            )),
             DataCell(Text(
                 (m['barcode']?.toString().isNotEmpty ?? false)
                     ? m['barcode'].toString()
@@ -2569,6 +2857,8 @@ class _InventoryPageState extends State<InventoryPage>
         final price = _parsePrice(m['price']);
         final expiry = _formatDate(m['expiryDate']?.toString());
         final barcode = m['barcode']?.toString() ?? '';
+        final campId = (m['dispensaryId'] ?? m['campId'] ?? 'all').toString();
+        final campLabel = CampSessionService.getCampLabel(campId);
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 5),
@@ -2596,6 +2886,8 @@ class _InventoryPageState extends State<InventoryPage>
                 _miniChip('PKR ${_fmtPrice(price)}', _green600),
                 const SizedBox(width: 6),
                 _miniChip(expiry, _textMid),
+                const SizedBox(width: 6),
+                _miniChip('Camp: $campLabel', _teal),
                 if (barcode.isNotEmpty) ...[
                   const SizedBox(width: 6),
                   _miniChip(barcode, _indigo),
@@ -2637,14 +2929,32 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
+  static Color _darkTypeColor(String type) => switch (type) {
+        'Tablet' => const Color(0xFF60A5FA),
+        'Capsule' => const Color(0xFFC084FC),
+        'Syrup' => const Color(0xFFFDBA74),
+        'Injection' => const Color(0xFFFCA5A5),
+        'Drip' => const Color(0xFF5EEAD4),
+        'Drip Set' => const Color(0xFF67E8F9),
+        'Syringe' => const Color(0xFFF472B6),
+        'Cannula' => const Color(0xFFFB7185),
+        'Needle' => const Color(0xFFE879F9),
+        'Nebulization' => const Color(0xFF818CF8),
+        'Dressing Item' => const Color(0xFFCBD5E1),
+        'Consumables' => const Color(0xFF2DD4BF),
+        _ => const Color(0xFFE2E8F0),
+      };
+
   Widget _typePill(String type) {
-    final color = _typeColor(type);
+    final color = _isDark ? _darkTypeColor(type) : _typeColor(type);
+    final bg = _isDark ? color.withValues(alpha: 0.18) : color.withValues(alpha: 0.12);
+    final border = _isDark ? color.withValues(alpha: 0.45) : color.withValues(alpha: 0.35);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
+        color: bg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.35), width: 1),
+        border: Border.all(color: border, width: 1),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         _typeIconWidget(type, size: 10, color: color),
@@ -2655,7 +2965,7 @@ class _InventoryPageState extends State<InventoryPage>
                 style: TextStyle(
                     color: color,
                     fontSize: 10.5,
-                    fontWeight: FontWeight.w700))),
+                    fontWeight: FontWeight.bold))),
       ]),
     );
   }
@@ -2948,8 +3258,9 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
       final barcode = _barcodeCtrl.text.trim();
 
       for (int i = 0; i < widget.docIds.length; i++) {
-        final ref = col.doc(widget.docIds[i]);
-        batch.update(ref, {
+        final id = widget.docIds[i];
+        final ref = col.doc(id);
+        final uData = {
           'formula': '',
           'name': _nameCtrl.text.trim(),
           'name_lower': _nameCtrl.text.trim().toLowerCase(),
@@ -2958,9 +3269,20 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           'quantity': perDoc + (i == 0 ? remainder : 0),
           'price': price,
           'barcode': barcode,
+          'code': barcode,
           'expiryDate': _expiryCtrl.text.trim(),
           'updatedAt': FieldValue.serverTimestamp(),
-        });
+        };
+        batch.update(ref, uData);
+
+        try {
+          final stockBox = Hive.box(LocalStorageService.stockBox);
+          final existing = stockBox.get('stock:$id') ?? stockBox.get(id);
+          if (existing is Map) {
+            final updated = Map<String, dynamic>.from(existing)..addAll(uData);
+            LocalStorageService.saveLocalInventoryItem(updated);
+          }
+        } catch (_) {}
       }
       await batch.commit();
 
@@ -3106,14 +3428,13 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
               ),
               const SizedBox(height: 12),
               Builder(builder: (context) {
-                final canEditBarcode = widget.isAdmin || widget.isDoctor || !widget.isDispenser;
+                const canEditBarcode = true;
                 return _field(
                   controller: _barcodeCtrl,
                   label: 'Barcode',
                   icon: Icons.qr_code_rounded,
                   keyboardType: TextInputType.text,
                   enabled: canEditBarcode,
-                  helperText: canEditBarcode ? null : 'Only Doctor can edit barcode',
                 );
               }),
               const SizedBox(height: 12),

@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'local_storage_service.dart';
 import 'finance_loans_storage.dart';
 import 'finance_ledger_storage.dart';
+import 'finance_expenses_storage.dart';
 
 
 class FinanceLocalStorage {
@@ -51,7 +52,7 @@ class FinanceLocalStorage {
   // Returns true if enough time has passed since the last successful sync of
   // [key], meaning a fresh download should be performed. Stores the timestamp
   // in the finance settings box so it persists across restarts.
-  static bool _shouldRefresh(String key, {Duration ttl = const Duration(minutes: 5)}) {
+  static bool _shouldRefresh(String key, {Duration ttl = const Duration(hours: 2)}) {
     try {
       final box = Hive.box(LocalStorageService.financeSettingsBox);
       final raw = box.get('__sync_ts_$key') as String?;
@@ -365,15 +366,55 @@ class FinanceLocalStorage {
     return branchId;
   }
 
-  static List<Map<String, dynamic>> getEmployees(String branchId) {
+  static String mapPaymentMethodToCoa(String? method) {
+    if (method == null || method.isEmpty) return '1030';
+    final lower = method.trim().toLowerCase();
+    if (lower.contains('1010') || lower.contains('meezan')) return '1010';
+    if (lower.contains('1020') || lower.contains('ubl')) return '1020';
+    if (lower.contains('1030') || lower.contains('cash') || lower == 'hand') return '1030';
+    if (lower.contains('1050') || lower.contains('easypaisa')) return '1050';
+    if (lower.contains('1060') || lower.contains('jazzcash')) return '1060';
+    if (lower.contains('1070') || lower.contains('bop')) return '1070';
+    if (lower.contains('1080') || lower.contains('nbp')) return '1080';
+    if (lower.contains('1090') || lower.contains('faysal')) return '1090';
+    if (lower == 'bank_transfer' || lower == 'cheque' || lower == 'bank') return '1010';
+    return '1030';
+  }
 
+  static List<Map<String, dynamic>> getEmployees(String branchId) {
     final list = <Map<String, dynamic>>[];
-    final isGlobal = branchId == 'all' || branchId.isEmpty;
+    final cleanBranch = branchId.trim().toLowerCase();
+    final isGlobal = cleanBranch == 'all' || cleanBranch.isEmpty;
 
     for (final val in employeesBox.values) {
       if (val is! Map) continue;
       final record = Map<String, dynamic>.from(val);
-      if (!isGlobal && record['branchId'] != branchId) continue;
+      final role = (record['role'] ?? record['linkedUserRole'] ?? record['designation'] ?? '').toString().toLowerCase().trim();
+      final dept = (record['department'] ?? record['linkedDepartment'] ?? '').toString().toLowerCase().trim();
+
+      // Exclude Madrassa Guardians, Patients, and non-employee roles from Finance Payroll/Employee list
+      if (role.contains('guardian') ||
+          role.contains('patient') ||
+          dept.contains('guardian') ||
+          dept.contains('patient') ||
+          record['isEmployee'] == false) {
+        continue;
+      }
+
+      final empBranch = (record['branchId'] ?? '').toString().trim().toLowerCase();
+
+      if (!isGlobal && empBranch.isNotEmpty && empBranch != cleanBranch) {
+        final empNameBranch = getBranchName(record['branchId']?.toString() ?? '').toLowerCase();
+        final reqNameBranch = getBranchName(branchId).toLowerCase();
+        final matchCanonical = empNameBranch == reqNameBranch;
+        final matchClean = empBranch.replaceAll('branch_', '') == cleanBranch.replaceAll('branch_', '');
+        final matchPrefix = empBranch.startsWith(cleanBranch) || cleanBranch.startsWith(empBranch);
+
+        if (!matchCanonical && !matchClean && !matchPrefix) {
+          continue;
+        }
+      }
+
       // Recalculate advance balance on demand
       record['currentAdvanceBalance'] = getAdvanceBalance(record['localId']);
       list.add(record);
@@ -1477,6 +1518,62 @@ class FinanceLocalStorage {
       'data': sanitized,
     });
 
+    // Automated Double-Entry Ledger Posting for Payroll Payout (QuickBooks Automation)
+    if (record['type'] == 'payout') {
+      final double amt = (record['amount'] as num?)?.toDouble() ?? 0.0;
+      final int paisa = (record['amountMinor'] as int?) ?? (amt * 100).round();
+      if (paisa > 0) {
+        final String accCode = record['accountCode']?.toString() ?? mapPaymentMethodToCoa(record['paymentMethod']?.toString());
+        final String empName = record['employeeName']?.toString() ?? 'Employee';
+        final String mKey = record['monthKey']?.toString() ?? DateFormat('yyyy-MM').format(DateTime.now());
+
+        try {
+          final je = JournalEntry(
+            id: 'JE_PAYOUT_$localId',
+            branchId: branchId,
+            date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+            sourceType: 'PAYROLL_PAYOUT',
+            sourceRefId: localId,
+            description: 'Salary Payout for $empName (Period: $mKey)',
+            createdBy: performedBy,
+            postedAt: now,
+            lines: [
+              JournalLine(
+                accountCode: '5010',
+                debit: paisa,
+                credit: 0,
+                memo: 'Salaries & Wages Expense ($empName)',
+              ),
+              JournalLine(
+                accountCode: accCode,
+                debit: 0,
+                credit: paisa,
+                memo: 'Paid from Account $accCode ($empName)',
+              ),
+            ],
+          );
+          await FinanceLedgerStorage.postJournalEntry(je);
+        } catch (jeErr) {
+          debugPrint('[FinanceLocalStorage] Auto JournalEntry post warning: $jeErr');
+        }
+
+        try {
+          await FinanceExpensesStorage.saveExpense(
+            branchId: branchId,
+            amount: amt,
+            category: 'Salaries & Payroll',
+            description: 'Salary Payout – $empName ($mKey)',
+            performedBy: performedBy,
+            performedByName: performedBy,
+            accountCode: accCode,
+            departmentId: 'ADM',
+          );
+        } catch (expErr) {
+          debugPrint('[FinanceLocalStorage] Auto expense post warning: $expErr');
+        }
+      }
+    }
+
     // Logging Audit Trail
     await logAction(
       branchId: branchId,
@@ -1556,6 +1653,46 @@ class FinanceLocalStorage {
       'recordId': recordId,
       'data': sanitized,
     });
+
+    // Automated Double-Entry Ledger Reversal for Voided Payout (Refund to Account)
+    if (entry['type'] == 'payout') {
+      final double amt = (entry['amount'] as num?)?.toDouble() ?? 0.0;
+      final int paisa = (entry['amountMinor'] as int?) ?? (amt * 100).round();
+      if (paisa > 0) {
+        final String accCode = entry['accountCode']?.toString() ?? mapPaymentMethodToCoa(entry['paymentMethod']?.toString());
+        final String empName = entry['employeeName']?.toString() ?? 'Employee';
+
+        try {
+          final reversalJe = JournalEntry(
+            id: 'JE_VOID_PAYOUT_${entry['localId']}_${DateTime.now().millisecondsSinceEpoch}',
+            branchId: branchId,
+            date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
+            sourceType: 'PAYROLL_VOID',
+            sourceRefId: recordId,
+            description: 'REVERSAL: Voided Salary Payout for $empName ($voidReason)',
+            createdBy: voidedBy,
+            postedAt: now,
+            lines: [
+              JournalLine(
+                accountCode: accCode,
+                debit: paisa,
+                credit: 0,
+                memo: 'Refunded to Account $accCode ($empName)',
+              ),
+              JournalLine(
+                accountCode: '5010',
+                debit: 0,
+                credit: paisa,
+                memo: 'Reversed Salaries & Wages Expense',
+              ),
+            ],
+          );
+          await FinanceLedgerStorage.postJournalEntry(reversalJe);
+        } catch (revErr) {
+          debugPrint('[FinanceLocalStorage] Void payout reversal error: $revErr');
+        }
+      }
+    }
 
     // Logging Audit Trail
     await logAction(

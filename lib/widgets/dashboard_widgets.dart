@@ -482,8 +482,114 @@ Future<BranchStats> fetchAllBranchesStats(List<String> ids, {DashboardFilter? fi
   );
 }
 
+Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids) async* {
+  BranchStats _compute() {
+    if (ids.isEmpty) return const BranchStats();
+    final targetSet = ids.map((i) => i.toLowerCase().trim()).toSet();
+    final matchAll = targetSet.isEmpty || targetSet.contains('all');
+
+    final today     = LocalStorageService.getTodayDateKey();          // ddMMyy
+    final todayDash = DateFormat('yyyy-MM-dd').format(DateTime.now()); // yyyy-MM-dd
+
+    int z = 0, nz = 0, gm = 0, dispensed = 0, dispRev = 0;
+    int zRev = 0, nzRev = 0;
+    double donTotal = 0;
+
+    // ── 1. Tokens (entries box) ──────────────────────────────────────────────
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      for (final raw in entriesBox.values) {
+        if (raw is! Map) continue;
+        final e = Map<String, dynamic>.from(raw);
+        if ((e['dateKey'] ?? '') != today) continue;
+        final bId = (e['branchId'] as String?)?.toLowerCase().trim() ?? '';
+        if (!matchAll && !targetSet.contains(bId)) continue;
+
+        final qt   = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'zakat';
+        final days = (e['daysOfMedicine'] as num?)?.toInt() ?? 1;
+        if (qt == 'non-zakat') {
+          nz++;
+          dispRev += 100 * days;
+          nzRev   += 100 * days;
+        } else if (qt == 'gmwf') {
+          gm++;
+        } else {
+          z++;
+          dispRev += 20 * days;
+          zRev    += 20 * days;
+        }
+      }
+    }
+
+    // ── 2. Dispensed (dispensary box) ─────────────────────────────────────────
+    if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+      final dispBox = Hive.box(LocalStorageService.dispensaryBox);
+      for (final raw in dispBox.values) {
+        if (raw is! Map) continue;
+        final d = Map<String, dynamic>.from(raw);
+        if ((d['dateKey'] ?? '') != today) continue;
+        final bId = (d['branchId'] as String?)?.toLowerCase().trim() ?? '';
+        if (!matchAll && !targetSet.contains(bId)) continue;
+        dispensed++;
+      }
+    }
+
+    // ── 3. Donations (donations box) ──────────────────────────────────────────
+    if (Hive.isBoxOpen(LocalStorageService.donationsBox)) {
+      final seenReceipts = <String>{};
+      final donBox = Hive.box(LocalStorageService.donationsBox);
+      for (final raw in donBox.values) {
+        if (raw is! Map) continue;
+        final data = Map<String, dynamic>.from(raw);
+        final recBranch = data['branchId']?.toString().toLowerCase().trim() ?? '';
+        if (!matchAll && !targetSet.contains(recBranch)) continue;
+
+        final date = data['date']?.toString() ?? '';
+        if (date != todayDash) continue;
+        final syncStatus = data['syncStatus']?.toString().toLowerCase() ?? '';
+        final status = data['status']?.toString().toLowerCase() ?? '';
+        if (syncStatus == 'deleted' || status == 'deleted') continue;
+        final payMethod = data['paymentMethod']?.toString().toLowerCase() ?? '';
+        if (payMethod == 'bank_deposit') continue;
+        final receiptNo = data['receiptNo']?.toString() ?? '';
+        final clean = don.cleanReceiptNumber(receiptNo);
+        if (seenReceipts.contains(clean)) continue;
+        seenReceipts.add(clean);
+        final amt = data['amount'];
+        donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+      }
+    }
+
+    return BranchStats(
+      zakat: z, nonZakat: nz, gmwf: gm,
+      dispensed: dispensed, prescribed: 0,
+      dasterkhwaan: 0, dasterkhwaanServed: 0,
+      donations: donTotal.toInt(),
+      dispensaryRevenue: dispRev,
+      zakatRevenue: zRev, nonZakatRevenue: nzRev, gmwfRevenue: 0,
+    );
+  }
+
+  yield _compute();
+
+  final streams = <Stream>[];
+  if (Hive.isBoxOpen(LocalStorageService.entriesBox)) streams.add(Hive.box(LocalStorageService.entriesBox).watch());
+  if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) streams.add(Hive.box(LocalStorageService.dispensaryBox).watch());
+  if (Hive.isBoxOpen(LocalStorageService.donationsBox)) streams.add(Hive.box(LocalStorageService.donationsBox).watch());
+
+  if (streams.isNotEmpty) {
+    await for (final _ in Rx.merge(streams)) {
+      yield _compute();
+    }
+  }
+}
+
 Stream<BranchStats> streamAllBranchesStats(List<String> ids, {DashboardFilter? filter}) {
   if (ids.isEmpty) return Stream.value(const BranchStats());
+  final isOnlyToday = (filter == null || filter.timeRange == TimeRange.today);
+  if (isOnlyToday) {
+    return _streamCombinedTodayStatsFromHive(ids);
+  }
   
   final streams = ids.map((id) => streamBranchStats(id, filter: filter)).toList();
   return Rx.combineLatestList(streams).map((results) {
@@ -2622,6 +2728,7 @@ class GlobalFilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final isMobile = MediaQuery.of(context).size.width < 750;
+    final showBranchSelector = branches.length > 1;
 
     return ValueListenableBuilder<DashboardFilter>(
       valueListenable: controller,
@@ -2654,12 +2761,14 @@ class GlobalFilterBar extends StatelessWidget {
                           child: _buildTimeChips(context, filter),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildFilterSection(
-                        icon: Icons.location_on_rounded,
-                        title: 'Selected Branch',
-                        child: _buildBranchSelector(context, filter),
-                      ),
+                      if (showBranchSelector) ...[
+                        const SizedBox(height: 16),
+                        _buildFilterSection(
+                          icon: Icons.location_on_rounded,
+                          title: 'Selected Branch',
+                          child: _buildBranchSelector(context, filter),
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       _buildFilterSection(
                         icon: Icons.category_rounded,
@@ -2682,23 +2791,25 @@ class GlobalFilterBar extends StatelessWidget {
                           child: _buildTimeChips(context, filter),
                         ),
                       ),
-                      Container(
-                        width: 1,
-                        height: 48,
-                        color: t.bgRule,
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                      ),
-                      Expanded(
-                        flex: 4,
-                        child: _buildFilterSection(
-                          icon: Icons.location_on_rounded,
-                          title: 'Selected Branch',
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: _buildBranchSelector(context, filter),
+                      if (showBranchSelector) ...[
+                        Container(
+                          width: 1,
+                          height: 48,
+                          color: t.bgRule,
+                          margin: const EdgeInsets.symmetric(horizontal: 16),
+                        ),
+                        Expanded(
+                          flex: 4,
+                          child: _buildFilterSection(
+                            icon: Icons.location_on_rounded,
+                            title: 'Selected Branch',
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: _buildBranchSelector(context, filter),
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                       Container(
                         width: 1,
                         height: 48,

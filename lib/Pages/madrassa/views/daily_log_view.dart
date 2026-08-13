@@ -2559,8 +2559,14 @@ class _StudentLogCard extends StatelessWidget {
             att == 'leave_requested' ||
             (leaveStatus == 'pending' && log['leaveReason'] != null && log['leaveReason'].toString().isNotEmpty);
         final parentRepliedRequested = log['parentRepliedRequested'] == true;
+        final String? parentMsgText = log['parentReplyText']?.toString() ?? log['parentReplyMessage']?.toString();
+        final bool hasPendingReply = parentRepliedRequested ||
+            (msg != true && (parentMsgText != null && parentMsgText.trim().isNotEmpty));
 
-        final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
+        final int studentCurrentLines = (studentData['currentLines'] as num?)?.toInt() ?? (int.tryParse(studentData['currentLines']?.toString() ?? '') ?? 0);
+        final int lines = (log.containsKey('currentLines') && log['currentLines'] != null)
+            ? ((log['currentLines'] as num?)?.toInt() ?? (int.tryParse(log['currentLines']?.toString() ?? '') ?? studentCurrentLines))
+            : studentCurrentLines;
         final int sabkiPara = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
         final String? sabkiRatio = log['sabkiRatio']?.toString();
         final int manzilPara = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);
@@ -2851,37 +2857,163 @@ class _StudentLogCard extends StatelessWidget {
                       if (hifzBadge != null) hifzBadge,
                     ],
                   ),
-                  if (isParentRequested && leaveStatus == 'pending')
+                  if ((isParentRequested || att == 'leave_requested') && leaveStatus == 'pending')
                     Container(
                       margin: const EdgeInsets.only(top: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(4)),
-                      child: Text(
-                        'Parent requested a leave: ${log['leaveReason'] ?? "No reason"}',
-                        style: TextStyle(fontSize: 11, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.event_note_rounded, size: 14, color: Colors.amber.shade900),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  'Parent Requested Leave: "${log['leaveReason'] ?? "No reason"}"',
+                                  style: TextStyle(fontSize: 11.5, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              _actionButton('Allow Leave', Colors.green, isReadOnly ? () {} : () {
+                                onUpdateLocal(sId, 'attendance', 'leave');
+                                onUpdateLocal(sId, 'leaveStatus', 'approved');
+                                onUpdateLocal(sId, 'isParentRequested', false);
+                              }),
+                              const SizedBox(width: 8),
+                              _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                                onUpdateLocal(sId, 'leaveStatus', 'declined');
+                                onUpdateLocal(sId, 'isParentRequested', false);
+                              }),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
-                  if (parentRepliedRequested && msg != true)
+                  if (leaveStatus == 'approved')
                     Container(
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(4)),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            'Parent requested reply verification',
-                            style: TextStyle(fontSize: 11, color: Colors.purple.shade900, fontWeight: FontWeight.bold),
+                          Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade800),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Leave Approved: "${log['leaveReason'] ?? "Granted"}"',
+                              style: TextStyle(fontSize: 11, color: Colors.green.shade900, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                          const SizedBox(width: 8),
-                          _actionButton('Approve Reply', Colors.purple, () {
-                            onUpdateLocal(sId, 'parentReplied', true);
-                            onUpdateLocal(sId, 'parentRepliedRequested', false);
-                          }),
-                          const SizedBox(width: 8),
-                          _actionButton('Deny', Colors.red, () {
-                            onUpdateLocal(sId, 'parentRepliedRequested', false);
-                          }),
+                        ],
+                      ),
+                    ),
+                  if (leaveStatus == 'declined')
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.cancel_rounded, size: 14, color: Colors.red.shade800),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Leave Request Declined',
+                              style: TextStyle(fontSize: 11, color: Colors.red.shade900, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (hasPendingReply && msg != true)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.purple.shade200),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.reply_rounded, size: 14, color: Colors.purple.shade900),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  parentMsgText != null && parentMsgText.trim().isNotEmpty
+                                      ? 'Parent Reply: "$parentMsgText"'
+                                      : 'Parent requested reply verification',
+                                  style: TextStyle(fontSize: 11.5, color: Colors.purple.shade900, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              _actionButton('Approve Reply', Colors.purple, isReadOnly ? () {} : () {
+                                onUpdateLocal(sId, 'parentReplied', true);
+                                onUpdateLocal(sId, 'parentRepliedRequested', false);
+                              }),
+                              const SizedBox(width: 8),
+                              _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
+                                onUpdateLocal(sId, 'parentRepliedRequested', false);
+                              }),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (msg == true)
+                    Container(
+                      margin: const EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.green.shade800),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              parentMsgText != null && parentMsgText.trim().isNotEmpty
+                                  ? 'Parent Reply: "$parentMsgText"'
+                                  : 'Parent Reply: Approved',
+                              style: TextStyle(fontSize: 11, color: Colors.green.shade900, fontWeight: FontWeight.bold),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       ),
                     ),

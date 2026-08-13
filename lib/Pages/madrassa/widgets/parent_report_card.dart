@@ -148,6 +148,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
           .set({
         studentId: {
           'parentReplied': true,
+          'parentRepliedRequested': true,
           'timestamp': FieldValue.serverTimestamp()
         }
       }, SetOptions(merge: true));
@@ -170,93 +171,233 @@ class _ParentReportCardState extends State<ParentReportCard> {
     }
   }
 
-  Future<void> _showLeaveReasonDialog(BuildContext context, String branchId, String dateStr, String studentId) async {
+  Future<void> _showLeaveReasonDialog(BuildContext context, String branchId, String initialDateStr, String studentId) async {
     final TextEditingController reasonController = TextEditingController();
     String? reasonError;
+
+    DateTime startDate = DateTime.tryParse(initialDateStr) ?? DateTime.now();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    if (startDate.isBefore(today)) startDate = today;
+    DateTime endDate = startDate;
+
+    bool isSaving = false;
 
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDs) {
+          final daysCount = endDate.difference(startDate).inDays + 1;
+          final startFormatted = DateFormat('dd MMM yyyy').format(startDate);
+          final endFormatted = DateFormat('dd MMM yyyy').format(endDate);
+          final dateRangeLabel = daysCount == 1 ? startFormatted : '$startFormatted → $endFormatted ($daysCount days)';
+
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Text(context.t('Request Leave'), style: TextStyle(fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: context.t('Leave Reason'),
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
-                      ),
-                      const TextSpan(
-                        text: ' *',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
-                      ),
-                    ],
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Select Dates Label
+                  Text(
+                    context.isUrdu ? 'رخصت کی تاریخ منتخب کریں' : 'Select Date(s)',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
                   ),
-                ),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: reasonController,
-                  maxLines: 3,
-                  style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
-                  decoration: InputDecoration(
-                    hintText: context.t('Enter reason here...'),
-                    hintStyle: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
-                    errorText: reasonError != null ? context.t(reasonError!) : null,
-                    errorStyle: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+                  const SizedBox(height: 6),
+
+                  // Date Selector Box
+                  InkWell(
+                    onTap: isSaving
+                        ? null
+                        : () async {
+                            final pickedRange = await showDateRangePicker(
+                              context: context,
+                              initialDateRange: DateTimeRange(start: startDate, end: endDate),
+                              firstDate: today,
+                              lastDate: today.add(const Duration(days: 365)),
+                              builder: (context, child) {
+                                return Theme(
+                                  data: Theme.of(context).copyWith(
+                                    colorScheme: ColorScheme.light(
+                                      primary: ParentReportCard.primaryColor,
+                                      onPrimary: Colors.white,
+                                      surface: Colors.white,
+                                      onSurface: const Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                  child: child!,
+                                );
+                              },
+                            );
+                            if (pickedRange != null) {
+                              setDs(() {
+                                startDate = pickedRange.start;
+                                endDate = pickedRange.end;
+                              });
+                            }
+                          },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: ParentReportCard.primaryColor, width: 1.5),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.calendar_month_rounded, color: ParentReportCard.primaryColor, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  dateRangeLabel,
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ParentReportCard.primaryColor),
+                                ),
+                                Text(
+                                  context.isUrdu ? 'تاریخ تبدیل کرنے کے لیے ٹیپ کریں' : 'Tap to change date or select multiple dates',
+                                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey.shade500),
+                        ],
+                      ),
                     ),
                   ),
-                  onChanged: (v) {
-                    if (reasonError != null) setDs(() => reasonError = null);
-                  },
-                ),
-              ],
+                  const SizedBox(height: 16),
+
+                  // Reason for Leave (MANDATORY)
+                  RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: context.t('Leave Reason'),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                        ),
+                        const TextSpan(
+                          text: ' * (Required)',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: reasonController,
+                    maxLines: 3,
+                    enabled: !isSaving,
+                    style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
+                    decoration: InputDecoration(
+                      hintText: context.isUrdu ? 'رخصت کی وجہ درج کریں (لازمی)' : 'Enter reason for leave (Mandatory)...',
+                      hintStyle: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null, fontSize: 12.5),
+                      errorText: reasonError != null ? context.t(reasonError!) : null,
+                      errorStyle: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+                      ),
+                    ),
+                    onChanged: (v) {
+                      if (reasonError != null) setDs(() => reasonError = null);
+                    },
+                  ),
+                ],
+              ),
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx),
+                onPressed: isSaving ? null : () => Navigator.pop(ctx),
                 child: Text(context.t('Cancel'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
               ElevatedButton(
-                onPressed: () async {
-                  if (reasonController.text.trim().isEmpty) {
-                    setDs(() => reasonError = 'Leave reason is required');
-                    return;
-                  }
-                  await FirebaseFirestore.instance
-                      .collection('branches')
-                      .doc(branchId)
-                      .collection('madrassa_daily_logs')
-                      .doc(dateStr)
-                      .set({
-                    studentId: {
-                      'attendance': 'leave_requested',
-                      'isParentRequested': true,
-                      'leaveReason': reasonController.text.trim(),
-                      'leaveStatus': 'pending',
-                      'timestamp': FieldValue.serverTimestamp()
-                    }
-                  }, SetOptions(merge: true));
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        final reasonText = reasonController.text.trim();
+                        if (reasonText.isEmpty) {
+                          setDs(() => reasonError = 'Leave reason is required');
+                          return;
+                        }
+
+                        setDs(() => isSaving = true);
+                        try {
+                          final batch = FirebaseFirestore.instance.batch();
+                          int totalDays = 0;
+
+                          DateTime curr = startDate;
+                          while (!curr.isAfter(endDate)) {
+                            totalDays++;
+                            final dStr = DateFormat('yyyy-MM-dd').format(curr);
+                            final docRef = FirebaseFirestore.instance
+                                .collection('branches')
+                                .doc(branchId)
+                                .collection('madrassa_daily_logs')
+                                .doc(dStr);
+
+                            batch.set(
+                              docRef,
+                              {
+                                studentId: {
+                                  'attendance': 'leave_requested',
+                                  'isParentRequested': true,
+                                  'leaveReason': reasonText,
+                                  'leaveStatus': 'pending',
+                                  'timestamp': FieldValue.serverTimestamp(),
+                                }
+                              },
+                              SetOptions(merge: true),
+                            );
+
+                            curr = curr.add(const Duration(days: 1));
+                          }
+
+                          await batch.commit();
+
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(context.isUrdu
+                                    ? 'رخصت کی درخواست ($totalDays دن) کامیابی کے ساتھ جمع ہو گئی ہے۔'
+                                    : 'Leave request for $totalDays day(s) submitted successfully.'),
+                                backgroundColor: Colors.green,
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (ctx.mounted) {
+                            setDs(() => isSaving = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Error submitting leave request: $e'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                          }
+                        }
+                      },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
                   foregroundColor: Colors.white,
                 ),
-                child: Text(context.t('Submit'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : Text(context.t('Submit'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
             ],
           );
@@ -722,7 +863,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                               .set({
                             widget.studentId: {
                               'parentReplied': true,
+                              'parentRepliedRequested': true,
                               'parentReplyText': text,
+                              'parentReplyMessage': text,
                               'parentReplyTime': FieldValue.serverTimestamp(),
                             }
                           }, SetOptions(merge: true));
@@ -910,6 +1053,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                               await user.verifyBeforeUpdateEmail(newEmail);
                             }
 
+                            // Update Display Name
+                            if (nameCtrl.text.trim().isNotEmpty) {
+                              await user.updateDisplayName(nameCtrl.text.trim());
+                            }
+
                             // Update Password if provided
                             if (newPw.isNotEmpty) {
                               await user.updatePassword(newPw);
@@ -1087,6 +1235,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       .set({
                     widget.studentId: {
                       'parentReplied': true,
+                      'parentRepliedRequested': true,
+                      'parentReplyText': replyCtrl.text.trim(),
                       'parentReplyMessage': replyCtrl.text.trim(),
                       'timestamp': FieldValue.serverTimestamp()
                     }
@@ -2054,21 +2204,21 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     if (targetIndex == -1) return 0;
     
     final targetLog = sorted[targetIndex].data() as Map<String, dynamic>?;
-    final targetLines = targetLog?[studentId]?['currentLines'] as int?;
+    final targetLines = (targetLog?[studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(targetLog?[studentId]?['currentLines']?.toString() ?? '');
     if (targetLines == null) return 0;
     
-    int prevLines = 0;
+    int prevLines = -1;
     for (int i = targetIndex - 1; i >= 0; i--) {
       final log = sorted[i].data() as Map<String, dynamic>?;
-      final lines = log?[studentId]?['currentLines'] as int?;
+      final lines = (log?[studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(log?[studentId]?['currentLines']?.toString() ?? '');
       if (lines != null) {
         prevLines = lines;
         break;
       }
     }
     
-    if (prevLines == 0) {
-      prevLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
+    if (prevLines == -1) {
+      prevLines = 0;
     }
     
     return (targetLines - prevLines).clamp(0, 9999);
@@ -2282,7 +2432,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
           final leaveReason = statusData['leaveReason']?.toString() ?? '';
           final leaveStatus = statusData['leaveStatus']?.toString() ?? 'pending';
-          final currentLines = statusData['currentLines'] as int? ?? 0;
+          final currentLines = (statusData['currentLines'] as num?)?.toInt() ?? int.tryParse(statusData['currentLines']?.toString() ?? '') ?? 0;
           
           final linesRead = getLinesCompletedOnDate(_selectedDate, allLogs, widget.studentId);
           
@@ -5546,7 +5696,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       final logDate = DateTime.tryParse(logDoc.id);
       if (logDate != null && logDate.isBefore(selectedMonthStart)) {
         final logMap = logDoc.data() as Map<String, dynamic>?;
-        final lines = logMap?[widget.studentId]?['currentLines'] as int?;
+        final lines = (logMap?[widget.studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(logMap?[widget.studentId]?['currentLines']?.toString() ?? '');
         if (lines != null && lines > 0) {
           prevMonthLines = lines;
           break;
@@ -5559,18 +5709,26 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       final sortedMonthAsc = [...monthLogsFiltered]..sort((a, b) => a.id.compareTo(b.id));
 
       final firstMap = sortedMonthAsc.first.data() as Map<String, dynamic>?;
-      final firstLogLines = firstMap?[widget.studentId]?['currentLines'] as int?;
+      final firstLogLines = (firstMap?[widget.studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(firstMap?[widget.studentId]?['currentLines']?.toString() ?? '');
 
       final lastMap = sortedMonthAsc.last.data() as Map<String, dynamic>?;
-      final lastLogLines = lastMap?[widget.studentId]?['currentLines'] as int?;
+      final lastLogLines = (lastMap?[widget.studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(lastMap?[widget.studentId]?['currentLines']?.toString() ?? '');
 
-      final int startLines = (prevMonthLines != -1)
-          ? prevMonthLines
-          : (firstLogLines ?? prevHifzLines);
+      final int studentCurrentLines = (studentData['currentLines'] as num?)?.toInt() ?? (int.tryParse(studentData['currentLines']?.toString() ?? '') ?? 0);
+      final int endLines = (lastLogLines != null) ? lastLogLines : studentCurrentLines;
 
-      final int endLines = (lastLogLines != null) ? lastLogLines : currentTotalLines;
+      int startLines = -1;
+      if (prevMonthLines != -1) {
+        startLines = prevMonthLines;
+      } else if (firstLogLines != null) {
+        startLines = firstLogLines;
+      }
 
-      monthGain = (endLines - startLines).clamp(0, 8640);
+      if (startLines != -1 && endLines >= startLines) {
+        monthGain = (endLines - startLines).clamp(0, 8640);
+      } else {
+        monthGain = 0;
+      }
     }
 
     // Congrats & nearing completion
@@ -5586,7 +5744,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           final d = DateTime.tryParse(logDoc.id);
           if (d != null) {
             final log = logDoc.data() as Map<String, dynamic>?;
-            final lines = log?[widget.studentId]?['currentLines'] as int?;
+            final lines = (log?[widget.studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(log?[widget.studentId]?['currentLines']?.toString() ?? '');
             if (lines != null && lines >= 8640 && (earliest == null || d.isBefore(earliest))) { earliest = d; }
           }
         }

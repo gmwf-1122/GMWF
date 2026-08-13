@@ -11,6 +11,7 @@ import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../services/auth_service.dart';
 import '../services/image_upload_service.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class BranchesRegister extends StatefulWidget {
   const BranchesRegister({super.key});
@@ -191,7 +192,17 @@ class _BranchesRegisterState extends State<BranchesRegister>
         degreeFile:         _degreeFile,
       );
 
-      await FirebaseFirestore.instance.collection('branches').doc(branchId).set({'name': branchName});
+      await FirebaseFirestore.instance.collection('branches').doc(branchId).set({
+        'name': branchName,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (Hive.isBoxOpen('local_branches')) {
+        await Hive.box('local_branches').put('branch:$branchId', {
+          'id': branchId,
+          'name': branchName,
+        });
+      }
 
       _snack("Branch '$branchName' created successfully!", success: true);
       if (mounted) Navigator.pop(context);

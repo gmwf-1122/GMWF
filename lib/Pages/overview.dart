@@ -14,6 +14,7 @@ import 'branches.dart';
 import 'donations/donations_shared.dart' as don;
 import 'donations/global_audit_trail.dart';
 import '../services/donations_local_storage.dart';
+import '../services/auth_service.dart';
 import 'donations/donations_screen.dart' show DonDS;
 
 class OverviewScreen extends StatefulWidget {
@@ -65,7 +66,11 @@ class _OverviewScreenState extends State<OverviewScreen>
   }
 
   void _logout() async {
-    await FirebaseAuth.instance.signOut();
+    try {
+      await AuthService().signOut();
+    } catch (e) {
+      debugPrint('[OverviewScreen] Logout error: $e');
+    }
     if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
 
@@ -164,13 +169,16 @@ class _OverviewScreenState extends State<OverviewScreen>
                              role.name.toLowerCase().contains('hq') || 
                              role.name.toLowerCase().contains('admin');
 
+    final roleName = role.name.toLowerCase();
+    final isBranchManager = roleName == 'branch manager' || roleName == 'branch_manager' || roleName.contains('branch manager');
+
     final content = ValueListenableBuilder<DashboardFilter>(
       valueListenable: dashboardController,
       builder: (context, filter, child) {
         return StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('branches').snapshots(),
           builder: (context, branchSnap) {
-            final branches = branchSnap.hasData
+            var branches = branchSnap.hasData
                 ? branchSnap.data!.docs.map((d) {
                     final data = d.data() as Map<String, dynamic>;
                     return <String, dynamic>{
@@ -179,6 +187,13 @@ class _OverviewScreenState extends State<OverviewScreen>
                     };
                   }).toList()
                 : <Map<String, dynamic>>[];
+
+            if (isBranchManager || (widget.initialBranchId != null && widget.initialBranchId != 'all' && widget.initialBranchId != 'unknown')) {
+              final targetB = widget.initialBranchId ?? filter.branchId;
+              if (targetB.isNotEmpty && targetB != 'all') {
+                branches = branches.where((b) => b['id'] == targetB).toList();
+              }
+            }
 
             return SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
@@ -206,59 +221,10 @@ class _OverviewScreenState extends State<OverviewScreen>
 
                       // -- Dynamic Tab Contents --
                       if (_activeTab == 'overall') ...[
-                        ExecutiveTopBranchFetcher(
-                          t: t,
-                          branches: branches,
-                          onGoToBranch: (id) {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => Branches(
-                                  initialBranchId: id,
-                                  isManager: false,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: DS.s3),
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'dispensary') ...[
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'tokens') ...[
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'donations' && showDonationsTab) ...[
-                        _DonationIntelligenceSection(t: t, branches: branches, filter: filter),
-                        const SizedBox(height: DS.s2),
-                        _buildKPIOverview(branches, filter),
-                      ],
-
-                      const SizedBox(height: DS.s4),
-
-                      // ── Dynamic Branch Performance Breakdown ─────────────────────────
-                      DashSectionHeader(
-                        title: _activeTab == 'overall'
-                            ? 'Branch Performance Breakdown'
-                            : _activeTab == 'dispensary'
-                                ? 'Clinical Performance'
-                                : _activeTab == 'tokens'
-                                    ? 'Food Service Performance'
-                                    : 'Donations Branch Breakdown',
-                        subtitle: _activeTab == 'overall'
-                            ? 'Detailed operational and financial metrics per branch'
-                            : _activeTab == 'dispensary'
-                                ? 'Branch-wise patient traffic and dispensary revenues'
-                                : _activeTab == 'tokens'
-                                    ? 'Dasterkhwaan meals issued vs served counts'
-                                    : 'Masjid and general donations share by branch',
-                      ),
-                      const SizedBox(height: DS.s2),
-                      ScrollReveal(
-                          delay: const Duration(milliseconds: 280),
-                          child: BranchPerformanceTable(
+                        if (!isBranchManager) ...[
+                          ExecutiveTopBranchFetcher(
                             t: t,
                             branches: branches,
-                            selectedTab: _activeTab,
                             onGoToBranch: (id) {
                               Navigator.push(
                                 context,
@@ -270,7 +236,60 @@ class _OverviewScreenState extends State<OverviewScreen>
                                 ),
                               );
                             },
-                          )),
+                          ),
+                          const SizedBox(height: DS.s3),
+                        ],
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'dispensary') ...[
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'tokens') ...[
+                        _buildKPIOverview(branches, filter),
+                      ] else if (_activeTab == 'donations' && showDonationsTab) ...[
+                        _DonationIntelligenceSection(t: t, branches: branches, filter: filter),
+                        const SizedBox(height: DS.s2),
+                        _buildKPIOverview(branches, filter),
+                      ],
+
+                      if (!isBranchManager) ...[
+                        const SizedBox(height: DS.s4),
+
+                        // ── Dynamic Branch Performance Breakdown ─────────────────────────
+                        DashSectionHeader(
+                          title: _activeTab == 'overall'
+                              ? 'Branch Performance Breakdown'
+                              : _activeTab == 'dispensary'
+                                  ? 'Clinical Performance'
+                                  : _activeTab == 'tokens'
+                                      ? 'Food Service Performance'
+                                      : 'Donations Branch Breakdown',
+                          subtitle: _activeTab == 'overall'
+                              ? 'Detailed operational and financial metrics per branch'
+                              : _activeTab == 'dispensary'
+                                  ? 'Branch-wise patient traffic and dispensary revenues'
+                                  : _activeTab == 'tokens'
+                                      ? 'Dasterkhwaan meals issued vs served counts'
+                                      : 'Masjid and general donations share by branch',
+                        ),
+                        const SizedBox(height: DS.s2),
+                        ScrollReveal(
+                            delay: const Duration(milliseconds: 280),
+                            child: BranchPerformanceTable(
+                              t: t,
+                              branches: branches,
+                              selectedTab: _activeTab,
+                              onGoToBranch: (id) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => Branches(
+                                      initialBranchId: id,
+                                      isManager: false,
+                                    ),
+                                  ),
+                                );
+                              },
+                            )),
+                      ],
                       const SizedBox(height: DS.s4),
                     ],
                   ),

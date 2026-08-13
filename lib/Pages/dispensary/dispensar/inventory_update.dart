@@ -5,10 +5,17 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/master_proforma_service.dart';
+import 'package:gmwf/utils/string_similarity_helper.dart';
+import 'package:gmwf/pages/dispensary/dispensar/universal_proforma_sheet.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/pages/request.dart';
+import 'package:gmwf/widgets/app_back_button.dart';
+import 'package:gmwf/widgets/camp_selector_chip.dart';
 
 class InventoryUpdatePage extends StatefulWidget {
   final String branchId;
@@ -43,7 +50,6 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   static const _green100 = Color(0xFFC8E6C9);
    static const _green600 = Color(0xFF2E7D32);
   static const _red = Color(0xFFD32F2F); // Vibrant red
-  static const _orange = Color(0xFFE65100);
   static const _blue = Color(0xFF1976D2);
   static const _purple = Color(0xFF6A1B9A);
   static const _textDark = Color(0xFF1B2631);
@@ -77,16 +83,42 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   String _regType = 'Tablet';
   String? _regSelectedDose;
   bool _isSubmittingReg = false;
+  Map<String, dynamic>? _liveSpellingSuggestion;
+
+  void _onRegNameChanged() {
+    final text = _regNameCtrl.text.trim();
+    if (text.length < 3) {
+      if (_liveSpellingSuggestion != null) setState(() => _liveSpellingSuggestion = null);
+      return;
+    }
+    final candidates = <Map<String, dynamic>>[
+      ...MasterProformaService.getAllProformaItems(),
+      ..._searchResults,
+    ];
+    final matches = StringSimilarityHelper.findSimilarMedicines(text, candidates, threshold: 0.60);
+    if (matches.isNotEmpty) {
+      final best = matches.first;
+      final bestName = (best['name'] as String? ?? '').trim();
+      if (bestName.toLowerCase() != text.toLowerCase()) {
+        if (_liveSpellingSuggestion != best) {
+          setState(() => _liveSpellingSuggestion = best);
+        }
+        return;
+      }
+    }
+    if (_liveSpellingSuggestion != null) setState(() => _liveSpellingSuggestion = null);
+  }
 
   final List<String> _allTypes = [
     'Tablet', 'Capsule', 'Syrup', 'Injection',
-    'Drip', 'Drip Set', 'Syringe', 'Nebulization', 'Others',
+    'Drip', 'Drip Set', 'Syringe', 'Cannula', 'Nebulization', 'Dressing Item', 'Consumables', 'Others',
   ];
 
   final Map<String, List<String>> _doseOptions = {
     'Tablet': [
       '2 mg',
       '5 mg',
+      '8 mg',
       '20 mg',
       '40 mg',
       '50 mg',
@@ -113,13 +145,16 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     'Syrup': ['5 ml', '10 ml', '15 ml', '20 ml', '30 ml', '60 ml', '90 ml', '120 ml', '250 ml'],
     'Injection': ['1cc', '2cc', '3cc', '5cc', '10cc'],
     'Drip': ['100 ml', '250 ml', '450 ml', '500 ml', '1000 ml'],
+    'Syringe': ['1cc', '3cc', '5cc', '10cc', '20cc', '50cc'],
+    'Cannula': ['18"', '20"', '21"', '22"', '23"', '24"', '25"', '26"', '27"', '30"'],
   };
 
   bool get _hasDoseDropdown => _doseOptions.containsKey(_regType);
   bool get _usesFreeTextDose =>
       !_doseOptions.containsKey(_regType) &&
       _regType != 'Drip Set' &&
-      _regType != 'Syringe';
+      _regType != 'Syringe' &&
+      _regType != 'Cannula';
 
   // ── INIT & LIFECYCLE ────────────────────────────────═══════════════════════
   @override
@@ -132,11 +167,13 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeInOut);
     _fadeCtrl.forward();
 
+    _regNameCtrl.addListener(_onRegNameChanged);
     _loadAllMedicines();
   }
 
   @override
   void dispose() {
+    _regNameCtrl.removeListener(_onRegNameChanged);
     _tabCtrl.dispose();
     _fadeCtrl.dispose();
     _searchCtrl.dispose();
@@ -172,18 +209,19 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   }
 
   // ── Barcode uniqueness check ────────────────────────────────────────────
-  // Checks local Hive cache first (covers items registered offline and not
-  // yet synced to Firestore), then falls back to a Firestore query. If the
-  // device is offline, the Firestore call fails silently and we rely on the
-  // local check only — SyncService will reconcile any conflicts once online.
   Future<bool> _isBarcodeTaken(String code, {String? excludeDocId}) async {
     final normalized = code.trim().toLowerCase();
     if (normalized.isEmpty) return false;
 
+    // 1. Check Master Proforma catalog
+    final profMatch = MasterProformaService.findExactBarcodeMatch(code);
+    if (profMatch != null) return true;
+
+    // 2. Check local stock items in active camp
     final localItems =
-        LocalStorageService.getAllLocalStockItems(branchId: widget.branchId);
+        LocalStorageService.getAllLocalStockItems(branchId: widget.branchId, filterByCamp: true);
     final localMatch = localItems.any((item) {
-      final itemCode = (item['code']?.toString().trim().toLowerCase() ?? '');
+      final itemCode = (item['code']?.toString().trim().toLowerCase() ?? item['barcode']?.toString().trim().toLowerCase() ?? '');
       if (itemCode.isEmpty || itemCode != normalized) return false;
       final itemDocId = item['_docId'] ?? item['id'] ?? item['docId'];
       if (excludeDocId != null && itemDocId == excludeDocId) return false;
@@ -191,6 +229,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     });
     if (localMatch) return true;
 
+    // 3. Check Firestore
     try {
       final snap = await FirebaseFirestore.instance
           .collection('branches')
@@ -203,10 +242,92 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         if (excludeDocId != null && doc.id == excludeDocId) continue;
         return true;
       }
-    } catch (_) {
-      // Offline — fall back to the local-only check above.
-    }
+    } catch (_) {}
+
+    try {
+      final snapBarcode = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory')
+          .where('barcode', isEqualTo: code.trim())
+          .limit(5)
+          .get();
+      for (final doc in snapBarcode.docs) {
+        if (excludeDocId != null && doc.id == excludeDocId) continue;
+        return true;
+      }
+    } catch (_) {}
+
     return false;
+  }
+
+  /// Returns existing medicine matching barcode if found
+  Future<Map<String, dynamic>?> _findExistingByBarcode(String code) async {
+    final cleanCode = code.trim().toLowerCase();
+    if (cleanCode.isEmpty) return null;
+
+    final profMatch = MasterProformaService.findExactBarcodeMatch(code);
+    if (profMatch != null) return profMatch;
+
+    final localItems = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId, filterByCamp: true);
+    for (final item in localItems) {
+      final itemCode = (item['code']?.toString().trim().toLowerCase() ?? item['barcode']?.toString().trim().toLowerCase() ?? '');
+      if (itemCode.isNotEmpty && itemCode == cleanCode) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  /// Checks if a medicine with exact Name + Dose + Type already exists in catalog or local stock
+  Future<Map<String, dynamic>?> _findExistingNameDoseTypeMatch(String name, String type, String dose, {String? excludeDocId}) async {
+    final cleanN = name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+    final cleanT = type.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final cleanD = dose.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    if (cleanN.isEmpty) return null;
+
+    final profMatch = MasterProformaService.findExactNameDoseTypeMatch(name, type, dose);
+    if (profMatch != null) return profMatch;
+
+    final localItems = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId, filterByCamp: true);
+    for (final item in localItems) {
+      final itemDocId = item['_docId'] ?? item['id'] ?? item['docId'];
+      if (excludeDocId != null && itemDocId == excludeDocId) continue;
+
+      final itemN = (item['name'] as String? ?? item['formula'] as String? ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+      final itemT = (item['type'] as String? ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      final itemD = (item['dose'] as String? ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+
+      final matchesName = (itemN == cleanN);
+      final matchesType = (itemT == cleanT);
+      final matchesDose = (cleanD.isEmpty || itemD == cleanD || itemD == 'standard');
+
+      if (matchesName && matchesType && matchesDose) {
+        return item;
+      }
+    }
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('inventory')
+          .where('name_lower', isEqualTo: cleanN)
+          .limit(10)
+          .get();
+      for (final doc in snap.docs) {
+        if (excludeDocId != null && doc.id == excludeDocId) continue;
+        final data = doc.data();
+        final itemT = (data['type'] as String? ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+        final itemD = (data['dose'] as String? ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+
+        if (itemT == cleanT && (cleanD.isEmpty || itemD == cleanD || itemD == 'standard')) {
+          return {...data, '_docId': doc.id};
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   // ── Submit: Edit Request (needs approval or direct update for admin) ─────
@@ -318,6 +439,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'Drip' => FontAwesomeIcons.bottleDroplet,
         'Drip Set' => FontAwesomeIcons.kitMedical,
         'Syringe' => FontAwesomeIcons.syringe,
+        'Cannula' => FontAwesomeIcons.kitMedical,
+        'Needle' => FontAwesomeIcons.syringe,
         'Nebulization' => FontAwesomeIcons.wind,
         _ => FontAwesomeIcons.pills,
       };
@@ -416,6 +539,31 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
 
 
+  bool get _canRegisterMedicine {
+    if (widget.isAdmin) return true;
+
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data');
+        if (uData is Map && uData['canRegisterMedicine'] == true) {
+          return true;
+        }
+      }
+    } catch (_) {}
+
+    final normBranchId = widget.branchId.toLowerCase().trim();
+    final activeCamp = (CampSessionService.getActiveCamp() ?? '').toLowerCase().trim();
+
+    final isGujrat = normBranchId.contains('gujrat') || activeCamp.contains('gujrat');
+
+    if (isGujrat) {
+      if (widget.isDoctor) return true;
+      if (widget.isDispenser) return false;
+    }
+
+    return true;
+  }
+
   Future<Map<String, String>> _getUserInfo() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return {'uid': '', 'username': 'Unknown'};
@@ -438,7 +586,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   Future<void> _loadAllMedicines() async {
     setState(() => _isSearching = true);
     try {
-      final localItems = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId);
+      final activeCamp = CampSessionService.getActiveCamp()?.toLowerCase().trim();
+      final localItems = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId, filterByCamp: true);
       final Map<String, Map<String, dynamic>> consolidated = {};
       final Set<String> processedDocIds = {};
 
@@ -447,6 +596,13 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         if (docId != null) {
           if (processedDocIds.contains(docId)) return;
           processedDocIds.add(docId);
+        }
+
+        if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
+          final itemCamp = (d['dispensaryId'] ?? d['campId'])?.toString().toLowerCase().trim();
+          if (itemCamp != null && itemCamp.isNotEmpty && itemCamp != 'all' && itemCamp != activeCamp) {
+            return;
+          }
         }
 
         final key = '${d['name']}|${d['type']}|${d['dose']}';
@@ -510,6 +666,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
     setState(() => _isSearching = true);
     try {
+      final activeCamp = CampSessionService.getActiveCamp()?.toLowerCase().trim();
       final snap = await FirebaseFirestore.instance
           .collection('branches')
           .doc(widget.branchId)
@@ -524,6 +681,12 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       final Map<String, Map<String, dynamic>> seen = {};
       for (final doc in snap.docs) {
         final d = doc.data();
+        if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
+          final itemCamp = (d['dispensaryId'] ?? d['campId'])?.toString().toLowerCase().trim();
+          if (itemCamp != null && itemCamp.isNotEmpty && itemCamp != 'all' && itemCamp != activeCamp) {
+            continue;
+          }
+        }
         final key = '${d['name']}|${d['type']}|${d['dose']}';
         if (!seen.containsKey(key)) {
           seen[key] = {...d, '_docId': doc.id};
@@ -615,6 +778,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           'medicineName': _selectedMed!['name'],
           'medicineId': medId,
           'quantityAdded': qty,
+          'dispensaryId': CampSessionService.getActiveCamp(),
           'performedBy': userInfo['uid'],
           'performedByName': userInfo['username'],
           'timestamp': FieldValue.serverTimestamp(),
@@ -624,6 +788,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         await LocalStorageService.enqueueSync({
           'type': 'add_inventory_stock',
           'branchId': widget.branchId,
+          'dispensaryId': CampSessionService.getActiveCamp(),
           'medicineId': medId,
           'medicineName': _selectedMed!['name'],
           'quantity': qty,
@@ -644,6 +809,199 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
 
 
+  /// Checks for exact or fuzzy matches in Proforma and stock catalog to avoid duplicate & spelling mistakes
+  Future<bool> _verifySpellingAndDuplicates(String name, String type) async {
+    // 1. Check exact match in Master Proforma
+    final exact = MasterProformaService.findExactMatch(name, type);
+    if (exact != null) {
+      final String profName = exact['name'] ?? name;
+      final String profCode = exact['code'] ?? '';
+      final String profFormula = exact['formula'] ?? '';
+
+      await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(FontAwesomeIcons.circleExclamation, color: Color(0xFFE65100), size: 26),
+              SizedBox(width: 10),
+              Text('Medicine Exists in Catalog'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'The medicine formula "${profFormula.isNotEmpty ? profFormula : profName}" ($type) is already registered in our Universal Proforma Catalog!',
+                style: const TextStyle(fontWeight: FontWeight.bold, color: _textDark),
+              ),
+              const SizedBox(height: 8),
+              if (profCode.isNotEmpty)
+                Text('Catalog Code: $profCode', style: const TextStyle(fontSize: 13, color: _textMid)),
+              const SizedBox(height: 12),
+              const Text(
+                'Duplicate registration is blocked. Please select this medicine from the Universal Proforma Sheet instead.',
+                style: TextStyle(fontSize: 13, color: _red, fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel', style: TextStyle(color: _textMid)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _teal,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop(false);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UniversalProformaSheetPage(
+                      branchId: widget.branchId,
+                      isDispenser: widget.isDispenser,
+                      isAdmin: widget.isAdmin,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(FontAwesomeIcons.fileExcel, size: 14, color: Colors.white),
+              label: const Text('Open Proforma Sheet', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+      return false; // Stop custom registration
+    }
+
+    // 2. Collect all candidates for fuzzy spelling match
+    final List<Map<String, dynamic>> candidates = [];
+    final proformaItems = MasterProformaService.getAllProformaItems();
+    candidates.addAll(proformaItems);
+
+    if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+      final stockBox = Hive.box(LocalStorageService.stockBox);
+      for (final key in stockBox.keys) {
+        final val = stockBox.get(key);
+        if (val is Map) {
+          candidates.add(Map<String, dynamic>.from(val));
+        }
+      }
+    }
+
+    final matches = StringSimilarityHelper.findSimilarMedicines(name, candidates, threshold: 0.65);
+    if (matches.isNotEmpty) {
+      final bestMatch = matches.first;
+      final String bestName = bestMatch['name'] ?? '';
+      final double score = (bestMatch['_similarityScore'] as double? ?? 0.0);
+
+      if (bestName.toLowerCase() != name.toLowerCase() && score < 1.0) {
+        final choice = await showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: const [
+                Icon(FontAwesomeIcons.lightbulb, color: Color(0xFF1976D2), size: 24),
+                SizedBox(width: 10),
+                Text('Did You Mean...?'),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 14, color: _textDark),
+                    children: [
+                      const TextSpan(text: 'You entered '),
+                      TextSpan(
+                        text: '"$name"',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: _red),
+                      ),
+                      const TextSpan(text: ', which is very similar to our standard catalog medicine:'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFA5D6A7)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(FontAwesomeIcons.pills, size: 16, color: _green600),
+                          const SizedBox(width: 8),
+                          Text(
+                            bestName,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _green600),
+                          ),
+                        ],
+                      ),
+                      if (bestMatch['formula'] != null && bestMatch['formula'].toString().isNotEmpty)
+                        Text('Formula: ${bestMatch['formula']}', style: const TextStyle(fontSize: 12, color: _textMid)),
+                      if (bestMatch['type'] != null)
+                        Text('Type: ${bestMatch['type']} | Dose: ${bestMatch['dose'] ?? 'Standard'}', style: const TextStyle(fontSize: 12, color: _textMid)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Would you like to use the suggested standard medicine or register your new custom spelling?',
+                  style: TextStyle(fontSize: 13, color: _textMid),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop('custom'),
+                child: Text('Keep Custom "$name"', style: const TextStyle(color: _textMid)),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _green600,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => Navigator.of(context).pop('suggested'),
+                child: Text('Use "$bestName"', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+
+        if (choice == 'suggested') {
+          _regNameCtrl.text = bestName;
+          if (bestMatch['type'] != null && _allTypes.contains(bestMatch['type'])) {
+            setState(() {
+              _regType = bestMatch['type'];
+            });
+          }
+          return true;
+        } else if (choice == 'custom') {
+          return true;
+        } else {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   // ── Submit: Register New Medicine ─────────────────────────────────────────
   Future<void> _submitRegister() async {
     if (!_regFormKey.currentState!.validate()) return;
@@ -657,36 +1015,121 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         ? (_regSelectedDose ?? '')
         : (_usesFreeTextDose ? _regDoseCtrl.text.trim() : '');
 
+    final numPrice = double.tryParse(price) ?? 0.0;
+
+    // 1. If barcode is entered, verify it doesn't belong to a DIFFERENT medicine
+    if (code.isNotEmpty) {
+      final existingByCode = await _findExistingByBarcode(code);
+      if (existingByCode != null) {
+        final existingName = (existingByCode['name'] ?? existingByCode['formula'] ?? '').toString().trim().toLowerCase();
+        final existingType = (existingByCode['type'] ?? '').toString().trim().toLowerCase();
+        final existingDose = (existingByCode['dose'] ?? '').toString().trim().toLowerCase();
+
+        final isSameMed = existingName == name.toLowerCase() &&
+            existingType == _regType.toLowerCase() &&
+            (dose.isEmpty || existingDose == dose.toLowerCase() || existingDose == 'standard');
+
+        if (!isSameMed) {
+          _snack('Barcode "$code" is already registered to a DIFFERENT medicine (${existingByCode['name']} - ${existingByCode['type']}). Duplicate barcodes across different medicines are not allowed!', err: true);
+          return;
+        }
+      }
+    }
+
+    // 2. If medicine ALREADY EXISTS (Name + Dose + Type), merge quantity into existing stock just like Proforma!
+    final existingMatch = await _findExistingNameDoseTypeMatch(name, _regType, dose);
+    if (existingMatch != null) {
+      setState(() => _isSubmittingReg = true);
+      try {
+        final existingDocId = existingMatch['_docId'] ?? existingMatch['id'] ?? existingMatch['docId'] ?? existingMatch['code'];
+        final existingName = existingMatch['name'] ?? existingMatch['formula'] ?? name;
+        final currentQty = (existingMatch['quantity'] as num?)?.toInt() ?? 0;
+        final newTotalQty = currentQty + qty;
+
+        final Map<String, dynamic> updatedStock = Map<String, dynamic>.from(existingMatch);
+        updatedStock['quantity'] = newTotalQty;
+        if (numPrice > 0) updatedStock['price'] = numPrice;
+        if (exp.isNotEmpty) updatedStock['expiryDate'] = exp;
+        if (code.isNotEmpty) {
+          updatedStock['code'] = code;
+          updatedStock['barcode'] = code;
+        }
+
+        final activeCamp = CampSessionService.getActiveCamp() ?? 'all';
+        updatedStock['branchId'] = widget.branchId;
+        updatedStock['dispensaryId'] = activeCamp;
+        updatedStock['campId'] = activeCamp;
+        updatedStock['lastUpdated'] = DateTime.now().toIso8601String();
+
+        // Save locally
+        LocalStorageService.saveLocalInventoryItem(updatedStock);
+
+        // LAN Broadcast
+        RealtimeManager().sendMessage({
+          'event_type': RealtimeEvents.saveStockItem,
+          'data': updatedStock,
+        });
+
+        // Sync to Firestore
+        try {
+          if (existingDocId != null && existingDocId.toString().isNotEmpty) {
+            await FirebaseFirestore.instance
+                .collection('branches')
+                .doc(widget.branchId)
+                .collection('inventory')
+                .doc(existingDocId.toString())
+                .set(updatedStock, SetOptions(merge: true));
+          }
+        } catch (_) {
+          await LocalStorageService.enqueueSync({
+            'type': 'add_stock',
+            'branchId': widget.branchId,
+            'data': updatedStock,
+          });
+        }
+
+        _snack('+$qty added to existing $existingName! Total Stock: $newTotalQty (Duplicate row prevented)');
+        _resetRegForm();
+        _loadAllMedicines();
+      } catch (e) {
+        _snack('Error updating stock: $e', err: true);
+      } finally {
+        if (mounted) setState(() => _isSubmittingReg = false);
+      }
+      return;
+    }
+
+    final allowed = await _verifySpellingAndDuplicates(name, _regType);
+    if (!allowed) return;
+
+    final finalName = _regNameCtrl.text.trim();
+
     setState(() => _isSubmittingReg = true);
     try {
-      // Barcode must be unique across the branch's inventory.
-      final barcodeTaken = await _isBarcodeTaken(code);
-      if (barcodeTaken) {
-        _snack('This barcode is already registered to another medicine', err: true);
-        setState(() => _isSubmittingReg = false);
-        return;
-      }
-
       final userInfo = await _getUserInfo();
+      final activeCamp = CampSessionService.getActiveCamp();
 
       final medData = {
-        'name': name,
-        'name_lower': name.toLowerCase(),
-        'formula': '',
-        'formula_lower': '',
+        'name': finalName,
+        'name_lower': finalName.toLowerCase(),
+        'formula': finalName,
+        'formula_lower': finalName.toLowerCase(),
         'code': code,
+        'barcode': code,
         'type': _regType,
         'dose': dose,
         'quantity': qty,
         'price': price,
         'expiryDate': exp,
         'branchId': widget.branchId,
+        'dispensaryId': activeCamp ?? 'all',
+        'campId': activeCamp ?? 'all',
         'createdAt': DateTime.now().toIso8601String(),
         'createdBy': userInfo['uid'] ?? '',
         'createdByName': userInfo['username'] ?? '',
       };
 
-      final docId = RequestUtils.generateDocId(name, _regType, dose, exp);
+      final docId = RequestUtils.generateDocId(name, _regType, dose, exp, campId: activeCamp);
       medData['id'] = docId;
 
       // STEP 1: Save to local Hive instantly — local UI reflects immediately
@@ -760,20 +1203,39 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
 
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   PreferredSizeWidget _buildAppBar() => AppBar(
-        backgroundColor: _teal,
+        backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
         elevation: 4,
         shadowColor: _shadow,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded,
-              color: Colors.white, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
+        automaticallyImplyLeading: false,
+        leading: (!widget.isEmbedded && Navigator.canPop(context))
+            ? AppBackButton(color: Colors.white)
+            : null,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text('Inventory Update',
             style: TextStyle(
                 color: Colors.white,
                 fontSize: 16,
                 fontWeight: FontWeight.bold)),
+        actions: [
+          CampSelectorChip(
+            onCampChanged: (newCamp) {
+              setState(() {
+                _loadAllMedicines();
+              });
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
         bottom: TabBar(
           controller: _tabCtrl,
           indicatorColor: Colors.white,
@@ -799,7 +1261,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   Widget _addStockTab() => Column(children: [
         // ── Search bar ──────────────────────────────────────────────────────
         Container(
-          color: _white,
+          color: _isDark ? const Color(0xFF1E293B) : _white,
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: TextField(
             controller: _searchCtrl,
@@ -1039,18 +1501,19 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       ]);
 
   Widget _searchResultRow(Map<String, dynamic> med, bool isSelected) {
+    final isDark = _isDark;
     final qty = _safeInt(med['quantity']);
     final type = med['type']?.toString() ?? '';
     final lowStock = qty < 50;
     final expSoon = _isExpiringSoon(med['expiryDate']?.toString());
     final isWarning = lowStock || expSoon;
 
-    final rowBg = isSelected 
-        ? _green50 
-        : (isWarning ? _red.withValues(alpha: 0.12) : _white);
-    final borderColor = isSelected
-        ? _teal
-        : (isWarning ? _red : _green100);
+    final rowBg = isDark 
+        ? (isSelected ? const Color(0xFF1E3A3A) : (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B)))
+        : (isSelected ? _green50 : (isWarning ? _red.withValues(alpha: 0.12) : _white));
+    final borderColor = isDark
+        ? (isSelected ? const Color(0xFF0F766E) : (isWarning ? const Color(0xFFFF6B6B) : const Color(0xFF334155)))
+        : (isSelected ? _teal : (isWarning ? _red : _green100));
 
     return GestureDetector(
       onTap: () => _selectMedForStock(med),
@@ -1065,11 +1528,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             top:    BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
             right:  BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
             bottom: BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
-            left:   BorderSide(color: isWarning ? _red : borderColor, width: isWarning ? 6.0 : (isSelected ? 2.0 : 1.0)),
+            left:   BorderSide(color: isWarning ? (isDark ? const Color(0xFFFF6B6B) : _red) : borderColor, width: isWarning ? 6.0 : (isSelected ? 2.0 : 1.0)),
           ),
           boxShadow: [
             BoxShadow(
-              color: _shadow,
+              color: isDark ? Colors.black26 : _shadow,
               blurRadius: isSelected ? 8 : 4,
               offset: const Offset(0, 2),
             )
@@ -1080,10 +1543,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
                 color: isSelected
-                    ? _teal.withValues(alpha: 0.12)
-                    : _green50,
+                    ? (isDark ? const Color(0xFF0F766E).withValues(alpha: 0.3) : _teal.withValues(alpha: 0.12))
+                    : (isDark ? const Color(0xFF334155) : _green50),
                 borderRadius: BorderRadius.circular(9)),
-            child: Icon(_typeIcon(type), color: _teal, size: 15),
+            child: Icon(_typeIcon(type), color: isDark ? const Color(0xFF38BDF8) : _teal, size: 15),
           ),
           const SizedBox(width: 12),
 
@@ -1093,15 +1556,15 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
             Text(med['name'] ?? '',
-                style: const TextStyle(
-                    color: _textDark,
+                style: TextStyle(
+                    color: isDark ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white) : (isWarning ? _red : _textDark),
                     fontWeight: FontWeight.bold,
                     fontSize: 14)),
             const SizedBox(height: 4),
             Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              _miniChip(type, _teal),
+              _miniChip(type, isDark ? const Color(0xFF38BDF8) : _teal),
               if ((med['dose'] ?? '').toString().isNotEmpty)
-                _miniChip(med['dose'].toString(), _textMid),
+                _miniChip(med['dose'].toString(), isDark ? const Color(0xFF94A3B8) : _textMid),
             ]),
             if (isWarning)
               _statusLabel(lowStock: lowStock, expSoon: expSoon),
@@ -1115,24 +1578,24 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               padding: const EdgeInsets.symmetric(
                   horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: (lowStock ? _red : _green600)
-                    .withValues(alpha: 0.1),
+                color: (lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600))
+                    .withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                    color: (lowStock ? _red : _green600)
+                    color: (lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600))
                         .withValues(alpha: 0.3)),
               ),
               child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                 if (lowStock) ...[
-                  const Icon(Icons.warning_rounded,
-                      size: 11, color: _red),
+                  Icon(Icons.warning_rounded,
+                      size: 11, color: isDark ? const Color(0xFFFF6B6B) : _red),
                   const SizedBox(width: 3),
                 ],
                 Text('$qty',
                     style: TextStyle(
-                        color: lowStock ? _red : _green600,
+                        color: lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600),
                         fontWeight: FontWeight.bold,
                         fontSize: 12)),
               ]),
@@ -1209,7 +1672,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   // TAB 2 — Register New Medicine
   // ══════════════════════════════════════════════════════════════════════════
   Widget _registerTab() {
-    if (widget.isDispenser && !widget.isAdmin) {
+    if (!_canRegisterMedicine) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -1224,7 +1687,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               ),
               const SizedBox(height: 8),
               const Text(
-                'Only doctors and admins can register new medicines.\nDispensers can restock existing inventory under "Add Stock".',
+                'In Gujrat branch, only doctors and admins can register new medicines.\nDispensers can restock existing inventory under "Add Stock".',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: _textMid),
               ),
@@ -1258,6 +1721,56 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
                       ? 'Formula is required'
                       : null,
                 ),
+                if (_liveSpellingSuggestion != null) ...[
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F2FD),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFF90CAF9)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.lightbulb_outline, size: 18, color: Color(0xFF1976D2)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              style: const TextStyle(fontSize: 12, color: _textDark),
+                              children: [
+                                const TextSpan(text: 'Did you mean '),
+                                TextSpan(
+                                  text: '${_liveSpellingSuggestion!['name']}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: _blue),
+                                ),
+                                if (_liveSpellingSuggestion!['formula'] != null)
+                                  TextSpan(text: ' (${_liveSpellingSuggestion!['formula']})'),
+                                const TextSpan(text: '?'),
+                              ],
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _regNameCtrl.text = _liveSpellingSuggestion!['name'] ?? '';
+                              _liveSpellingSuggestion = null;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _blue,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('Apply Fix', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 14),
 
                 // Barcode — required and must be unique across the branch
@@ -1477,12 +1990,12 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: _white,
+          color: _isDark ? const Color(0xFF1E293B) : _white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _green100),
+          border: Border.all(color: _isDark ? const Color(0xFF334155) : _green100),
           boxShadow: [
             BoxShadow(
-                color: _shadow,
+                color: _isDark ? Colors.black26 : _shadow,
                 blurRadius: 12,
                 offset: const Offset(0, 4))
           ],
@@ -1679,6 +2192,7 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
       'type': _selectedType,
       'dose': dose,
       'code': newCode,
+      'barcode': newCode,
       'quantity': int.tryParse(_qtyCtrl.text.trim()) ?? 0,
       'price': _priceCtrl.text.trim(),
       'expiryDate': _expiryCtrl.text.trim(),
@@ -1803,13 +2317,11 @@ class _EditRequestSheetState extends State<_EditRequestSheet> {
 
                 // Barcode — required and must be unique across the branch
                 Builder(builder: (context) {
-                  final canEditBarcode = widget.isAdmin || widget.isDoctor || !widget.isDispenser;
                   return _field(
                     controller: _codeCtrl,
                     label: 'Barcode',
                     icon: Icons.qr_code_rounded,
-                    enabled: canEditBarcode,
-                    helperText: canEditBarcode ? null : 'Only Doctor can edit barcode',
+                    enabled: true,
                     validator: (v) => (v == null || v.trim().isEmpty)
                         ? 'Barcode is required'
                         : null,

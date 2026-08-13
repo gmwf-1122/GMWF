@@ -5,8 +5,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
+import '../services/role_simulator_service.dart';
 import 'dispensary/patient_detail_screen.dart';
 import 'user_detail_screen.dart';
+import 'register.dart';
 import 'dart:async';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
@@ -16,16 +19,21 @@ import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
 import '../widgets/device_badge_widget.dart';
 import '../utils/formatters.dart';
+import '../services/user_module_access_service.dart';
+import '../services/device_info_service.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
   final bool isGuardianMode;
   final String? branchId;
+  final String? currentUserRole;
+
   const UsersScreen({
     super.key,
     this.isPatientMode = false,
     this.isGuardianMode = false,
     this.branchId,
+    this.currentUserRole,
   });
 
   @override
@@ -59,20 +67,45 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _loadBranches() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
-      var branches = snap.docs.map((d) {
+
+      // Clean up bogus 'all' or 'global' documents from Firestore if present
+      for (final doc in snap.docs) {
+        final idLower = doc.id.toLowerCase().trim();
+        final nameLower = (doc.data()['name'] as String? ?? '').toLowerCase().trim();
+        if (idLower == 'all' || idLower == 'global' || nameLower == 'all' || nameLower == 'global') {
+          try {
+            await FirebaseFirestore.instance.collection('branches').doc(doc.id).delete();
+          } catch (_) {}
+        }
+      }
+
+      var branches = snap.docs.where((d) {
+        final idLower = d.id.toLowerCase().trim();
+        final nameLower = (d.data()['name'] as String? ?? '').toLowerCase().trim();
+        return idLower != 'all' && idLower != 'global' && nameLower != 'all' && nameLower != 'global';
+      }).map((d) {
         final data = d.data();
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
       }).toList();
 
-      if (widget.branchId != null) {
-        branches = branches.where((b) => b['id'] == widget.branchId).toList();
+      final roleLower = (widget.currentUserRole ?? '').toLowerCase().trim();
+      final userBranch = (widget.branchId ?? '').toLowerCase().trim();
+      final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(roleLower) && (userBranch == 'all' || userBranch == 'global' || userBranch.isEmpty);
+
+      if (!isGlobalExec && userBranch.isNotEmpty && userBranch != 'all' && userBranch != 'global' && userBranch != 'unknown') {
+        branches = branches.where((b) {
+          final bId = (b['id'] as String).toLowerCase().trim();
+          return bId == userBranch || bId.contains(userBranch) || userBranch.contains(bId);
+        }).toList();
       }
 
       branches.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-      setState(() {
-        _branches = branches;
-        _tabController = TabController(length: branches.length, vsync: this);
-      });
+      if (mounted) {
+        setState(() {
+          _branches = branches;
+          _tabController = TabController(length: branches.length, vsync: this);
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -117,7 +150,7 @@ class _UsersScreenState extends State<UsersScreen>
               title: Text(
                 widget.isPatientMode
                     ? 'Patients'
-                    : (widget.isGuardianMode ? 'Guardians' : 'Staff'),
+                    : (widget.isGuardianMode ? 'Guardians' : 'User Management'),
                 style: TextStyle(
                   color: t.textPrimary,
                   fontSize: 18,
@@ -125,6 +158,28 @@ class _UsersScreenState extends State<UsersScreen>
                   letterSpacing: -0.5,
                 ),
               ),
+              actions: [
+                if (!widget.isPatientMode && !widget.isGuardianMode) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 16),
+                      label: const Text('Register User', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: t.accent,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const Register()),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
               bottom: PreferredSize(
                 preferredSize: const Size.fromHeight(1),
                 child: Divider(height: 1, color: t.bgRule),
@@ -132,27 +187,28 @@ class _UsersScreenState extends State<UsersScreen>
             ),
       body: Column(children: [
         // ── Tab bar ──
-        Container(
-          color: t.bgCard,
-          child: TabBar(
-            controller: _tabController!,
-            isScrollable: true,
-            labelColor: t.accent,
-            unselectedLabelColor: t.textTertiary,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-            indicator: UnderlineTabIndicator(
-              borderSide: BorderSide(color: t.accent, width: 3),
-              insets: const EdgeInsets.symmetric(horizontal: 12),
+        if (_branches.length > 1)
+          Container(
+            color: t.bgCard,
+            child: TabBar(
+              controller: _tabController!,
+              isScrollable: true,
+              labelColor: t.accent,
+              unselectedLabelColor: t.textTertiary,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+              indicator: UnderlineTabIndicator(
+                borderSide: BorderSide(color: t.accent, width: 3),
+                insets: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              tabAlignment: TabAlignment.start,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              tabs: _branches.map((b) => Tab(
+                child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(b['name'] as String)),
+              )).toList(),
             ),
-            tabAlignment: TabAlignment.start,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            tabs: _branches.map((b) => Tab(
-              child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(b['name'] as String)),
-            )).toList(),
           ),
-        ),
 
         // ── Filter bar ──
         _buildFilterBar(t),
@@ -218,6 +274,21 @@ class _UsersScreenState extends State<UsersScreen>
                       fontSize: 13, fontWeight: FontWeight.w600)),
                 ]),
               ),
+            ),
+          ],
+          if (!widget.isGuardianMode && !widget.isPatientMode && _isChairmanActor()) ...[
+            const SizedBox(width: 8),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F5132),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                elevation: 0,
+              ),
+              icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
+              label: const Text('Access Control Matrix', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              onPressed: () => _openAccessControlMatrixSheet(context, t),
             ),
           ],
         ]),
@@ -439,16 +510,15 @@ class _UsersScreenState extends State<UsersScreen>
           return 'id:$uid';
         }
 
-        // 1. Add Hive local users first
+        // 1. Add Hive local users first (preserves offline-created users)
         try {
-          final box = Hive.box('local_users');
-          for (final val in box.values) {
-            if (val is Map) {
-              final Map<String, dynamic> u = Map<String, dynamic>.from(val);
-              final uid = u['uid']?.toString() ?? u['id']?.toString() ?? '';
-              final uBranchId = u['branchId']?.toString() ?? '';
-              if (uid.isNotEmpty) {
-                if (uBranchId == branchId || uBranchId == 'all' || uBranchId == 'global') {
+          if (Hive.isBoxOpen('local_users')) {
+            final box = Hive.box('local_users');
+            for (final val in box.values) {
+              if (val is Map) {
+                final Map<String, dynamic> u = Map<String, dynamic>.from(val);
+                final uid = u['uid']?.toString() ?? u['id']?.toString() ?? '';
+                if (uid.isNotEmpty) {
                   mergedMap[getDedupKey(u, uid)] = u;
                 }
               }
@@ -458,8 +528,8 @@ class _UsersScreenState extends State<UsersScreen>
           debugPrint('Error reading local users: $e');
         }
 
-        // 2. Add Firestore users on top
-        if (snapshot.hasData) {
+        // 2. Overlay Firestore users on top
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           for (final doc in snapshot.data!.docs) {
             final Map<String, dynamic> u = {'id': doc.id, ...doc.data() as Map<String, dynamic>};
             final key = getDedupKey(u, doc.id);
@@ -473,8 +543,20 @@ class _UsersScreenState extends State<UsersScreen>
           final targetBranch = branchId.trim().toLowerCase();
           list = list.where((item) {
             final uBranch = (item['branchId'] ?? item['branch'] ?? '').toString().trim().toLowerCase();
-            if (uBranch.isEmpty) return true;
-            return uBranch == targetBranch || uBranch == 'all' || uBranch == 'global';
+            final uRole = (item['role'] ?? '').toString().trim().toLowerCase();
+
+            // System & executive roles are ALWAYS visible across all branch views
+            final isGlobalRole = uRole == 'chairman' ||
+                uRole == 'global admin' ||
+                uRole == 'admin' ||
+                uRole == 'ceo' ||
+                uRole == 'global accounts' ||
+                uRole == 'hq manager';
+
+            if (isGlobalRole || uBranch.isEmpty || uBranch == 'all' || uBranch == 'global') {
+              return true;
+            }
+            return uBranch == targetBranch;
           }).toList();
         }
 
@@ -510,28 +592,22 @@ class _UsersScreenState extends State<UsersScreen>
           }).toList();
         }
 
-        list.sort((a, b) => (a['username'] as String? ?? '').compareTo(b['username'] as String? ?? ''));
+        list.sort((a, b) {
+          final roleA = (a['role'] as String? ?? '').toLowerCase().trim();
+          final roleB = (b['role'] as String? ?? '').toLowerCase().trim();
+          final isChairmanA = roleA == 'chairman';
+          final isChairmanB = roleB == 'chairman';
 
-        bool isUserOnline(Map<String, dynamic> data) {
-          if (data['isOnline'] == false) return false;
+          if (isChairmanA && !isChairmanB) return -1;
+          if (!isChairmanA && isChairmanB) return 1;
 
-          final raw = data['lastSeen'] ?? data['lastOnlineAt'] ?? data['lastActiveAt'] ?? data['lastLoginAt'] ?? data['updatedAt'];
-          DateTime? lastActive;
-          if (raw is Timestamp) {
-            lastActive = raw.toDate();
-          } else if (raw is DateTime) {
-            lastActive = raw;
-          } else if (raw is String && raw.isNotEmpty) {
-            lastActive = DateTime.tryParse(raw);
-          }
+          final nameA = (a['name'] ?? a['username'] ?? '').toString().toLowerCase();
+          final nameB = (b['name'] ?? b['username'] ?? '').toString().toLowerCase();
+          return nameA.compareTo(nameB);
+        });
 
-          if (lastActive != null) {
-            final diffMinutes = DateTime.now().difference(lastActive).inMinutes;
-            return diffMinutes <= 2;
-          }
-
-          return data['isOnline'] == true;
-        }
+        bool isUserOnline(Map<String, dynamic> data) =>
+            DeviceInfoService.isUserOnline(data, thresholdMinutes: 5);
 
         String getDepartment(Map<String, dynamic> u) {
           final role = (u['role'] as String? ?? '').toLowerCase().trim();
@@ -718,18 +794,8 @@ class _UsersScreenState extends State<UsersScreen>
     return Colors.red;
   }
 
-  bool _isUserOnline(Map<String, dynamic> data) {
-    if (data['isOnline'] == false) return false;
-    if (data['isOnline'] == true) return true;
-    final raw = data['lastOnlineAt'] ?? data['lastLoginAt'] ?? data['updatedAt'];
-    if (raw is Timestamp) {
-      return DateTime.now().difference(raw.toDate()).inMinutes <= 15;
-    } else if (raw is String && raw.isNotEmpty) {
-      final dt = DateTime.tryParse(raw);
-      if (dt != null) return DateTime.now().difference(dt).inMinutes <= 15;
-    }
-    return false;
-  }
+  bool _isUserOnline(Map<String, dynamic> data) =>
+      DeviceInfoService.isUserOnline(data, thresholdMinutes: 5);
 
   Widget _categoryChip(RoleThemeData t, String label, String catKey, IconData icon, Color color) {
     final active = _selectedCategoryFilter == catKey;
@@ -842,16 +908,35 @@ class _UsersScreenState extends State<UsersScreen>
       'isOnline': true,
     } : null);
 
+    final isChairmanCard = rawRole == 'chairman';
+
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
+      margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: isRevoked ? Colors.red.withValues(alpha: 0.05) : t.bgCard,
+        gradient: isChairmanCard
+            ? const LinearGradient(
+                colors: [Color(0xFF1E112A), Color(0xFF2A1706), Color(0xFF170F2A), Color(0xFF0F172A)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+        color: isChairmanCard
+            ? null
+            : (isRevoked ? Colors.red.withValues(alpha: 0.05) : t.bgCard),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isRevoked ? Colors.red.withValues(alpha: 0.3) : t.bgRule, width: 0.8),
+        border: Border.all(
+          color: isChairmanCard
+              ? const Color(0xFFFBBF24)
+              : (isRevoked ? Colors.red.withValues(alpha: 0.3) : t.bgRule),
+          width: isChairmanCard ? 2.0 : 0.8,
+        ),
         boxShadow: [
           BoxShadow(
-            color: t.accent.withValues(alpha: 0.04),
-            blurRadius: 10,
+            color: isChairmanCard
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.45)
+                : t.accent.withValues(alpha: 0.04),
+            blurRadius: isChairmanCard ? 20 : 10,
+            spreadRadius: isChairmanCard ? 1.5 : 0,
             offset: const Offset(0, 4),
           ),
         ],
@@ -865,47 +950,61 @@ class _UsersScreenState extends State<UsersScreen>
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(children: [
-              // Avatar with online badge
-              Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 44, height: 44,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: t.accentMuted,
-                      image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
-                          ? DecorationImage(
-                              image: (ImageUploadService.decodeBase64ToBytes(profilePicUrl) != null
-                                  ? MemoryImage(ImageUploadService.decodeBase64ToBytes(profilePicUrl)!)
-                                  : NetworkImage(profilePicUrl) as ImageProvider),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                      boxShadow: [
-                        BoxShadow(color: t.accent.withValues(alpha: 0.1), blurRadius: 4, offset: const Offset(0, 2)),
+              // Avatar with online badge and tap to enlarge photo
+              GestureDetector(
+                onTap: () => _showEnlargedPhotoDialog(context, name, profilePicUrl, (data['role'] ?? 'USER').toString(), t),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Tooltip(
+                    message: 'Tap to enlarge profile photo',
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          width: 46, height: 46,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isChairmanCard ? const Color(0xFF382207) : t.accentMuted,
+                            border: isChairmanCard ? Border.all(color: const Color(0xFFFBBF24), width: 2) : null,
+                            image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
+                                ? DecorationImage(
+                                    image: (ImageUploadService.decodeBase64ToBytes(profilePicUrl) != null
+                                        ? MemoryImage(ImageUploadService.decodeBase64ToBytes(profilePicUrl)!)
+                                        : NetworkImage(profilePicUrl) as ImageProvider),
+                                    fit: BoxFit.cover,
+                                  )
+                                : null,
+                            boxShadow: [
+                              BoxShadow(
+                                color: isChairmanCard ? const Color(0xFFF59E0B).withValues(alpha: 0.35) : t.accent.withValues(alpha: 0.1),
+                                blurRadius: isChairmanCard ? 8 : 4,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          alignment: Alignment.center,
+                          child: profilePicUrl == null
+                              ? Text(initials, style: TextStyle(color: isChairmanCard ? const Color(0xFFFBBF24) : t.accent, fontWeight: FontWeight.w900, fontSize: 15))
+                              : null,
+                        ),
+                        if (isOnline)
+                          Positioned(
+                            right: -1,
+                            bottom: -1,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: isChairmanCard ? const Color(0xFF1E112A) : t.bgCard, width: 2),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
-                    alignment: Alignment.center,
-                    child: profilePicUrl == null
-                        ? Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 14))
-                        : null,
                   ),
-                  if (isOnline)
-                    Positioned(
-                      right: -1,
-                      bottom: -1,
-                      child: Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: Colors.green,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: t.bgCard, width: 2),
-                        ),
-                      ),
-                    ),
-                ],
+                ),
               ),
               const SizedBox(width: 14),
               // Info
@@ -919,11 +1018,12 @@ class _UsersScreenState extends State<UsersScreen>
                           child: Text(
                             name,
                             style: TextStyle(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w800,
-                              color: isRevoked ? Colors.red.shade900 : t.textPrimary,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color: isChairmanCard ? const Color(0xFFFFFBEB) : (isRevoked ? Colors.red.shade900 : t.textPrimary),
                               decoration: isRevoked ? TextDecoration.lineThrough : null,
                               height: 1.2,
+                              letterSpacing: isChairmanCard ? 0.3 : 0,
                             ),
                             maxLines: 2,
                             softWrap: true,
@@ -934,12 +1034,13 @@ class _UsersScreenState extends State<UsersScreen>
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.12),
+                              color: Colors.green.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 0.6),
                             ),
                             child: const Text(
                               'ONLINE',
-                              style: TextStyle(color: Colors.green, fontSize: 9, fontWeight: FontWeight.bold),
+                              style: TextStyle(color: Color(0xFF4ADE80), fontSize: 9, fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -960,8 +1061,39 @@ class _UsersScreenState extends State<UsersScreen>
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Text(subtitle, style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
-                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    if (isChairmanCard)
+                      Container(
+                        margin: const EdgeInsets.only(top: 3),
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF92400E), Color(0xFF451A03)],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+                          boxShadow: [
+                            BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.35), blurRadius: 6),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text('👑 ', style: TextStyle(fontSize: 10)),
+                            Text(
+                              'CHAIRMAN · SUPREME SYSTEM AUTHORITY',
+                              style: TextStyle(
+                                color: const Color(0xFFFDE68A),
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Text(subtitle, style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
+                          maxLines: 1, overflow: TextOverflow.ellipsis),
                     if (effectiveDevInfo != null) ...[
                       const SizedBox(height: 4),
                       DeviceBadgeWidget(
@@ -972,31 +1104,32 @@ class _UsersScreenState extends State<UsersScreen>
                   ],
                 ),
               ),
-              // Action buttons: Revoke/Archive on LEFT, Edit on RIGHT
+              // Action buttons: Offboard/Revoke, Edit, and Delete
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (!widget.isPatientMode) ...[
-                    if (!isGuardianRole && _canManageUserAccess(data))
+                  if (!widget.isPatientMode && _canManageUserAccess(data)) ...[
+                    if (!isGuardianRole)
                       IconButton(
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                         icon: Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: isRevoked ? Colors.grey.withValues(alpha: 0.15) : Colors.red.withValues(alpha: 0.12),
+                            color: isRevoked ? Colors.grey.withValues(alpha: 0.15) : Colors.amber.shade900.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: isRevoked ? Colors.grey : Colors.amber.shade800, width: 0.8),
                           ),
                           child: Icon(
-                            isRevoked ? Icons.key_rounded : Icons.no_accounts_rounded,
+                            isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded,
                             size: 16,
-                            color: isRevoked ? Colors.grey.shade700 : Colors.red,
+                            color: isRevoked ? Colors.grey.shade300 : Colors.amber.shade400,
                           ),
                         ),
-                        tooltip: isRevoked ? 'Update Access Status' : 'Revoke Access',
+                        tooltip: isRevoked ? 'Update Access Status' : 'Offboard / Revoke Access',
                         onPressed: () => _showQuickRevokeDialog(data, branchId, t),
                       )
-                    else if (isGuardianRole && _canManageUserAccess(data))
+                    else
                       IconButton(
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -1015,24 +1148,43 @@ class _UsersScreenState extends State<UsersScreen>
                         tooltip: 'Update Student / Guardian Status',
                         onPressed: () => _showGuardianStatusDialog(data, branchId, t),
                       ),
-                    if (_canManageUserAccess(data)) const SizedBox(width: 4),
-                  ],
-                  if (_canManageUserAccess(data))
+                    const SizedBox(width: 4),
+
+                    // Edit Profile Button
                     IconButton(
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                       icon: Container(
                         padding: const EdgeInsets.all(6),
                         decoration: BoxDecoration(
-                          color: t.accent.withValues(alpha: 0.10),
+                          color: t.accent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: t.accent, width: 0.8),
                         ),
                         child: Icon(Icons.edit_rounded, size: 16, color: t.accent),
                       ),
-                      tooltip: 'Edit Profile',
+                      tooltip: 'Edit Profile & Credentials',
                       onPressed: () => _openDetail(itemId, branchId),
-                    )
-                  else
+                    ),
+                    const SizedBox(width: 4),
+
+                    // Delete Account Button
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      icon: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red, width: 0.8),
+                        ),
+                        child: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent),
+                      ),
+                      tooltip: 'Delete Account Permanently',
+                      onPressed: () => _showQuickDeleteUserDialog(data, branchId, t),
+                    ),
+                  ] else
                     IconButton(
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -1256,67 +1408,249 @@ class _UsersScreenState extends State<UsersScreen>
     }
   }
 
-  bool _canManageUserAccess(Map<String, dynamic> targetData) {
-    String actorRole = '';
+  bool _isChairmanActor() {
+    if (widget.currentUserRole != null && widget.currentUserRole!.toLowerCase().trim() == 'chairman') {
+      return true;
+    }
+    try {
+      final label = RoleThemeScope.dataOf(context).roleLabel.toLowerCase().trim();
+      if (label == 'chairman') return true;
+    } catch (_) {}
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      final uid = currentUser.uid;
+      final email = currentUser.email?.toLowerCase().trim();
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final box = Hive.box(LocalStorageService.usersBox);
+        final uDoc = box.get(uid) ?? box.get('user:$uid') ?? (email != null ? box.get('user:$email') : null);
+        if (uDoc is Map) {
+          final r = (uDoc['role'] ?? uDoc['type'] ?? uDoc['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r == 'chairman') return true;
+        }
+      }
+    }
+
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final box = Hive.box('app_settings');
-        final currentMap = box.get('user_data') ?? box.get('currentUser') ?? box.get('active_user');
-        if (currentMap is Map && currentMap['role'] != null) {
-          actorRole = (currentMap['role'] as String).toLowerCase().trim();
+        final r1 = (box.get('user_role') ?? box.get('role'))?.toString().toLowerCase().trim() ?? '';
+        if (r1 == 'chairman') return true;
+
+        final uMap = box.get('user_data') ?? box.get('currentUser') ?? box.get('active_user');
+        if (uMap is Map) {
+          final r2 = (uMap['role'] ?? uMap['type'] ?? uMap['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r2 == 'chairman') return true;
         }
       }
     } catch (_) {}
 
-    if (actorRole.isEmpty && _localBox != null) {
-      try {
-        final currentMap = _localBox!.get('user_data') ?? _localBox!.get('currentUser') ?? _localBox!.get('active_user');
-        if (currentMap is Map && currentMap['role'] != null) {
-          actorRole = (currentMap['role'] as String).toLowerCase().trim();
+    try {
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUid != null && currentUid.isNotEmpty) {
+        final local = LocalStorageService.getLocalUserByUid(currentUid);
+        if (local != null) {
+          final r = (local['role'] ?? local['type'] ?? local['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r == 'chairman') return true;
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
-    if (actorRole.isEmpty && mounted) {
-      try {
-        final scope = context.dependOnInheritedWidgetOfExactType<RoleThemeScope>();
-        if (scope != null) {
-          actorRole = scope.role.name.toLowerCase().trim();
+    return false;
+  }
+
+  String _getActorRole() {
+    if (widget.currentUserRole != null && widget.currentUserRole!.isNotEmpty) {
+      return widget.currentUserRole!.toLowerCase().trim();
+    }
+    try {
+      final label = RoleThemeScope.dataOf(context).roleLabel.toLowerCase().trim();
+      if (label.isNotEmpty) return label;
+    } catch (_) {}
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      final uid = currentUser.uid;
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final uDoc = Hive.box(LocalStorageService.usersBox).get(uid);
+        if (uDoc is Map) {
+          final r = (uDoc['role'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty) return r;
         }
-      } catch (_) {}
+      }
     }
 
-    // GOD MODE: Chairman role can edit, delete, or revoke ANY role at all (including CEO, HQ Manager, Admins, global roles, server, self)
-    if (actorRole == 'chairman') {
-      return true;
-    }
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final r1 = (box.get('user_role') ?? box.get('role'))?.toString().toLowerCase().trim() ?? '';
+        if (r1.isNotEmpty) return r1;
 
-    final actorUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final targetUid = (targetData['uid'] ?? targetData['id'] ?? targetData['docId'] ?? '').toString();
-    if (actorUid.isNotEmpty && targetUid.isNotEmpty && actorUid == targetUid) {
-      return false;
-    }
+        final uMap = box.get('user_data') ?? box.get('currentUser') ?? box.get('active_user');
+        if (uMap is Map) {
+          final r2 = (uMap['role'] ?? '').toString().toLowerCase().trim();
+          if (r2.isNotEmpty) return r2;
+        }
+      }
+    } catch (_) {}
 
+    return 'admin';
+  }
+
+  bool _canManageUserAccess(Map<String, dynamic> targetData) {
     final targetRole = (targetData['role'] as String? ?? '').toLowerCase().trim();
 
-    // Rule 2: Server accounts protection for non-chairman
-    if (targetRole == 'server' || targetRole.contains('server')) {
+    // Chairman account is 100% immutable and CANNOT be deleted, edited, suspended, or demoted by ANY user.
+    if (targetRole == 'chairman') {
       return false;
     }
 
-    // Rule 3: Non-chairman roles CANNOT manage Administration / Executive employees (HQ Manager, CEO, Admin, Chairman)
-    final isTargetExecOrAdmin = targetRole == 'ceo' ||
-        targetRole == 'hq manager' ||
-        targetRole == 'hq_manager' ||
-        targetRole == 'admin' ||
-        targetRole == 'chairman' ||
-        targetRole == 'administration';
+    final actorRole = _getActorRole();
+    const allowedRoles = {'chairman', 'global admin', 'admin', 'ceo', 'hq manager', 'branch manager', 'supervisor'};
+    return allowedRoles.contains(actorRole);
+  }
 
-    if (isTargetExecOrAdmin) {
-      return false;
+  Future<void> _showQuickDeleteUserDialog(Map<String, dynamic> data, String branchId, RoleThemeData t) async {
+    if (!_canManageUserAccess(data)) {
+      final roleName = (data['role'] as String? ?? 'User').toUpperCase();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text((data['role']?.toString().toLowerCase().trim() == 'chairman')
+              ? 'Access Denied: The Chairman account can NEVER be deleted or removed.'
+              : 'Access Denied: You do not have permission to delete $roleName accounts.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
     }
 
-    return true;
+    final userName = data['name'] ?? data['username'] ?? 'User';
+    final targetUid = (data['uid'] ?? data['id'] ?? data['docId'] ?? '').toString();
+    final usernameLower = (data['usernameLower'] ?? data['username'] ?? '').toString().trim().toLowerCase();
+    final email = (data['email'] ?? '').toString().trim().toLowerCase();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: t.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 10),
+            Text('Delete Account', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to PERMANENTLY delete the account for "$userName"? This will remove their credentials and access completely.',
+          style: TextStyle(color: t.textSecondary, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete Permanently'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      final targetEmail = (data['email'] ?? '').toString();
+      final targetPass = (data['password'] ?? '112233').toString();
+
+      if (targetEmail.isNotEmpty) {
+        try {
+          final appName = 'TempAuthApp_${DateTime.now().millisecondsSinceEpoch}';
+          final secondaryApp = await Firebase.initializeApp(
+            name: appName,
+            options: Firebase.app().options,
+          );
+          final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+          final creds = await secondaryAuth.signInWithEmailAndPassword(email: targetEmail, password: targetPass);
+          if (creds.user != null) {
+            await creds.user!.delete();
+          }
+          await secondaryApp.delete();
+        } catch (e) {
+          debugPrint('[QuickDelete] Auth deletion note: $e');
+        }
+      }
+
+      // Purge from local Hive storage boxes
+      for (final boxName in [LocalStorageService.usersBox, 'local_users', 'local']) {
+        if (Hive.isBoxOpen(boxName)) {
+          final box = Hive.box(boxName);
+          if (targetUid.isNotEmpty) await box.delete(targetUid);
+          if (usernameLower.isNotEmpty) await box.delete(usernameLower);
+          if (email.isNotEmpty) await box.delete(email);
+          final keysToDelete = <dynamic>[];
+          for (final key in box.keys) {
+            final val = box.get(key);
+            if (val is Map) {
+              final uidVal = (val['uid'] ?? val['id'] ?? '').toString();
+              final uNameVal = (val['username'] ?? '').toString().toLowerCase();
+              final emailVal = (val['email'] ?? '').toString().toLowerCase();
+              if ((targetUid.isNotEmpty && uidVal == targetUid) ||
+                  (usernameLower.isNotEmpty && uNameVal == usernameLower) ||
+                  (email.isNotEmpty && emailVal == email)) {
+                keysToDelete.add(key);
+              }
+            }
+          }
+          for (final k in keysToDelete) {
+            await box.delete(k);
+          }
+        }
+      }
+
+      // Purge from Firestore
+      final firestore = FirebaseFirestore.instance;
+      if (targetUid.isNotEmpty) {
+        await firestore.collection('users').doc(targetUid).delete().catchError((_) {});
+      }
+      if (usernameLower.isNotEmpty && usernameLower != targetUid) {
+        await firestore.collection('users').doc(usernameLower).delete().catchError((_) {});
+      }
+      if (branchId.isNotEmpty && branchId != 'all') {
+        if (targetUid.isNotEmpty) {
+          await firestore.collection('branches').doc(branchId).collection('users').doc(targetUid).delete().catchError((_) {});
+        }
+        if (usernameLower.isNotEmpty && usernameLower != targetUid) {
+          await firestore.collection('branches').doc(branchId).collection('users').doc(usernameLower).delete().catchError((_) {});
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Account "$userName" has been permanently deleted.'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error deleting account: $e'),
+            backgroundColor: Colors.red.shade900,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _showQuickRevokeDialog(Map<String, dynamic> data, String branchId, RoleThemeData t) async {
@@ -1693,11 +2027,9 @@ class _UsersScreenState extends State<UsersScreen>
 
   Stream<QuerySnapshot> _getFilteredStream(String branchId, String collection) {
     if (collection == 'users') {
-      Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collection('users');
-      if (branchId != 'all' && branchId != 'global') {
-        q = q.where('branchId', isEqualTo: branchId);
-      }
-      return q.snapshots();
+      // Query ALL users from top-level /users collection so system & executive accounts
+      // (Chairman, Global Admin, CEO, HQ Manager) are never excluded by server queries.
+      return FirebaseFirestore.instance.collection('users').snapshots();
     }
     Query<Map<String, dynamic>> q = FirebaseFirestore.instance
         .collection('branches').doc(branchId).collection(collection);
@@ -1712,6 +2044,179 @@ class _UsersScreenState extends State<UsersScreen>
     }
     return q.snapshots();
   }
+
+  void _showEnlargedPhotoDialog(
+    BuildContext context,
+    String name,
+    String? photoUrl,
+    String role,
+    RoleThemeData t,
+  ) {
+    final bytes = photoUrl != null && photoUrl.trim().isNotEmpty
+        ? ImageUploadService.decodeBase64ToBytes(photoUrl)
+        : null;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
+              boxShadow: [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: 0.25),
+                  blurRadius: 30,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header bar
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.account_circle_rounded, color: t.accent, size: 22),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Profile Photo',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      onPressed: () => Navigator.pop(ctx),
+                      tooltip: 'Close',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Enlarged Avatar Container (320px x 320px)
+                Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFF59E0B), width: 4.0),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                        blurRadius: 24,
+                        spreadRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: photoUrl != null && photoUrl.trim().isNotEmpty
+                        ? (bytes != null
+                            ? Image.memory(bytes, fit: BoxFit.cover, width: 320, height: 320)
+                            : Image.network(photoUrl, fit: BoxFit.cover, width: 320, height: 320, errorBuilder: (_, __, ___) => _buildFallbackAvatar(name, t, size: 320)))
+                        : _buildFallbackAvatar(name, t, size: 320),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // User Name & Role
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    role.toUpperCase(),
+                    style: TextStyle(
+                      color: t.accent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFallbackAvatar(String name, RoleThemeData t, {required double size}) {
+    final initials = name.trim().isNotEmpty
+        ? name.trim().split(' ').map((e) => e[0]).take(2).join().toUpperCase()
+        : '?';
+    return Container(
+      width: size,
+      height: size,
+      color: t.accentMuted,
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: t.accent,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.35,
+        ),
+      ),
+    );
+  }
+
+  void _openAccessControlMatrixSheet(BuildContext context, RoleThemeData t) {
+    if (!_isChairmanActor()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Access Denied: Only the Chairman may open and use the Master Access Control Matrix.'),
+          backgroundColor: Colors.red.shade800,
+        ),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.90,
+          maxChildSize: 0.96,
+          minChildSize: 0.5,
+          builder: (sheetCtx, scrollController) {
+            return _AccessControlMatrixView(
+              scrollController: scrollController,
+              t: t,
+            );
+          },
+        );
+      },
+    );
+  }
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -1725,5 +2230,360 @@ class CNICInputFormatter extends TextInputFormatter {
       if ((i == 4 || i == 11) && i != digits.length - 1) buffer.write('-');
     }
     return TextEditingValue(text: buffer.toString(), selection: TextSelection.collapsed(offset: buffer.length));
+  }
+}
+
+// ─── Chairman Access Control Matrix View Widget ────────────────────────────────
+class _AccessControlMatrixView extends StatefulWidget {
+  final ScrollController scrollController;
+  final RoleThemeData t;
+
+  const _AccessControlMatrixView({
+    required this.scrollController,
+    required this.t,
+  });
+
+  @override
+  State<_AccessControlMatrixView> createState() => _AccessControlMatrixViewState();
+}
+
+class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with SingleTickerProviderStateMixin {
+  late TabController _tabCtrl;
+  String _query = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.t;
+    final modules = UserModuleAccessService.systemModules;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Column(
+        children: [
+          // Drag Handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 10, bottom: 6),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          // Header
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F5132).withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF10B981), size: 24),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: const [
+                        Text('Master Access Control Matrix', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+                        Text('Chairman Authority & Module Permission Overrides', style: TextStyle(color: Colors.white60, fontSize: 11)),
+                      ],
+                    ),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          TabBar(
+            controller: _tabCtrl,
+            labelColor: const Color(0xFF10B981),
+            unselectedLabelColor: Colors.white60,
+            indicatorColor: const Color(0xFF10B981),
+            tabs: const [
+              Tab(icon: Icon(Icons.person_off_rounded, size: 18), text: 'User Module Overrides'),
+              Tab(icon: Icon(Icons.table_chart_rounded, size: 18), text: 'Role Access Matrix'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabCtrl,
+              children: [
+                _buildUserOverridesTab(context, t, modules),
+                _buildRoleMatrixTab(t),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserOverridesTab(BuildContext context, RoleThemeData t, List<Map<String, String>> modules) {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: Container(
+            height: 42,
+            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
+            child: TextField(
+              controller: _searchCtrl,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+              decoration: const InputDecoration(
+                hintText: 'Search user by name, username, or role...',
+                hintStyle: TextStyle(color: Colors.white54, fontSize: 12),
+                prefixIcon: Icon(Icons.search, color: Colors.white54, size: 18),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('users').snapshots(),
+            builder: (ctx, snap) {
+              if (!snap.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final docs = snap.data!.docs;
+              var users = docs.map((d) {
+                final data = Map<String, dynamic>.from(d.data() as Map);
+                data['id'] = d.id;
+                return data;
+              }).toList();
+
+              if (_query.isNotEmpty) {
+                users = users.where((u) {
+                  final name = (u['name'] ?? u['username'] ?? '').toString().toLowerCase();
+                  final role = (u['role'] ?? '').toString().toLowerCase();
+                  return name.contains(_query) || role.contains(_query);
+                }).toList();
+              }
+
+              users.sort((a, b) {
+                final roleA = (a['role'] ?? '').toString().toLowerCase().trim();
+                final roleB = (b['role'] ?? '').toString().toLowerCase().trim();
+                if (roleA == 'chairman' && roleB != 'chairman') return -1;
+                if (roleA != 'chairman' && roleB == 'chairman') return 1;
+                return (a['name'] ?? a['username'] ?? '').toString().compareTo((b['name'] ?? b['username'] ?? '').toString());
+              });
+
+              return ListView.builder(
+                controller: widget.scrollController,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                itemCount: users.length,
+                itemBuilder: (ctx, idx) {
+                  final user = users[idx];
+                  final userId = (user['id'] ?? user['localId'] ?? user['username'] ?? '').toString();
+                  final name = (user['name'] ?? user['username'] ?? 'User').toString();
+                  final role = (user['role'] ?? 'staff').toString();
+                  final isChairman = role.toLowerCase().trim() == 'chairman';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      gradient: isChairman
+                          ? const LinearGradient(
+                              colors: [Color(0xFF382207), Color(0xFF1E293B)],
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                            )
+                          : null,
+                      color: isChairman ? null : const Color(0xFF1E293B),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isChairman ? const Color(0xFFF59E0B) : Colors.white10,
+                        width: isChairman ? 1.8 : 1.0,
+                      ),
+                      boxShadow: isChairman
+                          ? [
+                              BoxShadow(
+                                color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                                blurRadius: 14,
+                                spreadRadius: 1,
+                              )
+                            ]
+                          : null,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  CircleAvatar(
+                                    backgroundColor: isChairman ? const Color(0xFFD97706) : const Color(0xFF0F5132),
+                                    child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'U', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                                      Text('Role: ${role.toUpperCase()} | Branch: ${user['branchId'] ?? 'all'}', style: const TextStyle(color: Colors.white60, fontSize: 11)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              if (isChairman)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(color: const Color(0xFFD97706).withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFD97706))),
+                                  child: const Text('👑 Chairman (Unrestricted)', style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.bold)),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          const Divider(color: Colors.white12, height: 1),
+                          const SizedBox(height: 8),
+                          if (isChairman)
+                            const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 6.0),
+                              child: Text('The Chairman is the highest authority in GMWF and has 100% unrestricted access to all modules and finance.', style: TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic)),
+                            )
+                          else
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: modules.map((mod) {
+                                final modId = mod['id']!;
+                                final modName = mod['name']!;
+                                final isBlocked = UserModuleAccessService.isModuleBlockedForUser(userId, modId);
+                                final isAllowed = UserModuleAccessService.canUserAccessModule(userId: userId, role: role, moduleId: modId);
+
+                                return FilterChip(
+                                  selected: isAllowed,
+                                  showCheckmark: false,
+                                  avatar: Icon(
+                                    isBlocked ? Icons.block_rounded : (isAllowed ? Icons.check_circle_rounded : Icons.lock_outline_rounded),
+                                    size: 14,
+                                    color: isBlocked ? Colors.redAccent : (isAllowed ? Colors.greenAccent : Colors.white54),
+                                  ),
+                                  label: Text(
+                                    isBlocked ? '$modName (BLOCKED)' : modName,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isBlocked ? Colors.redAccent : (isAllowed ? Colors.white : Colors.white54),
+                                    ),
+                                  ),
+                                  selectedColor: isBlocked ? Colors.red.withValues(alpha: 0.2) : const Color(0xFF0F5132),
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  side: BorderSide(
+                                    color: isBlocked ? Colors.redAccent : (isAllowed ? const Color(0xFF10B981) : Colors.white24),
+                                  ),
+                                  onSelected: (val) async {
+                                    final newBlocked = !isBlocked;
+                                    await UserModuleAccessService.setModuleAccessForUser(
+                                      userId: userId,
+                                      moduleId: modId,
+                                      isBlocked: newBlocked,
+                                      performedBy: 'Chairman',
+                                    );
+                                    setState(() {});
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(newBlocked
+                                            ? 'Blocked $modName for $name'
+                                            : 'Unblocked $modName for $name'),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoleMatrixTab(RoleThemeData t) {
+    final matrix = UserModuleAccessService.getRoleDefaultsMap();
+
+    return SingleChildScrollView(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.all(16),
+      child: Table(
+        border: TableBorder.all(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+        columnWidths: const {
+          0: FlexColumnWidth(1.2),
+          1: FlexColumnWidth(2.5),
+        },
+        children: [
+          TableRow(
+            decoration: const BoxDecoration(color: Color(0xFF1E293B)),
+            children: const [
+              Padding(padding: EdgeInsets.all(10), child: Text('Role Title', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+              Padding(padding: EdgeInsets.all(10), child: Text('Permitted System Modules & Scope', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+            ],
+          ),
+          ...matrix.entries.map((e) {
+            return TableRow(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Text(e.key, style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: e.value.map((m) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
+                        child: Text(m, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            );
+          }),
+        ],
+      ),
+    );
   }
 }

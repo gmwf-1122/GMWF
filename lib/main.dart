@@ -170,6 +170,9 @@ void _showCrashScreen(Object error, StackTrace stack) {
 
 void _installGlobalErrorHandlers() {
   FlutterError.onError = (FlutterErrorDetails details) {
+    if (!kIsWeb && Platform.isWindows) {
+      try { appWindow.show(); } catch (_) {}
+    }
     FlutterError.presentError(details);
     _logError(details.exceptionAsString(), details.stack?.toString());
     _markLastCrash();
@@ -178,6 +181,9 @@ void _installGlobalErrorHandlers() {
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    if (!kIsWeb && Platform.isWindows) {
+      try { appWindow.show(); } catch (_) {}
+    }
     _logError(error.toString(), stack.toString());
     _markLastCrash();
     // Report to Sentry
@@ -187,6 +193,25 @@ void _installGlobalErrorHandlers() {
 }
 
 Future<void> main() async {
+  WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  _installGlobalErrorHandlers();
+
+  // Show window immediately on Desktop so app is NEVER hidden on launch or startup warning
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    try {
+      doWhenWindowReady(() {
+        appWindow.minSize = const Size(1280, 720);
+        appWindow.alignment = Alignment.center;
+        appWindow.title = "Gulzar Madina Dispensary";
+        appWindow.show();
+        appWindow.maximize();
+      });
+    } catch (e) {
+      debugPrint('[Main] Window ready error: $e');
+    }
+  }
+
   await SentryFlutter.init(
     (options) {
       options.dsn = 'https://1decf155927c0b93fcbc40447bb21a12@o4511376159014912.ingest.de.sentry.io/4511376169631824';
@@ -194,11 +219,14 @@ Future<void> main() async {
       options.environment = 'production';
     },
     appRunner: () async {
-      WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
-      FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
-      _installGlobalErrorHandlers();
-
       try {
+        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+            .timeout(const Duration(seconds: 5))
+            .catchError((e) {
+              debugPrint('[Main] Firebase init warning: $e');
+              return Firebase.app();
+            });
+
         if (!kIsWeb && Platform.isWindows) {
           final appSupportDir = await getApplicationSupportDirectory();
           final hiveDir = path.join(appSupportDir.path, 'gmwf_hive');
@@ -206,20 +234,28 @@ Future<void> main() async {
         } else {
           await Hive.initFlutter();
         }
-        await Hive.openBox('app_settings');
-      } catch (e) {
-        debugPrint('[Main] Pre-init Hive/settings failed: $e');
-      }
+        Hive.registerAdapter(TimestampAdapter());
 
-      // Show window immediately
-      if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-        doWhenWindowReady(() {
-          appWindow.minSize = const Size(1280, 720);
-          appWindow.alignment = Alignment.center;
-          appWindow.title = "Gulzar Madina Dispensary";
-          appWindow.show();
-          appWindow.maximize();
+        try {
+          await Hive.openBox('app_settings');
+        } catch (hiveErr) {
+          debugPrint('[Main] Hive app_settings box error: $hiveErr');
+        }
+
+        await Future.wait<dynamic>([
+          LocalStorageService.init(),
+          DonationsLocalStorage.init(),
+          ServerSyncManager.initHive(),
+          RealtimeRouter.init(),
+        ]).timeout(const Duration(seconds: 5)).catchError((e) {
+          debugPrint('[Main] Non-critical service init warning: $e');
+          return <dynamic>[];
         });
+
+        await LocalStorageService.seedLocalAdmins();
+      } catch (e, st) {
+        debugPrint('[Main] Pre-init error caught safely: $e');
+        _logError('Pre-init error: $e', st.toString());
       }
 
       runApp(const ProviderScope(child: MyApp()));
@@ -249,11 +285,15 @@ class _InitializationScreenState extends State<InitializationScreen> {
 
   Future<void> _startInit() async {
     try {
-      debugPrint("[Init] Starting async setup...");
+      debugPrint("[Init] Starting fast async setup...");
       
-      // 1. Firebase (with timeout)
+      // 1. Firebase (fast 5s timeout)
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 5))
+          .catchError((e) {
+            debugPrint('[Init] Firebase init warning/timeout: $e');
+            return Firebase.app();
+          });
 
       // 2. Hive
       if (!kIsWeb && Platform.isWindows) {
@@ -265,92 +305,55 @@ class _InitializationScreenState extends State<InitializationScreen> {
       }
       Hive.registerAdapter(TimestampAdapter());
 
-      // 3. Services
+      // 3. Essential local services (5s timeout)
       await Future.wait<dynamic>([
         LocalStorageService.init(),
         DonationsLocalStorage.init(),
         ServerSyncManager.initHive(),
         RealtimeRouter.init(),
         PdfAssetCache.preload(),
-      ]).timeout(const Duration(seconds: 15));
+      ]).timeout(const Duration(seconds: 5)).catchError((e) {
+        debugPrint('[Init] Non-critical service init warning: $e');
+        return <dynamic>[];
+      });
 
       await LocalStorageService.seedLocalAdmins();
+      await _clearCrashMarkerOnSuccess();
+
+      // Launch background tasks without blocking UI splash removal
+      unawaited(_runBackgroundCleanups());
+
+      debugPrint("[Init] Fast setup success. Removing splash & moving to home.");
+      if (mounted) {
+        FlutterNativeSplash.remove();
+        Navigator.pushReplacementNamed(context, '/');
+      }
+    } catch (e, st) {
+      debugPrint("[Init] Fast init completed with warning: $e");
+      debugPrint("[Init] STACK TRACE: $st");
+      await _logError("Init Warning: $e", st.toString());
+      if (mounted) {
+        FlutterNativeSplash.remove();
+        Navigator.pushReplacementNamed(context, '/');
+      }
+    }
+  }
+
+  static Future<void> _runBackgroundCleanups() async {
+    try {
       await FinanceV2Migration.runMigration();
       await LocalStorageService.forceDeduplicatePatients();
 
-      // ── CLEANUP DUPLICATE/CORRUPTED DONATIONS ─────────────────────────────
-      try {
+      if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
         final box = Hive.box(DonationsLocalStorage.donationsBox);
-        
-        // 1. Delete double-nested keys from local Hive box instantly
         final nestedKeys = box.keys.where((k) => k.toString().split('__').length > 3).toList();
         if (nestedKeys.isNotEmpty) {
-          debugPrint('[CLEANUP] Found ${nestedKeys.length} double-nested Hive keys. Deleting...');
           await box.deleteAll(nestedKeys);
           await box.flush();
         }
-
-        // 2. Query Firestore and clean up duplicate documents
-        final db = FirebaseFirestore.instance;
-        final snap = await db.collection('branches').doc('gujrat').collection('donations').get();
-        int deletedCount = 0;
-        
-        for (final doc in snap.docs) {
-          final data = doc.data();
-          final docId = doc.id;
-          final receiptNo = data['receiptNo']?.toString() ?? '';
-          
-          bool shouldDelete = false;
-          if (docId.contains('__')) {
-            shouldDelete = true;
-          } else if (receiptNo.isEmpty) {
-            shouldDelete = true;
-          }
-          
-          if (shouldDelete) {
-            debugPrint('[CLEANUP] Deleting duplicate document from Firestore: $docId');
-            await doc.reference.delete();
-            deletedCount++;
-            
-            // Also search and delete it from local Hive box if it exists under any key
-            for (final hiveKey in box.keys.toList()) {
-              final raw = box.get(hiveKey);
-              if (raw is Map) {
-                final fsId = raw['firestoreId']?.toString();
-                final localId = raw['localId']?.toString();
-                if (fsId == docId || localId == docId || hiveKey.toString().contains(docId)) {
-                  debugPrint('[CLEANUP] Deleting duplicate key from Hive: $hiveKey');
-                  await box.delete(hiveKey);
-                }
-              }
-            }
-          }
-        }
-        if (deletedCount > 0) {
-          debugPrint('[CLEANUP] Done! Deleted $deletedCount duplicate Firestore documents.');
-          await box.flush();
-        }
-      } catch (cleanupErr) {
-        debugPrint('[CLEANUP] Error during duplicate cleanup: $cleanupErr');
       }
-
-      await _clearCrashMarkerOnSuccess();
-
-      debugPrint("[Init] Success. Moving to home.");
-      if (mounted) {
-        FlutterNativeSplash.remove();
-        Navigator.pushReplacementNamed(context, '/home');
-      }
-    } catch (e, st) {
-      debugPrint("[Init] CRITICAL ERROR: $e");
-      debugPrint("[Init] STACK TRACE: $st");
-      await _logError("Init Failed: $e", st.toString());
-      if (mounted) {
-        setState(() {
-          _hasError = true;
-          _errorMsg = e.toString();
-        });
-      }
+    } catch (cleanupErr) {
+      debugPrint('[CLEANUP] Error during background cleanup: $cleanupErr');
     }
   }
 
@@ -410,6 +413,14 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!Hive.isBoxOpen('app_settings')) {
+      return MaterialApp(
+        navigatorKey: navigatorKey,
+        title: 'GM-D',
+        debugShowCheckedModeBanner: false,
+        home: const InitializationScreen(),
+      );
+    }
     return ValueListenableBuilder(
       valueListenable: Hive.box('app_settings').listenable(keys: [
         'custom_accent_color',
@@ -574,37 +585,51 @@ class MyApp extends StatelessWidget {
                 ? Hive.box('app_settings').get('font_scale', defaultValue: 1.0) as double
                 : 1.0;
 
-            final adjustedChild = Directionality(
-              textDirection: isUrdu ? TextDirection.rtl : TextDirection.ltr,
-              child: MediaQuery(
-                data: mediaQuery.copyWith(
-                  textScaler: TextScaler.linear(scale),
-                ),
+            final appDirection = isUrdu ? TextDirection.rtl : TextDirection.ltr;
+            final appMediaQuery = mediaQuery.copyWith(
+              textScaler: TextScaler.linear(scale),
+            );
+
+            final adjustedChild = MediaQuery(
+              data: appMediaQuery,
+              child: Directionality(
+                textDirection: appDirection,
                 child: child!,
               ),
             );
 
             if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
-              return Scaffold(
-                body: Overlay(
-                  initialEntries: [
-                    OverlayEntry(
-                      builder: (context) => Column(
-                        children: [
-                          const CustomTitleBar(),
-                          Expanded(child: adjustedChild),
-                        ],
-                      ),
+              return MediaQuery(
+                data: appMediaQuery,
+                child: Directionality(
+                  textDirection: appDirection,
+                  child: Material(
+                    color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
+                    child: Overlay(
+                      initialEntries: [
+                        OverlayEntry(
+                          builder: (context) => Column(
+                            children: [
+                              const CustomTitleBar(),
+                              Expanded(child: adjustedChild),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               );
             }
             return adjustedChild;
           },
-          initialRoute: '/',
+          home: const AuthHomeWrapper(),
+          onUnknownRoute: (settings) {
+            return MaterialPageRoute(
+              builder: (context) => const AuthHomeWrapper(),
+            );
+          },
           routes: {
-            '/': (context) => const InitializationScreen(),
             '/home': (context) => const AuthHomeWrapper(),
             '/login': (context) => const LoginPage(),
             '/admin': (context) => const OverviewScreen(),
@@ -634,34 +659,98 @@ class AuthHomeWrapper extends StatefulWidget {
   State<AuthHomeWrapper> createState() => _AuthHomeWrapperState();
 }
 
+class _SessionData {
+  final User? user;
+  final Map<String, dynamic>? localUser;
+  _SessionData({this.user, this.localUser});
+}
+
 class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
-  late final Stream<User?> _authStream = FirebaseAuth.instance.authStateChanges();
-  late final Future<Map<String, dynamic>?> _cachedUserFuture = offline_auth.OfflineAuthService.getCachedUserData();
+  late final Future<_SessionData> _sessionFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _sessionFuture = _determineSession();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        FlutterNativeSplash.remove();
+      } catch (_) {}
+    });
+  }
+
+  Future<_SessionData> _determineSession() async {
+    try {
+      // 1. Check if Firebase currentUser is available immediately
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        final localData = _getLocalUserData(currentUser);
+        return _SessionData(user: currentUser, localUser: localData);
+      }
+
+      // 2. Wait at most 2 seconds for authStateChanges event (prevents infinite hanging)
+      final streamUser = await FirebaseAuth.instance
+          .authStateChanges()
+          .firstWhere((u) => u != null, orElse: () => null)
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
+
+      if (streamUser != null) {
+        final localData = _getLocalUserData(streamUser);
+        return _SessionData(user: streamUser, localUser: localData);
+      }
+
+      // 3. Fallback to cached offline user credentials (2s timeout)
+      final offlineUser = await offline_auth.OfflineAuthService.getCachedUserData()
+          .timeout(const Duration(seconds: 2), onTimeout: () => null);
+
+      if (offlineUser != null &&
+          (offlineUser['uid'] != null ||
+           offlineUser['username'] != null ||
+           offlineUser['email'] != null)) {
+        return _SessionData(user: null, localUser: offlineUser);
+      }
+    } catch (e) {
+      debugPrint('[AuthHomeWrapper] Session resolution warning: $e');
+    }
+    return _SessionData(user: null, localUser: null);
+  }
+
+  Map<String, dynamic>? _getLocalUserData(User user) {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final cached = Hive.box('app_settings').get('user_data');
+        if (cached is Map) {
+          final m = Map<String, dynamic>.from(cached);
+          final r = (m['role'] ?? '').toString().toLowerCase().trim();
+          final uUid = (m['uid'] ?? '').toString();
+          final uEmail = (m['email'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown' && (uUid == user.uid || uEmail == (user.email ?? '').toLowerCase())) {
+            return m;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: _authStream,
+    return FutureBuilder<_SessionData>(
+      future: _sessionFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const GmwfLoadingView();
-        }
-        if (snapshot.hasData && snapshot.data != null) {
-          return HomeRouter(user: snapshot.data!);
+          return const GmwfLoadingView(
+            message: 'Verifying Session...',
+            subMessage: 'Connecting to GMWF Security Core',
+          );
         }
 
-        return FutureBuilder<Map<String, dynamic>?>(
-          future: _cachedUserFuture,
-          builder: (context, cachedSnap) {
-            if (cachedSnap.connectionState == ConnectionState.waiting) {
-              return const GmwfLoadingView();
-            }
-            if (cachedSnap.hasData && cachedSnap.data != null) {
-              return HomeRouter(user: null, localUser: cachedSnap.data!);
-            }
-            return const LoginPage();
-          },
-        );
+        final data = snapshot.data;
+        if (data != null && (data.user != null || data.localUser != null)) {
+          return HomeRouter(user: data.user, localUser: data.localUser);
+        }
+
+        return const LoginPage();
       },
     );
   }

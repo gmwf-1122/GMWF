@@ -69,6 +69,9 @@ final branchDateRangeProvider =
 /// Selected type filter: null = All, 'zakat', 'non-zakat', 'gmwf'
 final branchTypeFilterProvider = StateProvider<String?>((ref) => null);
 
+/// Selected sub-dispensary facility filter: null = All, 'kapayya', 'haji_camp'
+final branchSubDispensaryFilterProvider = StateProvider<String?>((ref) => null);
+
 final branchMultiDayFilterProvider = StateProvider<bool>((ref) => false);
 
 final branchMultiVisitFilterProvider = StateProvider<bool>((ref) => false);

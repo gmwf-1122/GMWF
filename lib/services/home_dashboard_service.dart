@@ -243,49 +243,119 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
   try {
     final bId = branchId.toLowerCase().trim();
     final dateKeyYmd = DateFormat('yyyy-MM-dd').format(date);
+    final dateKeyDmyy = DateFormat('ddMMyy').format(date);
     int donTotal = 0;
     int empAtt = 0;
+    int z = 0, nz = 0, gm = 0, das = 0, dispensed = 0, dispRev = 0;
+    int zRev = 0, nzRev = 0, gmRev = 0;
 
+    // 1. Donations
     try {
       final donSnap = await FirebaseFirestore.instance
-          .collection('donations')
+          .collection('branches').doc(bId).collection('donations')
+          .where('date', isGreaterThanOrEqualTo: dateKeyYmd)
+          .where('date', isLessThanOrEqualTo: dateKeyYmd)
           .get()
           .timeout(const Duration(seconds: 4));
       for (final doc in donSnap.docs) {
         final val = doc.data();
-        final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
-        final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
-        if (_isMatchingBranch(b, bId) && _isSameDate(d, dateKeyYmd, DateFormat('ddMMyy').format(date))) {
-          final status = val['status']?.toString().toLowerCase();
-          if (status == 'deleted') continue;
-          final amt = val['amount'];
-          final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-          donTotal += amtDouble.toInt();
-        }
+        final status = val['status']?.toString().toLowerCase();
+        final syncStatus = val['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted') continue;
+        final payMethod = val['paymentMethod']?.toString().toLowerCase() ?? '';
+        if (payMethod == 'bank_deposit') continue;
+        final amt = val['amount'];
+        final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+        donTotal += amtDouble.toInt();
       }
     } catch (_) {}
 
+    // Fallback: try top-level donations collection if branch-level found nothing
+    if (donTotal == 0) {
+      try {
+        final donSnap = await FirebaseFirestore.instance
+            .collection('donations')
+            .get()
+            .timeout(const Duration(seconds: 4));
+        for (final doc in donSnap.docs) {
+          final val = doc.data();
+          final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+          final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
+          if (_isMatchingBranch(b, bId) && _isSameDate(d, dateKeyYmd, dateKeyDmyy)) {
+            final status = val['status']?.toString().toLowerCase();
+            if (status == 'deleted') continue;
+            final amt = val['amount'];
+            final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+            donTotal += amtDouble.toInt();
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Serials (zakat, non-zakat, gmwf) + dispensary + dasterkhwaan
+    try {
+      final base = FirebaseFirestore.instance
+          .collection('branches').doc(bId).collection('serials').doc(dateKeyDmyy);
+
+      final results = await Future.wait([
+        base.collection('zakat').get(),
+        base.collection('non-zakat').get(),
+        base.collection('gmwf').get(),
+        base.collection('dasterkhwan').get(),
+        FirebaseFirestore.instance.collection('branches/$bId/dispensary/$dateKeyDmyy/$dateKeyDmyy').get(),
+      ]).timeout(const Duration(seconds: 6));
+
+      // Zakat patients
+      for (final doc in (results[0] as QuerySnapshot).docs) {
+        z++;
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        final rev = 20 * d.toInt();
+        dispRev += rev;
+        zRev += rev;
+      }
+
+      // Non-zakat patients
+      for (final doc in (results[1] as QuerySnapshot).docs) {
+        nz++;
+        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+        final rev = 100 * d.toInt();
+        dispRev += rev;
+        nzRev += rev;
+      }
+
+      // GMWF patients
+      gm = (results[2] as QuerySnapshot).size;
+
+      // Dasterkhwaan tokens
+      das = (results[3] as QuerySnapshot).size;
+
+      // Dispensed patients
+      dispensed = (results[4] as QuerySnapshot).size;
+    } catch (_) {}
+
+    // 3. Employee attendance (rough count)
     try {
       final userSnap = await FirebaseFirestore.instance
           .collection('users')
+          .where('branchId', isEqualTo: bId)
           .get()
           .timeout(const Duration(seconds: 4));
       empAtt = userSnap.docs.length;
     } catch (_) {}
 
     return BranchStats(
-      zakat: 0,
-      nonZakat: 0,
-      gmwf: 0,
-      dispensed: 0,
+      zakat: z,
+      nonZakat: nz,
+      gmwf: gm,
+      dispensed: dispensed,
       prescribed: 0,
-      dasterkhwaan: 0,
+      dasterkhwaan: das,
       dasterkhwaanServed: 0,
       donations: donTotal,
-      dispensaryRevenue: 0,
-      zakatRevenue: 0,
-      nonZakatRevenue: 0,
-      gmwfRevenue: 0,
+      dispensaryRevenue: dispRev,
+      zakatRevenue: zRev,
+      nonZakatRevenue: nzRev,
+      gmwfRevenue: gmRev,
       employeeAttendance: empAtt,
     );
   } catch (_) {
@@ -364,6 +434,226 @@ Future<Map<String, TodayVsYesterday>> fetchTodayVsYesterdayPerBranch(
     out[ids[i]] = TodayVsYesterday(today: todayResults[i], yesterday: yestResults[i]);
   }
   return out;
+}
+
+class KarachiCampBreakdown {
+  final int hajiCampPatients;
+  final int hajiCampZakat;
+  final int hajiCampNonZakat;
+  final int hajiCampGmwf;
+  final int hajiCampRevenue;
+
+  final int hajiCampMorningPatients;
+  final int hajiCampMorningZakat;
+  final int hajiCampMorningNonZakat;
+  final int hajiCampMorningGmwf;
+
+  final int hajiCampEveningPatients;
+  final int hajiCampEveningZakat;
+  final int hajiCampEveningNonZakat;
+  final int hajiCampEveningGmwf;
+
+  final int kapayaPatients;
+  final int kapayaZakat;
+  final int kapayaNonZakat;
+  final int kapayaGmwf;
+  final int kapayaRevenue;
+
+  final int kapayaMorningPatients;
+  final int kapayaMorningZakat;
+  final int kapayaMorningNonZakat;
+  final int kapayaMorningGmwf;
+
+  final int kapayaEveningPatients;
+  final int kapayaEveningZakat;
+  final int kapayaEveningNonZakat;
+  final int kapayaEveningGmwf;
+
+  const KarachiCampBreakdown({
+    this.hajiCampPatients = 0,
+    this.hajiCampZakat = 0,
+    this.hajiCampNonZakat = 0,
+    this.hajiCampGmwf = 0,
+    this.hajiCampRevenue = 0,
+    this.hajiCampMorningPatients = 0,
+    this.hajiCampMorningZakat = 0,
+    this.hajiCampMorningNonZakat = 0,
+    this.hajiCampMorningGmwf = 0,
+    this.hajiCampEveningPatients = 0,
+    this.hajiCampEveningZakat = 0,
+    this.hajiCampEveningNonZakat = 0,
+    this.hajiCampEveningGmwf = 0,
+    this.kapayaPatients = 0,
+    this.kapayaZakat = 0,
+    this.kapayaNonZakat = 0,
+    this.kapayaGmwf = 0,
+    this.kapayaRevenue = 0,
+    this.kapayaMorningPatients = 0,
+    this.kapayaMorningZakat = 0,
+    this.kapayaMorningNonZakat = 0,
+    this.kapayaMorningGmwf = 0,
+    this.kapayaEveningPatients = 0,
+    this.kapayaEveningZakat = 0,
+    this.kapayaEveningNonZakat = 0,
+    this.kapayaEveningGmwf = 0,
+  });
+
+  int get totalPatients => hajiCampPatients + kapayaPatients;
+}
+
+Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
+  final targetDate = date ?? DateTime.now();
+  final ymd = DateFormat('yyyy-MM-dd').format(targetDate);
+  final dmyy = DateFormat('ddMMyy').format(targetDate);
+
+  int hajiMZ = 0, hajiMNZ = 0, hajiMGM = 0;
+  int hajiEZ = 0, hajiENZ = 0, hajiEGM = 0;
+  int kapayaMZ = 0, kapayaMNZ = 0, kapayaMGM = 0;
+  int kapayaEZ = 0, kapayaENZ = 0, kapayaEGM = 0;
+  int hajiRev = 0;
+  int kapayaRev = 0;
+
+  final Map<String, Map<String, dynamic>> entryMap = {};
+
+  // 1. Local entries across all possible Hive keys
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final box = Hive.box(LocalStorageService.entriesBox);
+      for (final k in box.keys) {
+        final val = box.get(k);
+        if (val is Map) {
+          final e = Map<String, dynamic>.from(val);
+          final b = (e['branchId'] ?? '').toString().toLowerCase();
+          final kStr = k.toString().toLowerCase();
+          if (b.contains('karachi') || b.contains('haji') || b.contains('kapaya') || kStr.contains('karachi') || kStr.contains('haji') || kStr.contains('kapaya')) {
+            final key = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? k).toString();
+            if (key.isNotEmpty) entryMap[key] = e;
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  // Also include LocalStorageService.getLocalEntries for karachi
+  try {
+    final localEntries = LocalStorageService.getLocalEntries('karachi');
+    for (final e in localEntries) {
+      final key = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? '').toString();
+      if (key.isNotEmpty) entryMap[key] = e;
+    }
+  } catch (_) {}
+
+  // 2. Cloud entries if available
+  try {
+    final snap = await FirebaseFirestore.instance
+        .collection('branches')
+        .doc('karachi')
+        .collection('entries')
+        .where('dateKey', isEqualTo: ymd)
+        .limit(300)
+        .get()
+        .timeout(const Duration(seconds: 4));
+
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      final key = (data['serial'] ?? doc.id).toString();
+      entryMap[key] = data;
+    }
+  } catch (_) {}
+
+  for (final e in entryMap.values) {
+    if (!_isSameDate(e['date'] ?? e['createdAt'] ?? e['timestamp'] ?? e['dateKey'], ymd, dmyy)) continue;
+
+    final disp = (e['dispensaryId'] ?? e['campId'] ?? e['subLocation'] ?? e['facility'] ?? '').toString().toLowerCase().trim();
+    final cat = (e['category'] ?? e['queueType'] ?? e['type'] ?? '').toString().toLowerCase().trim();
+    final isHaji = disp.contains('haji');
+
+    final sTag = e['session']?.toString().toLowerCase().trim();
+    bool isEvening = sTag == 'evening';
+    if (sTag == null || sTag.isEmpty) {
+      final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
+      if (rawTime != null) {
+        try {
+          final dt = DateTime.parse(rawTime.toString());
+          isEvening = dt.hour >= 14;
+        } catch (_) {
+          isEvening = false;
+        }
+      }
+    }
+
+    final isZakat = cat.contains('zakat') && !cat.contains('non');
+    final isNonZakat = cat.contains('non-zakat') || cat.contains('nonzakat') || cat.contains('non_zakat');
+
+    final feeVal = e['fee'] ?? e['tokenFee'] ?? e['amount'] ?? e['price'] ?? e['dispensaryRevenue'];
+    int eRev = 0;
+    if (feeVal != null && (feeVal is num || double.tryParse(feeVal.toString()) != null)) {
+      eRev = (feeVal is num ? feeVal.toInt() : double.tryParse(feeVal.toString())?.toInt() ?? 0);
+    } else {
+      final daysRaw = e['daysOfMedicine'] ?? 1;
+      final days = (daysRaw is num ? daysRaw.toInt() : int.tryParse(daysRaw.toString()) ?? 1);
+      if (isZakat) eRev = 20 * days;
+      else if (isNonZakat) eRev = 100 * days;
+    }
+
+    if (isHaji) {
+      hajiRev += eRev;
+      if (isEvening) {
+        if (isZakat) hajiEZ++; else if (isNonZakat) hajiENZ++; else hajiEGM++;
+      } else {
+        if (isZakat) hajiMZ++; else if (isNonZakat) hajiMNZ++; else hajiMGM++;
+      }
+    } else {
+      kapayaRev += eRev;
+      if (isEvening) {
+        if (isZakat) kapayaEZ++; else if (isNonZakat) kapayaENZ++; else kapayaEGM++;
+      } else {
+        if (isZakat) kapayaMZ++; else if (isNonZakat) kapayaMNZ++; else kapayaMGM++;
+      }
+    }
+  }
+
+  final hajiZ = hajiMZ + hajiEZ;
+  final hajiNZ = hajiMNZ + hajiENZ;
+  final hajiGM = hajiMGM + hajiEGM;
+
+  final kapayaZ = kapayaMZ + kapayaEZ;
+  final kapayaNZ = kapayaMNZ + kapayaENZ;
+  final kapayaGM = kapayaMGM + kapayaEGM;
+
+  return KarachiCampBreakdown(
+    hajiCampPatients: hajiZ + hajiNZ + hajiGM,
+    hajiCampZakat: hajiZ,
+    hajiCampNonZakat: hajiNZ,
+    hajiCampGmwf: hajiGM,
+    hajiCampRevenue: hajiRev,
+
+    hajiCampMorningPatients: hajiMZ + hajiMNZ + hajiMGM,
+    hajiCampMorningZakat: hajiMZ,
+    hajiCampMorningNonZakat: hajiMNZ,
+    hajiCampMorningGmwf: hajiMGM,
+
+    hajiCampEveningPatients: hajiEZ + hajiENZ + hajiEGM,
+    hajiCampEveningZakat: hajiEZ,
+    hajiCampEveningNonZakat: hajiENZ,
+    hajiCampEveningGmwf: hajiEGM,
+
+    kapayaPatients: kapayaZ + kapayaNZ + kapayaGM,
+    kapayaZakat: kapayaZ,
+    kapayaNonZakat: kapayaNZ,
+    kapayaGmwf: kapayaGM,
+    kapayaRevenue: kapayaRev,
+
+    kapayaMorningPatients: kapayaMZ + kapayaMNZ + kapayaMGM,
+    kapayaMorningZakat: kapayaMZ,
+    kapayaMorningNonZakat: kapayaMNZ,
+    kapayaMorningGmwf: kapayaMGM,
+
+    kapayaEveningPatients: kapayaEZ + kapayaENZ + kapayaEGM,
+    kapayaEveningZakat: kapayaEZ,
+    kapayaEveningNonZakat: kapayaENZ,
+    kapayaEveningGmwf: kapayaEGM,
+  );
 }
 
 /// Fetches daily revenue total for the past [days] days for the list of branches,

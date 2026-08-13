@@ -87,6 +87,7 @@ class PermissionService {
     
     // Branch Manager — locked to their own branch only
     'branch manager': {
+      AppPermission.manageUsers,          // Allow branch managers to manage system users/staff
       AppPermission.viewBranchSpecificStats, // own branch summary only
       AppPermission.reverseTokens, 
       AppPermission.manageInventory, 
@@ -99,6 +100,8 @@ class PermissionService {
       AppPermission.generateFoodTokens, 
       AppPermission.manageMadrassa, 
       AppPermission.manageMadrassaAdmin, // Added for full Madrassa Admin view
+      AppPermission.manageSchool,        // Added for School
+      AppPermission.manageSchoolAdmin,   // Added for School Admin
       AppPermission.viewPatients,        // Added for Patients list
       AppPermission.registerPatients,    // Added for Registration
       AppPermission.downloadData,        // Added for Downloads
@@ -237,7 +240,7 @@ class PermissionService {
   // ── GMWF Finance v2 RBAC matrix checks ──────────────────────────────────────
   
   static const List<String> financeRoles = [
-    'chairman', 'ceo', 'admin', 'hq manager', 'branch manager', 'global accounts'
+    'chairman', 'ceo', 'admin', 'global admin', 'hq manager', 'branch manager', 'global accounts'
   ];
 
   /// Checks if a role is allowed to open the GMWF Finance module.
@@ -249,10 +252,11 @@ class PermissionService {
   FinanceAccess getAttendanceAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
-      case 'branch manager':
-      case 'hq manager':
+      case 'global admin':
       case 'admin':
       case 'ceo':
+      case 'branch manager':
+      case 'hq manager':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -263,10 +267,11 @@ class PermissionService {
   FinanceAccess getEmployeeProfileAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
-      case 'branch manager':
-      case 'hq manager':
+      case 'global admin':
       case 'admin':
       case 'ceo':
+      case 'branch manager':
+      case 'hq manager':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -276,8 +281,10 @@ class PermissionService {
   /// Approve salary change
   FinanceAccess getSalaryApprovalAccess(String role) {
     switch (role.toLowerCase().trim()) {
-      case 'ceo':
       case 'chairman':
+      case 'global admin':
+      case 'admin':
+      case 'ceo':
         return FinanceAccess.full;
       case 'branch manager':
       case 'hq manager':
@@ -291,9 +298,10 @@ class PermissionService {
   FinanceAccess getPayrollPayoutAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
-      case 'global accounts':
+      case 'global admin':
       case 'admin':
       case 'ceo':
+      case 'global accounts':
         return FinanceAccess.full;
       case 'hq manager':
         return FinanceAccess.requestOnly;
@@ -306,11 +314,12 @@ class PermissionService {
   FinanceAccess getExpenseAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
+      case 'global admin':
+      case 'admin':
+      case 'ceo':
       case 'branch manager':
       case 'hq manager':
       case 'global accounts':
-      case 'admin':
-      case 'ceo':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -321,9 +330,10 @@ class PermissionService {
   FinanceAccess getLoanAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
-      case 'global accounts':
+      case 'global admin':
       case 'admin':
       case 'ceo':
+      case 'global accounts':
       case 'hq manager':
         return FinanceAccess.full;
       case 'branch manager':
@@ -337,9 +347,10 @@ class PermissionService {
   FinanceAccess getLedgerVoidAccess(String role) {
     switch (role.toLowerCase().trim()) {
       case 'chairman':
-      case 'global accounts':
+      case 'global admin':
       case 'admin':
       case 'ceo':
+      case 'global accounts':
       case 'hq manager':
         return FinanceAccess.full;
       default:
@@ -350,9 +361,10 @@ class PermissionService {
   /// Lock/unlock a payroll period
   FinanceAccess getPeriodLockAccess(String role) {
     switch (role.toLowerCase().trim()) {
-      case 'ceo':
       case 'chairman':
+      case 'global admin':
       case 'admin':
+      case 'ceo':
       case 'hq manager':
         return FinanceAccess.full;
       case 'global accounts':

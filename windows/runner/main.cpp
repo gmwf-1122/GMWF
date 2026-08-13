@@ -20,28 +20,39 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
-  // ── Single-instance guard ─────────────────────────────────────────────────
-  // Prevents a second instance from launching and fighting over Hive lock
-  // files (which causes the PathAccessException / errno=32 startup crash).
-  // If an instance is already running, bring its window to the foreground
-  // and exit this new process cleanly.
-  HANDLE hMutex = ::CreateMutex(nullptr, TRUE, L"GmwfSingleInstanceMutex");
+  HANDLE hMutex = nullptr;
+
+#ifdef NDEBUG
+  // ── Single-instance guard (Release builds only) ───────────────────────────
+  // Prevents a second release instance from launching and fighting over Hive
+  // lock files (which causes the PathAccessException / errno=32 startup crash).
+  // If an instance is already running with an active window, bring it to front.
+  hMutex = ::CreateMutex(nullptr, FALSE, L"GmwfSingleInstanceMutex");
   if (::GetLastError() == ERROR_ALREADY_EXISTS) {
-    // Another instance is running — find its window and bring it to front.
-    HWND existing = ::FindWindow(nullptr, L"GMWF v1.2.6");
+    // Another instance is running — find its window by class name or title.
+    HWND existing = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", nullptr);
+    if (!existing) {
+      existing = ::FindWindow(nullptr, L"Gulzar Madina Dispensary");
+    }
+    if (!existing) {
+      existing = ::FindWindow(nullptr, L"GMWF");
+    }
     if (existing) {
+      ::ShowWindow(existing, SW_SHOW);
       if (::IsIconic(existing)) {
         ::ShowWindow(existing, SW_RESTORE);
       }
       ::SetForegroundWindow(existing);
+      if (hMutex) {
+        ::CloseHandle(hMutex);
+        hMutex = nullptr;
+      }
+      ::CoUninitialize();
+      return 0;
     }
-    if (hMutex) {
-      ::CloseHandle(hMutex);
-    }
-    ::CoUninitialize();
-    return 0;
   }
   // ─────────────────────────────────────────────────────────────────────────
+#endif
 
   flutter::DartProject project(L"data");
 
@@ -53,9 +64,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"GMWF v1.2.6", origin, size)) {
+  if (!window.Create(L"GMWF", origin, size)) {
     if (hMutex) {
       ::CloseHandle(hMutex);
+      hMutex = nullptr;
     }
     return EXIT_FAILURE;
   }
@@ -67,10 +79,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
-  // Release the mutex when the app exits normally.
   if (hMutex) {
     ::ReleaseMutex(hMutex);
     ::CloseHandle(hMutex);
+    hMutex = nullptr;
   }
 
   ::CoUninitialize();

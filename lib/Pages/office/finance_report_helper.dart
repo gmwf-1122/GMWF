@@ -11,6 +11,8 @@ import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'package:flutter/material.dart';
+import '../../widgets/file_action_helper.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_expenses_storage.dart';
 import '../../services/local_storage_service.dart';
@@ -616,10 +618,11 @@ class FinanceReportHelper {
   }
 
   // ── 2. Excel Monthly Payroll & Attendance Sheet (Branch / Department) ──────
-  static Future<void> exportMonthlyExcel({
+  static Future<Map<String, dynamic>?> exportMonthlyExcel({
     required String branchId,
     required String monthKey,
     String? department,
+    BuildContext? context,
   }) async {
     try {
       final employees = FinanceLocalStorage.getEmployees(branchId).where((emp) {
@@ -776,20 +779,39 @@ class FinanceReportHelper {
       final deptStr = department != null ? '_${department.toLowerCase()}' : '';
       final fileName = 'payroll_${branchId}_${monthKey}${deptStr}_$dateStr.xlsx';
 
-      await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Excel Report',
-        fileName: fileName,
-        bytes: excelBytes,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
-    } catch (_) {}
+      String? path;
+      try {
+        path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Excel Report',
+          fileName: fileName,
+          bytes: excelBytes,
+          type: FileType.custom,
+          allowedExtensions: ['xlsx'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': excelBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: excelBytes,
+          fileName: fileName,
+          title: 'Monthly Excel Sheet Ready',
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] exportMonthlyExcel error: $e');
+      return null;
+    }
   }
 
   // ── 3. Excel Consolidated Report: All Branches categorized branch-wise ──────
-  static Future<void> exportConsolidatedAllBranchesExcel({
+  static Future<Map<String, dynamic>?> exportConsolidatedAllBranchesExcel({
     required List<Map<String, dynamic>> branches,
     required String monthKey,
+    BuildContext? context,
   }) async {
     try {
       final excel = xl.Excel.createExcel();
@@ -897,22 +919,42 @@ class FinanceReportHelper {
 
       final excelBytes = excel.encode() != null ? Uint8List.fromList(excel.encode()!) : Uint8List(0);
       final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final fileName = 'consolidated_payroll_${monthKey}_$dateStr.xlsx';
 
-      await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Consolidated Report',
-        fileName: 'consolidated_payroll_${monthKey}_$dateStr.xlsx',
-        bytes: excelBytes,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
-    } catch (_) {}
+      String? path;
+      try {
+        path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Consolidated Report',
+          fileName: fileName,
+          bytes: excelBytes,
+          type: FileType.custom,
+          allowedExtensions: ['xlsx'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': excelBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: excelBytes,
+          fileName: fileName,
+          title: 'Consolidated Payroll Sheet Ready',
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] exportConsolidatedAllBranchesExcel error: $e');
+      return null;
+    }
   }
 
   // ── 4. PDF Monthly Payroll & Attendance Sheet (Branch / Department) ────────
-  static Future<void> exportMonthlyPdf({
+  static Future<Map<String, dynamic>?> exportMonthlyPdf({
     required String branchId,
     required String monthKey,
     String? department,
+    BuildContext? context,
   }) async {
     try {
       final employees = FinanceLocalStorage.getEmployees(branchId).where((emp) {
@@ -1058,22 +1100,41 @@ class FinanceReportHelper {
       final deptStr = department != null ? '_${department.toLowerCase()}' : '';
       final fileName = 'payroll_${branchId}_${monthKey}${deptStr}_$dateStr.pdf';
 
-      await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Monthly PDF Report',
-        fileName: fileName,
-        bytes: pdfBytes,
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-      );
-    } catch (_) {}
+      String? path;
+      try {
+        path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Monthly PDF Report',
+          fileName: fileName,
+          bytes: pdfBytes,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': pdfBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: pdfBytes,
+          fileName: fileName,
+          title: 'Monthly PDF Report Ready',
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] exportMonthlyPdf error: $e');
+      return null;
+    }
   }
 
   static int min(int a, int b) => a < b ? a : b;
 
   // ── 5. Excel Monthly Expenses Log ──────────────────────────────────────────
-  static Future<void> exportExpensesExcel({
+  static Future<Map<String, dynamic>?> exportExpensesExcel({
     required String branchId,
     required String monthKey, // format: 'yyyy-MM'
+    BuildContext? context,
   }) async {
     try {
       // Parse month range
@@ -1265,15 +1326,159 @@ class FinanceReportHelper {
       final branchStr = branchId == 'all' ? 'all_branches' : branchId;
       final fileName = 'expenses_${branchStr}_${monthKey}.xlsx';
 
-      await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Expenses Report',
-        fileName: fileName,
-        bytes: excelBytes,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
+      String? path;
+      try {
+        path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Expenses Report',
+          fileName: fileName,
+          bytes: excelBytes,
+          type: FileType.custom,
+          allowedExtensions: ['xlsx'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': excelBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: excelBytes,
+          fileName: fileName,
+          title: 'Expenses Excel Report Ready',
+        );
+      }
+      return result;
     } catch (e) {
       debugPrint('[FinanceReportHelper] exportExpensesExcel error: $e');
+      return null;
+    }
+  }
+
+  // ── 6. Bank Reconciliation Audit PDF ──────────────────────────────────────
+  static Future<Map<String, dynamic>?> exportReconciliationPdf({
+    required String branchId,
+    required String monthKey,
+    required List<Map<String, dynamic>> items,
+    BuildContext? context,
+  }) async {
+    try {
+      final pdf = pw.Document();
+
+      final reconciledCount = items.where((i) => i['isReconciled'] == true).length;
+      final totalCount = items.length;
+      final pendingCount = totalCount - reconciledCount;
+
+      int totalReconciledPaisa = 0;
+      int totalPendingPaisa = 0;
+
+      for (final item in items) {
+        final amt = (item['amountMinor'] as num?)?.toInt() ?? 0;
+        if (item['isReconciled'] == true) {
+          totalReconciledPaisa += amt;
+        } else {
+          totalPendingPaisa += amt;
+        }
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(32),
+          build: (pwContext) => [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
+                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('BANK & CASH RECONCILIATION AUDIT REPORT',
+                        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('Branch: ${branchId.toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Period: $monthKey', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
+                        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+                  ],
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 10),
+            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.SizedBox(height: 10),
+
+            // Summary Grid
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              children: [
+                pw.TableRow(children: [
+                  pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Total Transactions: $totalCount', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9))),
+                  pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Reconciled: $reconciledCount (PKR ${NumberFormat('#,###').format(totalReconciledPaisa / 100)})', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.green700, fontSize: 9))),
+                  pw.Padding(padding: const pw.EdgeInsets.all(6), child: pw.Text('Pending: $pendingCount (PKR ${NumberFormat('#,###').format(totalPendingPaisa / 100)})', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.red700, fontSize: 9))),
+                ]),
+              ],
+            ),
+            pw.SizedBox(height: 14),
+
+            pw.Text('LEDGER TRANSACTIONS AUDIT TRAIL',
+                style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.teal900)),
+            pw.SizedBox(height: 6),
+
+            pw.TableHelper.fromTextArray(
+              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey100),
+              headers: ['Type / Source', 'Date', 'Description', 'Amount (PKR)', 'Reconciliation Status'],
+              data: items.map((i) {
+                final isRec = i['isReconciled'] == true;
+                final amt = (i['amountMinor'] as num?)?.toInt() ?? 0;
+                return [
+                  i['type']?.toString() ?? 'N/A',
+                  i['date']?.toString() ?? 'N/A',
+                  i['description']?.toString() ?? 'N/A',
+                  'PKR ${NumberFormat('#,###').format(amt / 100)}',
+                  isRec ? 'RECONCILED ✓' : 'PENDING ❌',
+                ];
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+
+      final pdfBytes = await pdf.save();
+      final fileName = 'reconciliation_${branchId}_${monthKey}.pdf';
+
+      String? path;
+      try {
+        path = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Bank Reconciliation Report',
+          fileName: fileName,
+          bytes: pdfBytes,
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': pdfBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: pdfBytes,
+          fileName: fileName,
+          title: 'Reconciliation PDF Ready',
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] exportReconciliationPdf error: $e');
+      return null;
     }
   }
 }

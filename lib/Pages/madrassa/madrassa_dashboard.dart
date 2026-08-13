@@ -10,6 +10,7 @@ import 'views/madrassa_progress_view.dart';
 import 'dialogs/enrollment_dialog.dart';
 import 'madrassa_strings.dart';
 import '../../services/sync_service.dart';
+import '../../services/auth_service.dart';
 
 class MadrassaDashboard extends StatefulWidget {
   final String branchId;
@@ -502,7 +503,11 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                                     tooltip: 'Sign Out',
                                     onPressed: () async {
                                       final navigator = Navigator.of(context);
-                                      await FirebaseAuth.instance.signOut();
+                                      try {
+                                        await AuthService().signOut();
+                                      } catch (e) {
+                                        debugPrint('[MadrassaDashboard] Sign out error: $e');
+                                      }
                                       navigator.pushNamedAndRemoveUntil('/login', (_) => false);
                                     },
                                   ),

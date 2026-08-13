@@ -14,6 +14,7 @@ import '../../models/stock_item.dart';
 import 'widgets/cook_dialog.dart';
 import 'widgets/stock_dialogs.dart';
 import '../../widgets/global_module_wrapper.dart';
+import '../../services/auth_service.dart';
 
 export 'widgets/cook_dialog.dart'
     show
@@ -390,7 +391,11 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   }
 
   Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
+    try {
+      await AuthService().signOut();
+    } catch (e) {
+      debugPrint('[DasterkhwaanKitchen] Sign out error: $e');
+    }
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
     }

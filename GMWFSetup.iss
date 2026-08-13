@@ -7,19 +7,22 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.2.9
+AppVersion=1.3.5
 AppPublisher=GMWF Pvt. Ltd
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
 AppUpdatesURL=https://gmwf.pk/
 
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+
 ; Install to Program Files
-DefaultDirName={pf}\GMWF
+DefaultDirName={autopf}\GMWF
 DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.2.9
+OutputBaseFilename=GMWF-v1.3.5-x64
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression
@@ -63,7 +66,7 @@ Source: "build\windows\x64\runner\Release\*"; \
 ; ── VC++ Redistributable ─────────────────────────────────────
 ; Bundled so the app works on clean Windows installs with no
 ; internet. Deleted from {tmp} after install completes.
-Source: "installer\vc_redist.x64.exe"; \
+Source: "Installer\vc_redist.x64.exe"; \
     DestDir: "{tmp}"; \
     Flags: deleteafterinstall
 
@@ -88,7 +91,7 @@ Filename: "{tmp}\vc_redist.x64.exe"; \
 ; 2. Launch app after install (user can untick this)
 Filename: "{app}\gmwf.exe"; \
     Description: "Launch GMWF now"; \
-    Flags: nowait postinstall skipifsilent
+    Flags: nowait postinstall runasoriginaluser
 
 [UninstallRun]
 ; Kill the app if it is still running when the user uninstalls

@@ -14,6 +14,9 @@ import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/widgets/camp_selection_dialog.dart';
+import 'user_settings_dialog.dart';
 
 import 'package:gmwf/models/patient.dart';
 import 'package:gmwf/models/token.dart';
@@ -174,15 +177,25 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       RealtimeManager().updateUsername(name);
     }
 
-    // 3. Fetch from Firestore for authoritative name
+    // 3. Fetch from Firestore for authoritative user profile and cache it
     try {
       final userData = await AuthService().getUserByUid(widget.userId);
+      if (userData != null && Hive.isBoxOpen('app_settings')) {
+        await Hive.box('app_settings').put('user_data', userData);
+        await Hive.box('app_settings').put('currentUser', userData);
+      }
       final firestoreName =
           (userData?['username'] as String?)?.trim() ??
           (userData?['name'] as String?)?.trim();
-      if (firestoreName != null && firestoreName.isNotEmpty && firestoreName != name) {
-        if (mounted) setState(() => _resolvedName = firestoreName);
-        RealtimeManager().updateUsername(firestoreName);
+      if (mounted) {
+        setState(() {
+          if (firestoreName != null && firestoreName.isNotEmpty) {
+            _resolvedName = firestoreName;
+          }
+        });
+        if (firestoreName != null && firestoreName.isNotEmpty) {
+          RealtimeManager().updateUsername(firestoreName);
+        }
       }
     } catch (e) {
       debugPrint('[HybridScreen] Could not fetch name from Firestore: $e');
@@ -308,7 +321,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
     if (confirm == true) {
       try {
-        await FirebaseAuth.instance.signOut();
+        await AuthService().signOut();
       } catch (_) {}
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -334,14 +347,21 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 700;
 
-    return Scaffold(
-      appBar: AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: _teal,
-        elevation: 6,
-        shadowColor: Colors.black26,
-        toolbarHeight: isMobile ? 80 : 90,
-        iconTheme: const IconThemeData(color: Colors.white),
+    return ValueListenableBuilder<Box>(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+        final headerBg = isDark ? const Color(0xFF0F172A) : _teal;
+
+        return Scaffold(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          appBar: AppBar(
+            automaticallyImplyLeading: false,
+            backgroundColor: headerBg,
+            elevation: 6,
+            shadowColor: Colors.black26,
+            toolbarHeight: isMobile ? 80 : 90,
+            iconTheme: const IconThemeData(color: Colors.white),
         title: Row(
           children: [
             Image.asset('assets/logo/gmwf-1.webp', height: isMobile ? 45 : 55),
@@ -351,17 +371,33 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(
-                    'Hybrid Desk – ${_resolvedName ?? widget.userName}',
-                    style: TextStyle(
-                      fontSize: isMobile ? 18 : 22,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                  GestureDetector(
+                    onLongPress: () => DispensaryUserSettingsDialog.show(
+                      context,
+                      branchId: widget.branchId,
+                      onUserUpdated: () {
+                        if (mounted) setState(() { _fetchUserNameAndConnect(); });
+                      },
+                    ),
+                    child: Tooltip(
+                      message: 'Long press for Settings',
+                      child: Text(
+                        'Hybrid Desk – ${_resolvedName ?? widget.userName}',
+                        style: TextStyle(
+                          fontSize: isMobile ? 18 : 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    _branchName ?? 'Free Dispensary',
+                    CampSessionService.getBranchAndCampDisplayName(
+                      branchName: _branchName ?? 'Free Dispensary',
+                      branchId: widget.branchId,
+                      campId: CampSessionService.getActiveCamp(),
+                    ),
                     style: TextStyle(
                       fontSize: isMobile ? 13 : 15,
                       color: Colors.white70,
@@ -442,6 +478,8 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         physics: const NeverScrollableScrollPhysics(), // Keep state and prevent accidental swipe
         children: _tabs.map((t) => t['widget'] as Widget).toList(),
       ),
+    );
+      },
     );
   }
 }

@@ -34,65 +34,89 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
   int _calculateProgress(Map<String, dynamic> student, List<Map<String, dynamic>> allLogs) {
     final sId = student['id'] ?? '';
     final prevHifzLines = int.tryParse(student['prevHifzLines']?.toString() ?? '0') ?? 0;
+    final studentCurrentLines = (student['currentLines'] as num?)?.toInt() ?? (int.tryParse(student['currentLines']?.toString() ?? '') ?? 0);
 
-    if (allLogs.isEmpty) {
-      if (_selectedTimeframe == 'Overall') {
-        return prevHifzLines;
+    if (_selectedTimeframe == 'Overall') {
+      int latestMadrassaLines = studentCurrentLines;
+      if (allLogs.isNotEmpty) {
+        final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
+          ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+        for (int i = sortedLogs.length - 1; i >= 0; i--) {
+          final sLog = sortedLogs[i][sId];
+          if (sLog is Map && sLog.containsKey('currentLines')) {
+            final parsed = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+            if (parsed != null && parsed >= 0) {
+              latestMadrassaLines = parsed;
+              break;
+            }
+          }
+        }
       }
-      return 0;
+      return latestMadrassaLines + prevHifzLines;
     }
 
-    // Sort allLogs chronologically by dateKey
+    if (allLogs.isEmpty) return 0;
+
     final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
       ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
-
-    final latestDateKey = sortedLogs.last['dateKey']?.toString() ?? '';
-    final latestDate = DateTime.tryParse(latestDateKey) ?? DateTime.now();
 
     if (_selectedTimeframe == 'Daily') {
       final latestLog = sortedLogs.last;
       final studentLog = latestLog[sId];
       if (studentLog is Map && studentLog.containsKey('currentLines')) {
-        return int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        final current = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        int prev = 0;
+        for (int i = sortedLogs.length - 2; i >= 0; i--) {
+          final sLog = sortedLogs[i][sId];
+          if (sLog is Map && sLog.containsKey('currentLines')) {
+            final p = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+            if (p != null) {
+              prev = p;
+              break;
+            }
+          }
+        }
+        return (current - prev).clamp(0, 9999);
       }
       return 0;
     }
 
+    final latestDateKey = sortedLogs.last['dateKey']?.toString() ?? '';
+    final latestDate = DateTime.tryParse(latestDateKey) ?? DateTime.now();
+
     DateTime startDate;
     if (_selectedTimeframe == 'Weekly') {
-      // Last 7 days ending at latestDate (e.g. from T-6 to T)
       startDate = latestDate.subtract(const Duration(days: 6));
-    } else if (_selectedTimeframe == 'Monthly') {
-      // Last 30 days ending at latestDate (e.g. from T-29 to T)
+    } else { // Monthly
       startDate = latestDate.subtract(const Duration(days: 29));
-    } else {
-      // Overall: sum all logs in history
-      startDate = DateTime(2000, 1, 1);
     }
 
-    int sum = 0;
+    int endLines = -1;
+    int startLines = -1;
     for (final log in sortedLogs) {
       final dateKey = log['dateKey']?.toString() ?? '';
       final parsedDate = DateTime.tryParse(dateKey);
       if (parsedDate == null) continue;
 
-      if (_selectedTimeframe == 'Weekly' || _selectedTimeframe == 'Monthly') {
-        if (parsedDate.isBefore(startDate) || parsedDate.isAfter(latestDate)) {
-          continue;
-        }
+      if (parsedDate.isBefore(startDate) || parsedDate.isAfter(latestDate)) {
+        continue;
       }
 
       final studentLog = log[sId];
       if (studentLog is Map && studentLog.containsKey('currentLines')) {
-        sum += int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        final parsed = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
+        if (parsed != null) {
+          if (startLines == -1) startLines = parsed;
+          endLines = parsed;
+        }
       }
     }
 
-    if (_selectedTimeframe == 'Overall') {
-      sum += prevHifzLines;
+    if (endLines != -1 && startLines != -1) {
+      return (endLines - startLines).clamp(0, 8640);
     }
 
-    return sum;
+    return 0;
   }
 
   @override

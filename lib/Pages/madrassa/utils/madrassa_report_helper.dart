@@ -66,13 +66,13 @@ class MadrassaReportHelper {
       final studentLog = _asStringMap(logData[studentId]);
       if (studentLog == null) continue;
 
-      final currentLines = studentLog['currentLines'] as int?;
+      final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
       if (currentLines != null && currentLines > 0) {
         if (firstLines == -1) firstLines = currentLines;
         lastLines = currentLines;
       }
 
-      final sabkiPara = studentLog['sabkiPara'] as int?;
+      final sabkiPara = (studentLog['sabkiPara'] as num?)?.toInt() ?? int.tryParse(studentLog['sabkiPara']?.toString() ?? '');
       final sabkiRatio = studentLog['sabkiRatio']?.toString();
       if (sabkiPara != null && sabkiPara > 0) {
         latestSabkiPara = sabkiPara;
@@ -82,7 +82,7 @@ class MadrassaReportHelper {
         latestSabkiRatio = 'nahi_sunaya';
       }
 
-      final manzilPara = studentLog['manzilPara'] as int?;
+      final manzilPara = (studentLog['manzilPara'] as num?)?.toInt() ?? int.tryParse(studentLog['manzilPara']?.toString() ?? '');
       final manzilRatio = studentLog['manzilRatio']?.toString();
       if (manzilPara != null && manzilPara > 0) {
         latestManzilPara = manzilPara;
@@ -770,7 +770,7 @@ class MadrassaReportHelper {
     
     // Academic calculations
     final total = 8640;
-    final currentTotalLines = studentData['currentLines'] as int? ?? 0;
+    final currentTotalLines = (studentData['currentLines'] as num?)?.toInt() ?? int.tryParse(studentData['currentLines']?.toString() ?? '') ?? 0;
     final prevHifzLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
     
     final joinDate = _parseJoinDate(studentData['joinDate']);
@@ -1152,7 +1152,7 @@ class MadrassaReportHelper {
 
     // Academic calculations
     final total = 8640;
-    final currentTotalLines = studentData['currentLines'] as int? ?? 0;
+    final currentTotalLines = (studentData['currentLines'] as num?)?.toInt() ?? int.tryParse(studentData['currentLines']?.toString() ?? '') ?? 0;
     final prevHifzLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
     
     final joinDate = _parseJoinDate(studentData['joinDate']);
@@ -1686,7 +1686,7 @@ class MadrassaReportHelper {
                 TextButton(
                   onPressed: () async {
                     if (isMobile) {
-                      await Share.shareXFiles([XFile(finalFilePath!)], text: fileName);
+                      await Share.shareXFiles([XFile(finalFilePath!, mimeType: 'application/pdf')], text: fileName);
                     } else {
                       final fileUri = Uri.file(finalFilePath!);
                       await launchUrl(fileUri, mode: LaunchMode.externalApplication);

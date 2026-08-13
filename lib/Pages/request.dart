@@ -5,8 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:rxdart/rxdart.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../services/sync_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/camp_session_service.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
 
@@ -56,6 +58,7 @@ class RequestUtils {
     String expiry, {
     int? distilledWater,
     int? drops,
+    String? campId,
   }) {
     String clean(String s) => s
         .trim()
@@ -63,10 +66,12 @@ class RequestUtils {
         .replaceAll(RegExp(r'\s+'), '-')
         .replaceAll(RegExp(r'[^a-z0-9-]'), '');
     final cleanExpiry = clean(expiry);
+    final activeCamp = (campId != null && campId.isNotEmpty) ? campId : CampSessionService.getActiveCamp();
+    final campPrefix = (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') ? '${clean(activeCamp)}--' : '';
     if (type == 'Nebulization' && distilledWater != null && drops != null) {
-      return '${clean(name)}--${clean(type)}--water${distilledWater}ml-drops$drops--$cleanExpiry';
+      return '$campPrefix${clean(name)}--${clean(type)}--water${distilledWater}ml-drops$drops--$cleanExpiry';
     }
-    return '${clean(name)}--${clean(type)}--${clean(doseOrVariant)}--$cleanExpiry';
+    return '$campPrefix${clean(name)}--${clean(type)}--${clean(doseOrVariant)}--$cleanExpiry';
   }
 }
 
@@ -110,6 +115,17 @@ class _RequestPageState extends State<RequestPage>
     // Fetch current user details
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          final uData = box.get('user_data') ?? box.get('currentUser');
+          if (uData is Map && uData['role'] != null) {
+            _currentUserRole = uData['role'].toString().toLowerCase().trim();
+            _username = uData['username']?.toString();
+          }
+        }
+      } catch (_) {}
+
       FirebaseFirestore.instance
           .collection('branches')
           .doc(widget.branchId)
@@ -117,7 +133,7 @@ class _RequestPageState extends State<RequestPage>
           .doc(uid)
           .get()
           .then((snap) {
-        if (mounted) {
+        if (mounted && snap.exists) {
           setState(() {
             _currentUserRole = snap.data()?['role']?.toString().toLowerCase();
             _username = snap.data()?['username']?.toString();
@@ -414,8 +430,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
       }
     }
 
-    final isDoctor = widget.currentUserRole == 'doctor';
-    final canApproveAsSupervisor = widget.isSupervisor && requestType != 'token_exception';
+    final role = (widget.currentUserRole ?? '').toLowerCase().trim();
+    final isBranchManager = role.contains('branch manager') || role.contains('branch_manager') || role == 'bm' || role.contains('manager');
+    final isSupervisorRole = widget.isSupervisor || role.contains('supervisor') || isBranchManager || role.contains('admin') || role.contains('chairman') || role.contains('ceo');
+    final isDoctor = role.contains('doctor');
+
+    final canApproveAsSupervisor = isSupervisorRole && requestType != 'token_exception';
     final canApproveAsDoctor = isDoctor && requestType == 'token_exception';
 
     return Card(
@@ -460,6 +480,15 @@ class _StableRequestTabState extends State<_StableRequestTab>
               Icon(Icons.person, size: 16, color: Colors.teal.shade800),
               const SizedBox(width: 8),
               Text('By: $name', style: const TextStyle(fontSize: 14)),
+            ]),
+            const SizedBox(height: 4),
+            Row(children: [
+              Icon(Icons.location_on, size: 16, color: Colors.teal.shade800),
+              const SizedBox(width: 8),
+              Text(
+                'Facility: ${CampSessionService.getBranchAndCampDisplayName(branchName: (data['branchId'] ?? widget.branchId).toString().toUpperCase(), branchId: (data['branchId'] ?? widget.branchId).toString(), campId: data['dispensaryId']?.toString() ?? data['campId']?.toString())}',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.teal.shade900),
+              ),
             ]),
             if (ts != null) ...[
               const SizedBox(height: 4),
@@ -559,7 +588,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     ),
                   ],
                 )
-              else if (widget.isSupervisor && requestType == 'token_exception')
+              else if (isSupervisorRole && requestType == 'token_exception')
                 _buildDoctorOnlyNotice()
               else
                 Align(
@@ -1387,6 +1416,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
         debugPrint('Collection: $collection');
         debugPrint('Document ID: $docId');
 
+        final reqCampId = data['dispensaryId']?.toString() ??
+            data['campId']?.toString() ??
+            data['dispensaryTag']?.toString();
+
         if (requestType == 'patient_edit') {
           final patientId = data['patientId'] as String?;
           final toApply   = (data['draftData']    as Map<String, dynamic>?) ??
@@ -1412,6 +1445,20 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
           await patientsRef.doc(patientId).update(toApply);
           debugPrint('✅ Patient $patientId updated in Firestore');
+
+          try {
+            if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+              final box = Hive.box(LocalStorageService.patientsBox);
+              final existing = box.get('patient:$patientId') ?? box.get(patientId);
+              if (existing is Map) {
+                final updated = Map<String, dynamic>.from(existing)..addAll(toApply);
+                LocalStorageService.saveLocalPatient(updated);
+                debugPrint('✅ Patient $patientId updated in local Hive');
+              }
+            }
+          } catch (e) {
+            debugPrint('Hive patient update error: $e');
+          }
 
           await SyncService().forceFullRefresh(widget.branchId);
 
@@ -1448,7 +1495,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   ? 'gmwf'
                   : 'zakat';
 
-          final dateKey = tokenSerial.split('-').first;
+          final parts = tokenSerial.split('-');
+          final dateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+              ? (parts.length > 1 ? parts[1] : '')
+              : (parts.isNotEmpty ? parts[0] : '');
 
           debugPrint('Deleting token: $tokenSerial from $queueCollection');
 
@@ -1504,7 +1554,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
           }
 
           try {
-            await _handleAddStock(itemsToUse);
+            await _handleAddStock(itemsToUse, campId: reqCampId);
             await SyncService().forceFullRefresh(widget.branchId);
             debugPrint('✅ Add stock completed successfully');
           } catch (e, stack) {
@@ -1523,14 +1573,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
           final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
               ? _safeItemList(data['draftItems'])
               : _safeItemList(data['items']);
-          await _handleEditMedicine(itemsToUse, reviewerUid ?? '', reviewerName);
+          await _handleEditMedicine(itemsToUse, reviewerUid ?? '', reviewerName, campId: reqCampId);
           await SyncService().forceFullRefresh(widget.branchId);
         }
         else if (requestType == 'delete_medicine') {
           final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
               ? _safeItemList(data['draftItems'])
               : _safeItemList(data['items']);
-          await _handleDeleteMedicine(itemsToUse);
+          await _handleDeleteMedicine(itemsToUse, campId: reqCampId);
           await SyncService().forceFullRefresh(widget.branchId);
         }
         else if (requestType == 'change_prescription') {
@@ -1591,9 +1641,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
             final dose = item['dose'] ?? '';
             final exp  = item['expiryDate'] ?? '';
             
-            final id = RequestUtils.generateDocId(name, type, dose, exp);
+            final id = RequestUtils.generateDocId(name, type, dose, exp, campId: reqCampId);
             
-            await inventory.doc(id).set({
+            final docData = <String, dynamic>{
               ...item,
               'addedAt': FieldValue.serverTimestamp(),
               'isVerified': true,
@@ -1601,7 +1651,13 @@ class _StableRequestTabState extends State<_StableRequestTab>
               'createdByName': data['requesterName'],
               'approvedBy': reviewerUid,
               'approvedByName': reviewerName ?? 'Supervisor',
-            });
+            };
+            if (reqCampId != null && reqCampId.isNotEmpty) {
+              docData['dispensaryId'] = reqCampId;
+              docData['dispensaryTag'] = CampSessionService.getDispensaryKeyword(reqCampId);
+            }
+            
+            await inventory.doc(id).set(docData);
             
             // Add to log
             await FirebaseFirestore.instance
@@ -1621,6 +1677,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
               'timestamp': FieldValue.serverTimestamp(),
               'docId': id,
               'approvedRequestId': docId,
+              if (reqCampId != null) 'dispensaryId': reqCampId,
             });
           }
           await SyncService().forceFullRefresh(widget.branchId);
@@ -1650,8 +1707,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
     }
   }
 
-  Future<void> _handleAddStock(List<Map<String, dynamic>> items) async {
-    debugPrint('handleAddStock started with ${items.length} items');
+  Future<void> _handleAddStock(List<Map<String, dynamic>> items, {String? campId}) async {
+    debugPrint('handleAddStock started with ${items.length} items (Target Camp: $campId)');
 
     if (items.isEmpty) {
       debugPrint('handleAddStock: items list is empty - returning');
@@ -1699,7 +1756,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
       final warehouseId = RequestUtils.generateDocId(
         name, type, variantForId, expiry,
-        distilledWater: distilledWater, drops: drops,
+        distilledWater: distilledWater, drops: drops, campId: campId,
       );
 
       final warehouseSnap = await warehouse.doc(warehouseId).get();
@@ -1714,6 +1771,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
         'price':          price,
         'quantity':       qty,
         'expiryDate':     expiry,
+        if (campId != null && campId.isNotEmpty) 'dispensaryId': campId,
+        if (campId != null && campId.isNotEmpty) 'dispensaryTag': CampSessionService.getDispensaryKeyword(campId),
       };
 
       final Map<String, dynamic> fullWarehouseData = Map.from(commonFields);
@@ -1741,6 +1800,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
           .where('name_lower', isEqualTo: nameLower)
           .where('type',       isEqualTo: type);
 
+      if (campId != null && campId.isNotEmpty && campId != 'all') {
+        invQuery = invQuery.where('dispensaryId', isEqualTo: campId);
+      }
       if (type != 'Nebulization' && dose.isNotEmpty) {
         invQuery = invQuery.where('dose', isEqualTo: dose);
       }
@@ -1772,7 +1834,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       } else {
         final inventoryId = RequestUtils.generateDocId(
           name, type, variantForId, expiry,
-          distilledWater: distilledWater, drops: drops,
+          distilledWater: distilledWater, drops: drops, campId: campId,
         );
         fullInventoryData['addedAt'] = FieldValue.serverTimestamp();
         batch.set(inventory.doc(inventoryId), fullInventoryData);
@@ -1792,7 +1854,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
   }
 
   Future<void> _handleEditMedicine(
-      List<Map<String, dynamic>> items, String reviewerUid, String? reviewerName) async {
+      List<Map<String, dynamic>> items, String reviewerUid, String? reviewerName, {String? campId}) async {
     if (items.isEmpty) return;
 
     final inventory = FirebaseFirestore.instance
@@ -1816,6 +1878,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       final distilledWater = (item['distilledWater'] as num?)?.toInt();
       final drops          = (item['drops']          as num?)?.toInt();
 
+      final barcode = (item['barcode'] ?? item['code'] ?? '').toString().trim();
       final newData = <String, dynamic>{
         'name':           name,
         'name_lower':     name.toLowerCase(),
@@ -1826,10 +1889,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
         'quantity':       qty,
         'price':          price,
         'expiryDate':     expiry,
+        if (barcode.isNotEmpty) 'code': barcode,
+        if (barcode.isNotEmpty) 'barcode': barcode,
         'classification': classification,
         'approvedBy':     reviewerUid,
         'approvedByName': reviewerName ?? 'Supervisor',
         'updatedAt':      FieldValue.serverTimestamp(),
+        if (campId != null && campId.isNotEmpty) 'dispensaryId': campId,
+        if (campId != null && campId.isNotEmpty) 'dispensaryTag': CampSessionService.getDispensaryKeyword(campId),
       };
       if (type == 'Nebulization') {
         newData['distilledWater'] = distilledWater ?? 0;
@@ -1838,13 +1905,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
       final newId = RequestUtils.generateDocId(
         name, type, type == 'Nebulization' ? '' : dose, expiry,
-        distilledWater: distilledWater, drops: drops,
+        distilledWater: distilledWater, drops: drops, campId: campId,
       );
 
       if (oldId == newId) {
         batch.update(inventory.doc(oldId), newData);
       } else {
         batch.delete(inventory.doc(oldId));
+        LocalStorageService.deleteLocalStockItem(oldId);
         
         // Broadcast delete to LAN so others remove the old ghost record immediately
         RealtimeManager().sendMessage({
@@ -1856,6 +1924,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
         newData['addedAt'] = FieldValue.serverTimestamp();
         batch.set(inventory.doc(newId), newData);
       }
+
+      final finalMedId = oldId == newId ? oldId : newId;
+      final hiveData = Map<String, dynamic>.from(newData);
+      hiveData['id'] = finalMedId;
+      hiveData['branchId'] = widget.branchId;
+      LocalStorageService.saveLocalInventoryItem(hiveData);
 
       // Add to log
       FirebaseFirestore.instance
@@ -1872,13 +1946,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
         'performedBy': reviewerUid,
         'performedByName': reviewerName ?? 'Supervisor',
         'timestamp': FieldValue.serverTimestamp(),
+        if (campId != null) 'dispensaryId': campId,
       });
     }
     await batch.commit();
   }
 
   Future<void> _handleDeleteMedicine(
-      List<Map<String, dynamic>> items) async {
+      List<Map<String, dynamic>> items, {String? campId}) async {
     if (items.isEmpty) return;
 
     final inventory = FirebaseFirestore.instance
@@ -1898,7 +1973,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
       final id = RequestUtils.generateDocId(
         name, type, dose, expiry,
-        distilledWater: distilledWater, drops: drops,
+        distilledWater: distilledWater, drops: drops, campId: campId,
       );
       batch.delete(inventory.doc(id));
     }

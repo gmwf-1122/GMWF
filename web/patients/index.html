@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GMWF Patient Portal – Prescription & History</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Nastaliq+Urdu:wght@400;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    :root {
+      --teal-dark: #047857;
+      --teal-darker: #065f46;
+      --teal: #059669;
+      --teal-bg: #ecfdf5;
+      --teal-border: #a7f3d0;
+      --blue-bg: #eff6ff;
+      --blue-text: #1e40af;
+      --blue-border: #bfdbfe;
+      --amber-bg: #fffbeb;
+      --amber-text: #92400e;
+      --amber-border: #fde68a;
+      --ink: #111827;
+      --gray: #6b7280;
+      --card-border: #e5e7eb;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      color: var(--ink)
+    }
+
+    .wrap {
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 20px 14px
+    }
+
+    /* top bar */
+    .top-bar {
+      background: linear-gradient(135deg, var(--teal-dark), var(--teal-darker));
+      border-radius: 16px;
+      padding: 18px 22px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .18)
+    }
+
+    .top-bar img {
+      width: 44px;
+      height: 44px;
+      object-fit: contain
+    }
+
+    .top-bar h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: .3px
+    }
+
+    .top-bar p {
+      font-size: 11px;
+      color: #a7f3d0;
+      margin-top: 2px
+    }
+
+    /* search card */
+    .search-card {
+      background: #fff;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+      margin-bottom: 18px
+    }
+
+    .search-card label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--gray);
+      text-transform: uppercase;
+      letter-spacing: .4px;
+      margin-bottom: 6px
+    }
+
+    .type-pills {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px
+    }
+
+    .type-pills button {
+      flex: 1;
+      padding: 10px 8px;
+      border-radius: 10px;
+      border: 1.5px solid #d1d5db;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--gray);
+      cursor: pointer;
+      transition: all .15s;
+      text-align: center
+    }
+
+    .type-pills button.active {
+      border-color: var(--teal);
+      background: var(--teal-bg);
+      color: var(--teal-dark)
+    }
+
+    .type-pills button i {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 4px
+    }
+
+    .branch-row {
+      display: none;
+      margin-bottom: 12px
+    }
+
+    .branch-row label {
+      margin-bottom: 4px
+    }
+
+    .branch-row select {
+      width: 100%;
+      border: 1.5px solid #d1d5db;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      outline: none;
+      background: #fff;
+      color: var(--ink);
+      font-family: 'Inter', sans-serif
+    }
+
+    .branch-row select:focus {
+      border-color: var(--teal)
+    }
+
+    .search-row {
+      display: flex;
+      gap: 8px
+    }
+
+    .search-row input {
+      flex: 1;
+      border: 1.5px solid #d1d5db;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      outline: none;
+      transition: border .2s;
+      font-family: 'Inter', monospace
+    }
+
+    .search-row input:focus {
+      border-color: var(--teal)
+    }
+
+    .search-row button {
+      background: var(--teal);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      padding: 0 22px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .15s
+    }
+
+    .search-row button:hover {
+      background: var(--teal-dark)
+    }
+
+    .hint {
+      font-size: 10px;
+      color: #9ca3af;
+      margin-top: 6px
+    }
+
+    .msg {
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+      text-align: center
+    }
+
+    .msg.err {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #b91c1c
+    }
+
+    .msg.info {
+      background: #fef2f2;
+      border: 1px solid #fca5a5;
+      color: #b91c1c
+    }
+
+    .msg.loading {
+      background: var(--teal-bg);
+      border: 1px solid var(--teal-border);
+      color: var(--teal-dark)
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--teal);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .selector {
+      background: #fff;
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+      margin-bottom: 18px;
+      display: none
+    }
+
+    .selector h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--teal-dark);
+      margin-bottom: 10px
+    }
+
+    .p-item {
+      border: 1.5px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: border .15s
+    }
+
+    .p-item:hover {
+      border-color: var(--teal);
+      background: var(--teal-bg)
+    }
+
+    .p-item strong {
+      font-size: 14px;
+      color: var(--ink)
+    }
+
+    .p-item small {
+      font-size: 11px;
+      color: var(--gray)
+    }
+
+    .btn-back {
+      background: none;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 12px
+    }
+
+    .btn-back:hover {
+      background: #f3f4f6
+    }
+
+    /* ===== receipt slip ===== */
+    .slip {
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .08);
+      margin-bottom: 16px;
+      display: none
+    }
+
+    .slip-hdr {
+      background: linear-gradient(135deg, var(--teal-dark), var(--teal-darker));
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 22px 20px
+    }
+
+    .slip-hdr .logo-l {
+      width: 74px;
+      height: 74px;
+      object-fit: contain;
+      flex-shrink: 0;
+      background: #fff;
+      border-radius: 50%;
+      padding: 4px
+    }
+
+    .slip-hdr .center {
+      flex: 1;
+      text-align: center
+    }
+
+    .slip-hdr .urdu {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.4;
+      margin-bottom: 6px
+    }
+
+    .slip-hdr .org {
+      font-size: 17px;
+      font-weight: 900;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      margin-bottom: 3px
+    }
+
+    .slip-hdr .sub {
+      font-size: 12px;
+      font-weight: 700;
+      color: #a7f3d0
+    }
+
+    .slip-hdr .logo-r {
+      width: 62px;
+      height: 62px;
+      object-fit: contain;
+      flex-shrink: 0
+    }
+
+    .slip-body {
+      padding: 20px
+    }
+
+    .dr-line {
+      background: var(--teal-bg);
+      border: 1px solid var(--teal-border);
+      border-radius: 10px;
+      padding: 9px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--teal-dark);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    /* patient card */
+    .patient-card {
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .04)
+    }
+
+    .patient-top {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px
+    }
+
+    .avatar {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: var(--teal-bg);
+      color: var(--teal-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 19px;
+      flex-shrink: 0
+    }
+
+    .patient-id {
+      flex: 1;
+      min-width: 0
+    }
+
+    .p-name {
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--ink)
+    }
+
+    .p-cnic {
+      font-size: 12px;
+      color: var(--teal-dark);
+      font-weight: 600;
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 5px
+    }
+
+    .cat-badge {
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .3px;
+      white-space: nowrap
+    }
+
+    .badge-nonzakat {
+      background: var(--blue-bg);
+      color: var(--blue-text);
+      border: 1px solid var(--blue-border)
+    }
+
+    .badge-zakat {
+      background: var(--teal-bg);
+      color: var(--teal-dark);
+      border: 1px solid var(--teal-border)
+    }
+
+    .badge-gmwf {
+      background: var(--amber-bg);
+      color: var(--amber-text);
+      border: 1px solid var(--amber-border)
+    }
+
+    .badge-default {
+      background: #f3f4f6;
+      color: #374151;
+      border: 1px solid #e5e7eb
+    }
+
+    .patient-stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      border-top: 1px dashed #e5e7eb;
+      padding-top: 12px
+    }
+
+    .stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 4px
+    }
+
+    .stat i {
+      color: var(--teal);
+      font-size: 14px
+    }
+
+    .stat label {
+      font-size: 9px;
+      font-weight: 700;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: .3px
+    }
+
+    .stat span {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink)
+    }
+
+    /* info strip */
+    .info-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px 14px;
+      background: #f9fafb;
+      border: 1px dashed #d1d5db;
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 14px
+    }
+
+    .info-strip div {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #374151
+    }
+
+    .info-strip i {
+      color: var(--teal);
+      width: 13px;
+      text-align: center;
+      flex-shrink: 0
+    }
+
+    .info-strip label {
+      font-weight: 700;
+      color: var(--gray)
+    }
+
+    /* generic section card */
+    .section-card {
+      background: #fff;
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, .04)
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px
+    }
+
+    .icon-sq {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: var(--teal-bg);
+      color: var(--teal-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0
+    }
+
+    .icon-sq.blue {
+      background: var(--blue-bg);
+      color: var(--blue-text)
+    }
+
+    .icon-sq.amber {
+      background: var(--amber-bg);
+      color: var(--amber-text)
+    }
+
+    .section-head span {
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--teal-darker)
+    }
+
+    .diag-box {
+      background: #f9fafb;
+      border: 1px dashed #d1d5db;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #374151;
+      font-weight: 600
+    }
+
+    /* medicine list */
+    .med-list .no-data {
+      text-align: center;
+      color: #9ca3af;
+      padding: 18px 0;
+      font-style: italic;
+      font-size: 13px
+    }
+
+    .med-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      background: var(--teal-bg);
+      border: 1px solid var(--teal-border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 8px
+    }
+
+    .med-item:last-child {
+      margin-bottom: 0
+    }
+
+    .med-name {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--ink)
+    }
+
+    .med-badge {
+      display: inline-block;
+      margin-top: 5px;
+      background: #fff;
+      border: 1px solid var(--teal-border);
+      color: var(--teal-dark);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 20px
+    }
+
+    .med-qty {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--teal-dark);
+      white-space: nowrap;
+      flex-shrink: 0
+    }
+
+    /* duration summary */
+    .pill-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap
+    }
+
+    .pill {
+      background: var(--teal-bg);
+      border: 1px solid var(--teal-border);
+      color: var(--teal-dark);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 14px;
+      border-radius: 20px
+    }
+
+    /* lab tests */
+    .lab-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px
+    }
+
+    .lab-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--blue-bg);
+      border: 1px solid var(--blue-border);
+      color: var(--blue-text);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 8px 12px;
+      border-radius: 10px
+    }
+
+    .slip-ftr {
+      border-top: 2px dashed var(--teal);
+      padding-top: 14px;
+      margin-top: 2px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between
+    }
+
+    .slip-ftr .qr-block {
+      text-align: center
+    }
+
+    .slip-ftr .qr-block img {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 2px
+    }
+
+    .slip-ftr .qr-block small {
+      display: block;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--gray);
+      margin-top: 3px
+    }
+
+    .slip-ftr .prayer {
+      flex: 1;
+      text-align: center;
+      padding: 0 10px
+    }
+
+    .slip-ftr .prayer .ar {
+      font-family: 'Noto Nastaliq Urdu', serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--teal-dark);
+      line-height: 1.5
+    }
+
+    .slip-ftr .prayer .tiny {
+      font-size: 9px;
+      color: #9ca3af;
+      margin-top: 3px;
+      font-weight: 600
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px
+    }
+
+    .actions button {
+      flex: 1;
+      padding: 11px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: opacity .15s
+    }
+
+    .actions button:active {
+      opacity: .85
+    }
+
+    .btn-dl {
+      background: #2563eb;
+      color: #fff
+    }
+
+    .btn-wa {
+      background: #16a34a;
+      color: #fff
+    }
+
+    .history {
+      background: #fff;
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
+      margin-bottom: 18px;
+      display: none
+    }
+
+    .history h3 {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--teal-dark);
+      margin-bottom: 10px
+    }
+
+    .h-item {
+      border-left: 3px solid var(--teal);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: #f9fafb;
+      cursor: pointer;
+      transition: background .12s
+    }
+
+    .h-item:hover {
+      background: var(--teal-bg)
+    }
+
+    .h-item .row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px
+    }
+
+    .h-item .row strong {
+      color: var(--ink)
+    }
+
+    .h-item .row span {
+      color: var(--teal);
+      font-weight: 700
+    }
+
+    .h-item small {
+      font-size: 10px;
+      color: #9ca3af;
+      display: block;
+      margin-top: 3px
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="top-bar">
+      <img src="gmwf-1.webp" alt="GMWF">
+      <div>
+        <h1>GMWF Patient Portal</h1>
+        <p>Gulzar Madina Welfare Foundation · Free Dispensary</p>
+      </div>
+    </div>
+
+    <!-- search -->
+    <div class="search-card" id="searchSection">
+      <label>Search Type</label>
+      <div class="type-pills" id="typePills">
+        <button class="active" data-type="cnic" onclick="setType('cnic')"><i class="fa-solid fa-id-card"></i>
+          CNIC</button>
+        <button data-type="phone" onclick="setType('phone')"><i class="fa-solid fa-phone"></i> Phone</button>
+        <button data-type="serial" onclick="setType('serial')"><i class="fa-solid fa-barcode"></i> Serial</button>
+      </div>
+      <div class="branch-row" id="branchRow">
+        <label>Branch</label>
+        <select id="branchSelect">
+          <option value="">Loading branches…</option>
+        </select>
+      </div>
+      <div class="search-row">
+        <input type="text" id="searchInput" placeholder="XXXXX-XXXXXXX-X" maxlength="15" autocomplete="off">
+        <button onclick="performSearch()"><i class="fa-solid fa-arrow-right"></i> Search</button>
+      </div>
+      <div class="hint" id="hintText">Format: XXXXX-XXXXXXX-X (13 digits + 2 dashes)</div>
+      <div class="msg loading" id="loadingMsg"><span class="spinner"></span> Searching cloud…</div>
+      <div class="msg err" id="errMsg"></div>
+      <div class="msg info" id="notFoundMsg"><i class="fa-solid fa-circle-exclamation"></i> No patient records found.
+        Please check your input and try again.</div>
+    </div>
+
+    <!-- multi-patient selector -->
+    <div class="selector" id="selectorSection">
+      <button class="btn-back" onclick="resetSearch()"><i class="fa-solid fa-arrow-left"></i> Back</button>
+      <h3><i class="fa-solid fa-users"></i> Multiple patients found — select one:</h3>
+      <div id="patientsList"></div>
+    </div>
+
+    <!-- receipt container -->
+    <div id="receiptContainer" style="display:none">
+      <button class="btn-back" onclick="resetSearch()"><i class="fa-solid fa-arrow-left"></i> Back to Search</button>
+
+      <div class="slip" id="receiptPaper">
+
+        <div class="slip-hdr">
+          <img src="gmwf-1.webp" class="logo-l" alt="GMWF">
+          <div class="center">
+            <div class="urdu">ہو الشافی</div>
+            <div class="org">Gulzar Madina Welfare Foundation</div>
+            <div class="sub">Free Medical Dispensary</div>
+          </div>
+          <img src="moon.webp" class="logo-r" alt="Crescent">
+        </div>
+
+        <div class="slip-body">
+
+          <div class="dr-line" id="rDoctor"><i class="fa-solid fa-user-doctor"></i> Prescribed by: Dr. Duty Doctor</div>
+
+          <!-- patient card -->
+          <div class="patient-card">
+            <div class="patient-top">
+              <div class="avatar"><i class="fa-solid fa-user"></i></div>
+              <div class="patient-id">
+                <div class="p-name" id="rName">—</div>
+                <div class="p-cnic"><i class="fa-solid fa-id-card"></i> CNIC: <span id="rCnic">—</span></div>
+              </div>
+              <div class="cat-badge badge-default" id="rTypeBadge">—</div>
+            </div>
+            <div class="patient-stats">
+              <div class="stat"><i class="fa-solid fa-venus-mars"></i><label>Gender</label><span id="rGender">—</span>
+              </div>
+              <div class="stat"><i class="fa-solid fa-cake-candles"></i><label>Age</label><span id="rAge">—</span></div>
+              <div class="stat"><i class="fa-solid fa-hashtag"></i><label>Token Serial</label><span
+                  id="rSerialBadge">—</span></div>
+            </div>
+          </div>
+
+          <!-- secondary info -->
+          <div class="info-strip">
+            <div><i class="fa-solid fa-calendar-day"></i><label>Date:</label> <span id="rDate">—</span></div>
+            <div><i class="fa-regular fa-calendar"></i><label>DOB:</label> <span id="rDob">—</span></div>
+            <div><i class="fa-solid fa-user-nurse"></i><label>Dispensed by:</label> <span id="rDisp">—</span></div>
+            <div><i class="fa-solid fa-user-check"></i><label>Token by:</label> <span id="rToken">—</span></div>
+          </div>
+
+          <!-- diagnosis -->
+          <div class="section-card" id="diagSection" style="display:none">
+            <div class="section-head">
+              <div class="icon-sq"><i class="fa-solid fa-stethoscope"></i></div><span>Diagnosis</span>
+            </div>
+            <div class="diag-box" id="rDiagnosis">—</div>
+          </div>
+
+          <!-- medicines -->
+          <div class="section-card">
+            <div class="section-head">
+              <div class="icon-sq"><i class="fa-solid fa-pills"></i></div><span>Prescribed Medicines</span>
+            </div>
+            <div id="medBody" class="med-list">
+              <div class="no-data">No medicines recorded</div>
+            </div>
+          </div>
+
+          <!-- duration summary -->
+          <div class="section-card">
+            <div class="section-head">
+              <div class="icon-sq"><i class="fa-solid fa-calendar-days"></i></div><span>Medicine Duration Summary</span>
+            </div>
+            <div class="pill-row">
+              <span class="pill">Paid: <span id="rPaidDays">—</span> day</span>
+              <span class="pill">Prescribed: <span id="rPrescribedDays">—</span> day</span>
+            </div>
+          </div>
+
+          <!-- lab tests -->
+          <div class="section-card" id="labSection" style="display:none">
+            <div class="section-head">
+              <div class="icon-sq blue"><i class="fa-solid fa-flask"></i></div><span>Lab Tests</span>
+            </div>
+            <div id="labList" class="lab-pills"></div>
+          </div>
+
+          <div class="slip-ftr">
+            <div class="qr-block"><img src="gm.webp" alt="GM QR"><small>GMWF</small></div>
+            <div class="prayer">
+              <div class="ar">اَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ</div>
+              <div class="tiny">Gulzar Madina Welfare Foundation · Free Dispensary</div>
+            </div>
+            <div class="qr-block"><img src="anjuman.webp" alt="Anjuman QR"><small>Anjuman</small></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-dl" onclick="downloadPDF()"><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
+        <button class="btn-wa" onclick="shareWhatsApp()"><i class="fa-brands fa-whatsapp"></i> Share WhatsApp</button>
+      </div>
+
+      <div class="history" id="historySection">
+        <h3><i class="fa-solid fa-clock-rotate-left"></i> Visit History (<span id="visitCount">0</span>)</h3>
+        <div id="historyList"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDA6MmTuZIPIxylV372s8zh-ndbShHwwAk",
+      appId: "1:434943069322:web:68564f6ee9d15fe0583173",
+      projectId: "gmwf-8fc4c", authDomain: "gmwf-8fc4c.firebaseapp.com",
+      storageBucket: "gmwf-8fc4c.firebasestorage.app"
+    };
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let currentPatient = null;
+    let allHistory = [];
+    let lookupType = 'cnic';
+    let branchIds = []; // dynamically loaded
+
+    const QUEUE_TYPES = ['zakat', 'non-zakat', 'gmwf'];
+
+    // ─── load branches from Firestore on page load ──────────────────────────────
+    async function loadBranches() {
+      try {
+        const snap = await db.collection('branches').get();
+        branchIds = snap.docs.map(d => d.id);
+        const sel = document.getElementById('branchSelect');
+        sel.innerHTML = '<option value="">All Branches (search all)</option>';
+        snap.docs.forEach(doc => {
+          const name = doc.data().name || doc.id;
+          sel.innerHTML += `<option value="${doc.id}">${name}</option>`;
+        });
+      } catch (e) {
+        console.error('Failed to load branches:', e);
+        branchIds = ['main'];
+      }
+    }
+
+    // ─── lookup type ─────────────────────────────────────────────────────────────
+    function setType(type) {
+      lookupType = type;
+      document.querySelectorAll('#typePills button').forEach(b => b.classList.remove('active'));
+      document.querySelector(`#typePills button[data-type="${type}"]`).classList.add('active');
+      const input = document.getElementById('searchInput');
+      const hint = document.getElementById('hintText');
+      const branchRow = document.getElementById('branchRow');
+      if (type === 'cnic') {
+        input.placeholder = 'XXXXX-XXXXXXX-X'; input.maxLength = 15;
+        hint.textContent = 'Format: XXXXX-XXXXXXX-X (13 digits + 2 dashes)';
+        branchRow.style.display = 'none';
+      } else if (type === 'phone') {
+        input.placeholder = 'XXXXXXXXXXX'; input.maxLength = 11;
+        hint.textContent = 'Format: 11 digits e.g. 03001234567';
+        branchRow.style.display = 'none';
+      } else {
+        input.placeholder = 'DDMMYY-XXX'; input.maxLength = 10;
+        hint.textContent = 'Format: DDMMYY-Number e.g. 050826-001';
+        branchRow.style.display = 'block';
+      }
+      input.value = '';
+      input.focus();
+    }
+
+    // ─── auto-format CNIC ────────────────────────────────────────────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      loadBranches();
+      const input = document.getElementById('searchInput');
+      input.addEventListener('input', () => {
+        if (lookupType === 'cnic') {
+          let v = input.value.replace(/[^0-9]/g, '');
+          if (v.length > 13) v = v.slice(0, 13);
+          let f = '';
+          for (let i = 0; i < v.length; i++) {
+            if (i === 5 || i === 12) f += '-';
+            f += v[i];
+          }
+          input.value = f;
+        } else if (lookupType === 'serial') {
+          // DDMMYY-NNN — auto-insert the dash after the 6-digit date part
+          let v = input.value.replace(/[^0-9]/g, '');
+          if (v.length > 9) v = v.slice(0, 9);
+          let f = v;
+          if (v.length > 6) f = v.slice(0, 6) + '-' + v.slice(6);
+          input.value = f;
+        }
+      });
+      input.addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(); });
+
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('id') || params.get('cnic') || params.get('phone') || params.get('serial');
+      if (id) {
+        if (id.match(/^\d{6}-/) && id.length <= 12) { setType('serial'); }
+        else if (id.replace(/[^0-9]/g, '').length === 11 && id.startsWith('0')) { setType('phone'); }
+        else { setType('cnic'); }
+        input.value = id;
+        setTimeout(performSearch, 800); // wait for branches to load
+      }
+    });
+
+    // ─── helpers ─────────────────────────────────────────────────────────────────
+    function digits(s) { return (s || '').replace(/[^0-9]/g, ''); }
+    function showEl(id, show) { document.getElementById(id).style.display = show ? 'block' : 'none'; }
+    function showMsg(id) { ['loadingMsg', 'errMsg', 'notFoundMsg'].forEach(x => showEl(x, false)); if (id) showEl(id, true); }
+    function formatCnic(raw) { const d = digits(raw); if (d.length === 13) return d.slice(0, 5) + '-' + d.slice(5, 12) + '-' + d.slice(12); return raw; }
+
+    function catBadgeClass(cat) {
+      const c = (cat || '').toLowerCase();
+      if (c.includes('non')) return 'badge-nonzakat';
+      if (c.includes('zakat')) return 'badge-zakat';
+      if (c.includes('gmwf')) return 'badge-gmwf';
+      return 'badge-default';
+    }
+
+    function parseDate(data) {
+      const raw = data.createdAt || data.completedAt || data.dispensedAt;
+      if (raw && raw.toDate) return raw.toDate();
+      if (raw && typeof raw === 'string') { try { return new Date(raw); } catch (_) { } }
+      const serial = (data.serial || data.id || '').toString();
+      const p = serial.split('-');
+      if (p[0] && p[0].length === 6) { const dd = parseInt(p[0].slice(0, 2)), mm = parseInt(p[0].slice(2, 4)), yy = parseInt(p[0].slice(4, 6)); if (dd && mm) return new Date(2000 + yy, mm - 1, dd); }
+      const dk = (data.dateKey || data.date || '').toString();
+      if (dk.length === 6) { const dd = parseInt(dk.slice(0, 2)), mm = parseInt(dk.slice(2, 4)), yy = parseInt(dk.slice(4, 6)); if (dd && mm) return new Date(2000 + yy, mm - 1, dd); }
+      return new Date();
+    }
+
+    // ─── main search ─────────────────────────────────────────────────────────────
+    async function performSearch() {
+      const raw = document.getElementById('searchInput').value.trim();
+      if (!raw) { document.getElementById('errMsg').innerText = 'Please enter a value to search.'; showMsg('errMsg'); return; }
+
+      const clean = digits(raw);
+      if (lookupType === 'cnic' && clean.length !== 13) { document.getElementById('errMsg').innerText = 'CNIC must be exactly 13 digits.'; showMsg('errMsg'); return; }
+      if (lookupType === 'phone' && clean.length !== 11) { document.getElementById('errMsg').innerText = 'Phone number must be exactly 11 digits.'; showMsg('errMsg'); return; }
+      if (lookupType === 'serial' && !raw.match(/^\d{6}-.+/)) { document.getElementById('errMsg').innerText = 'Serial format: DDMMYY-Number (e.g. 050826-001)'; showMsg('errMsg'); return; }
+
+      showMsg('loadingMsg');
+
+      if (branchIds.length === 0) await loadBranches();
+
+      if (lookupType === 'serial') { await searchBySerial(raw); }
+      else { await searchByContact(raw, clean); }
+    }
+
+    // ─── search by CNIC or Phone across ALL branches ─────────────────────────────
+    async function searchByContact(raw, clean) {
+      const patientsMap = {};
+
+      const terms = new Set([clean]);
+      terms.add(raw);
+      if (clean.length === 13) terms.add(formatCnic(clean));
+
+      for (const branch of branchIds) {
+        for (const term of terms) {
+          if (!term) continue;
+
+          try {
+            const docSnap = await db.collection('branches').doc(branch).collection('patients').doc(term).get();
+            if (docSnap.exists) {
+              const d = docSnap.data(); d._docId = docSnap.id; d._branchId = branch;
+              patientsMap[branch + '/' + docSnap.id] = d;
+            }
+          } catch (_) { }
+
+          try {
+            const snap = await db.collection('branches').doc(branch).collection('patients').where('cnic', '==', term).get();
+            snap.forEach(doc => { const d = doc.data(); d._docId = doc.id; d._branchId = branch; patientsMap[branch + '/' + doc.id] = d; });
+          } catch (_) { }
+
+          try {
+            const snap = await db.collection('branches').doc(branch).collection('patients').where('guardianCnic', '==', term).get();
+            snap.forEach(doc => { const d = doc.data(); d._docId = doc.id; d._branchId = branch; patientsMap[branch + '/' + doc.id] = d; });
+          } catch (_) { }
+
+          if (lookupType === 'phone' || clean.length === 11) {
+            try {
+              const snap = await db.collection('branches').doc(branch).collection('patients').where('phone', '==', term).get();
+              snap.forEach(doc => { const d = doc.data(); d._docId = doc.id; d._branchId = branch; patientsMap[branch + '/' + doc.id] = d; });
+            } catch (_) { }
+          }
+        }
+      }
+
+      const list = Object.values(patientsMap);
+      showMsg(null);
+      if (list.length === 0) { showMsg('notFoundMsg'); return; }
+      if (list.length === 1) { selectPatient(list[0]); }
+      else { renderSelector(list); }
+    }
+
+    // ─── search by Serial (with branch selection) ───────────────────────────────
+    async function searchBySerial(serial) {
+      const dateKey = serial.split('-')[0];
+      const selectedBranch = document.getElementById('branchSelect').value;
+      const searchBranches = selectedBranch ? [selectedBranch] : branchIds;
+      let found = null;
+      let foundBranch = '';
+
+      for (const branch of searchBranches) {
+        if (found) break;
+        for (const type of QUEUE_TYPES) {
+          try {
+            const snap = await db.collection('branches').doc(branch)
+              .collection('serials').doc(dateKey)
+              .collection(type).doc(serial).get();
+            if (snap.exists) {
+              found = snap.data();
+              found.serial = serial;
+              found.queueType = type;
+              found._branchId = branch;
+              foundBranch = branch;
+              if (found.prescription && typeof found.prescription === 'object') {
+                const presc = found.prescription;
+                found = { ...found, ...presc };
+                found.queueType = type;
+                found._branchId = branch;
+              }
+              break;
+            }
+          } catch (_) { }
+        }
+      }
+
+      showMsg(null);
+      if (!found) { showMsg('notFoundMsg'); return; }
+
+      const patientMeta = {
+        name: found.patientName || found.name || '—',
+        cnic: found.cnic || found.patientCnic || '',
+        guardianCnic: found.guardianCnic || '',
+        age: found.age || '', gender: found.gender || '',
+        _branchId: foundBranch, _docId: found.patientId || ''
+      };
+      currentPatient = patientMeta;
+      allHistory = [found];
+
+      showEl('searchSection', false);
+      showEl('receiptContainer', true);
+      document.getElementById('receiptPaper').style.display = 'block';
+      renderReceipt(found, patientMeta);
+      renderHistory(allHistory);
+    }
+
+    // ─── selector ────────────────────────────────────────────────────────────────
+    function renderSelector(list) {
+      showEl('searchSection', false);
+      showEl('selectorSection', true);
+      showEl('receiptContainer', false);
+      const c = document.getElementById('patientsList');
+      c.innerHTML = list.map(p => {
+        const name = p.name || p.patientName || 'Unknown';
+        const cnic = p.cnic || p.guardianCnic || '—';
+        const branch = p._branchId || '';
+        return `<div class="p-item" onclick='selectPatient(JSON.parse(decodeURIComponent(this.dataset.p)))' data-p='${encodeURIComponent(JSON.stringify(p))}'>
+      <div><strong>${name}</strong><br><small>CNIC: ${cnic} · ${p.gender || ''} ${p.age ? p.age + ' yrs' : ''}${branch ? ' · ' + branch.toUpperCase() : ''}</small></div>
+      <i class="fa-solid fa-chevron-right" style="color:var(--teal)"></i>
+    </div>`;
+      }).join('');
+    }
+
+    // ─── select patient & load prescriptions from ALL branches ──────────────────
+    async function selectPatient(p) {
+      currentPatient = p;
+      showEl('searchSection', false);
+      showEl('selectorSection', false);
+      showEl('receiptContainer', true);
+      document.getElementById('receiptPaper').style.display = 'block';
+
+      const patientBranch = (p._branchId || p.branchId || 'main').toLowerCase();
+      const cnic = digits(p.cnic || p.guardianCnic || p.patientCnic || '');
+      const patientId = p._docId || p.patientId || p.id || cnic;
+
+      allHistory = [];
+      const seen = new Set();
+
+      const variants = new Set();
+      if (cnic) variants.add(cnic);
+      if (p.cnic) { variants.add(digits(p.cnic)); variants.add(p.cnic); }
+      if (p.guardianCnic) { variants.add(digits(p.guardianCnic)); variants.add(p.guardianCnic); }
+      if (patientId && patientId !== cnic) variants.add(patientId);
+
+      const searchBranches = [patientBranch, ...branchIds.filter(b => b !== patientBranch)];
+
+      for (const branch of searchBranches) {
+        for (const id of variants) {
+          if (!id) continue;
+          try {
+            const snap = await db.collection('branches').doc(branch)
+              .collection('prescriptions').doc(id)
+              .collection('prescriptions')
+              .orderBy('createdAt', 'desc').get();
+            snap.forEach(doc => {
+              if (seen.has(doc.id)) return;
+              seen.add(doc.id);
+              const d = doc.data();
+              d.serial = d.serial || doc.id;
+              d._source = 'prescriptions';
+              d._branchId = branch;
+              allHistory.push(d);
+            });
+          } catch (_) { }
+        }
+      }
+
+      allHistory.sort((a, b) => parseDate(b) - parseDate(a));
+
+      const latest = allHistory.length > 0 ? allHistory[0] : null;
+      renderReceipt(latest, p);
+      renderHistory(allHistory);
+    }
+
+    // ─── render receipt slip ─────────────────────────────────────────────────────
+    function renderReceipt(visit, pMeta) {
+      const v = visit || {};
+      const name = pMeta.name || pMeta.patientName || v.patientName || v.name || '—';
+      const serial = v.serial || v.id || '—';
+      const cnic = pMeta.cnic || pMeta.guardianCnic || v.cnic || v.patientCnic || '—';
+      const doctor = v.doctorName || v.prescribedBy || v.doctor || '';
+      const category = v.queueType || v.category || v.type || '—';
+      const dispenser = v.dispenserName || v.dispensedBy || '';
+      const tokenBy = v.createdByName || v.tokenBy || v.createdBy || '';
+      const gender = pMeta.gender || v.gender || '—';
+      const dt = visit ? parseDate(v) : new Date();
+      const diagnosis = v.diagnosis || '';
+      const complaint = v.complaint || v.condition || '';
+      const diagText = [diagnosis, complaint].filter(Boolean).join(' — ');
+      const daysOfMed = v.daysOfMedicine || '—';
+      const paidDays = v.paidDays || v.medicineDaysPaid || daysOfMed;
+      const prescribedDays = v.prescribedDays || v.medicineDaysPrescribed || daysOfMed;
+
+      let dobStr = '—';
+      let ageStr = pMeta.age || v.age || '—';
+      const rawDob = pMeta.dob || pMeta.dateOfBirth || v.dob || v.dateOfBirth || '';
+      if (rawDob) {
+        let dobDate = null;
+        if (rawDob.toDate) { dobDate = rawDob.toDate(); }
+        else if (typeof rawDob === 'string' && rawDob.length > 0) { try { dobDate = new Date(rawDob); } catch (_) { } }
+        if (dobDate && !isNaN(dobDate.getTime())) {
+          dobStr = dobDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+          const today = new Date();
+          let calcAge = today.getFullYear() - dobDate.getFullYear();
+          const m = today.getMonth() - dobDate.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < dobDate.getDate())) calcAge--;
+          if (calcAge >= 0) ageStr = calcAge + ' yrs';
+        }
+      }
+      if (typeof ageStr === 'number') ageStr = ageStr + ' yrs';
+      else if (ageStr !== '—' && !ageStr.toString().includes('yr')) ageStr = ageStr + ' yrs';
+
+      document.getElementById('rDoctor').innerHTML = '<i class="fa-solid fa-user-doctor"></i> Prescribed by: ' + (doctor ? 'Dr. ' + doctor : 'Dr. Duty Doctor');
+      document.getElementById('rName').innerText = name;
+      document.getElementById('rCnic').innerText = digits(cnic).length === 13 ? formatCnic(digits(cnic)) : cnic;
+
+      const typeBadge = document.getElementById('rTypeBadge');
+      const categoryLabel = category === '—' ? '—' : category.charAt(0).toUpperCase() + category.slice(1).replace('-', ' ');
+      typeBadge.innerText = categoryLabel;
+      typeBadge.className = 'cat-badge ' + catBadgeClass(category);
+
+      document.getElementById('rGender').innerText = gender;
+      document.getElementById('rAge').innerText = ageStr;
+      document.getElementById('rSerialBadge').innerText = serial;
+
+      document.getElementById('rDate').innerText = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+      document.getElementById('rDob').innerText = dobStr;
+      document.getElementById('rDisp').innerText = dispenser || 'Duty Dispenser';
+      document.getElementById('rToken').innerText = tokenBy || '—';
+
+      document.getElementById('rPaidDays').innerText = paidDays;
+      document.getElementById('rPrescribedDays').innerText = prescribedDays;
+
+      const diagSec = document.getElementById('diagSection');
+      if (diagText) { diagSec.style.display = 'block'; document.getElementById('rDiagnosis').innerText = diagText; }
+      else { diagSec.style.display = 'none'; }
+
+      // medicines
+      const meds = v.prescriptions || v.medicines || v.prescription || [];
+      const medBody = document.getElementById('medBody');
+      if (Array.isArray(meds) && meds.length > 0) {
+        medBody.innerHTML = meds.map(m => {
+          const rawName = m.name || m.displayName || m.medicineName || 'Medicine';
+          const type = (m.type || '').toLowerCase();
+          let px = '';
+          if (type.includes('syrup') || type.includes('syp')) px = 'Syp. ';
+          else if (type.includes('tablet') || type.includes('tab')) px = 'Tab. ';
+          else if (type.includes('capsule') || type.includes('cap')) px = 'Cap. ';
+          else if (type.includes('injection') || type.includes('inj')) px = 'Inj. ';
+          else if (type.includes('drip')) px = 'Drip ';
+          else if (type.includes('syringe') || type.includes('syr')) px = 'Syr. ';
+          const timing = m.timing || m.dosage || m.dose || '—';
+          const meal = m.meal ? ' (' + m.meal + ')' : '';
+          const qty = m.quantity || m.qty || '1';
+          return `<div class="med-item">
+        <div class="med-info">
+          <div class="med-name">${px}${rawName}</div>
+          <div class="med-badge">${timing}${meal}</div>
+        </div>
+        <div class="med-qty">مقدار: ${qty}</div>
+      </div>`;
+        }).join('');
+      } else {
+        medBody.innerHTML = '<div class="no-data">No medicines recorded for this visit</div>';
+      }
+
+      // lab tests
+      const labSec = document.getElementById('labSection');
+      const labList = document.getElementById('labList');
+      const labs = v.labResults || v.labTests || [];
+      if (Array.isArray(labs) && labs.length > 0) {
+        labSec.style.display = 'block';
+        labList.innerHTML = labs.map(l => {
+          const n = (typeof l === 'string') ? l : (l.name || l.testName || '');
+          return n ? `<span class="lab-pill"><i class="fa-solid fa-vial"></i> ${n}</span>` : '';
+        }).join('');
+      } else { labSec.style.display = 'none'; }
+    }
+
+    // ─── history ─────────────────────────────────────────────────────────────────
+    function renderHistory(list) {
+      const sec = document.getElementById('historySection');
+      document.getElementById('visitCount').innerText = list.length;
+      if (!list || list.length === 0) { sec.style.display = 'none'; return; }
+      sec.style.display = 'block';
+      document.getElementById('historyList').innerHTML = list.map((item, idx) => {
+        const serial = item.serial || item.id || '#' + (list.length - idx);
+        const dt = parseDate(item);
+        const dateStr = dt.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const mc = (item.prescriptions || item.medicines || item.prescription || []).length;
+        const cat = item.queueType || item.category || '—';
+        const doc = item.doctorName || item.prescribedBy || '';
+        return `<div class="h-item" onclick='renderReceipt(allHistory[${idx}],currentPatient)'>
+      <div class="row"><strong>${serial}</strong><span>${dateStr}</span></div>
+      <small>${mc} medicine(s) · ${cat}${doc ? ' · Dr. ' + doc : ''}</small></div>`;
+      }).join('');
+    }
+
+    function downloadPDF() {
+      const el = document.getElementById('receiptPaper');
+      const name = currentPatient ? (currentPatient.name || currentPatient.patientName || 'Patient') : 'Patient';
+      html2pdf().set({ margin: .35, filename: 'GMWF_Receipt_' + name + '.pdf', image: { type: 'jpeg', quality: .98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' } }).from(el).save();
+    }
+
+    function shareWhatsApp() {
+      const name = currentPatient ? (currentPatient.name || currentPatient.patientName || 'Patient') : 'Patient';
+      const cnic = currentPatient ? (currentPatient.cnic || document.getElementById('searchInput').value) : '';
+      const msg = `Assalam-o-Alaikum ${name},\n\nThank you for your visit, hope you get well soon. Here is your receipt:\nhttps://gmwf.pk/patients?id=${encodeURIComponent(cnic)}\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ`;
+      window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
+    }
+
+    function resetSearch() {
+      showEl('searchSection', true); showEl('selectorSection', false); showEl('receiptContainer', false); showMsg(null);
+    }
+  </script>
+</body>
+
+</html>

@@ -13,6 +13,8 @@ import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import '../user_settings_dialog.dart';
 import 'patient_queue.dart';
 import 'patient_info.dart';
 import 'doctor_right_panel.dart';
@@ -331,13 +333,10 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   Future<void> _logout() async {
-    Future.wait([
-      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-    ]).whenComplete(() {
-      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
-      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
-    });
+    try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+    ConnectionManager().stop().catchError((_) {});
+    await AuthService().signOut();
+    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
   }
 
   Future<void> _selectPatient(Map<String, dynamic> rawEntry) async {
@@ -416,14 +415,19 @@ class _DoctorScreenState extends State<DoctorScreen>
     );
   }
 
-  PreferredSizeWidget _buildAppBar(bool isMobile) {
-    final gradient = const LinearGradient(
+  PreferredSizeWidget _buildAppBar(bool isMobile, bool isDark) {
+    final gradient = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [
-        Color(0xFF004D40), // Premium Emerald Teal
-        Color(0xFF00796B), // Clean Jade Teal
-      ],
+      colors: isDark
+          ? [
+              const Color(0xFF02140F),
+              const Color(0xFF052C22),
+            ]
+          : [
+              const Color(0xFF004D40), // Premium Emerald Teal
+              const Color(0xFF00796B), // Clean Jade Teal
+            ],
     );
 
     if (isMobile) {
@@ -510,12 +514,30 @@ class _DoctorScreenState extends State<DoctorScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('Doctor Panel – ${_username ?? 'Loading...'}',
-                  style: const TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+              GestureDetector(
+                onLongPress: () => DispensaryUserSettingsDialog.show(
+                  context,
+                  branchId: widget.branchId,
+                  onUserUpdated: () {
+                    if (mounted) setState(() { _fetchDoctorName(); });
+                  },
+                ),
+                child: Tooltip(
+                  message: 'Long press for Settings',
+                  child: Text('Doctor Panel – ${_username ?? 'Loading...'}',
+                      style: const TextStyle(
+                          fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              ),
               if (!_loadingBranch)
-                Text(_branchName ?? 'Free Dispensary',
-                    style: const TextStyle(fontSize: 16, color: Colors.white70)),
+                Text(
+                  CampSessionService.getBranchAndCampDisplayName(
+                    branchName: _branchName ?? 'Free Dispensary',
+                    branchId: widget.branchId,
+                    campId: CampSessionService.getActiveCamp(),
+                  ),
+                  style: const TextStyle(fontSize: 16, color: Colors.white70),
+                ),
             ],
           ),
         ),
@@ -672,38 +694,48 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 900;
 
     final body = Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+          colors: isDark
+              ? [const Color(0xFF031611), const Color(0xFF07211B)]
+              : [const Color(0xFFE8F5E9), const Color(0xFFF1F8E9)],
         ),
       ),
-      child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+      child: isMobile ? _buildMobileBody(isDark) : _buildDesktopBody(isDark),
     );
 
     if (widget.isEmbedded) return body;
 
     return Scaffold(
-      appBar: _buildAppBar(isMobile),
+      backgroundColor: isDark ? const Color(0xFF031611) : const Color(0xFFE8F5E9),
+      appBar: _buildAppBar(isMobile, isDark),
       body: body,
     );
   }
 
-  Widget _buildMobileBody() {
+  Widget _buildMobileBody(bool isDark) {
+    final cardColor = isDark ? const Color(0xFF061E18) : Colors.white;
+    final cardBorder = isDark
+        ? const BorderSide(color: Color(0xFF0D382B), width: 1)
+        : BorderSide.none;
+
     return TabBarView(
       controller: _tabController,
       children: [
         Padding(
           padding: const EdgeInsets.all(8),
           child: Card(
-            elevation: 4,
+            color: cardColor,
+            elevation: isDark ? 2 : 4,
             clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: cardBorder),
             child: PatientQueue(
               branchId: widget.branchId,
               selectedPatient: _selectedPatientData,
@@ -717,16 +749,30 @@ class _DoctorScreenState extends State<DoctorScreen>
           child: Column(children: [
             if (_selectedPatientData != null)
               Card(
+                color: cardColor,
                 margin: const EdgeInsets.only(bottom: 6),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: cardBorder),
                 clipBehavior: Clip.antiAlias,
-                child: PatientInfo(patientData: _selectedPatientData),
+                child: PatientInfo(
+                  patientData: _selectedPatientData,
+                  doctorId: widget.doctorId,
+                  doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
+                  branchId: widget.branchId,
+                  onVitalsUpdated: (updatedVitals) {
+                    if (mounted && _selectedPatientData != null) {
+                      setState(() {
+                        _selectedPatientData!['vitals'] = updatedVitals;
+                      });
+                    }
+                  },
+                ),
               ),
             Expanded(
               child: Card(
-                elevation: 4,
+                color: cardColor,
+                elevation: isDark ? 2 : 4,
                 clipBehavior: Clip.antiAlias,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: cardBorder),
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: _buildPrescriptionPanel(),
@@ -738,9 +784,10 @@ class _DoctorScreenState extends State<DoctorScreen>
         Padding(
           padding: const EdgeInsets.all(8),
           child: Card(
-            elevation: 4,
+            color: cardColor,
+            elevation: isDark ? 2 : 4,
             clipBehavior: Clip.antiAlias,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: cardBorder),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: _buildHistoryPanel(),
@@ -751,7 +798,12 @@ class _DoctorScreenState extends State<DoctorScreen>
     );
   }
 
-  Widget _buildDesktopBody() {
+  Widget _buildDesktopBody(bool isDark) {
+    final cardColor = isDark ? const Color(0xFF061E18) : Colors.white;
+    final cardBorder = isDark
+        ? const BorderSide(color: Color(0xFF0D382B), width: 1)
+        : BorderSide.none;
+
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(children: [
@@ -761,9 +813,10 @@ class _DoctorScreenState extends State<DoctorScreen>
             Expanded(
               flex: 3,
               child: Card(
-                elevation: 12,
+                color: cardColor,
+                elevation: isDark ? 6 : 12,
                 clipBehavior: Clip.antiAlias,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
                 child: PatientQueue(
                   branchId: widget.branchId,
                   selectedPatient: _selectedPatientData,
@@ -779,10 +832,23 @@ class _DoctorScreenState extends State<DoctorScreen>
                 SizedBox(
                   height: 230,
                   child: Card(
-                    elevation: 12,
+                    color: cardColor,
+                    elevation: isDark ? 6 : 12,
                     clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                    child: PatientInfo(patientData: _selectedPatientData),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
+                    child: PatientInfo(
+                      patientData: _selectedPatientData,
+                      doctorId: widget.doctorId,
+                      doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
+                      branchId: widget.branchId,
+                      onVitalsUpdated: (updatedVitals) {
+                        if (mounted && _selectedPatientData != null) {
+                          setState(() {
+                            _selectedPatientData!['vitals'] = updatedVitals;
+                          });
+                        }
+                      },
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -791,9 +857,10 @@ class _DoctorScreenState extends State<DoctorScreen>
                     Expanded(
                       flex: 7,
                       child: Card(
-                        elevation: 12,
+                        color: cardColor,
+                        elevation: isDark ? 6 : 12,
                         clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
                         child: Padding(
                           padding: const EdgeInsets.all(24),
                           child: _buildPrescriptionPanel(),
@@ -804,9 +871,10 @@ class _DoctorScreenState extends State<DoctorScreen>
                     Expanded(
                       flex: 4,
                       child: Card(
-                        elevation: 12,
+                        color: cardColor,
+                        elevation: isDark ? 6 : 12,
                         clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: _buildHistoryPanel(),

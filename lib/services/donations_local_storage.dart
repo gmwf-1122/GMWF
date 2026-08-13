@@ -919,37 +919,59 @@ class DonationsLocalStorage {
   // ══════════════════════════════════════════════════════════════════════════
 
   static Future<void> downloadAllDonations(String branchId,
-      {int days = 90}) async {
+      {int days = 90, bool force = false}) async {
     try {
+      final normBranch = branchId.toLowerCase().trim();
+      final syncKey = 'donations_$normBranch';
+      final lastSyncedTs = force ? null : LocalStorageService.getLastSyncedServerTimestamp(syncKey);
+
       final cutoff = DateTime.now().subtract(Duration(days: days));
       final cutoffStr = DateFormat('yyyy-MM-dd').format(cutoff);
 
       final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      String? maxServerTs = lastSyncedTs;
 
-      if (branchId == 'all' || branchId.isEmpty) {
+      final branchesToQuery = <String>[];
+      if (normBranch == 'all' || normBranch.isEmpty) {
         final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
-        for (final branchDoc in branchesSnap.docs) {
-          final snap = await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(branchDoc.id)
-              .collection('donations')
-              .where('date', isGreaterThanOrEqualTo: cutoffStr)
-              .get();
-          docs.addAll(snap.docs);
-        }
+        branchesToQuery.addAll(branchesSnap.docs.map((d) => d.id));
       } else {
-        final snap = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('donations')
-            .where('date', isGreaterThanOrEqualTo: cutoffStr)
-            .get();
-        docs.addAll(snap.docs);
+        branchesToQuery.add(normBranch);
+      }
+
+      for (final bId in branchesToQuery) {
+        DocumentSnapshot? lastDoc;
+        bool hasMore = true;
+
+        while (hasMore) {
+          Query<Map<String, dynamic>> query = FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('donations');
+
+          if (lastSyncedTs != null) {
+            query = query.where('updatedAt', isGreaterThan: lastSyncedTs).orderBy('updatedAt', descending: false).limit(500);
+          } else {
+            query = query.where('date', isGreaterThanOrEqualTo: cutoffStr).orderBy('date', descending: false).limit(500);
+          }
+
+          if (lastDoc != null) {
+            query = query.startAfterDocument(lastDoc);
+          }
+
+          final snap = await query.get();
+          docs.addAll(snap.docs);
+
+          if (snap.docs.length < 500) {
+            hasMore = false;
+          } else {
+            lastDoc = snap.docs.last;
+          }
+        }
       }
 
       final box = Hive.box(donationsBox);
       int saved = 0;
-      final Set<String> remoteKeys = {};
       final Map<String, dynamic> updates = {};
 
       for (final doc in docs) {
@@ -959,11 +981,17 @@ class DonationsLocalStorage {
         final String? rawBranch = d['branchId'] as String?;
         final docBranch = (rawBranch != null && rawBranch.isNotEmpty)
             ? rawBranch.toLowerCase().trim()
-            : (doc.reference.parent.parent?.id ?? branchId).toLowerCase().trim();
+            : (doc.reference.parent.parent?.id ?? normBranch).toLowerCase().trim();
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
-        remoteKeys.add(key);
+
+        final docUpdatedAt = d['updatedAt']?.toString();
+        if (docUpdatedAt != null) {
+          if (maxServerTs == null || docUpdatedAt.compareTo(maxServerTs) > 0) {
+            maxServerTs = docUpdatedAt;
+          }
+        }
 
         final existing = box.get(key);
         if (existing == null) {
@@ -977,15 +1005,22 @@ class DonationsLocalStorage {
           saved++;
         } else {
           final ex = Map<String, dynamic>.from(existing as Map);
-          // Only overwrite if Firestore has a NEWER or equal lastUpdatedAt
-          // (last-writer-wins: preserve local edits that haven't synced yet)
-          final localTs  = DateTime.tryParse(ex['lastUpdatedAt']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final cloudTs  = DateTime.tryParse(d['lastUpdatedAt']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
-          final cloudIsNewer = !cloudTs.isBefore(localTs);
+          final localTs = ex['updatedAt']?.toString() ?? ex['lastUpdatedAt']?.toString() ?? '';
+          final cloudTs = docUpdatedAt ?? '';
+          final cloudIsNewer = cloudTs.compareTo(localTs) >= 0;
+
           if (ex['syncStatus'] != 'pending' || cloudIsNewer) {
+            if (ex['syncStatus'] == 'pending' && !cloudIsNewer) {
+              // Log conflict
+              LocalStorageService.logSyncConflict(
+                collectionKey: 'donations',
+                docId: doc.id,
+                localData: ex,
+                cloudData: d,
+              );
+            }
             ex['firestoreId'] = doc.id;
             ex['syncStatus']  = 'synced';
-            // Merge cloud fields only if cloud is newer
             if (cloudIsNewer) {
               ex.addAll(_sanitize({...d, 'firestoreId': doc.id, 'syncStatus': 'synced'}));
             }
@@ -999,48 +1034,15 @@ class DonationsLocalStorage {
         await box.putAll(updates);
       }
 
-      // Cleanup local records that were deleted on Firestore
-      final isGlobal = branchId == 'all' || branchId.isEmpty;
-      final normBranch = branchId.toLowerCase().trim();
-      final keysToDelete = <String>[];
-
-      for (var key in box.keys) {
-        final keyStr = key.toString();
-        if (keyStr.contains('_credit_')) continue;
-
-        // Check if key belongs to the branch we are syncing
-        final belongsToBranch = isGlobal ||
-            keyStr.startsWith('${normBranch}_') ||
-            keyStr.startsWith('${normBranch}__');
-
-        if (!belongsToBranch) continue;
-
-        final raw = box.get(key);
-        if (raw == null || raw is! Map) continue;
-
-        final date = raw['date']?.toString() ?? '';
-        if (date.compareTo(cutoffStr) < 0) continue; // Out of date range
-
-        final syncStatus = raw['syncStatus']?.toString();
-        // Do not touch pending creations/edits
-        if (syncStatus == 'pending') continue;
-
-        // If not found in Firestore, it was deleted remotely!
-        if (!remoteKeys.contains(keyStr)) {
-          keysToDelete.add(keyStr);
-        }
-      }
-
-      if (keysToDelete.isNotEmpty) {
-        await box.deleteAll(keysToDelete);
-        debugPrint('[DonationsLS] Cleanup: Deleted ${keysToDelete.length} local records that were deleted on Firestore.');
+      if (maxServerTs != null) {
+        await LocalStorageService.setLastSyncedServerTimestamp(syncKey, maxServerTs);
       }
 
       await _syncReceiptSequence();
       await box.flush();
       debugPrint(
-          '[DonationsLS] downloadAllDonations: merged $saved records '
-          '(${docs.length} from Firestore, last $days days)');
+          '[DonationsLS] downloadAllDonations (Delta): merged $saved records '
+          '(${docs.length} fetched from Firestore)');
     } catch (e) {
       debugPrint('[DonationsLS] downloadAllDonations error: $e');
     }

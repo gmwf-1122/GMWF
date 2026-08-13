@@ -59,6 +59,8 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   final _bloodGroupKey = GlobalKey();
   final _visitKey      = GlobalKey();
 
+  final _scrollController = ScrollController();
+
   List<FocusNode> get activeFocusNodes {
     if (_isChild) {
       return [
@@ -86,9 +88,15 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
 
   void _addFocusListeners() {
     void scrollTo(BuildContext? ctx) {
-      if (ctx != null) {
-        Scrollable.ensureVisible(ctx,
-            duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+      if (ctx != null && _scrollController.hasClients) {
+        final renderObject = ctx.findRenderObject();
+        if (renderObject != null) {
+          _scrollController.position.ensureVisible(
+            renderObject,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+          );
+        }
       }
     }
 
@@ -104,6 +112,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   @override
   void dispose() {
     _formScopeNode.dispose();
+    _scrollController.dispose();
     for (var c in [_nameController, _cnicController, _phoneController, _dobController]) {
       c.dispose();
     }
@@ -174,6 +183,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
 
       final patientMap = <String, dynamic>{
+        'branchId':    widget.branchId,
         'name':        _nameController.text.trim(),
         'isAdult':     !_isChild,
         'guardianCnic': _isChild ? formattedCnic : null,
@@ -186,7 +196,6 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
             ? _phoneController.text.trim()
             : null,
         'age':         _calculatedAge,
-        'branchId':    widget.branchId,
         'createdBy':   widget.receptionistId,
         'createdAt':   DateTime.now().toIso8601String(),
       };
@@ -291,6 +300,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         color: Colors.transparent,
         child: Center(
           child: SingleChildScrollView(
+            controller: _scrollController,
             child: Container(
               width: formWidth,
               margin: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 0),
@@ -608,6 +618,15 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     );
   }
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   Widget _buildTextField({
     required TextEditingController controller,
     required String label,
@@ -620,12 +639,13 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     TextInputType? keyboardType,
   }) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final isDark = _isDark;
     return TextFormField(
       key:            key,
       controller:     controller,
       focusNode:      focusNode,
-      cursorColor:    const Color(0xFF004D40),
-      style: TextStyle(color: const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
+      cursorColor:    isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
       decoration:     _inputDecoration(label, icon),
       validator:      validator,
       inputFormatters: inputFormatters,
@@ -653,37 +673,45 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     required void Function(String?) onChanged,
   }) {
     final isMobile = MediaQuery.of(context).size.width < 600;
+    final isDark = _isDark;
     return DropdownButtonFormField2<String>(
       key:        key,
       focusNode:  focusNode,
       isExpanded: true,
       value:      value,
+      dropdownStyleData: DropdownStyleData(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
       items: items
           .map((e) => DropdownMenuItem<String>(
               value: e,
               child: Text(e,
-                  style: const TextStyle(color: Color(0xFF004D40)))))
+                  style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40)))))
           .toList(),
       onChanged:  onChanged,
       decoration: _inputDecoration(label, icon),
       validator:  (val) => val == null ? 'Select $label' : null,
-      style: TextStyle(color: const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
+      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
     );
   }
 
   InputDecoration _inputDecoration(String label, IconData icon) {
+    final isDark = _isDark;
     return InputDecoration(
       labelText:  label,
-      labelStyle: const TextStyle(color: Color(0xFF00695C)),
-      prefixIcon: Icon(icon, color: const Color(0xFF004D40)),
+      labelStyle: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF00695C)),
+      prefixIcon: Icon(icon, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40)),
       filled:     true,
-      fillColor:  const Color(0xFFE0F2F1),
+      fillColor:  isDark ? const Color(0xFF334155) : const Color(0xFFE0F2F1),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF00695C))),
+          borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : const Color(0xFF00695C))),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: Color(0xFF00695C), width: 1.8)),
+          borderSide: BorderSide(color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C), width: 1.8)),
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
     );

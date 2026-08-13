@@ -7,6 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 
 // Alias kept for backwards compatibility with existing call sites
 typedef PatientHistory = PatientHistoryPanel;
@@ -837,6 +838,19 @@ class _CompactLatestCard extends StatelessWidget {
                     Text(e.doctorName, style: const TextStyle(color: Colors.white70, fontSize: 11)),
                   ],
                 ),
+              if (e.campName.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.location_on_outlined, color: Colors.white, size: 11),
+                      const SizedBox(width: 3),
+                      Text(e.campName, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
@@ -864,12 +878,7 @@ class _CompactLatestCard extends StatelessWidget {
             ],
             if (e.vitals.isNotEmpty) ...[
               _label('Vitals'), const SizedBox(height: 4),
-              Wrap(spacing: 5, runSpacing: 5, children: [
-                if (e.vitals['bp']     != null) _vitalChip('BP',    e.vitals['bp'].toString(),    const Color(0xFFE91E63)),
-                if (e.vitals['temp']   != null) _vitalChip('Temp',  '${e.vitals['temp']}${e.vitals['tempUnit'] ?? ''}', Colors.orange.shade700),
-                if (e.vitals['sugar']  != null) _vitalChip('Sugar', e.vitals['sugar'].toString(), Colors.purple),
-                if (e.vitals['weight'] != null) _vitalChip('Wt',    '${e.vitals['weight']} kg',  Colors.teal),
-              ]),
+              _buildCompactVitalsDisplay(e.vitals),
               const SizedBox(height: 8),
             ],
             if (oralMeds.isNotEmpty) ...[
@@ -909,6 +918,59 @@ class _CompactLatestCard extends StatelessWidget {
         ),
       ]),
     );
+  }
+
+  Widget _buildCompactVitalsDisplay(Map<String, dynamic> vitals) {
+    final recVitals = (vitals['receptionistVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['receptionistVitals'])
+        : <String, dynamic>{};
+    final docVitals = (vitals['doctorVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['doctorVitals'])
+        : <String, dynamic>{};
+
+    final hasDocEdit = docVitals.isNotEmpty;
+
+    if (hasDocEdit) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text('REC VITALS (${recVitals['addedBy'] ?? 'Receptionist'}):',
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.blue.shade800, letterSpacing: 0.5)),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Wrap(spacing: 5, runSpacing: 4, children: [
+            if (recVitals['bp'] != null && recVitals['bp'] != 'N/A') _vitalChip('BP', recVitals['bp'].toString(), Colors.blue.shade700),
+            if (recVitals['temp'] != null && recVitals['temp'] != 'N/A') _vitalChip('Temp', '${recVitals['temp']}°C', Colors.orange.shade700),
+            if (recVitals['sugar'] != null && recVitals['sugar'].toString().isNotEmpty) _vitalChip('Sugar', recVitals['sugar'].toString(), Colors.purple),
+            if (recVitals['weight'] != null && recVitals['weight'] != 'N/A') _vitalChip('Wt', '${recVitals['weight']} kg', Colors.teal),
+          ]),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Text('DOC VITALS EDITED (${docVitals['updatedBy'] ?? 'Doctor'}):',
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.amber.shade900, letterSpacing: 0.5)),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Wrap(spacing: 5, runSpacing: 4, children: [
+            if (docVitals['bp'] != null && docVitals['bp'] != 'N/A') _vitalChip('BP', docVitals['bp'].toString(), const Color(0xFFE91E63)),
+            if (docVitals['temp'] != null && docVitals['temp'] != 'N/A') _vitalChip('Temp', '${docVitals['temp']}°C', Colors.orange.shade700),
+            if (docVitals['sugar'] != null && docVitals['sugar'].toString().isNotEmpty) _vitalChip('Sugar', docVitals['sugar'].toString(), Colors.purple),
+            if (docVitals['weight'] != null && docVitals['weight'] != 'N/A') _vitalChip('Wt', '${docVitals['weight']} kg', Colors.teal),
+          ]),
+        ],
+      );
+    }
+
+    return Wrap(spacing: 5, runSpacing: 5, children: [
+      if (vitals['bp'] != null && vitals['bp'] != 'N/A') _vitalChip('BP', vitals['bp'].toString(), const Color(0xFFE91E63)),
+      if (vitals['temp'] != null && vitals['temp'] != 'N/A') _vitalChip('Temp', '${vitals['temp']}${vitals['tempUnit'] ?? ''}', Colors.orange.shade700),
+      if (vitals['sugar'] != null && vitals['sugar'].toString().isNotEmpty) _vitalChip('Sugar', vitals['sugar'].toString(), Colors.purple),
+      if (vitals['weight'] != null && vitals['weight'] != 'N/A') _vitalChip('Wt', '${vitals['weight']} kg', Colors.teal),
+    ]);
   }
 
   Widget _label(String text) => Text(text.toUpperCase(),
@@ -1080,12 +1142,7 @@ class _HistoryCard extends StatelessWidget {
             if (e.vitals.isNotEmpty) ...[
               _buildSectionTitle('Vitals', Icons.favorite_outline),
               const SizedBox(height: 8),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                if (e.vitals['bp']     != null) _buildVitalChip('BP',     e.vitals['bp'].toString(),     Colors.pink),
-                if (e.vitals['temp']   != null) _buildVitalChip('Temp',   '${e.vitals['temp']} ${e.vitals['tempUnit'] ?? ''}', Colors.orange),
-                if (e.vitals['sugar']  != null) _buildVitalChip('Sugar',  e.vitals['sugar'].toString(),  Colors.purple),
-                if (e.vitals['weight'] != null) _buildVitalChip('Weight', e.vitals['weight'].toString(), Colors.teal),
-              ]),
+              _buildFullVitalsDisplay(e.vitals),
               const SizedBox(height: 12),
             ],
             if (oralMeds.isNotEmpty) ...[
@@ -1186,6 +1243,81 @@ class _HistoryCard extends StatelessWidget {
     );
   }
 
+  Widget _buildFullVitalsDisplay(Map<String, dynamic> vitals) {
+    final recVitals = (vitals['receptionistVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['receptionistVitals'])
+        : <String, dynamic>{};
+    final docVitals = (vitals['doctorVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['doctorVitals'])
+        : <String, dynamic>{};
+
+    final hasDocEdit = docVitals.isNotEmpty;
+
+    if (hasDocEdit) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.blue.shade200),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.support_agent, size: 13, color: Colors.blue),
+                const SizedBox(width: 4),
+                Text('Added by Receptionist (${recVitals['addedBy'] ?? 'Receptionist'})',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (recVitals['bp'] != null && recVitals['bp'] != 'N/A') _buildVitalChip('BP', recVitals['bp'].toString(), Colors.blue),
+            if (recVitals['temp'] != null && recVitals['temp'] != 'N/A') _buildVitalChip('Temp', '${recVitals['temp']}°C', Colors.orange),
+            if (recVitals['sugar'] != null && recVitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', recVitals['sugar'].toString(), Colors.purple),
+            if (recVitals['weight'] != null && recVitals['weight'] != 'N/A') _buildVitalChip('Weight', '${recVitals['weight']} kg', Colors.teal),
+          ]),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: Colors.amber.shade50,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: Colors.amber.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.medical_services, size: 13, color: Colors.amber),
+                const SizedBox(width: 4),
+                Text('Updated by Doctor (${docVitals['updatedBy'] ?? 'Doctor'})',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.amber.shade900)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            if (docVitals['bp'] != null && docVitals['bp'] != 'N/A') _buildVitalChip('BP', docVitals['bp'].toString(), Colors.pink),
+            if (docVitals['temp'] != null && docVitals['temp'] != 'N/A') _buildVitalChip('Temp', '${docVitals['temp']}°C', Colors.orange),
+            if (docVitals['sugar'] != null && docVitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', docVitals['sugar'].toString(), Colors.purple),
+            if (docVitals['weight'] != null && docVitals['weight'] != 'N/A') _buildVitalChip('Weight', '${docVitals['weight']} kg', Colors.teal),
+          ]),
+        ],
+      );
+    }
+
+    return Wrap(spacing: 8, runSpacing: 8, children: [
+      if (vitals['bp'] != null && vitals['bp'] != 'N/A') _buildVitalChip('BP', vitals['bp'].toString(), Colors.pink),
+      if (vitals['temp'] != null && vitals['temp'] != 'N/A') _buildVitalChip('Temp', '${vitals['temp']} ${vitals['tempUnit'] ?? ''}', Colors.orange),
+      if (vitals['sugar'] != null && vitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', vitals['sugar'].toString(), Colors.purple),
+      if (vitals['weight'] != null && vitals['weight'] != 'N/A') _buildVitalChip('Weight', '${vitals['weight']} kg', Colors.teal),
+    ]);
+  }
+
   Widget _buildInjectableRow(_MedEntry med) => Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -1214,7 +1346,7 @@ class _HistoryCard extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _HistoryEntry {
-  final String serial, diagnosis, complaint, doctorName, source;
+  final String serial, diagnosis, complaint, doctorName, source, campId, campName;
   final DateTime date;
   final List<_MedEntry> medicines;
   final List<String> labTests;
@@ -1226,11 +1358,20 @@ class _HistoryEntry {
     required this.complaint, required this.doctorName, required this.medicines,
     required this.labTests, required this.vitals, required this.raw,
     required this.source, required this.days,
+    required this.campId, required this.campName,
   });
 
   static _HistoryEntry? fromMap(Map<String, dynamic> data, {required String source}) {
     final serial = (data['serial'] ?? data['id'] ?? '').toString().trim();
     if (serial.isEmpty) return null;
+
+    final cId = (data['dispensaryId'] ?? data['campId'] ?? data['branchCamp'] ?? '').toString().trim();
+    final rawCampName = (data['campName'] ?? '').toString().trim();
+    final cName = rawCampName.isNotEmpty
+        ? rawCampName
+        : (cId.isNotEmpty
+            ? CampSessionService.getCampLabel(cId)
+            : (data['branchName'] ?? data['branchId'] ?? '').toString().trim());
 
     DateTime date = DateTime(2000);
     final rawTs = data['createdAt'] ?? data['completedAt'] ?? data['dispensedAt'];
@@ -1297,6 +1438,8 @@ class _HistoryEntry {
       raw:       data,
       source:    source,
       days:      (data['daysOfMedicine'] is num ? (data['daysOfMedicine'] as num).toInt() : int.tryParse(data['daysOfMedicine']?.toString() ?? '') ?? 1),
+      campId:    cId,
+      campName:  cName,
     );
   }
 

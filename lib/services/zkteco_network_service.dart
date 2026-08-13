@@ -3,6 +3,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +23,9 @@ class ZkTecoNetworkService {
   static HttpServer? _httpServer;
   static RawDatagramSocket? _udpSocket;
   static bool _isListening = false;
+  static Timer? _activePollingTimer;
+  static StreamSubscription? _firestorePunchesSub;
+  static final Set<String> _lastKnownLogKeys = {}; // Dedup: "IP_PIN_TIMESTAMP"
 
   // Streams & Notifiers for UI update
   static final StreamController<Map<String, dynamic>> _punchStreamController =
@@ -34,6 +39,7 @@ class ZkTecoNetworkService {
 
   /// Starts the embedded HTTP Server (for ZKTeco ADMS Push) and UDP socket listener
   static Future<bool> startServer({int httpPort = defaultHttpPort}) async {
+    if (kIsWeb) return false;
     if (_isListening) return true;
 
     try {
@@ -65,6 +71,12 @@ class ZkTecoNetworkService {
         debugPrint('[ZkTecoNetworkService] UDP Socket bind warning (port may be in use): $e');
       }
 
+      // 3. Start active polling timer to pull attendance logs from ZKTeco devices
+      _startActivePolling();
+
+      // 4. Start listening to Cloud Firestore for biometric punches from Python services
+      listenToFirestorePunches();
+
       return true;
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] Failed to start server: $e');
@@ -78,6 +90,10 @@ class ZkTecoNetworkService {
   static Future<void> stopServer() async {
     _isListening = false;
     isServerRunningNotifier.value = false;
+    _activePollingTimer?.cancel();
+    _activePollingTimer = null;
+    _firestorePunchesSub?.cancel();
+    _firestorePunchesSub = null;
     await _httpServer?.close(force: true);
     _httpServer = null;
     _udpSocket?.close();
@@ -221,6 +237,17 @@ class ZkTecoNetworkService {
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] Realtime broadcast notice: $e');
     }
+
+    // Sync to Cloud Firestore (Works on both Web & Windows, handles offline queue automatically)
+    try {
+      final docId = '${deviceIp}_${pin}_${timestamp.millisecondsSinceEpoch}';
+      await FirebaseFirestore.instance
+          .collection('biometric_punches')
+          .doc(docId)
+          .set(punchRecord, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[ZkTecoNetworkService] Firestore punch sync notice: $e');
+    }
   }
 
   static Future<void> _routePunchToModule(
@@ -235,13 +262,13 @@ class ZkTecoNetworkService {
 
     debugPrint('[ZkTecoNetworkService] Routing punch for ${credential.entityName} ($type) to module...');
 
-    if (type == 'employee' || type == 'dispensary_staff') {
-      // Record in Office Employee Attendance Box
+    if (type == 'employee' || type == 'dispensary_staff' || type == 'dasterkhwaan_staff' || type == 'teacher' || type == 'staff') {
+      // Record in Office / Department Staff Employee Attendance Box
       await _recordEmployeeAttendance(credential, dateStr, timeStr, source, location);
-    } else if (type == 'madrassa_student') {
+    } else if (type == 'madrassa_student' || type == 'madrassa') {
       // Record in Madrassa Student Log Box
       await _recordMadrassaStudentAttendance(credential, dateStr, timeStr, source);
-    } else if (type == 'school_student') {
+    } else if (type == 'school_student' || type == 'school') {
       // Record in School Daily Attendance Box
       await _recordSchoolStudentAttendance(credential, dateStr, timeStr, source);
     }
@@ -476,10 +503,19 @@ class ZkTecoNetworkService {
   static List<BiometricDeviceConfig> getAllDevices() {
     if (!Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) return [];
     final box = Hive.box(LocalStorageService.biometricDevicesBox);
-    return box.values
-        .where((v) => v != null)
-        .map((v) => BiometricDeviceConfig.fromMap(Map<String, dynamic>.from(v as Map)))
-        .toList();
+    final now = DateTime.now();
+    final List<BiometricDeviceConfig> result = [];
+    for (var v in box.values) {
+      if (v is Map) {
+        try {
+          final cfg = BiometricDeviceConfig.fromMap(v);
+          final isRecentlyActive = cfg.lastHeartbeat != null &&
+              now.difference(cfg.lastHeartbeat!).inSeconds < 120;
+          result.add(cfg.copyWith(status: isRecentlyActive ? 'Online' : 'Offline'));
+        } catch (_) {}
+      }
+    }
+    return result;
   }
 
   static Future<void> saveDeviceConfig(BiometricDeviceConfig config) async {
@@ -490,17 +526,468 @@ class ZkTecoNetworkService {
     await box.put(config.deviceId, config.toMap());
   }
 
+  /// Pings a ZKTeco device over LAN and waits for genuine network socket response
+  static Future<bool> pingDevice(String ipAddress, {int port = 4370}) async {
+    if (kIsWeb) return false;
+
+    // 1. Try TCP handshake (ADMS Web Push 8088 / ZKTeco TCP 4370)
+    try {
+      final socket = await Socket.connect(ipAddress, port, timeout: const Duration(seconds: 2));
+      socket.destroy();
+      await _updateDeviceOnlineStatus(ipAddress);
+      return true;
+    } catch (_) {}
+
+    // 2. Try ZKTeco UDP Datagram handshake with strict response wait
+    try {
+      final udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      
+      // Send proper ZKTeco CMD_CONNECT packet with checksum
+      final command = _buildZkPacket(command: 0x03E8, sessionId: 0, replyId: 0);
+
+      udp.send(command, InternetAddress(ipAddress), port);
+
+      Completer<bool> completer = Completer<bool>();
+      Timer timer = Timer(const Duration(seconds: 2), () {
+        if (!completer.isCompleted) {
+          udp.close();
+          completer.complete(false);
+        }
+      });
+
+      udp.listen((event) {
+        if (event == RawSocketEvent.read) {
+          final dg = udp.receive();
+          if (dg != null && dg.data.isNotEmpty) {
+            timer.cancel();
+            udp.close();
+            if (!completer.isCompleted) {
+              completer.complete(true);
+            }
+          }
+        }
+      });
+
+      final result = await completer.future;
+      if (result) {
+        await _updateDeviceOnlineStatus(ipAddress);
+      } else {
+        await _markDeviceOffline(ipAddress);
+      }
+      return result;
+    } catch (_) {
+      await _markDeviceOffline(ipAddress);
+      return false;
+    }
+  }
+
+  static Future<void> _updateDeviceOnlineStatus(String ipAddress) async {
+    final devices = getAllDevices();
+    for (final dev in devices) {
+      if (dev.ipAddress == ipAddress) {
+        final updated = dev.copyWith(
+          lastHeartbeat: DateTime.now(),
+          status: 'Online',
+        );
+        await saveDeviceConfig(updated);
+      }
+    }
+  }
+
+  static Future<void> _markDeviceOffline(String ipAddress) async {
+    final devices = getAllDevices();
+    for (final dev in devices) {
+      if (dev.ipAddress == ipAddress) {
+        final updated = dev.copyWith(
+          status: 'Offline',
+        );
+        await saveDeviceConfig(updated);
+      }
+    }
+  }
+
+  // ── Firestore Snapshot Listener ─────────────────────────────────────────────
+
+  /// Listens to Cloud Firestore for biometric punches synced from Python services or remote apps
+  static void listenToFirestorePunches() {
+    _firestorePunchesSub?.cancel();
+    try {
+      _firestorePunchesSub = FirebaseFirestore.instance
+          .collection('biometric_punches')
+          .orderBy('timestamp', descending: true)
+          .limit(50)
+          .snapshots()
+          .listen((snap) {
+        for (var doc in snap.docChanges) {
+          if (doc.type == DocumentChangeType.added) {
+            final data = doc.doc.data();
+            if (data != null) {
+              final pin = data['pin']?.toString() ?? '';
+              final timeStr = data['timestamp']?.toString() ?? '';
+              final deviceIp = data['deviceIp']?.toString() ?? '192.168.1.100';
+              final source = data['source']?.toString() ?? 'firestore_sync';
+
+              if (pin.isNotEmpty && timeStr.isNotEmpty) {
+                final timestamp = DateTime.tryParse(timeStr) ?? DateTime.now();
+                final dedupKey = '${deviceIp}_${pin}_$timeStr';
+                if (!_lastKnownLogKeys.contains(dedupKey)) {
+                  _lastKnownLogKeys.add(dedupKey);
+                  processIncomingPunch(
+                    pin: pin,
+                    timestamp: timestamp,
+                    deviceIp: deviceIp,
+                    source: source,
+                  );
+                }
+              }
+            }
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('[ZkTecoNetworkService] Firestore listener notice: $e');
+    }
+  }
+
+  // ── Active ZKTeco Device Polling & Keep-Alive (Pull-Based) ─────────────────────────────
+
+  /// Starts a periodic timer that actively connects to each online ZKTeco device
+  /// and pulls new attendance log records using the ZK UDP protocol.
+  static void _startActivePolling() {
+    _activePollingTimer?.cancel();
+    // Poll every 15 seconds
+    _activePollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _pollAllDevices();
+    });
+    // Also do an immediate first poll
+    _pollAllDevices();
+  }
+
+  static Future<void> _pollAllDevices() async {
+    if (kIsWeb) return;
+    final devices = getAllDevices();
+    for (final device in devices) {
+      if (device.ipAddress.isNotEmpty) {
+        try {
+          // Automatic Keep-Alive Ping: Keeps status Online continuously without manual checking!
+          final isReachable = await pingDevice(device.ipAddress, port: device.port);
+          if (isReachable) {
+            await _pullAttendanceLogsFromDevice(device);
+          }
+        } catch (e) {
+          debugPrint('[ZkTecoNetworkService] Poll error for ${device.ipAddress}: $e');
+        }
+      }
+    }
+  }
+
+  /// Connects to a ZKTeco device via UDP and requests attendance logs.
+  /// ZK Protocol flow: CMD_CONNECT → get session → CMD_ATTLOG_RRQ → read log data → CMD_FREE_DATA → CMD_EXIT
+  static Future<void> _pullAttendanceLogsFromDevice(BiometricDeviceConfig device) async {
+    final ip = device.ipAddress;
+    final port = device.port;
+    RawDatagramSocket? udp;
+
+    try {
+      udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+
+      // ── Step 1: CMD_CONNECT (0x03E8) ──
+      final connectPacket = _buildZkPacket(command: 0x03E8, sessionId: 0, replyId: 0);
+      udp.send(connectPacket, InternetAddress(ip), port);
+
+      final connectReply = await _waitForReply(udp, timeout: const Duration(seconds: 3));
+      if (connectReply == null || connectReply.length < 8) {
+        udp.close();
+        return; // Device didn't respond
+      }
+
+      // Parse session ID from connect reply (bytes 4-5, little-endian)
+      final replyCommand = connectReply[0] | (connectReply[1] << 8);
+      if (replyCommand != 0x07D0) {
+        // 0x07D0 = CMD_ACK_OK
+        debugPrint('[ZkTecoNetworkService] CMD_CONNECT rejected by $ip (reply: 0x${replyCommand.toRadixString(16)})');
+        udp.close();
+        return;
+      }
+
+      final sessionId = connectReply[4] | (connectReply[5] << 8);
+      int replyId = 1;
+
+      // Update device online status
+      await _updateDeviceOnlineStatus(ip);
+
+      // ── Step 2: CMD_DISABLEDEVICE (0x003C) – prevent concurrent operations ──
+      final disablePacket = _buildZkPacket(command: 0x003C, sessionId: sessionId, replyId: replyId++);
+      udp.send(disablePacket, InternetAddress(ip), port);
+      await _waitForReply(udp, timeout: const Duration(seconds: 2)); // ACK
+
+      // ── Step 3: CMD_ATTLOG_RRQ (0x000D) – request attendance log records ──
+      final attlogPacket = _buildZkPacket(command: 0x000D, sessionId: sessionId, replyId: replyId++);
+      udp.send(attlogPacket, InternetAddress(ip), port);
+
+      // Collect all data chunks (device may send multiple packets)
+      final allData = BytesBuilder();
+      bool receivedPrepare = false;
+
+      // Wait for CMD_PREPARE_DATA (0x05DC) or CMD_DATA (0x05DD) or direct ACK
+      while (true) {
+        final chunk = await _waitForReply(udp, timeout: const Duration(seconds: 3));
+        if (chunk == null) break;
+
+        final cmd = chunk[0] | (chunk[1] << 8);
+
+        if (cmd == 0x05DC) {
+          // CMD_PREPARE_DATA – device is preparing to send data
+          receivedPrepare = true;
+          continue;
+        } else if (cmd == 0x05DD) {
+          // CMD_DATA – actual attendance data chunk
+          if (chunk.length > 8) {
+            allData.add(chunk.sublist(8));
+          }
+          continue;
+        } else if (cmd == 0x07D0) {
+          // CMD_ACK_OK – done sending
+          break;
+        } else {
+          break;
+        }
+      }
+
+      // ── Step 4: CMD_FREE_DATA (0x000C) – acknowledge receipt ──
+      final freeDataPacket = _buildZkPacket(command: 0x000C, sessionId: sessionId, replyId: replyId++);
+      udp.send(freeDataPacket, InternetAddress(ip), port);
+      await _waitForReply(udp, timeout: const Duration(seconds: 1));
+
+      // ── Step 5: CMD_ENABLEDEVICE (0x003D) – re-enable the device ──
+      final enablePacket = _buildZkPacket(command: 0x003D, sessionId: sessionId, replyId: replyId++);
+      udp.send(enablePacket, InternetAddress(ip), port);
+      await _waitForReply(udp, timeout: const Duration(seconds: 1));
+
+      // ── Step 6: CMD_EXIT (0x03E9) – disconnect session ──
+      final exitPacket = _buildZkPacket(command: 0x03E9, sessionId: sessionId, replyId: replyId++);
+      udp.send(exitPacket, InternetAddress(ip), port);
+
+      udp.close();
+      udp = null;
+
+      // ── Parse attendance records ──
+      if (allData.length > 0) {
+        _parseZkAttendanceData(allData.toBytes(), ip, device.serialNumber);
+      } else if (!receivedPrepare) {
+        debugPrint('[ZkTecoNetworkService] No attendance data from $ip (may be empty or unsupported)');
+      }
+    } catch (e) {
+      debugPrint('[ZkTecoNetworkService] Error polling device at $ip: $e');
+    } finally {
+      udp?.close();
+    }
+  }
+
+  /// Builds a minimal ZKTeco UDP packet.
+  /// ZK Protocol header: [0x50, 0x50, 0x82, 0x7D, CMD_LO, CMD_HI, 0x00, 0x00, SESSION_LO, SESSION_HI, REPLY_LO, REPLY_HI]
+  static Uint8List _buildZkPacket({required int command, required int sessionId, required int replyId, List<int>? data}) {
+    final dataBytes = data ?? [];
+
+    final buf = ByteData(8 + dataBytes.length);
+
+    // Command (2 bytes LE)
+    buf.setUint16(0, command, Endian.little);
+    // Checksum placeholder (2 bytes) – will be filled
+    buf.setUint16(2, 0, Endian.little);
+    // Session ID (2 bytes LE)
+    buf.setUint16(4, sessionId, Endian.little);
+    // Reply ID (2 bytes LE)
+    buf.setUint16(6, replyId, Endian.little);
+
+    // Data payload
+    for (int i = 0; i < dataBytes.length; i++) {
+      buf.setUint8(8 + i, dataBytes[i]);
+    }
+
+    final bytes = Uint8List.view(buf.buffer);
+
+    // Calculate checksum over entire packet body
+    int chksum = 0;
+    for (int i = 0; i < bytes.length; i += 2) {
+      if (i == 2) continue; // skip checksum field
+      int word = bytes[i];
+      if (i + 1 < bytes.length) word |= bytes[i + 1] << 8;
+      chksum += word;
+    }
+    chksum = (chksum ^ 0xFFFF) + 1;
+    chksum &= 0xFFFF;
+    bytes[2] = chksum & 0xFF;
+    bytes[3] = (chksum >> 8) & 0xFF;
+
+    // Wrap with ZK transport header: magic (0x5050827D) + length
+    final fullPacket = Uint8List(4 + bytes.length);
+    fullPacket[0] = 0x50;
+    fullPacket[1] = 0x50;
+    fullPacket[2] = 0x82;
+    fullPacket[3] = 0x7D;
+    fullPacket.setRange(4, fullPacket.length, bytes);
+
+    return fullPacket;
+  }
+
+  /// Waits for a UDP reply and strips the transport header, returning the payload.
+  static Future<Uint8List?> _waitForReply(RawDatagramSocket udp, {required Duration timeout}) async {
+    final completer = Completer<Uint8List?>();
+    late StreamSubscription sub;
+    late Timer timer;
+
+    timer = Timer(timeout, () {
+      if (!completer.isCompleted) {
+        sub.cancel();
+        completer.complete(null);
+      }
+    });
+
+    sub = udp.listen((event) {
+      if (event == RawSocketEvent.read) {
+        final dg = udp.receive();
+        if (dg != null && dg.data.isNotEmpty) {
+          timer.cancel();
+          sub.cancel();
+          if (!completer.isCompleted) {
+            // Strip 4-byte transport header if present
+            final raw = dg.data;
+            if (raw.length > 4 && raw[0] == 0x50 && raw[1] == 0x50 && raw[2] == 0x82 && raw[3] == 0x7D) {
+              completer.complete(Uint8List.fromList(raw.sublist(4)));
+            } else {
+              completer.complete(Uint8List.fromList(raw));
+            }
+          }
+        }
+      }
+    });
+
+    return completer.future;
+  }
+
+  /// Parses binary ZKTeco attendance log data.
+  /// Each record is typically 40 bytes (newer firmware) or variable-length text.
+  static void _parseZkAttendanceData(Uint8List data, String deviceIp, String deviceSn) {
+    // Try text-based parsing first (some firmware returns tab-separated text)
+    final textData = utf8.decode(data, allowMalformed: true);
+
+    if (textData.contains('\t') || textData.contains('\n')) {
+      // Text-format attendance records: PIN\tTIMESTAMP\tSTATUS\tVERIFY\t...
+      final lines = textData.split('\n');
+      for (var line in lines) {
+        line = line.trim();
+        if (line.isEmpty) continue;
+
+        final parts = line.split('\t');
+        if (parts.length >= 2) {
+          final pin = parts[0].trim();
+          final timeStr = parts[1].trim();
+          final timestamp = DateTime.tryParse(timeStr) ?? DateTime.now();
+
+          if (pin.isNotEmpty) {
+            final dedupKey = '${deviceIp}_${pin}_$timeStr';
+            if (!_lastKnownLogKeys.contains(dedupKey)) {
+              _lastKnownLogKeys.add(dedupKey);
+              // Prevent unlimited memory growth
+              if (_lastKnownLogKeys.length > 10000) {
+                final toRemove = _lastKnownLogKeys.take(5000).toList();
+                _lastKnownLogKeys.removeAll(toRemove);
+              }
+              processIncomingPunch(
+                pin: pin,
+                timestamp: timestamp,
+                deviceIp: deviceIp,
+                deviceSn: deviceSn,
+                source: 'zkteco_pull',
+              );
+            }
+          }
+        }
+      }
+      return;
+    }
+
+    // Binary-format parsing (40-byte fixed-length records)
+    const recordSize = 40;
+    if (data.length < recordSize) {
+      debugPrint('[ZkTecoNetworkService] Attendance data too short: ${data.length} bytes');
+      return;
+    }
+
+    final recordCount = data.length ~/ recordSize;
+    debugPrint('[ZkTecoNetworkService] Parsing $recordCount binary attendance records from $deviceIp');
+
+    for (int i = 0; i < recordCount; i++) {
+      final offset = i * recordSize;
+      try {
+        // Bytes 0-8: User ID (null-terminated string)
+        final userIdBytes = data.sublist(offset, offset + 9);
+        final nullIdx = userIdBytes.indexOf(0);
+        final pin = utf8.decode(userIdBytes.sublist(0, nullIdx > 0 ? nullIdx : 9), allowMalformed: true).trim();
+
+        // Bytes 24-27: Timestamp (encoded as seconds since 2000-01-01)
+        if (offset + 27 < data.length) {
+          final timeEncoded = data[offset + 24] |
+              (data[offset + 25] << 8) |
+              (data[offset + 26] << 16) |
+              (data[offset + 27] << 24);
+
+          final timestamp = _decodeZkTime(timeEncoded);
+
+          if (pin.isNotEmpty) {
+            final dedupKey = '${deviceIp}_${pin}_${timestamp.toIso8601String()}';
+            if (!_lastKnownLogKeys.contains(dedupKey)) {
+              _lastKnownLogKeys.add(dedupKey);
+              if (_lastKnownLogKeys.length > 10000) {
+                final toRemove = _lastKnownLogKeys.take(5000).toList();
+                _lastKnownLogKeys.removeAll(toRemove);
+              }
+              processIncomingPunch(
+                pin: pin,
+                timestamp: timestamp,
+                deviceIp: deviceIp,
+                deviceSn: deviceSn,
+                source: 'zkteco_pull',
+              );
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[ZkTecoNetworkService] Error parsing record $i: $e');
+      }
+    }
+  }
+
+  /// Decodes ZKTeco encoded timestamp (seconds since 2000-01-01 00:00:00)
+  static DateTime _decodeZkTime(int encoded) {
+    final second = encoded % 60;
+    encoded ~/= 60;
+    final minute = encoded % 60;
+    encoded ~/= 60;
+    final hour = encoded % 24;
+    encoded ~/= 24;
+    final day = (encoded % 31) + 1;
+    encoded ~/= 31;
+    final month = (encoded % 12) + 1;
+    encoded ~/= 12;
+    final year = encoded + 2000;
+    return DateTime(year, month, day, hour, minute, second);
+  }
+
   // ── Credential & PIN Registry Management ────────────────────────────────────
 
   static BiometricCredential? getCredentialByPin(String pin) {
     if (!Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) return null;
     final box = Hive.box(LocalStorageService.biometricCredentialsBox);
     for (var val in box.values) {
-      if (val != null) {
-        final cred = BiometricCredential.fromMap(Map<String, dynamic>.from(val as Map));
-        if (cred.biometricPin == pin && cred.active) {
-          return cred;
-        }
+      if (val is Map) {
+        try {
+          final cred = BiometricCredential.fromMap(val);
+          if (cred.biometricPin == pin && cred.active) {
+            return cred;
+          }
+        } catch (_) {}
       }
     }
     return null;
@@ -509,10 +996,15 @@ class ZkTecoNetworkService {
   static List<BiometricCredential> getAllCredentials() {
     if (!Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) return [];
     final box = Hive.box(LocalStorageService.biometricCredentialsBox);
-    return box.values
-        .where((v) => v != null)
-        .map((v) => BiometricCredential.fromMap(Map<String, dynamic>.from(v as Map)))
-        .toList();
+    final List<BiometricCredential> result = [];
+    for (var v in box.values) {
+      if (v is Map) {
+        try {
+          result.add(BiometricCredential.fromMap(v));
+        } catch (_) {}
+      }
+    }
+    return result;
   }
 
   static Future<void> registerBiometricCredential(BiometricCredential credential) async {

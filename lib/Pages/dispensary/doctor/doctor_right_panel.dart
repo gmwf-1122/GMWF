@@ -225,8 +225,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     }
   }
 
+  static bool _isSyringeItem(Map<String, dynamic> m) {
+    final type = (m['type'] ?? '').toString().toLowerCase().trim();
+    final name = (m['name'] ?? '').toString().toLowerCase().trim();
+    return type.contains('syringe') || type == 'syr' || type == 'syr.' || name.contains('syringe');
+  }
+
   void _loadInventory() async {
-    final items = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId);
+    final items = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId)
+        .where((m) => !_isSyringeItem(m))
+        .toList();
     if (mounted) {
       setState(() => _allInventory = items);
     }
@@ -321,6 +329,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final query = q.trim().toLowerCase();
     if (query.isEmpty) { setState(() => _searchResults.clear()); return; }
     final filtered = _allInventory.where((m) {
+      if (_isSyringeItem(m)) return false;
       return (m['name'] ?? '').toString().toLowerCase().contains(query) ||
           (m['type'] ?? '').toString().toLowerCase().contains(query) ||
           (m['dose'] ?? '').toString().toLowerCase().contains(query) ||
@@ -1063,7 +1072,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final now         = DateTime.now();
       final nowIso      = now.toIso8601String();
       final serialClean = widget.serialId.trim().toLowerCase();
-      final dateKey     = serialClean.split('-')[0];
+      final parts       = serialClean.split('-');
+      final dateKey     = (parts.isNotEmpty && parts[0] == 'x')
+          ? (parts.length > 1 ? parts[1] : '')
+          : (parts.isNotEmpty ? parts[0] : '');
 
       final medicineList = widget.prescriptions.map((m) {
         return {

@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart' show BuildContext;
+import '../../../widgets/file_action_helper.dart';
 
 class InventoryPdfHelper {
   // ── Asset loader ─────────────────────────────────────────────────────────
@@ -21,7 +23,7 @@ class InventoryPdfHelper {
   // ── Type helpers ──────────────────────────────────────────────────────────
   static const _typeOrder = [
     'Tablet', 'Capsule', 'Syrup', 'Injection',
-    'Drip', 'Drip Set', 'Syringe', 'Nebulization',
+    'Drip', 'Drip Set', 'Syringe', 'Cannula', 'Needle', 'Nebulization',
   ];
 
   static int _typeIdx(String t) {
@@ -37,6 +39,8 @@ class InventoryPdfHelper {
         'Drip'         => 'DRIPS',
         'Drip Set'     => 'DRIP SETS',
         'Syringe'      => 'SYRINGES',
+        'Cannula'      => 'CANNULAS',
+        'Needle'       => 'NEEDLES',
         'Nebulization' => 'NEBULIZATIONS',
         _              => type.toUpperCase(),
       };
@@ -49,6 +53,8 @@ class InventoryPdfHelper {
         'Drip'         => 'Drip',
         'Drip Set'     => 'D.Set',
         'Syringe'      => 'Syg.',
+        'Cannula'      => 'Can.',
+        'Needle'       => 'Ndl.',
         'Nebulization' => 'Neb.',
         _              => type,
       };
@@ -65,9 +71,10 @@ class InventoryPdfHelper {
   // ══════════════════════════════════════════════════════════════════════════
   // MAIN EXPORT
   // ══════════════════════════════════════════════════════════════════════════
-  static Future<void> exportInventoryChecklistPdf({
+  static Future<Map<String, dynamic>?> exportInventoryChecklistPdf({
     required List<Map<String, dynamic>> items,
     required String branchName,
+    BuildContext? context,
   }) async {
     // ── Logo ─────────────────────────────────────────────────────────────
     final logoBytes = await _loadAsset('assets/logo/gmwf-1.webp');
@@ -96,12 +103,13 @@ class InventoryPdfHelper {
         sorted.where((b) => ((b['quantity'] as int?) ?? 0) < 10).length;
 
     // ── Column widths (A4 usable ≈ 563 pt with 16 pt margins) ────────────
-    const double colNo       = 24;
-    const double colName     = 235; // wider — formula column removed
-    const double colType     =  60;
-    const double colDose     =  72;
-    const double colQty      =  55;
-    const double colPhysical =  77; // empty box for writing
+    const double colNo       = 20;
+    const double colName     = 180;
+    const double colBarcode  = 85;
+    const double colType     = 55;
+    const double colDose     = 65;
+    const double colQty      = 50;
+    const double colPhysical = 68;
 
     // ── Cell builders ─────────────────────────────────────────────────────
 
@@ -165,7 +173,7 @@ class InventoryPdfHelper {
 
     // Type group separator: grey background, bold label
     const double totalRowW =
-        colNo + colName + colType + colDose + colQty + colPhysical;
+        colNo + colName + colBarcode + colType + colDose + colQty + colPhysical;
 
     pw.Widget typeHeader(String type) {
       return pw.Container(
@@ -197,6 +205,7 @@ class InventoryPdfHelper {
       for (final item in sorted) {
         final type = (item['type'] ?? '').toString();
         final name = (item['name'] ?? '').toString();
+        final barcode = (item['barcode'] ?? item['code'] ?? '—').toString();
         final dose = (item['dose'] ?? '').toString();
         final qty     = (item['quantity'] as int?) ?? 0;
         final low     = qty < 10;
@@ -236,6 +245,10 @@ class InventoryPdfHelper {
                   fontWeight: pw.FontWeight.bold,
                   color: PdfColors.grey700)),
           nameCell,
+          dCell(barcode, colBarcode,
+              align: pw.Alignment.center,
+              bg: rowBg,
+              style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.blue900)),
           dCell(_typeAbbrev(type), colType,
               align: pw.Alignment.center, bg: rowBg),
           dCell(dose, colDose, bg: rowBg),
@@ -445,6 +458,7 @@ class InventoryPdfHelper {
           pw.Row(children: [
             hCell('#',               colNo,       align: pw.Alignment.center),
             hCell('Medicine Name',    colName),
+            hCell('Barcode',         colBarcode,  align: pw.Alignment.center),
             hCell('Type',            colType,     align: pw.Alignment.center),
             hCell('Dose',            colDose),
             hCell('Sys. Qty',        colQty,      align: pw.Alignment.center),
@@ -490,13 +504,29 @@ class InventoryPdfHelper {
         .replaceAll(RegExp(r'[^\w\s\-]'), '')
         .replaceAll(' ', '_')
         .toLowerCase();
+    final fileName = 'inventory_checklist_${safeBranch}_$safeDate.pdf';
 
-    await FilePicker.platform.saveFile(
-      dialogTitle:       'Save Inventory Checklist PDF',
-      fileName:          'inventory_checklist_${safeBranch}_$safeDate.pdf',
-      bytes:             pdfBytes,
-      type:              FileType.custom,
-      allowedExtensions: ['pdf'],
-    );
+    String? path;
+    try {
+      path = await FilePicker.platform.saveFile(
+        dialogTitle:       'Save Inventory Checklist PDF',
+        fileName:          fileName,
+        bytes:             pdfBytes,
+        type:              FileType.custom,
+        allowedExtensions: ['pdf'],
+      );
+    } catch (_) {}
+
+    final result = {'path': path, 'bytes': pdfBytes, 'name': fileName};
+    if (context != null && context.mounted) {
+      FileActionHelper.showFileOptions(
+        context,
+        filePath: path,
+        bytes: pdfBytes,
+        fileName: fileName,
+        title: 'Inventory Checklist PDF Ready',
+      );
+    }
+    return result;
   }
 }

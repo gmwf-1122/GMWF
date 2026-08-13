@@ -8,23 +8,24 @@
 [![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)](https://flutter.dev)
 [![Firebase](https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase)](https://firebase.google.com)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Web%20%7C%20Android%20%7C%20iOS-blue?style=for-the-badge)](https://flutter.dev/multi-platform)
-[![Release](https://img.shields.io/badge/Release-v1.2.9-brightgreen?style=for-the-badge)](https://github.com/gmwf-1122/GMWF)
+[![Release](https://img.shields.io/badge/Release-v1.3.5-brightgreen?style=for-the-badge)](https://github.com/gmwf-1122/GMWF)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
 
 A production-grade, multi-platform **Flutter application** purpose-built for the Gulzar Madina Welfare Foundation. GMWF digitally orchestrates the foundation's entire operational ecosystem—spanning **medical dispensaries**, **educational institutions (Madrassa & School)**, **community kitchens (Dasterkhwaan)**, **financial auditing**, **biometric attendance**, **pre-authentication security**, and **automated multi-device session tracking**—with offline-first reliability and real-time synchronization.
 
 ---
 
-## 🚀 Latest Updates in v1.2.9
+## 🚀 Latest Updates & Bug Fixes in v1.3.5
 
 > [!IMPORTANT]
-> **Cross-Platform Auto-Updater Engine**
-> The auto-update engine in v1.2.9 features platform-specific installer handoff, direct native package installation on Android (`open_filex` with `REQUEST_INSTALL_PACKAGES`), and silent setup execution on Windows.
+> **v1.3.5 Production Maintenance & System Enhancements**
+> App version bumped to v1.3.5 across all platform targets. Includes performance optimizations, critical fixes in Quran progress tracking, Madrassa local storage, Dispensary queue reactivity, and multi-architecture split release packaging.
 
-- 🛠️ **Native In-App Android Updater**: Directly triggers the Android Package Installer (`content://` FileProvider) without manual browser downloads or Chrome save prompts.
-- 💻 **Windows Silent Installer**: Automatically downloads `.exe` releases and executes Inno Setup silent setup switches (`/verysilent /suppressmsgboxes`).
-- 🔒 **Pre-Authentication Security & Visitor Telemetry**: Logs device UUID, public IP, OS signatures, and connection metadata before login.
-- 📱 **Session & Hardware Fingerprinting**: Accurately tracks Windows PCs, Web browsers, Android, and iOS devices connected to branch servers.
+- 📖 **Quran Progress & Madrassa Module Fixes**: Resolved Quran Juz/Para tracking calculations, daily progress log synchronization, and parent report card rendering.
+- 💊 **Dispensary & Inventory Performance Optimizations**: Resolved patient queue state reactivity bugs, inventory ledger stock calculations, and Proforma sheet generation speed.
+- ⚡ **ZKTeco & Biometric Device Connectivity**: Enhanced network connection resilience, automatic IP discovery, and punch log sync stability.
+- 🌐 **LAN Realtime Router & Multi-Server Handshake**: Fixed LAN client/server heartbeat timeouts, server discovery, and Firestore fallback routing.
+- 📦 **Split Release Packaging & Auto-Update Engine**: Updated build system to deliver optimized split ARM64 APKs (`app-arm64-v8a-release.apk`), Windows release binaries (`gmwf.exe`), and Web release bundles.
 
 ---
 

@@ -8,6 +8,35 @@ class CustomTitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!Hive.isBoxOpen('app_settings')) {
+      return WindowTitleBarBox(
+        child: Container(
+          color: const Color(0xFF00695C),
+          child: Row(
+            children: [
+              Expanded(
+                child: MoveWindow(
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "GMWF",
+                        style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const WindowButtons(
+                mouseOver: Color(0xFF005b50),
+                mouseDown: Color(0xFF004d44),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return ValueListenableBuilder(
       valueListenable: Hive.box('app_settings').listenable(keys: ['custom_accent_color']),
       builder: (context, Box box, child) {
@@ -51,13 +80,14 @@ class CustomTitleBar extends StatelessWidget {
                               letterSpacing: 0.5,
                             ),
                           ),
-                          const Spacer(),
-                          const SyncStatusIndicator(),
-                          const SizedBox(width: 16),
                         ],
                       ),
                     ),
                   ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: SyncStatusIndicator(),
                 ),
                 WindowButtons(
                   mouseOver: mouseOverColor,

@@ -1,0 +1,43 @@
+{
+    "sync_interval_seconds": 15,
+    "firebase_credentials_path": "serviceAccountKey.json",
+    "clear_memory_after_sync": false,
+    "devices": [
+        {
+            "name": "Office HQ Main Gate Scanner",
+            "ip": "192.168.1.150",
+            "port": 4370,
+            "location": "Office/Dasterkhwaan"
+        },
+        {
+            "name": "Dispensary Medical Scanner",
+            "ip": "192.168.1.151",
+            "port": 4370,
+            "location": "Dispensary"
+        },
+        {
+            "name": "Madrassa Gate Scanner",
+            "ip": "192.168.1.152",
+            "port": 4370,
+            "location": "Madrassa"
+        },
+        {
+            "name": "GMWF Model School Scanner",
+            "ip": "192.168.1.153",
+            "port": 4370,
+            "location": "School"
+        },
+        {
+            "name": "Dasterkhwaan Kitchen Scanner",
+            "ip": "192.168.1.154",
+            "port": 4370,
+            "location": "Dasterkhwaan Kitchen"
+        },
+        {
+            "name": "Auxiliary Staff Scanner",
+            "ip": "192.168.1.155",
+            "port": 4370,
+            "location": "Office/Dasterkhwaan"
+        }
+    ]
+}

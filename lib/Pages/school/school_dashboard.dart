@@ -17,6 +17,8 @@ import 'utils/school_local_storage.dart';
 import 'utils/school_sync_service.dart';
 import '../../widgets/global_module_wrapper.dart';
 import '../../widgets/app_back_button.dart';
+import '../../services/local_storage_service.dart';
+import '../../services/auth_service.dart';
 
 class _NavItem {
   final String label;
@@ -224,7 +226,11 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
     );
 
     if (confirm == true) {
-      await FirebaseAuth.instance.signOut();
+      try {
+        await AuthService().signOut();
+      } catch (e) {
+        debugPrint('[SchoolDashboard] Sign out error: $e');
+      }
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
       }
@@ -233,6 +239,87 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
 
   @override
   Widget build(BuildContext context) {
+    final hasSchool = LocalStorageService.hasSchoolFacility(widget.branchId);
+    if (!hasSchool) {
+      final bName = LocalStorageService.getBranchName(widget.branchId);
+      return Scaffold(
+        backgroundColor: const Color(0xFFF8FAFC),
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: const AppBackButton(),
+          title: const Text('School Module', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+        ),
+        body: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 480),
+            margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+            padding: const EdgeInsets.all(32),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.04),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFEFF6FF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.school_outlined, size: 42, color: Color(0xFF2563EB)),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'School is not available in $bName yet',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1E293B),
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'The school facility is not enabled or registered for the $bName branch. If this branch has a school, contact system administration to configure it in Branches Management.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF64748B),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                ElevatedButton.icon(
+                  onPressed: () => Navigator.maybePop(context),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 16),
+                  label: const Text('Return to Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF2563EB),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (_navItems.isEmpty) {
       _initNavItemsAndViews();
     }

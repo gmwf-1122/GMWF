@@ -14,6 +14,8 @@ import 'package:gmwf/services/finance_expenses_storage.dart';
 import 'package:gmwf/services/permission_service.dart';
 import 'package:collection/collection.dart';
 import 'package:uuid/uuid.dart';
+import 'package:gmwf/services/serials_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/offline_auth_service.dart';
 
 class SyncService {
@@ -46,9 +48,9 @@ class SyncService {
     _setupDailyTokenRefresh(branchId);
     
     _periodicSyncTimer?.cancel();
-    // 30-minute periodic sync — reduced from 15 min to halve quota usage.
-    // Finance bulk downloads run separately via triggerFinanceRefresh().
-    _periodicSyncTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+    // 2-hour periodic sync for historical/report data delta syncing.
+    // Live operational updates use scoped snapshot listeners.
+    _periodicSyncTimer = Timer.periodic(const Duration(hours: 2), (_) {
       triggerUpload();
     });
 
@@ -153,13 +155,13 @@ class SyncService {
             final lastRefreshStr = settings.get('last_refresh_$bId') as String?;
             final lastRefresh = lastRefreshStr != null ? DateTime.tryParse(lastRefreshStr) : null;
             final now = DateTime.now();
-            // Cooldown raised to 30 min to match the periodic timer and avoid
-            // back-to-back downloads on rapid connectivity-change events.
-            if (force || lastRefresh == null || now.difference(lastRefresh) > const Duration(minutes: 30)) {
+            // Cooldown raised to 2 hours to match historical periodic timer
+            // and prevent redundant full/delta scans on rapid connectivity events.
+            if (force || lastRefresh == null || now.difference(lastRefresh) > const Duration(hours: 2)) {
               await settings.put('last_refresh_$bId', now.toIso8601String());
               await _refreshDataForBranch(bId);
             } else {
-              Logger().d("[SyncService] Skipping automatic refresh for branch $bId (cooldown active)");
+              Logger().d("[SyncService] Skipping automatic refresh for branch $bId (2-hour cooldown active)");
             }
           }
         } catch (e) {
@@ -302,7 +304,25 @@ class SyncService {
             final serial  = (action['serial'] ?? data['serial'])?.toString();
             if (dateKey == null || serial == null) throw Exception('Missing dateKey/serial');
             final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
-            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
+
+            if (data['isTempSerial'] == true || action['isTempSerial'] == true) {
+              final dispTag = (data['dispensaryTag'] ?? CampSessionService.getDispensaryKeyword(data['dispensaryId'])).toString();
+              final result = await issueAtomicSerialTransaction(
+                branchId: branchId,
+                dispensaryTag: dispTag,
+                queueType: queueType,
+                tokenData: data,
+              );
+              final canonicalSerial = result['serial'] as String;
+              await LocalStorageService.remapTempSerialToCanonical(
+                branchId,
+                serial,
+                canonicalSerial,
+                result['entryData'] as Map<String, dynamic>,
+              );
+            } else {
+              await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
+            }
           }
           else if (type == 'save_prescription') {
             final serial = action['serial'] as String?;

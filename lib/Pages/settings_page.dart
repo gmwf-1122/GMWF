@@ -15,6 +15,7 @@ import '../services/offline_auth_service.dart' as offline_auth;
 import '../services/auto_update_service.dart';
 import '../services/image_upload_service.dart';
 import '../widgets/update_dialog_widget.dart';
+import 'settings/biometric_device_manager_page.dart';
 
 
 class SettingsPage extends StatefulWidget {
@@ -517,6 +518,19 @@ class _SettingsPageState extends State<SettingsPage> {
               // Save to Hive users database & secure storage credentials cache
               await LocalStorageService.saveLocalUser(userData);
               await offline_auth.OfflineAuthService.updateCachedUserData(userData);
+              await offline_auth.OfflineAuthService.updateCachedUserData(userData, usernameOrEmail: newEmail);
+              await offline_auth.OfflineAuthService.updateCachedUserData(userData, usernameOrEmail: newName);
+              final currentPw = userData['password'] as String? ?? '112233';
+              await offline_auth.OfflineAuthService.saveCredentials(
+                usernameOrEmail: newEmail,
+                password: currentPw,
+                userData: userData,
+              );
+              await offline_auth.OfflineAuthService.saveCredentials(
+                usernameOrEmail: newName,
+                password: currentPw,
+                userData: userData,
+              );
 
               // Update online in Firebase Firestore
               try {
@@ -1151,6 +1165,41 @@ class _SettingsPageState extends State<SettingsPage> {
                             ],
                           ),
                         ),
+
+                        // HARDWARE & BIOMETRICS SECTION
+                        _sectionLabel(t, 'HARDWARE & BIOMETRICS'),
+                        RoleCard(
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: t.accent.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(Icons.fingerprint_rounded, color: t.accent, size: 24),
+                            ),
+                            title: Text(
+                              'ZKTeco Biometric Devices & Attendance',
+                              style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                            ),
+                            subtitle: Text(
+                              'View connected Wi-Fi/Ethernet readers, building assignments, live logs, and employee PINs.',
+                              style: TextStyle(color: t.textSecondary, fontSize: 12),
+                            ),
+                            trailing: Icon(Icons.arrow_forward_ios_rounded, color: t.textTertiary, size: 14),
+                            onTap: () {
+                              final branchId = widget.userData['branchId'] as String? ?? 'main';
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => BiometricDeviceManagerPage(branchId: branchId),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
 
                         // PERSONALIZATION SECTION
                         _sectionLabel(t, 'personalization'),

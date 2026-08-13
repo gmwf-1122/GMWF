@@ -25,18 +25,18 @@ class BiometricDeviceConfig {
     this.enabled = true,
   });
 
-  factory BiometricDeviceConfig.fromMap(Map<String, dynamic> map) {
+  factory BiometricDeviceConfig.fromMap(Map<dynamic, dynamic> map) {
     return BiometricDeviceConfig(
       deviceId: map['deviceId']?.toString() ?? '',
-      deviceName: map['deviceName']?.toString() ?? '',
+      deviceName: map['deviceName']?.toString() ?? 'Biometric Device',
       buildingLocation: map['buildingLocation']?.toString() ?? 'Office',
       ipAddress: map['ipAddress']?.toString() ?? '192.168.1.100',
-      port: (map['port'] is int) ? map['port'] : int.tryParse(map['port']?.toString() ?? '') ?? 4370,
+      port: int.tryParse(map['port']?.toString() ?? '') ?? 4370,
       serialNumber: map['serialNumber']?.toString() ?? '',
       status: map['status']?.toString() ?? 'Offline',
       lastHeartbeat: map['lastHeartbeat'] != null ? DateTime.tryParse(map['lastHeartbeat'].toString()) : null,
       lastSyncTimestamp: map['lastSyncTimestamp'] != null ? DateTime.tryParse(map['lastSyncTimestamp'].toString()) : null,
-      enabled: map['enabled'] ?? true,
+      enabled: map['enabled'] != false,
     );
   }
 

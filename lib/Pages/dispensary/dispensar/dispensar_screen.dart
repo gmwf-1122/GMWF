@@ -14,7 +14,10 @@ import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/widgets/camp_selection_dialog.dart';
+import '../user_settings_dialog.dart';
 import 'inventory.dart';
 import 'patient_form.dart';
 import 'patient_list.dart';
@@ -312,21 +315,17 @@ class _DispensarScreenState extends State<DispensarScreen> {
   Future<void> _logout() async {
     if (_isLoggingOut) return;
     if (mounted) setState(() => _isLoggingOut = true);
-
-    Future.wait([
-      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-    ]).whenComplete(() {
-      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
-      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
-    });
+    try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+    ConnectionManager().stop().catchError((_) {});
+    await AuthService().signOut();
+    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     if (isMobile) {
       return AppBar(
         automaticallyImplyLeading: false,
-        backgroundColor: _teal,
+        backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
         elevation: 4,
         toolbarHeight: 60,
         iconTheme: const IconThemeData(color: Colors.white),
@@ -381,7 +380,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
     return AppBar(
       automaticallyImplyLeading: false,
-      backgroundColor: _teal,
+      backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
       elevation: 10,
       shadowColor: Colors.black26,
       toolbarHeight: 100,
@@ -394,11 +393,29 @@ class _DispensarScreenState extends State<DispensarScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('Dispensary – ${_dispenserName ?? 'Loading...'}',
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+              GestureDetector(
+                onLongPress: () => DispensaryUserSettingsDialog.show(
+                  context,
+                  branchId: widget.branchId,
+                  onUserUpdated: () {
+                    if (mounted) setState(() { _fetchDispenserName(); });
+                  },
+                ),
+                child: Tooltip(
+                  message: 'Long press for Settings',
+                  child: Text('Dispensary – ${_dispenserName ?? 'Loading...'}',
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                ),
+              ),
               if (!_loadingBranch)
-                Text(_branchName ?? 'Free Dispensary',
-                    style: const TextStyle(fontSize: 16, color: Colors.white70)),
+                Text(
+                  CampSessionService.getBranchAndCampDisplayName(
+                    branchName: _branchName ?? 'Free Dispensary',
+                    branchId: widget.branchId,
+                    campId: CampSessionService.getActiveCamp(),
+                  ),
+                  style: const TextStyle(fontSize: 16, color: Colors.white70),
+                ),
             ],
           ),
         ),
@@ -441,33 +458,52 @@ class _DispensarScreenState extends State<DispensarScreen> {
     );
   }
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 700;
 
-    final bodyContent = Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
-        ),
-      ),
-      child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
-    );
-
     return ValueListenableBuilder<Box>(
-      valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
-      builder: (context, entriesBox, _) {
-        return ValueListenableBuilder<Box>(
-          valueListenable: Hive.box(LocalStorageService.prescriptionsBox).listenable(),
-          builder: (context, prescriptionsBox, _) {
-            if (widget.isEmbedded) return bodyContent;
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
 
-            return Scaffold(
-              appBar: _buildAppBar(isMobile),
-              body: bodyContent,
+        final bodyContent = Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: isDark
+                  ? const [Color(0xFF0F172A), Color(0xFF1E293B)]
+                  : const [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+            ),
+          ),
+          child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+        );
+
+        return ValueListenableBuilder<Box>(
+          valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
+          builder: (context, entriesBox, _) {
+            return ValueListenableBuilder<Box>(
+              valueListenable: Hive.box(LocalStorageService.prescriptionsBox).listenable(),
+              builder: (context, prescriptionsBox, _) {
+                if (widget.isEmbedded) return bodyContent;
+
+                return Scaffold(
+                  backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+                  appBar: _buildAppBar(isMobile),
+                  body: bodyContent,
+                );
+              },
             );
           },
         );
@@ -479,24 +515,24 @@ class _DispensarScreenState extends State<DispensarScreen> {
     if (_showingForm && _selectedQueueEntry != null) {
       return Column(children: [
         Container(
-          color: Colors.white,
+          color: _isDark ? const Color(0xFF1E293B) : Colors.white,
           child: Row(children: [
             TextButton.icon(
               onPressed: () => setState(() { _showingForm = false; }),
-              icon: const Icon(Icons.arrow_back, color: _teal),
-              label: const Text('Queue', style: TextStyle(color: _teal)),
+              icon: Icon(Icons.arrow_back, color: _isDark ? const Color(0xFF38BDF8) : _teal),
+              label: Text('Queue', style: TextStyle(color: _isDark ? const Color(0xFF38BDF8) : _teal)),
             ),
             const Spacer(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
                 '#${_selectedQueueEntry!['serial'] ?? ''}',
-                style: const TextStyle(fontWeight: FontWeight.bold, color: _teal),
+                style: TextStyle(fontWeight: FontWeight.bold, color: _isDark ? Colors.white : _teal),
               ),
             ),
           ]),
         ),
-        const Divider(height: 1),
+        Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
         Expanded(
           child: PatientForm(
             branchId: widget.branchId,
@@ -531,7 +567,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
         Container(
           width: isTablet ? 480 : constraints.maxWidth * 0.42,
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.7),
+            color: _isDark ? const Color(0xFF1E293B).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.7),
             borderRadius: const BorderRadius.only(
               topRight: Radius.circular(36),
               bottomRight: Radius.circular(36),
@@ -548,32 +584,33 @@ class _DispensarScreenState extends State<DispensarScreen> {
         ),
         Expanded(
           child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Card(
-              elevation: 12,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: _selectedQueueEntry == null
-                    ? Center(
+            padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: _selectedQueueEntry == null
+                  ? Container(
+                      color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                      child: Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.medical_information_outlined, size: 120, color: Colors.grey.shade400),
-                            const SizedBox(height: 24),
-                            Text('Select a patient to dispense medicines',
-                                style: TextStyle(fontSize: 22, color: Colors.grey.shade700),
-                                textAlign: TextAlign.center),
+                            Icon(Icons.medical_information_outlined, size: 80, color: _isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Select a patient to dispense medicines',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                              textAlign: TextAlign.center,
+                            ),
                           ],
                         ),
-                      )
-                    : PatientForm(
-                        branchId: widget.branchId,
-                        queueEntry: _selectedQueueEntry!,
-                        onDispensed: () => setState(() => _selectedQueueEntry = null),
-                        dispenserName: _dispenserName,
                       ),
-              ),
+                    )
+                  : PatientForm(
+                      branchId: widget.branchId,
+                      queueEntry: _selectedQueueEntry!,
+                      onDispensed: () => setState(() => _selectedQueueEntry = null),
+                      dispenserName: _dispenserName,
+                    ),
             ),
           ),
         ),

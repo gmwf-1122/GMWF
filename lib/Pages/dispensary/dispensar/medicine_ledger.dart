@@ -293,8 +293,11 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 });
               } else if (_selectedMed != null && isSelectedMedSyringe) {
                 final typeStr = rx['type']?.toString().toLowerCase() ?? '';
-                final isInjOrDrip = typeStr.contains('injection') || typeStr.contains('drip');
-                final isRxSyringe = typeStr.contains('syringe');
+                final nameStr = rx['name']?.toString().toLowerCase() ?? '';
+                final isInjOrDrip = typeStr.contains('injection') || typeStr.contains('inj') ||
+                                    typeStr.contains('drip') || typeStr.contains('iv') || typeStr.contains('i.v') ||
+                                    nameStr.contains('inj') || nameStr.contains('iv') || nameStr.contains('i.v.');
+                final isRxSyringe = typeStr.contains('syringe') || nameStr.contains('syringe');
                 if (isInjOrDrip && !isRxSyringe) {
                   final perDayRaw = rx['quantity'] ?? rx['qty'] ?? 1;
                   final perDay = perDayRaw is num ? perDayRaw.toDouble() : double.tryParse(perDayRaw.toString()) ?? 1.0;
@@ -394,16 +397,27 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
 
   // ── UI Components ──────────────────────────────────────────────────────────
   @override
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isDark = _isDark;
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : _bg,
       body: CustomScrollView(
         slivers: [
           if (!widget.isEmbedded)
             _buildSliverAppBar(),
           SliverToBoxAdapter(child: _buildFilters()),
           if (_isLoading)
-            const SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: _teal)))
+            SliverFillRemaining(child: Center(child: CircularProgressIndicator(color: isDark ? const Color(0xFF0D9488) : _teal)))
           else if (_reportData == null)
             _buildEmptyState('No data found for this period')
           else
@@ -413,7 +427,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       floatingActionButton: _reportData != null
           ? FloatingActionButton.extended(
               onPressed: () => _loadReport(forceRecalculate: true),
-              backgroundColor: _teal,
+              backgroundColor: isDark ? const Color(0xFF0F766E) : _teal,
               icon: const Icon(Icons.refresh_rounded, color: Colors.white),
               label: const Text('Recalculate', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             )
@@ -422,17 +436,18 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   }
 
   Widget _buildSliverAppBar() {
+    final isDark = _isDark;
     return SliverAppBar(
       expandedHeight: 140,
       pinned: true,
-      backgroundColor: _teal,
+      backgroundColor: isDark ? const Color(0xFF0F172A) : _teal,
       flexibleSpace: FlexibleSpaceBar(
         titlePadding: const EdgeInsets.only(left: 56, bottom: 16),
         title: const Text('Medicine Ledger', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
         background: Container(
-          decoration: const BoxDecoration(
+          decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [_tealDark, _teal],
+              colors: isDark ? [const Color(0xFF0F172A), const Color(0xFF1E293B)] : [_tealDark, _teal],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -456,11 +471,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   }
 
   Widget _buildFilters() {
+    final isDark = _isDark;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _white,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))],
+        color: isDark ? const Color(0xFF1E293B) : _white,
+        boxShadow: [BoxShadow(color: isDark ? Colors.black26 : Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(
         children: [
@@ -472,19 +488,19 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                     decoration: BoxDecoration(
-                      color: _bg,
+                      color: isDark ? const Color(0xFF0F172A) : _bg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.medication_rounded, size: 18, color: _teal),
+                        Icon(Icons.medication_rounded, size: 18, color: isDark ? const Color(0xFF38BDF8) : _teal),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _selectedMed?['name'] ?? 'Select Medicine',
                             style: TextStyle(
-                              color: _selectedMed != null ? _textDark : _textLight,
+                              color: _selectedMed != null ? (isDark ? Colors.white : _textDark) : (isDark ? const Color(0xFF94A3B8) : _textLight),
                               fontWeight: _selectedMed != null ? FontWeight.bold : FontWeight.normal,
                               fontSize: 14,
                             ),
@@ -503,7 +519,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
-                icon: const Icon(Icons.chevron_left_rounded, color: _teal),
+                icon: Icon(Icons.chevron_left_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
                 onPressed: () {
                   setState(() {
                     _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
@@ -534,19 +550,19 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: _teal.withValues(alpha: 0.05),
+                      color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _teal.withValues(alpha: 0.1)),
+                      border: Border.all(color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.4) : _teal.withValues(alpha: 0.1)),
                     ),
                     child: Text(
                       DateFormat('MMMM yyyy').format(_selectedMonth),
-                      style: const TextStyle(color: _tealDark, fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(color: isDark ? const Color(0xFF38BDF8) : _tealDark, fontWeight: FontWeight.bold, fontSize: 14),
                     ),
                   ),
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.chevron_right_rounded, color: _teal),
+                icon: Icon(Icons.chevron_right_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
                 onPressed: _selectedMonth.year == DateTime.now().year && _selectedMonth.month == DateTime.now().month
                     ? null
                     : () {
@@ -565,14 +581,15 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   }
 
   Widget _buildEmptyState(String msg) {
+    final isDark = _isDark;
     return SliverFillRemaining(
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.query_stats_rounded, size: 80, color: Colors.grey.shade200),
+            Icon(Icons.query_stats_rounded, size: 80, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
             const SizedBox(height: 16),
-            Text(msg, style: TextStyle(color: _textLight, fontSize: 15)),
+            Text(msg, style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 15)),
           ],
         ),
       ),
@@ -610,18 +627,23 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
 
     if (groups.isEmpty) return const SizedBox.shrink();
 
+    final isDark = _isDark;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      elevation: 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: isDark ? 0 : 2,
+      color: isDark ? const Color(0xFF1E293B) : null,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+      ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           initiallyExpanded: true,
-          leading: const Icon(Icons.analytics_rounded, color: _teal),
-          title: const Text(
+          leading: Icon(Icons.analytics_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
+          title: Text(
             'Medicine Breakdown Summary',
-            style: TextStyle(fontWeight: FontWeight.bold, color: _tealDark, fontSize: 15),
+            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : _tealDark, fontSize: 15),
           ),
           subtitle: Text('${groups.length} medicines moved this month'),
           children: [
@@ -715,14 +737,14 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       delegate: SliverChildListDelegate([
         _buildSummaryCards(report),
         _buildConsolidatedBreakdown(report),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 24, 16, 12),
-          child: Text('Transaction History', style: TextStyle(color: _tealDark, fontWeight: FontWeight.bold, fontSize: 16)),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+          child: Text('Transaction History', style: TextStyle(color: _isDark ? Colors.white : _tealDark, fontWeight: FontWeight.bold, fontSize: 16)),
         ),
         if (logs.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 40),
-            child: Center(child: Text('No transactions recorded for this period', style: TextStyle(color: _textLight))),
+            child: Center(child: Text('No transactions recorded for this period', style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight))),
           )
         else
           ...logs.map((log) => _buildLogTile(log)),
@@ -754,45 +776,49 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             ],
           ),
           const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: _orange.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _orange.withValues(alpha: 0.3)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.inventory_2_rounded, color: _orange, size: 20),
-                    SizedBox(width: 12),
-                    Text('Current Live Stock', style: TextStyle(color: _textDark, fontWeight: FontWeight.bold, fontSize: 15)),
-                  ],
-                ),
-                Text(
-                  report['remaining'].toStringAsFixed(0),
-                  style: const TextStyle(color: _orange, fontWeight: FontWeight.w900, fontSize: 24),
-                ),
-              ],
-            ),
-          ),
+          Builder(builder: (context) {
+            final isDark = _isDark;
+            return Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF422006).withValues(alpha: 0.5) : _orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: isDark ? const Color(0xFFFDBA74).withValues(alpha: 0.3) : _orange.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.inventory_2_rounded, color: isDark ? const Color(0xFFFDBA74) : _orange, size: 20),
+                      const SizedBox(width: 12),
+                      Text('Current Live Stock', style: TextStyle(color: isDark ? Colors.white : _textDark, fontWeight: FontWeight.bold, fontSize: 15)),
+                    ],
+                  ),
+                  Text(
+                    report['remaining'].toStringAsFixed(0),
+                    style: TextStyle(color: isDark ? const Color(0xFFFDBA74) : _orange, fontWeight: FontWeight.w900, fontSize: 24),
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );
   }
 
   Widget _summaryCard(String label, String value, Color color, IconData icon) {
+    final isDark = _isDark;
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: _white,
+          color: isDark ? const Color(0xFF1E293B) : _white,
           borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: color.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))],
-          border: Border.all(color: color.withValues(alpha: 0.1)),
+          boxShadow: [BoxShadow(color: isDark ? Colors.black26 : color.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 4))],
+          border: Border.all(color: isDark ? const Color(0xFF334155) : color.withValues(alpha: 0.1)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -801,7 +827,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             const SizedBox(height: 8),
             Text(value, style: TextStyle(color: color, fontSize: 22, fontWeight: FontWeight.w900)),
             const SizedBox(height: 2),
-            Text(label, style: const TextStyle(color: _textLight, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(label, style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 11, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -811,14 +837,16 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   Widget _buildLogTile(Map<dynamic, dynamic> log) {
     final bool isAdded = log['type'] == 'added';
     final date = DateTime.parse(log['date']);
+    final isDark = _isDark;
     
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _white,
+        color: isDark ? const Color(0xFF1E293B) : _white,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 5, offset: const Offset(0, 2))],
+        border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.transparent),
+        boxShadow: [BoxShadow(color: isDark ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 5, offset: const Offset(0, 2))],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -826,12 +854,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: (isAdded ? _teal : _red).withValues(alpha: 0.1),
+              color: (isAdded ? (isDark ? const Color(0xFF0F766E) : _teal) : _red).withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(
               isAdded ? Icons.add_rounded : Icons.remove_rounded,
-              color: isAdded ? _teal : _red,
+              color: isAdded ? (isDark ? const Color(0xFF38BDF8) : _teal) : (isDark ? const Color(0xFFFF6B6B) : _red),
               size: 18,
             ),
           ),
@@ -844,26 +872,26 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   isAdded 
                       ? (log['msg'] ?? '') 
                       : 'Dispensed ${log['medicineName'] ?? ''} to ${log['patientName'] ?? 'Unknown Patient'}', 
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: _textDark, fontSize: 14),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : _textDark, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
                 if (!isAdded) ...[
                   if (log['patientCnic'] != null && log['patientCnic'].toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 2),
-                      child: Text('CNIC: ${log['patientCnic']}', style: const TextStyle(color: _textLight, fontSize: 11)),
+                      child: Text('CNIC: ${log['patientCnic']}', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 11)),
                     ),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 2),
                     child: Text(
                       'Token: ${log['serial']} • Age: ${log['age']} • Gender: ${log['gender']}',
-                      style: const TextStyle(color: _textLight, fontSize: 11),
+                      style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 11),
                     ),
                   ),
                 ],
                 Text(
                   isAdded ? 'By ${log['user']}' : 'Dispenser: ${log['user']}', 
-                  style: const TextStyle(color: _textLight, fontSize: 11),
+                  style: TextStyle(color: isDark ? const Color(0xFF64748B) : _textLight, fontSize: 11),
                 ),
               ],
             ),
@@ -875,19 +903,19 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               Text(
                 '${isAdded ? "+" : "-"}${log['qty']}',
                 style: TextStyle(
-                  color: isAdded ? _teal : _red,
+                  color: isAdded ? (isDark ? const Color(0xFF38BDF8) : _teal) : (isDark ? const Color(0xFFFF6B6B) : _red),
                   fontWeight: FontWeight.w900,
                   fontSize: 16,
                 ),
               ),
               const SizedBox(height: 2),
-              Text(DateFormat('dd MMM hh:mm a').format(date), style: const TextStyle(color: _textLight, fontSize: 11)),
+              Text(DateFormat('dd MMM hh:mm a').format(date), style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 11)),
               if (!isAdded && log['days'] != null) ...[
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: _red.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                  child: Text('${log['days']} Days', style: const TextStyle(color: _red, fontSize: 9, fontWeight: FontWeight.bold)),
+                  decoration: BoxDecoration(color: _red.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(4)),
+                  child: Text('${log['days']} Days', style: TextStyle(color: isDark ? const Color(0xFFFF6B6B) : _red, fontSize: 9, fontWeight: FontWeight.bold)),
                 ),
               ],
             ],
@@ -898,23 +926,24 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   }
 
   void _showMedicinePicker() {
+    final isDark = _isDark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: _white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E293B) : _white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
           children: [
             Container(
               margin: const EdgeInsets.all(12),
-              width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
+              width: 40, height: 4, decoration: BoxDecoration(color: isDark ? const Color(0xFF475569) : Colors.grey[300], borderRadius: BorderRadius.circular(2)),
             ),
-            const Text('Choose Medicine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: _tealDark)),
+            Text('Choose Medicine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: isDark ? Colors.white : _tealDark)),
             const SizedBox(height: 16),
             Expanded(
               child: ListView.builder(

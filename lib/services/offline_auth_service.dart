@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
 
 /// Offline authentication service.
@@ -103,7 +104,7 @@ class OfflineAuthService {
       }
 
       // Write user data blob
-      await _secureWrite(_dataKey(key), jsonEncode(userData));
+      await _secureWrite(_dataKey(key), jsonEncode(_sanitizeForJson(userData)));
 
       // Verify data write
       final savedData = await _secureRead(_dataKey(key));
@@ -204,10 +205,30 @@ class OfflineAuthService {
         key = prefs.getString(_keyLastUsername);
       }
       if (key == null) return;
-      await _secureWrite(_dataKey(key), jsonEncode(userData));
+      await _secureWrite(_dataKey(key), jsonEncode(_sanitizeForJson(userData)));
       debugPrint('[OfflineAuth] User data updated in cache for $key');
     } catch (e) {
       debugPrint('[OfflineAuth] updateCachedUserData error: $e');
+    }
+  }
+
+  static dynamic _sanitizeForJson(dynamic input) {
+    if (input is Map) {
+      final Map<String, dynamic> result = {};
+      input.forEach((k, v) {
+        result[k.toString()] = _sanitizeForJson(v);
+      });
+      return result;
+    } else if (input is List) {
+      return input.map((item) => _sanitizeForJson(item)).toList();
+    } else if (input is DateTime) {
+      return input.toIso8601String();
+    } else if (input is Timestamp) {
+      return input.toDate().toIso8601String();
+    } else if (input is FieldValue || input is DocumentReference) {
+      return input.toString();
+    } else {
+      return input;
     }
   }
 

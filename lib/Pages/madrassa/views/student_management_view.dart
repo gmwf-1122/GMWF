@@ -404,7 +404,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           final logVal = box.get(key);
           if (logVal is Map && logVal.containsKey(studentId)) {
             final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
-            final currentLines = studentLog['currentLines'] as int?;
+            final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
             if (currentLines != null && currentLines > 0) {
               logsList.add(MapEntry(date, currentLines));
             }

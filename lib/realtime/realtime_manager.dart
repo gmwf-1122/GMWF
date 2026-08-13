@@ -220,6 +220,7 @@ class RealtimeManager {
         'role':       _role,
         'branchId':   _branchId,
         'username':   _username ?? _role,
+        'platform':   kIsWeb ? 'web' : 'native',
         '_clientId':  _clientId,
         '_timestamp': DateTime.now().millisecondsSinceEpoch,
       };

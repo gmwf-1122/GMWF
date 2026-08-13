@@ -9,6 +9,7 @@ import 'package:gmwf/pages/dispensary/doctor/patient_history.dart';
 import 'dart:async';
 import 'package:gmwf/theme/role_theme_provider.dart';
 import 'package:gmwf/theme/app_theme.dart';
+import 'package:gmwf/widgets/app_back_button.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final String patientId;
@@ -571,11 +572,10 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       pinned: true,
       backgroundColor: t.accent,
       foregroundColor: Colors.white,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
-        onPressed: () => Navigator.pop(context),
-      ),
+      automaticallyImplyLeading: false,
+      leading: Navigator.canPop(context)
+          ? const AppBackButton(color: Colors.white)
+          : null,
       actions: widget.isAdmin ? [
         IconButton(
           icon: Container(padding: const EdgeInsets.all(8),

@@ -9,7 +9,10 @@
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /web/
+
+  # Rewrite clean paths for Hostinger folders
+  RewriteRule ^patients/?$ patients/index.html [L,QSA]
+  RewriteRule ^verify/?$ verify/index.html [L,QSA]
 
   # Allow direct access to existing files or directories
   RewriteCond %{REQUEST_FILENAME} -f [OR]

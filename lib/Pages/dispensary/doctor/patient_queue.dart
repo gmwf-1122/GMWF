@@ -10,6 +10,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 
@@ -41,13 +43,97 @@ class _PatientQueueState extends State<PatientQueue>
   late final Animation<double> _pulseAnimation;
 
   String _filter = 'all';
-  final String _todayKey = DateFormat('ddMMyy').format(DateTime.now());
+  String _selectedSessionFilter = 'auto';
+  String get _todayKey => CampSessionService.resolveShiftAndDateKey().dateKey;
 
   late StreamSubscription<Map<String, dynamic>> _realtimeSub;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   StreamSubscription<QuerySnapshot>? _exceptionSub;
+  List<StreamSubscription>? _todaySerialsSubs;
   List<DocumentSnapshot> _exceptionRequests = [];
   List<Map<String, dynamic>> _localExceptionRequests = [];
+
+  // ─── Strict two-group sort ─────────────────────────────────────────────────
+  List<Map<String, dynamic>> _getSortedQueue() {
+    final userDisp = _userDispensaryId;
+    final activeShift = CampSessionService.getCurrentSession();
+    final targetSession = _selectedSessionFilter == 'auto'
+        ? activeShift
+        : _selectedSessionFilter;
+
+    var all = LocalStorageService.getLocalEntries(
+          widget.branchId,
+          dispensaryId: userDisp,
+          filterByCamp: true,
+        )
+        .where((e) => e['dateKey'] == _todayKey)
+        .toList();
+
+    if (targetSession != 'all') {
+      final String? priorShift = switch (activeShift) {
+        'evening' => 'morning',
+        'night'   => 'evening',
+        _         => null,
+      };
+
+      all = all.where((entry) {
+        final s = (entry['session'] ?? '').toString().toLowerCase().trim();
+        final status = (entry['status'] ?? '').toString().toLowerCase();
+        if (s == targetSession) return true;
+        // Item 5: Include unserved tokens from immediately prior shift
+        if (_selectedSessionFilter == 'auto' && priorShift != null && s == priorShift && status == 'waiting') {
+          return true;
+        }
+        return false;
+      }).toList();
+    }
+
+    final waiting = <Map<String, dynamic>>[];
+    final others  = <Map<String, dynamic>>[];
+
+    for (final e in all) {
+      final status = (e['status'] ?? '').toString().toLowerCase();
+      if (status == 'waiting') {
+        waiting.add(e);
+      } else {
+        others.add(e);
+      }
+    }
+
+    int compareTokens(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final numA = _extractSerialNumber(a);
+      final numB = _extractSerialNumber(b);
+      if (numA != numB) return numA.compareTo(numB);
+      final dtA = a['createdAt']?.toString() ?? '';
+      final dtB = b['createdAt']?.toString() ?? '';
+      return dtA.compareTo(dtB);
+    }
+
+    waiting.sort(compareTokens);
+    others.sort(compareTokens);
+
+    return [...waiting, ...others];
+  }
+
+  List<Map<String, dynamic>> _getPreviousDaysCarryoverQueue() {
+    final userDisp = _userDispensaryId;
+    return LocalStorageService.getUnservedPreviousDaysTokens(
+      widget.branchId,
+      daysBack: 3,
+      dispensaryId: userDisp,
+    );
+  }
+
+  Future<void> _closeOutDay(String dateKey) async {
+    final count = await LocalStorageService.expireUnservedTokensForDate(widget.branchId, dateKey);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('✅ Closed out day $dateKey. Expired $count unserved token(s).'),
+        backgroundColor: Colors.teal,
+      ));
+      setState(() {});
+    }
+  }
 
   List<Map<String, dynamic>> _loadLocalExceptionRequests() {
     final box = Hive.box('app_settings');
@@ -140,15 +226,15 @@ class _PatientQueueState extends State<PatientQueue>
           });
         }
       } else if (type == RealtimeEvents.tokenExceptionRequest) {
-        final requestId = data?['requestId']?.toString() ??
+        final requestId = data['requestId']?.toString() ??
             'local_${DateTime.now().millisecondsSinceEpoch}';
         final localReq = <String, dynamic>{
           'id':          requestId,
           'requestType': 'token_exception',
           'status':      'pending',
-          'patientId':   data?['patientId'] ?? '',
-          'patientName': data?['patientName'] ?? 'Unknown',
-          'restriction': data?['restriction'],
+          'patientId':   data['patientId'] ?? '',
+          'patientName': data['patientName'] ?? 'Unknown',
+          'restriction': data['restriction'],
           'branchId':    widget.branchId,
         };
         Hive.box('app_settings').put(
@@ -163,6 +249,7 @@ class _PatientQueueState extends State<PatientQueue>
     });
 
     _startExceptionListener();
+    _startTodaySerialsListener();
 
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
@@ -186,12 +273,74 @@ class _PatientQueueState extends State<PatientQueue>
   }
 
   @override
+  void didUpdateWidget(PatientQueue oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedPatient != widget.selectedPatient ||
+        widget.selectedPatient == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _tryAutoSelectSmallestWaiting();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _pulseController.dispose();
     _realtimeSub.cancel();
     _connSub?.cancel();
     _exceptionSub?.cancel();
+    _cancelTodaySerialsListeners();
     super.dispose();
+  }
+
+  void _startTodaySerialsListener() {
+    _cancelTodaySerialsListeners();
+    if (widget.branchId.isEmpty) return;
+    _todaySerialsSubs = [];
+    final serialsRef = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('serials')
+        .doc(_todayKey);
+
+    for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+      final sub = serialsRef.collection(type).snapshots().listen((snap) {
+        bool hasChanges = false;
+        for (final change in snap.docChanges) {
+          if (change.type == DocumentChangeType.added ||
+              change.type == DocumentChangeType.modified) {
+            final data = change.doc.data();
+            if (data != null) {
+              final serial = change.doc.id;
+              final entryData = Map<String, dynamic>.from(data);
+              entryData['queueType'] ??= type;
+              entryData['dateKey']   ??= _todayKey;
+              entryData['serial']    ??= serial;
+              LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+              hasChanges = true;
+            }
+          }
+        }
+        if (hasChanges && mounted) {
+          setState(() {});
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _tryAutoSelectSmallestWaiting();
+          });
+        }
+      }, onError: (e) {
+        debugPrint('[PatientQueue] Today serials listener error ($type): $e');
+      });
+      _todaySerialsSubs!.add(sub);
+    }
+  }
+
+  void _cancelTodaySerialsListeners() {
+    if (_todaySerialsSubs != null) {
+      for (final sub in _todaySerialsSubs!) {
+        sub.cancel();
+      }
+      _todaySerialsSubs = null;
+    }
   }
 
   void _startExceptionListener() {
@@ -380,38 +529,29 @@ class _PatientQueueState extends State<PatientQueue>
 
   // ─── Serial number extraction ──────────────────────────────────────────────
   int _extractSerialNumber(Map<String, dynamic> p) {
-    final s = (p['serial'] ?? p['id'] ?? 'Z-999999').toString();
-    final parts = s.split('-');
-    return parts.length > 1 ? int.tryParse(parts.last) ?? 999999 : 999999;
+    final s = (p['serial'] ?? p['id'] ?? '').toString();
+    return parseSequenceFromSerial(s);
   }
 
-  // ─── Strict two-group sort ─────────────────────────────────────────────────
-  List<Map<String, dynamic>> _getSortedQueue() {
-    final all = LocalStorageService.getLocalEntries(widget.branchId)
-        .where((e) => e['dateKey'] == _todayKey)
-        .toList();
-
-    final waiting = <Map<String, dynamic>>[];
-    final others  = <Map<String, dynamic>>[];
-
-    for (final e in all) {
-      final status = (e['status'] ?? '').toString().toLowerCase();
-      if (status == 'waiting') {
-        waiting.add(e);
-      } else {
-        others.add(e);
+  String? get _userDispensaryId {
+    final active = CampSessionService.getActiveCamp();
+    if (active != null && active.isNotEmpty && active != 'all') return active;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final userData = Hive.box('app_settings').get('user_data');
+        if (userData is Map && userData['dispensaryId'] != null) {
+          final d = userData['dispensaryId'].toString().trim().toLowerCase();
+          if (d.isNotEmpty && d != 'all') return d;
+        }
       }
-    }
-
-    waiting.sort((a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
-    others.sort((a, b)  => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
-
-    return [...waiting, ...others];
+    } catch (_) {}
+    return null;
   }
 
   // ─── Auto-select smallest waiting ─────────────────────────────────────────
   void _tryAutoSelectSmallestWaiting() {
     if (!mounted) return;
+    if (widget.selectedPatient != null) return;
     final queue   = _getSortedQueue();
     final waiting = queue
         .where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting')
@@ -420,16 +560,8 @@ class _PatientQueueState extends State<PatientQueue>
 
     final smallest       = waiting.first;
     final smallestSerial = smallest['serial']?.toString() ?? smallest['id']?.toString() ?? '';
-    final currentSerial  = widget.selectedPatient?['serial']?.toString() ??
-        widget.selectedPatient?['id']?.toString() ?? '';
-
-    final currentIsWaiting = waiting.any((p) =>
-        (p['serial']?.toString() ?? p['id']?.toString() ?? '') == currentSerial);
-
-    if (!currentIsWaiting || currentSerial != smallestSerial) {
-      debugPrint('[PatientQueue] Auto-selecting smallest waiting: $smallestSerial');
-      widget.onPatientSelected({...smallest, 'serial': smallestSerial, 'id': smallestSerial});
-    }
+    debugPrint('[PatientQueue] Auto-selecting smallest waiting: $smallestSerial');
+    widget.onPatientSelected({...smallest, 'serial': smallestSerial, 'id': smallestSerial});
   }
 
   // ─── Firestore sync ────────────────────────────────────────────────────────
@@ -933,7 +1065,7 @@ class _PatientQueueState extends State<PatientQueue>
       if (prescData.isEmpty && _isOnline) {
         debugPrint('[PrescEdit] Falling back to Firestore for: $serial');
         try {
-          final ddmmyy = serial.split('-')[0];
+          final ddmmyy = CampSessionService.getDateKeyFromSerial(serial);
           for (final type in ['zakat', 'non-zakat', 'gmwf']) {
             final snap = await FirebaseFirestore.instance
                 .collection('branches').doc(branchId)
@@ -994,9 +1126,7 @@ class _PatientQueueState extends State<PatientQueue>
           entryData['daysOfMedicine'] ??
           (entryData['prescription'] is Map
               ? entryData['prescription']['daysOfMedicine']
-              : null) ??
-          entryData['suggestedDays'] ??
-          patient['suggestedDays'];
+              : null);
       if (d is int && d >= 1 && d <= 3) return d;
       return 1;
     })();
@@ -1469,7 +1599,7 @@ class _PatientQueueState extends State<PatientQueue>
     required String now,
   }) async {
     try {
-      final ddmmyy    = serial.split('-')[0];
+      final ddmmyy    = CampSessionService.getDateKeyFromSerial(serial);
       final db        = FirebaseFirestore.instance;
       final cleanCnic = patientCnic.isNotEmpty ? patientCnic : 'unknown_$serial';
 
@@ -1512,17 +1642,7 @@ class _PatientQueueState extends State<PatientQueue>
           _tryAutoSelectSmallestWaiting();
         });
 
-        if (allPatients.isEmpty) {
-          return const Center(child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.people_outline, size: 80, color: Colors.grey),
-              SizedBox(height: 16),
-              Text("No patients in today's queue",
-                  style: TextStyle(fontSize: 18, color: Colors.grey)),
-            ],
-          ));
-        }
+        // Do NOT return early on empty queue; render full Header and Summary cards (0 values)
 
         final waiting   = allPatients
             .where((p) => (p['status'] ?? '').toString().toLowerCase() == 'waiting')
@@ -1578,6 +1698,38 @@ class _PatientQueueState extends State<PatientQueue>
                       (_) => _tryAutoSelectSmallestWaiting());
                 }),
             ]),
+          ),
+
+          // ── Session Filter Bar ─────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            color: Colors.teal.shade50,
+            child: Row(
+              children: [
+                const Icon(Icons.schedule, size: 14, color: _teal),
+                const SizedBox(width: 6),
+                const Text('Session:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildSessionChip('auto', 'Auto (${CampSessionService.getCurrentSession() == 'morning' ? 'Morning' : (CampSessionService.getCurrentSession() == 'evening' ? 'Evening' : 'Night')})'),
+                        const SizedBox(width: 6),
+                        _buildSessionChip('morning', '☀️ Morning'),
+                        const SizedBox(width: 6),
+                        _buildSessionChip('evening', '🌅 Evening'),
+                        const SizedBox(width: 6),
+                        _buildSessionChip('night', '🌙 Night'),
+                        const SizedBox(width: 6),
+                        _buildSessionChip('all', 'All Sessions'),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
 
           // ── Filter tabs ──────────────────────────────────────────────────
@@ -1665,12 +1817,81 @@ class _PatientQueueState extends State<PatientQueue>
             ),
           ],
 
+          // ── Previous Days Carryover Section ─────────────────────────────
+          Builder(builder: (context) {
+            final prevCarryover = _getPreviousDaysCarryoverQueue();
+            if (prevCarryover.isEmpty) return const SizedBox.shrink();
+            return Container(
+              margin: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: ExpansionTile(
+                dense: true,
+                leading: const Icon(Icons.history_outlined, color: Colors.deepOrange),
+                title: Text(
+                  'Pending From Previous Day(s) (${prevCarryover.length} patient${prevCarryover.length == 1 ? '' : 's'})',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.brown),
+                ),
+                children: [
+                  ...prevCarryover.map((prevPatient) {
+                    final prevSerial = prevPatient['serial']?.toString() ?? prevPatient['id']?.toString() ?? '';
+                    final prevDateKey = prevPatient['dateKey']?.toString() ?? '';
+                    return ListTile(
+                      dense: true,
+                      title: Text('${prevPatient['patientName']} (Serial: $prevSerial)'),
+                      subtitle: Text('Date: $prevDateKey — Status: ${prevPatient['status']}'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: () => _closeOutDay(prevDateKey),
+                            child: const Text('Close Out Day', style: TextStyle(color: Colors.red, fontSize: 11)),
+                          ),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.teal,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                            ),
+                            onPressed: () => widget.onPatientSelected({
+                              ...prevPatient,
+                              'serial': prevSerial,
+                              'id': prevSerial,
+                            }),
+                            child: const Text('Select', style: TextStyle(fontSize: 11)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            );
+          }),
+
           // ── Patient list ─────────────────────────────────────────────────
           Expanded(
-            child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-              itemCount: list.length,
-              itemBuilder: (context, index) {
+            child: list.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.people_outline, size: 64, color: Colors.grey),
+                        SizedBox(height: 12),
+                        Text(
+                          "No patients in queue",
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                    itemCount: list.length,
+                    itemBuilder: (context, index) {
                 final patient = list[index];
                 final serial  = patient['serial']?.toString() ??
                     patient['id']?.toString() ?? 'N/A';
@@ -1759,6 +1980,23 @@ class _PatientQueueState extends State<PatientQueue>
                                         : Colors.black87)),
                             const SizedBox(height: 3),
                             Row(children: [
+                              Builder(builder: (_) {
+                                final dispId = (patient['dispensaryId'] ?? patient['campId'])?.toString();
+                                final dispBadgeTag = (patient['dispensaryTag'] ?? CampSessionService.getDispensaryKeyword(dispId)).toString().toUpperCase();
+                                if (dispBadgeTag.isEmpty) return const SizedBox.shrink();
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                  margin: const EdgeInsets.only(right: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.teal.shade700,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    dispBadgeTag,
+                                    style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                                  ),
+                                );
+                              }),
                               Text('Serial: $serial',
                                   style: TextStyle(
                                       color: isSelected
@@ -1838,6 +2076,30 @@ class _PatientQueueState extends State<PatientQueue>
                 fontSize: 18,
                 fontWeight: FontWeight.bold)),
       ]),
+    );
+  }
+
+  Widget _buildSessionChip(String value, String label) {
+    final isSelected = _selectedSessionFilter == value;
+    return InkWell(
+      onTap: () => setState(() => _selectedSessionFilter = value),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? _teal : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? _teal : Colors.teal.shade200),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : Colors.teal.shade900,
+          ),
+        ),
+      ),
     );
   }
 }

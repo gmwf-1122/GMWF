@@ -956,13 +956,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
       final studentLog = _asStringMap(logData[sId]);
       if (studentLog == null) continue;
 
-      final currentLines = studentLog['currentLines'] as int?;
+      final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
       if (currentLines != null && currentLines > 0) {
         if (firstLines == -1) firstLines = currentLines;
         lastLines = currentLines;
       }
 
-      final sabkiPara = studentLog['sabkiPara'] as int?;
+      final sabkiPara = (studentLog['sabkiPara'] as num?)?.toInt() ?? int.tryParse(studentLog['sabkiPara']?.toString() ?? '');
       final sabkiRatio = studentLog['sabkiRatio']?.toString();
       if (sabkiPara != null && sabkiPara > 0) {
         latestSabkiPara = sabkiPara;
@@ -972,7 +972,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         latestSabkiRatio = 'nahi_sunaya';
       }
 
-      final manzilPara = studentLog['manzilPara'] as int?;
+      final manzilPara = (studentLog['manzilPara'] as num?)?.toInt() ?? int.tryParse(studentLog['manzilPara']?.toString() ?? '');
       final manzilRatio = studentLog['manzilRatio']?.toString();
       if (manzilPara != null && manzilPara > 0) {
         latestManzilPara = manzilPara;

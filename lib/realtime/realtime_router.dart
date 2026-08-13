@@ -20,6 +20,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../services/local_storage_service.dart';
+import '../services/zkteco_network_service.dart';
 import 'realtime_events.dart';
 import 'realtime_manager.dart';
 
@@ -229,7 +230,8 @@ Serial: ${data['serial'] ?? 'N/A'}
       case 'welcome':
       case 'identify_request':
       case 'identified':
-        // ignore connection handshake messages
+      case RealtimeEvents.clientCountUpdate:
+        // ignore connection handshake / housekeeping messages
         break;
 
       default:
@@ -263,6 +265,11 @@ Serial: ${data['serial'] ?? 'N/A'}
     // CRITICAL: Use CONSISTENT key format across all devices
     final uniqueKey = '$branchId-$serial';
 
+    final parts = serial.split('-');
+    final cleanDateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+        ? (parts.length > 1 ? parts[1] : '')
+        : (parts.isNotEmpty ? parts[0] : '');
+
     // Build complete entry data — merge everything
     final entryData = <String, dynamic>{
       'serial':       serial,
@@ -277,7 +284,7 @@ Serial: ${data['serial'] ?? 'N/A'}
       'vitals':       data['vitals'] ?? {},
       'createdBy':    data['createdBy'] ?? '',
       'createdByName':data['createdByName'] ?? '',
-      'dateKey':      data['dateKey'] ?? serial.split('-')[0],
+      'dateKey':      data['dateKey'] ?? cleanDateKey,
     };
 
     // Add any additional fields from data not already included
@@ -297,8 +304,7 @@ Serial: ${data['serial'] ?? 'N/A'}
     // Skip when the message originated from the server's own catch-up push
     // to prevent the server device from double-enqueuing.
     if (fullMessage['_serverPush'] != true) {
-      final dateKey   = (entryData['dateKey'] as String?) ??
-          serial.split('-')[0];
+      final dateKey   = (entryData['dateKey'] as String?) ?? cleanDateKey;
       final queueType = _resolveQueueType(entryData['queueType']?.toString());
       await LocalStorageService.enqueueSync({
         'type':      'save_entry',
@@ -580,7 +586,22 @@ Serial: ${data['serial'] ?? 'N/A'}
       final box = await LocalStorageService.openBoxSafe('attendance_box');
       final id = data['id']?.toString() ?? data['punchId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
       await box.put(id, LocalStorageService.sanitize(data));
-      if (kDebugMode) print('✅ ATTENDANCE EVENT saved via LAN → $type ($id)');
+
+      final pin = data['pin']?.toString() ?? '';
+      final timeStr = data['timestamp']?.toString() ?? '';
+      final deviceIp = data['deviceIp']?.toString() ?? '192.168.1.150';
+      final source = data['source']?.toString() ?? 'lan_realtime';
+
+      if (pin.isNotEmpty && timeStr.isNotEmpty) {
+        final timestamp = DateTime.tryParse(timeStr) ?? DateTime.now();
+        await ZkTecoNetworkService.processIncomingPunch(
+          pin: pin,
+          timestamp: timestamp,
+          deviceIp: deviceIp,
+          source: source,
+        );
+      }
+      if (kDebugMode) print('✅ ATTENDANCE EVENT processed via LAN → $type ($id)');
     } catch (e) {
       if (kDebugMode) print('❌ _handleAttendanceEvent error: $e');
     }

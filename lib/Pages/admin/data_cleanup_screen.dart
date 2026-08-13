@@ -82,6 +82,101 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     }
   }
 
+  // ─── Schema Auto-Heal & Backfill ─────────────────────────────────────────────
+
+  Future<void> _fixAllLegacyDataSchema() async {
+    setState(() {
+      _isProcessing = true;
+      _logs = ["🚀 Starting Fix & Heal All Legacy Data Schema..."];
+      _progress = 0.0;
+    });
+
+    try {
+      int totalHealed = 0;
+      final collectionsToHeal = [
+        'users',
+        'donations',
+        'inventory',
+        'patients',
+        'madrassa_students',
+        'school_students',
+      ];
+
+      for (int i = 0; i < collectionsToHeal.length; i++) {
+        final collName = collectionsToHeal[i];
+        _log("🔍 Scanning collection '$collName' for missing schema fields...");
+        setState(() => _progress = (i / collectionsToHeal.length));
+
+        List<DocumentSnapshot> docs = [];
+        try {
+          if (collName == 'users' || collName == 'donations') {
+            final snap = await _fs.collection(collName).get();
+            docs = snap.docs;
+          } else {
+            final snap = await _fs.collectionGroup(collName).get();
+            docs = snap.docs;
+          }
+        } catch (e) {
+          _log("⚠️ Note on $collName: $e");
+        }
+
+        WriteBatch batch = _fs.batch();
+        int batchCount = 0;
+
+        for (final doc in docs) {
+          final data = doc.data() as Map<String, dynamic>? ?? {};
+          bool needsFix = false;
+          final updates = <String, dynamic>{};
+
+          if (data['updatedAt'] == null) {
+            updates['updatedAt'] = FieldValue.serverTimestamp();
+            needsFix = true;
+          }
+          if (data['isDeleted'] == null) {
+            updates['isDeleted'] = false;
+            needsFix = true;
+          }
+
+          if (needsFix) {
+            batch.set(doc.reference, updates, SetOptions(merge: true));
+            batchCount++;
+            totalHealed++;
+
+            if (batchCount >= 400) {
+              await batch.commit();
+              batch = _fs.batch();
+              batchCount = 0;
+              _log("  ↳ Committed batch heal for 400 records in $collName...");
+            }
+          }
+        }
+
+        if (batchCount > 0) {
+          await batch.commit();
+          _log("  ↳ Committed batch heal for $batchCount records in $collName.");
+        }
+      }
+
+      setState(() {
+        _isProcessing = false;
+        _progress = 1.0;
+      });
+      _log("🎉 Fix & Heal Completed! Total legacy records healed: $totalHealed.");
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("✅ Schema Heal Complete! $totalHealed legacy records fixed."),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      _log("❌ Fix All Data error: $e");
+      setState(() => _isProcessing = false);
+    }
+  }
+
   // ─── Entry point ────────────────────────────────────────────────────────────
 
   Future<void> _startCleanup() async {
@@ -2119,16 +2214,37 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _isProcessing ? null : _startCleanup,
-            icon: const Icon(Icons.cleaning_services),
-            label: Text(
-              _isProcessing ? "Cleaning..." : "Start Deep Deduplication",
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _startCleanup,
+                  icon: const Icon(Icons.cleaning_services),
+                  label: Text(
+                    _isProcessing ? "Cleaning..." : "Start Deep Deduplication",
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _fixAllLegacyDataSchema,
+                  icon: const Icon(Icons.auto_fix_high),
+                  label: Text(
+                    _isProcessing ? "Processing..." : "Fix & Heal All Legacy Data",
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),

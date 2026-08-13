@@ -14,7 +14,10 @@ import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/widgets/camp_selection_dialog.dart';
+import '../user_settings_dialog.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
 
@@ -56,6 +59,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   bool _isSyncing = false;
   bool _loadingBranch = true;
   bool _sortNewestFirst = true;
+  String _selectedSessionFilter = 'auto';
 
   // Listenables
   late final ValueListenable<Box> _entriesListenable;
@@ -75,6 +79,30 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   static const int _tabRegister = 2;
 
   late TabController _mobileTabController;
+
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  String? get _resolvedDispensaryId {
+    final active = CampSessionService.getActiveCamp();
+    if (active != null && active.isNotEmpty) return active;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final userData = Hive.box('app_settings').get('user_data');
+        if (userData is Map && userData['dispensaryId'] != null) {
+          final d = userData['dispensaryId'].toString().trim();
+          if (d.isNotEmpty && d.toLowerCase() != 'all') return d.toLowerCase();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
 
   @override
   void initState() {
@@ -97,6 +125,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // _fetchReceptionistName() starts the connection once the name is resolved.
+    CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
     _fetchReceptionistName();
 
     _connectionSub = ConnectionManager().statusStream.listen((status) {
@@ -224,15 +253,20 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     //    but if it differs from Firestore we update in the background.
     try {
       final userData = await AuthService().getUserByUid(widget.receptionistId);
+      if (userData != null && Hive.isBoxOpen('app_settings')) {
+        await Hive.box('app_settings').put('user_data', userData);
+        await Hive.box('app_settings').put('currentUser', userData);
+      }
       final firestoreName =
           (userData?['username'] as String?)?.trim() ??
           (userData?['name']     as String?)?.trim();
-      if (firestoreName != null && firestoreName.isNotEmpty &&
-          firestoreName != resolvedName) {
-        if (mounted) setState(() => _username = firestoreName);
-        // [FIX-USERNAME] Push updated name into RealtimeManager so future
-        // messages carry the correct attribution.
-        if (!widget.isEmbedded) {
+      if (mounted) {
+        setState(() {
+          if (firestoreName != null && firestoreName.isNotEmpty) {
+            _username = firestoreName;
+          }
+        });
+        if (firestoreName != null && firestoreName.isNotEmpty && !widget.isEmbedded) {
           RealtimeManager().updateUsername(firestoreName);
         }
       }
@@ -264,6 +298,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (isOnline) _forceSync();
       }
     });
+  }
+
+  void _onActiveCampChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _loadBranchName() async {
@@ -352,14 +390,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   Future<void> _logout() async {
     if (_isLoggingOut) return;
     if (mounted) setState(() => _isLoggingOut = true);
-
-    Future.wait([
-      ConnectionManager().stop().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-      AuthService().signOut().timeout(const Duration(milliseconds: 500)).catchError((_) {}),
-    ]).whenComplete(() {
-      try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
-      if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
-    });
+    try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
+    ConnectionManager().stop().catchError((_) {});
+    await AuthService().signOut();
+    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (r) => false);
   }
 
   void _handlePatientNotFound(String cnic) {
@@ -375,12 +409,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   void _onPatientRegistered(String patientId) {
     setState(() {
-      _pendingCnic = '';
+      _pendingCnic = patientId;
       _activeSection = 'token';
     });
-    _mobileTabController.animateTo(_tabToken);
+    if (_mobileTabController.length > _tabToken) {
+      _mobileTabController.animateTo(_tabToken);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tokenKey.currentState?.focusAndFillCnic(patientId);
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) {
+          _tokenKey.currentState?.focusAndFillCnic(patientId);
+        }
+      });
     });
   }
 
@@ -490,13 +531,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
-    final gradient = const LinearGradient(
+    final gradient = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
-      colors: [
-        Color(0xFF004D40), // Premium Emerald Teal
-        Color(0xFF00796B), // Clean Jade Teal
-      ],
+      colors: _isDark
+          ? const [Color(0xFF0F172A), Color(0xFF1E293B)]
+          : const [Color(0xFF004D40), Color(0xFF00796B)],
     );
 
     if (isMobile) {
@@ -601,15 +641,32 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('Receptionist – ${_username ?? 'Loading...'}',
-                  style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white)),
+              GestureDetector(
+                onLongPress: () => DispensaryUserSettingsDialog.show(
+                  context,
+                  branchId: widget.branchId,
+                  onUserUpdated: () {
+                    if (mounted) setState(() { _fetchReceptionistName(); });
+                  },
+                ),
+                child: Tooltip(
+                  message: 'Long press for Settings',
+                  child: Text('Receptionist – ${_username ?? 'Loading...'}',
+                      style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white)),
+                ),
+              ),
               if (!_loadingBranch)
-                Text(_branchName ?? 'Free Dispensary',
-                    style:
-                        const TextStyle(fontSize: 16, color: Colors.white70)),
+                Text(
+                  CampSessionService.getBranchAndCampDisplayName(
+                    branchName: _branchName ?? 'Free Dispensary',
+                    branchId: widget.branchId,
+                    campId: CampSessionService.getActiveCamp(),
+                  ),
+                  style: const TextStyle(fontSize: 16, color: Colors.white70),
+                ),
             ],
           ),
         ),
@@ -668,7 +725,17 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   Widget _buildSummaryCards(bool isMobile) {
     final today = DateFormat('ddMMyy').format(DateTime.now());
-    final allEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+    final activeSession = _selectedSessionFilter == 'auto'
+        ? CampSessionService.getCurrentSession()
+        : _selectedSessionFilter;
+
+    final allEntries = lss.LocalStorageService.getLocalEntries(
+      widget.branchId,
+      dispensaryId: _resolvedDispensaryId,
+      filterByCamp: true,
+      session: activeSession,
+      filterBySession: activeSession != 'all',
+    );
     final todayEntries =
         allEntries.where((e) => (e['dateKey'] as String?) == today).toList();
 
@@ -847,8 +914,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   Widget _buildTokenLog(bool isMobile) {
     final today = DateFormat('ddMMyy').format(DateTime.now());
+    final activeSession = _selectedSessionFilter == 'auto'
+        ? CampSessionService.getCurrentSession()
+        : _selectedSessionFilter;
+
     var entries = lss.LocalStorageService
-        .getLocalEntries(widget.branchId)
+        .getLocalEntries(
+          widget.branchId,
+          dispensaryId: _resolvedDispensaryId,
+          filterByCamp: true,
+          session: activeSession,
+          filterBySession: activeSession != 'all',
+        )
         .where((e) => (e['dateKey'] as String?) == today)
         .toList();
 
@@ -1094,22 +1171,26 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 800;
 
-    final body = Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
-        ),
-      ),
-      child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
-    );
+    return ValueListenableBuilder<Box>(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
 
-    if (widget.isEmbedded) return body;
+        final body = Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          ),
+          child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+        );
 
-    return Scaffold(
-      appBar: _buildAppBar(isMobile),
-      body: body,
+        if (widget.isEmbedded) return body;
+
+        return Scaffold(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          appBar: _buildAppBar(isMobile),
+          body: body,
+        );
+      },
     );
   }
 
@@ -1140,6 +1221,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     branchId: widget.branchId,
                     receptionistId: widget.receptionistId,
                     receptionistName: widget.receptionistName,
+                    initialCnic: _pendingCnic,
                     onPatientNotFound: _handlePatientNotFound,
                   ),
                 ),
@@ -1232,6 +1314,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         Expanded(
                           child: Card(
                             elevation: 12,
+                            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(36)),
                             child: Padding(
@@ -1253,6 +1336,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                         receptionistId: widget.receptionistId,
                                         receptionistName:
                                             widget.receptionistName,
+                                        initialCnic: _pendingCnic,
                                         onPatientNotFound:
                                             _handlePatientNotFound,
                                       ),
@@ -1277,7 +1361,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                               final today =
                                   DateFormat('ddMMyy').format(DateTime.now());
                               final todayCount = lss.LocalStorageService
-                                  .getLocalEntries(widget.branchId)
+                                  .getLocalEntries(widget.branchId, dispensaryId: _resolvedDispensaryId, filterByCamp: true)
                                   .where((e) =>
                                       (e['dateKey'] as String?) == today)
                                   .length;
@@ -1288,6 +1372,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                 Expanded(
                                   child: Card(
                                     elevation: 8,
+                                    color: _isDark ? const Color(0xFF1E293B) : Colors.white,
                                     shape: RoundedRectangleBorder(
                                         borderRadius:
                                             BorderRadius.circular(24)),
@@ -1299,14 +1384,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                         children: [
                                           Row(children: [
                                             Icon(Icons.list_alt,
-                                                color: _teal, size: 32),
+                                                color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 32),
                                             const SizedBox(width: 16),
-                                            const Text("Today's Tokens",
+                                            Text("Today's Tokens",
                                                 style: TextStyle(
                                                     fontSize: 22,
                                                     fontWeight:
                                                         FontWeight.bold,
-                                                    color: _teal)),
+                                                    color: _isDark ? Colors.white : _teal)),
                                             const Spacer(),
                                             IconButton(
                                               icon: Icon(
@@ -1315,22 +1400,22 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                                           .arrow_downward_rounded
                                                       : Icons
                                                           .arrow_upward_rounded,
-                                                  color: _teal),
+                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal),
                                               onPressed: () => setState(() =>
                                                   _sortNewestFirst =
                                                       !_sortNewestFirst),
                                             ),
                                             // Refresh Button
                                             IconButton(
-                                              icon: const Icon(Icons.refresh,
-                                                  color: _teal, size: 28),
+                                              icon: Icon(Icons.refresh,
+                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 28),
                                               onPressed: _refreshTokenLog,
                                               tooltip: 'Refresh token list',
                                             ),
                                           ]),
                                           Text('$todayCount total',
-                                              style: const TextStyle(
-                                                  color: Colors.grey,
+                                              style: TextStyle(
+                                                  color: _isDark ? const Color(0xFF94A3B8) : Colors.grey,
                                                   fontSize: 16)),
                                           const Divider(height: 36),
                                           Expanded(
@@ -1360,7 +1445,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     final isToken = _activeSection == 'token';
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(32),
         boxShadow: const [
           BoxShadow(
@@ -1370,8 +1455,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       child: ToggleButtons(
         borderRadius: BorderRadius.circular(32),
         selectedColor: Colors.white,
-        fillColor: const Color(0xFF004D40),
-        color: const Color(0xFF00695C),
+        fillColor: _isDark ? const Color(0xFF0F766E) : const Color(0xFF004D40),
+        color: _isDark ? const Color(0xFFCBD5E1) : const Color(0xFF00695C),
         constraints:
             const BoxConstraints(minHeight: 52, minWidth: 190),
         isSelected: [!isToken, isToken],
@@ -1405,6 +1490,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   @override
   void dispose() {
+    CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     _refreshNotifier.dispose();
     _mobileTabController.dispose();
     ConnectionManager().stop();

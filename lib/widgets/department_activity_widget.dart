@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
+import '../services/device_info_service.dart';
 
 class DepartmentActivityWidget extends StatefulWidget {
   final String branchId;
@@ -150,6 +151,14 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                         return deptRoles.contains(role);
                       }).toList();
 
+                      deptUsers.sort((a, b) {
+                        final rA = (a['role'] ?? '').toString().toLowerCase().trim();
+                        final rB = (b['role'] ?? '').toString().toLowerCase().trim();
+                        if (rA == 'chairman' && rB != 'chairman') return -1;
+                        if (rA != 'chairman' && rB == 'chairman') return 1;
+                        return (a['name'] ?? a['username'] ?? '').toString().compareTo((b['name'] ?? b['username'] ?? '').toString());
+                      });
+
                       final activeUsersCount = deptUsers.where((u) => u['isOnline'] == true).length;
                       final totalTransactions = deptEntries.length;
 
@@ -252,28 +261,58 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
 
                                   userActions.sort((a, b) => (b['createdAt'] ?? '').toString().compareTo((a['createdAt'] ?? '').toString()));
 
-                                  return Card(
-                                    color: const Color(0xFF1F2937).withValues(alpha: 0.8),
+                                  final isChairman = role.toLowerCase().trim() == 'chairman';
+
+                                  return Container(
                                     margin: const EdgeInsets.only(bottom: 16),
-                                    shape: RoundedRectangleBorder(
+                                    decoration: BoxDecoration(
+                                      gradient: isChairman
+                                          ? const LinearGradient(
+                                              colors: [Color(0xFF1E112A), Color(0xFF2A1706), Color(0xFF170F2A)],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            )
+                                          : null,
+                                      color: isChairman ? null : const Color(0xFF1F2937).withValues(alpha: 0.8),
                                       borderRadius: BorderRadius.circular(16),
-                                      side: BorderSide(color: isOnline ? Colors.greenAccent.withValues(alpha: 0.3) : Colors.white10),
+                                      border: Border.all(
+                                        color: isChairman
+                                            ? const Color(0xFFFBBF24)
+                                            : (isOnline ? Colors.greenAccent.withValues(alpha: 0.3) : Colors.white10),
+                                        width: isChairman ? 2.0 : 1.0,
+                                      ),
+                                      boxShadow: isChairman
+                                          ? [
+                                              BoxShadow(
+                                                color: const Color(0xFFF59E0B).withValues(alpha: 0.40),
+                                                blurRadius: 18,
+                                                spreadRadius: 1.5,
+                                              )
+                                            ]
+                                          : null,
                                     ),
                                     child: ExpansionTile(
                                       shape: Border.all(color: Colors.transparent),
                                       leading: CircleAvatar(
-                                        backgroundColor: deptColor.withValues(alpha: 0.2),
-                                        child: Text(
-                                          name.isNotEmpty ? name[0].toUpperCase() : 'U',
-                                          style: TextStyle(color: deptColor, fontWeight: FontWeight.bold),
-                                        ),
+                                        backgroundColor: isChairman ? const Color(0xFF92400E) : deptColor.withValues(alpha: 0.2),
+                                        child: isChairman
+                                            ? const Icon(Icons.workspace_premium_rounded, color: Color(0xFFFCD34D), size: 20)
+                                            : Text(
+                                                name.isNotEmpty ? name[0].toUpperCase() : 'U',
+                                                style: TextStyle(color: deptColor, fontWeight: FontWeight.bold),
+                                              ),
                                       ),
                                       title: Row(
                                         children: [
                                           Expanded(
                                             child: Text(
                                               name,
-                                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                              style: TextStyle(
+                                                color: isChairman ? const Color(0xFFFFFBEB) : Colors.white,
+                                                fontWeight: FontWeight.w900,
+                                                fontSize: 16,
+                                                letterSpacing: isChairman ? 0.3 : 0,
+                                              ),
                                             ),
                                           ),
                                           Container(
@@ -299,8 +338,10 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                       subtitle: Padding(
                                         padding: const EdgeInsets.only(top: 4),
                                         child: Text(
-                                          '$role • $deviceSummary • App $appVer • (${userActions.length} Actions Saved)',
-                                          style: const TextStyle(color: Colors.white54, fontSize: 12),
+                                          isChairman
+                                              ? '👑 CHAIRMAN · SUPREME AUTHORITY • $deviceSummary • App $appVer'
+                                              : '$role • $deviceSummary • App $appVer • (${userActions.length} Actions Saved)',
+                                          style: TextStyle(color: isChairman ? const Color(0xFFFDE68A) : Colors.white54, fontSize: 11.5, fontWeight: isChairman ? FontWeight.bold : FontWeight.normal),
                                         ),
                                       ),
                                       children: [

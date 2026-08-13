@@ -41,7 +41,7 @@ class MadrassaOverviewView extends ConsumerWidget {
           final logVal = box.get(key);
           if (logVal is Map && logVal.containsKey(studentId)) {
             final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
-            final currentLines = studentLog['currentLines'] as int?;
+            final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
             if (currentLines != null && currentLines > 0) {
               logsList.add(MapEntry(date, currentLines));
             }
@@ -329,8 +329,8 @@ class MadrassaOverviewView extends ConsumerWidget {
         final val = box.get(key);
         if (val is Map && val.containsKey(studentId)) {
           final studentLog = Map<String, dynamic>.from(val[studentId] as Map);
-          final prevLines = studentLog['currentLines'] as int?;
-          if (prevLines != null && prevLines > 0) {
+          final prevLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
+          if (prevLines != null && prevLines >= 0) {
             return prevLines;
           }
         }
@@ -338,67 +338,95 @@ class MadrassaOverviewView extends ConsumerWidget {
     } catch (e) {
       debugPrint('Error getting previous lines: $e');
     }
-    return currentLinesToday;
+    return 0;
   }
 
   int _calculateProgress(Map<String, dynamic> student, List<Map<String, dynamic>> allLogs, String timeframe) {
     final sId = student['id'] ?? '';
     final prevHifzLines = int.tryParse(student['prevHifzLines']?.toString() ?? '0') ?? 0;
+    final studentCurrentLines = (student['currentLines'] as num?)?.toInt() ?? (int.tryParse(student['currentLines']?.toString() ?? '') ?? 0);
 
-    if (allLogs.isEmpty) {
-      if (timeframe == 'Overall') {
-        return prevHifzLines;
+    if (timeframe == 'Overall') {
+      int latestMadrassaLines = studentCurrentLines;
+      if (allLogs.isNotEmpty) {
+        final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
+          ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+        for (int i = sortedLogs.length - 1; i >= 0; i--) {
+          final sLog = sortedLogs[i][sId];
+          if (sLog is Map && sLog.containsKey('currentLines')) {
+            final parsed = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+            if (parsed != null && parsed >= 0) {
+              latestMadrassaLines = parsed;
+              break;
+            }
+          }
+        }
       }
-      return 0;
+      return latestMadrassaLines + prevHifzLines;
     }
+
+    if (allLogs.isEmpty) return 0;
 
     final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
       ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
-
-    final latestDateKey = sortedLogs.last['dateKey']?.toString() ?? '';
-    final latestDate = DateTime.tryParse(latestDateKey) ?? DateTime.now();
 
     if (timeframe == 'Daily') {
       final latestLog = sortedLogs.last;
       final studentLog = latestLog[sId];
       if (studentLog is Map && studentLog.containsKey('currentLines')) {
-        return int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        final current = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        int prev = 0;
+        for (int i = sortedLogs.length - 2; i >= 0; i--) {
+          final sLog = sortedLogs[i][sId];
+          if (sLog is Map && sLog.containsKey('currentLines')) {
+            final p = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+            if (p != null) {
+              prev = p;
+              break;
+            }
+          }
+        }
+        return (current - prev).clamp(0, 9999);
       }
       return 0;
     }
 
+    final latestDateKey = sortedLogs.last['dateKey']?.toString() ?? '';
+    final latestDate = DateTime.tryParse(latestDateKey) ?? DateTime.now();
+
     DateTime startDate;
     if (timeframe == 'Weekly') {
       startDate = latestDate.subtract(const Duration(days: 6));
-    } else if (timeframe == 'Monthly') {
+    } else { // Monthly
       startDate = latestDate.subtract(const Duration(days: 29));
-    } else {
-      startDate = DateTime(2000, 1, 1);
     }
 
-    int sum = 0;
+    int endLines = -1;
+    int startLines = -1;
     for (final log in sortedLogs) {
       final dateKey = log['dateKey']?.toString() ?? '';
       final parsedDate = DateTime.tryParse(dateKey);
       if (parsedDate == null) continue;
 
-      if (timeframe == 'Weekly' || timeframe == 'Monthly') {
-        if (parsedDate.isBefore(startDate) || parsedDate.isAfter(latestDate)) {
-          continue;
-        }
+      if (parsedDate.isBefore(startDate) || parsedDate.isAfter(latestDate)) {
+        continue;
       }
 
       final studentLog = log[sId];
       if (studentLog is Map && studentLog.containsKey('currentLines')) {
-        sum += int.tryParse(studentLog['currentLines']?.toString() ?? '') ?? 0;
+        final parsed = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
+        if (parsed != null) {
+          if (startLines == -1) startLines = parsed;
+          endLines = parsed;
+        }
       }
     }
 
-    if (timeframe == 'Overall') {
-      sum += prevHifzLines;
+    if (endLines != -1 && startLines != -1) {
+      return (endLines - startLines).clamp(0, 8640);
     }
 
-    return sum;
+    return 0;
   }
 
   Widget _buildInsightsGrid(BuildContext context, List<Map<String, dynamic>> best, List<Map<String, dynamic>> worst) {

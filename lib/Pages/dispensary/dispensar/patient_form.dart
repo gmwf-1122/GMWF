@@ -8,7 +8,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
 import 'package:gmwf/services/local_storage_service.dart';
@@ -18,6 +17,7 @@ import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/theme/app_theme.dart';
 import 'package:gmwf/theme/role_theme_provider.dart';
+import 'package:gmwf/widgets/file_action_helper.dart';
 
 class PatientForm extends StatefulWidget {
   final String branchId;
@@ -47,6 +47,7 @@ class _PatientFormState extends State<PatientForm> {
   bool _isLoadingPrescription = true;
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
   int? _selectedSyringeCount;
+  int? _selectedNeedleCount;
 
   // ─── Queue-type normaliser ────────────────────────────────────────────────
   static String _normaliseQueueType(String? raw) {
@@ -209,24 +210,17 @@ class _PatientFormState extends State<PatientForm> {
         found = await _fetchFromPrescriptionsScanAll(serial);
         if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
       }
-      if (found.isEmpty) found = _searchHive(serial, cnic);
-      final vitals = (widget.queueEntry['vitals'] as Map<String, dynamic>?) ?? {};
-      final gender = found['patientGender']?.toString() ??
-          widget.queueEntry['patientGender']?.toString() ??
-          vitals['gender']?.toString() ?? 'N/A';
-      final age = found['patientAge']?.toString() ??
-          widget.queueEntry['patientAge']?.toString() ??
-          vitals['age']?.toString() ?? 'N/A';
+      final rawVitals = widget.queueEntry['vitals'];
+      final vitals = (rawVitals is Map) ? Map<String, dynamic>.from(rawVitals) : <String, dynamic>{};
       final dispenseStatus = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase();
-      final patientName = found['patientName']?.toString() ??
-          widget.queueEntry['patientName']?.toString() ?? 'Unknown Patient';
-      if (found.isNotEmpty) found['patientName'] = patientName;
-      if (mounted) setState(() {
-        _data = found;
-        _gender = gender;
-        _age = age;
-        _isDispensed = dispenseStatus == 'dispensed';
-      });
+      if (mounted) {
+        setState(() {
+          _data = found;
+          _gender = _resolveGender();
+          _age = _resolveAge();
+          _isDispensed = dispenseStatus == 'dispensed';
+        });
+      }
     } catch (e) {
       debugPrint('[PatientForm] Error loading prescription: $e');
     } finally {
@@ -235,34 +229,68 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   Map<String, dynamic> _searchHive(String serial, String cnic) {
-    final box = Hive.box(LocalStorageService.prescriptionsBox);
-    if (cnic.isNotEmpty && serial.isNotEmpty) {
-      final v = box.get('${cnic}_$serial');
+    final normSerial = serial.trim().toLowerCase();
+    final parts      = normSerial.split('-');
+    final numSerial  = parts.length > 1 ? parts.last : normSerial;
+    final normCnic   = cnic.trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
+
+    final prescBox = Hive.box(LocalStorageService.prescriptionsBox);
+
+    // 1. Direct key lookups
+    if (normCnic.isNotEmpty && normSerial.isNotEmpty) {
+      final v = prescBox.get('${normCnic}_$normSerial') ?? prescBox.get('${normCnic}_$numSerial');
       if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
     }
-    if (serial.isNotEmpty) {
-      final v = box.get(serial);
+    if (normSerial.isNotEmpty) {
+      final v = prescBox.get(normSerial) ?? prescBox.get(numSerial);
       if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
     }
-    if (serial.isNotEmpty) {
-      for (final key in box.keys) {
-        if (key is String && key.toLowerCase().endsWith('_$serial')) {
-          final v = box.get(key);
-          if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
-        }
+
+    // 2. Scan prescriptionsBox keys
+    for (final key in prescBox.keys) {
+      if (key is! String) continue;
+      final kLower = key.toLowerCase();
+      if (normSerial.isNotEmpty &&
+          (kLower.endsWith('_$normSerial') ||
+           kLower.endsWith('-$normSerial') ||
+           kLower.endsWith('_$numSerial')  ||
+           kLower.endsWith('-$numSerial'))) {
+        final v = prescBox.get(key);
+        if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
       }
     }
-    if (serial.isNotEmpty) {
-      for (final key in box.keys) {
-        if (key is String && key.toLowerCase().contains(serial)) {
-          final v = box.get(key);
-          if (v is Map && v.isNotEmpty) {
-            final m = Map<String, dynamic>.from(v);
-            if (m['serial']?.toString().trim().toLowerCase() == serial) return m;
+
+    // 3. Scan prescriptionsBox values
+    for (final key in prescBox.keys) {
+      final v = prescBox.get(key);
+      if (v is Map && v.isNotEmpty) {
+        final m = Map<String, dynamic>.from(v);
+        final s = (m['serial'] ?? m['id'] ?? '').toString().trim().toLowerCase();
+        final sParts = s.split('-');
+        final sNum   = sParts.length > 1 ? sParts.last : s;
+        if (s == normSerial || sNum == numSerial) return m;
+      }
+    }
+
+    // 4. Scan entriesBox for embedded prescription
+    final entriesBox = Hive.box(LocalStorageService.entriesBox);
+    for (final key in entriesBox.keys) {
+      final entry = entriesBox.get(key);
+      if (entry is Map) {
+        final eSerial = (entry['serial'] ?? entry['id'] ?? '').toString().trim().toLowerCase();
+        final eParts  = eSerial.split('-');
+        final eNum    = eParts.length > 1 ? eParts.last : eSerial;
+        if (eSerial == normSerial ||
+            eNum == numSerial ||
+            (key is String && (key.toLowerCase().endsWith('-$normSerial') || key.toLowerCase().endsWith('-$numSerial')))) {
+          final embedded = entry['prescription'];
+          if (embedded is Map && embedded.isNotEmpty) {
+            return Map<String, dynamic>.from(embedded);
           }
         }
       }
     }
+
     return {};
   }
 
@@ -307,7 +335,9 @@ class _PatientFormState extends State<PatientForm> {
 
   Future<Map<String, dynamic>> _fetchFromSerialsEmbedded(String serial) async {
     try {
-      final dateKey = serial.contains('-') ? serial.split('-')[0] : '';
+      final dateKey = serial.contains('-')
+          ? serial.split('-')[0]
+          : DateFormat('ddMMyy').format(DateTime.now());
       if (dateKey.isEmpty) return {};
       for (final type in ['zakat', 'non-zakat', 'gmwf']) {
         final snap = await FirebaseFirestore.instance
@@ -395,11 +425,13 @@ class _PatientFormState extends State<PatientForm> {
     for (final med in allPrescriptions) {
       if (med is! Map) continue;
       final medMap = Map<String, dynamic>.from(med);
-      final type = medMap['type']?.toString() ?? '';
-      final t = type.toLowerCase();
-      final isInjOrDrip = t.contains('injection') || t.contains('drip');
-      final isSyringe = t.contains('syringe');
-      if (isInjOrDrip && !isSyringe) {
+      final type = (medMap['type']?.toString() ?? '').toLowerCase();
+      final name = (medMap['name']?.toString() ?? '').toLowerCase();
+      final isInjOrDripOrIV = type.contains('injection') || type.contains('inj') ||
+                              type.contains('drip') || type.contains('iv') || type.contains('i.v') ||
+                              name.contains('inj') || name.contains('iv') || name.contains('i.v.');
+      final isSyringe = type.contains('syringe') || name.contains('syringe');
+      if (isInjOrDripOrIV && !isSyringe) {
         final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
         final qty = (qtyRaw is num) ? qtyRaw.toInt() : (int.tryParse(qtyRaw.toString()) ?? 1);
         totalInj += qty > 0 ? qty : 1;
@@ -409,10 +441,10 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   int _getEffectiveSyringeCount(List<dynamic> allPrescriptions) {
-    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 2);
+    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return 0;
     if (_selectedSyringeCount != null) {
-      return _selectedSyringeCount!.clamp(0, 2);
+      return _selectedSyringeCount!.clamp(0, 3);
     }
     return autoCount;
   }
@@ -569,6 +601,105 @@ class _PatientFormState extends State<PatientForm> {
         }
       } catch (e) {
         debugPrint('[PatientForm] Error during auto syringe deduction: $e');
+      }
+    }
+  }
+
+  int _getAutoNeedleCount(List<dynamic> allPrescriptions) {
+    int totalInj = 0;
+    for (final med in allPrescriptions) {
+      if (med is! Map) continue;
+      final medMap = Map<String, dynamic>.from(med);
+      final type = (medMap['type']?.toString() ?? '').toLowerCase();
+      final name = (medMap['name']?.toString() ?? '').toLowerCase();
+      final isInjOrIV = type.contains('injection') || type.contains('inj') ||
+                        type.contains('iv') || type.contains('i.v') ||
+                        name.contains('inj') || name.contains('iv') || name.contains('i.v.');
+      final isNeedleOrSyringe = type.contains('needle') || name.contains('needle') ||
+                                type.contains('syringe') || name.contains('syringe');
+      if (isInjOrIV && !isNeedleOrSyringe) {
+        final qtyRaw = medMap['quantity'] ?? medMap['qty'] ?? 1;
+        final qty = (qtyRaw is num) ? qtyRaw.toInt() : (int.tryParse(qtyRaw.toString()) ?? 1);
+        totalInj += qty > 0 ? qty : 1;
+      }
+    }
+    return totalInj;
+  }
+
+  int _getEffectiveNeedleCount(List<dynamic> allPrescriptions) {
+    final autoCount = _getAutoNeedleCount(allPrescriptions).clamp(0, 3);
+    if (autoCount == 0) return 0;
+    if (_selectedNeedleCount != null) {
+      return _selectedNeedleCount!.clamp(0, 3);
+    }
+    return autoCount;
+  }
+
+  Future<void> _deductNeedleIfNeeded(
+      String branchId, String serial, List<dynamic> allPrescriptions) async {
+    final totalNeedlesToDeduct = _getEffectiveNeedleCount(allPrescriptions).toDouble();
+
+    if (totalNeedlesToDeduct > 0.0) {
+      try {
+        final stockBox = Hive.box(LocalStorageService.stockBox);
+        String? needleKey;
+        Map<String, dynamic>? needleMap;
+        
+        for (final key in stockBox.keys) {
+          final val = stockBox.get(key);
+          if (val is Map) {
+            final type = (val['type'] ?? '').toString().toLowerCase();
+            final name = (val['name'] ?? '').toString().toLowerCase();
+            if (type.contains('needle') || name.contains('needle')) {
+              needleKey = key.toString();
+              needleMap = Map<String, dynamic>.from(val);
+              break;
+            }
+          }
+        }
+        
+        if (needleKey != null && needleMap != null) {
+          final q = needleMap['quantity'];
+          final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+          needleMap['quantity'] = (current - totalNeedlesToDeduct).clamp(0.0, double.infinity);
+          await stockBox.put(needleKey, needleMap);
+          debugPrint('[PatientForm] Auto-deducted $totalNeedlesToDeduct Needle ($needleKey) from Hive: $current → ${needleMap['quantity']}');
+          
+          final rawNeedleId = needleKey.replaceFirst('stock:', '');
+          Future<void> updateNeedleFirestore() async {
+            try {
+              final conn = await Connectivity().checkConnectivity();
+              final online = !conn.contains(ConnectivityResult.none);
+              if (online) {
+                final docRef = FirebaseFirestore.instance
+                    .collection('branches').doc(branchId)
+                    .collection('inventory').doc(rawNeedleId);
+                await FirebaseFirestore.instance.runTransaction((transaction) async {
+                  final snapshot = await transaction.get(docRef);
+                  if (snapshot.exists) {
+                    final q = snapshot.data()?['quantity'];
+                    final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+                    final updated = (current - totalNeedlesToDeduct).clamp(0.0, double.infinity);
+                    transaction.update(docRef, {'quantity': updated});
+                  }
+                });
+                debugPrint('[PatientForm] ✅ Auto-deducted $totalNeedlesToDeduct Needle ($rawNeedleId) in Firestore');
+                return;
+              }
+            } catch (e) {
+              debugPrint('[PatientForm] Auto-deducted needle Firestore update failed: $e');
+            }
+            await LocalStorageService.enqueueSync({
+              'type': 'update_inventory', 'branchId': branchId,
+              'inventoryId': rawNeedleId, 'delta': -totalNeedlesToDeduct,
+            });
+          }
+          updateNeedleFirestore();
+        } else {
+          debugPrint('[PatientForm] ⚠️ Auto needle deduction skipped: No needle item found in stock_items');
+        }
+      } catch (e) {
+        debugPrint('[PatientForm] Error during auto needle deduction: $e');
       }
     }
   }
@@ -828,6 +959,7 @@ class _PatientFormState extends State<PatientForm> {
         await _deductInventoryLocally(widget.branchId, serial, medicines, days);
       }
       await _deductSyringeIfNeeded(widget.branchId, serial, allPrescriptions);
+      await _deductNeedleIfNeeded(widget.branchId, serial, allPrescriptions);
       RealtimeManager().sendMessage(RealtimeEvents.payload(
         type: 'dispense_completed',
         data: {
@@ -1183,9 +1315,9 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   Widget _buildSyringeSelectionCard(List<dynamic> allPrescriptions, RoleThemeData t, {required bool isMobile}) {
-    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 2);
+    final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return const SizedBox.shrink();
-    final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 2);
+    final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 3);
 
     return Container(
       margin: EdgeInsets.only(top: isMobile ? 12 : 16),
@@ -1219,7 +1351,7 @@ class _PatientFormState extends State<PatientForm> {
                   ),
                 ),
                 Text(
-                  'Auto-calculated: $autoCount syringe${autoCount > 1 ? 's' : ''} (Max 2)',
+                  'Auto-calculated: $autoCount syringe${autoCount > 1 ? 's' : ''} (Max 3)',
                   style: TextStyle(
                     color: t.textSecondary,
                     fontSize: isMobile ? 11 : 12,
@@ -1232,7 +1364,7 @@ class _PatientFormState extends State<PatientForm> {
             children: [
               IconButton(
                 onPressed: effectiveCount > 0
-                    ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 2))
+                    ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.remove_circle_outline),
                 color: t.accent,
@@ -1255,8 +1387,8 @@ class _PatientFormState extends State<PatientForm> {
                 ),
               ),
               IconButton(
-                onPressed: effectiveCount < 2
-                    ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 2))
+                onPressed: effectiveCount < 3
+                    ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.add_circle_outline),
                 color: t.accent,
@@ -1269,12 +1401,99 @@ class _PatientFormState extends State<PatientForm> {
     );
   }
 
+  Widget _buildNeedleSelectionCard(List<dynamic> allPrescriptions, RoleThemeData t, {required bool isMobile}) {
+    final autoCount = _getAutoNeedleCount(allPrescriptions).clamp(0, 3);
+    if (autoCount == 0) return const SizedBox.shrink();
+    final effectiveCount = (_selectedNeedleCount ?? autoCount).clamp(0, 3);
+
+    return Container(
+      margin: EdgeInsets.only(top: isMobile ? 8 : 12),
+      padding: EdgeInsets.all(isMobile ? 12 : 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFA5D6A7)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFC8E6C9),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(Icons.pin_outlined, color: const Color(0xFF2E7D32), size: isMobile ? 22 : 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Needles To Dispense',
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: isMobile ? 14 : 16,
+                  ),
+                ),
+                Text(
+                  'Auto-calculated: $autoCount needle${autoCount > 1 ? 's' : ''} (Max 3)',
+                  style: TextStyle(
+                    color: t.textSecondary,
+                    fontSize: isMobile ? 11 : 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              IconButton(
+                onPressed: effectiveCount > 0
+                    ? () => setState(() => _selectedNeedleCount = (effectiveCount - 1).clamp(0, 3))
+                    : null,
+                icon: const Icon(Icons.remove_circle_outline),
+                color: const Color(0xFF2E7D32),
+                iconSize: isMobile ? 24 : 28,
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFA5D6A7)),
+                ),
+                child: Text(
+                  '$effectiveCount',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: isMobile ? 15 : 18,
+                    color: t.textPrimary,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: effectiveCount < 3
+                    ? () => setState(() => _selectedNeedleCount = (effectiveCount + 1).clamp(0, 3))
+                    : null,
+                icon: const Icon(Icons.add_circle_outline),
+                color: const Color(0xFF2E7D32),
+                iconSize: isMobile ? 24 : 28,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Header / footer ──────────────────────────────────────────────────────
   Widget _buildHeader(RoleThemeData t, {required bool isMobile}) => ClipRRect(
-    borderRadius: BorderRadius.vertical(top: Radius.circular(isMobile ? 16 : 24)),
+    borderRadius: BorderRadius.vertical(top: Radius.circular(isMobile ? 12 : 16)),
     child: Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isMobile ? 16 : 28),
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: isMobile ? 10 : 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -1282,112 +1501,61 @@ class _PatientFormState extends State<PatientForm> {
           colors: [t.accent, t.accentLight],
         ),
       ),
-      child: isMobile
-          ? Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Image.asset('assets/logo/gmwf-1.webp', width: isMobile ? 42 : 54, height: isMobile ? 42 : 54),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
               children: [
-                Image.asset('assets/logo/gmwf-1.webp', width: 52, height: 52),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 3),
-                        child: const Text(
-                          'ہو الشافی',
-                          style: TextStyle(
-                            fontFamily: 'Jameel Noori Nastaleeq',
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const Text(
-                        'Gulzar Madina Welfare Foundation',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          letterSpacing: 0.3,
-                        ),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Free Dispensary',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white.withValues(alpha: 0.8),
-                        ),
-                      ),
-                    ],
+                const Text(
+                  'ہو الشافی',
+                  style: TextStyle(
+                    fontFamily: 'Jameel Noori Nastaleeq',
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Transform.rotate(
-                  angle: -0.10,
-                  child: Image.asset('assets/images/moon.webp', width: 48, height: 48),
-                ),
-              ],
-            )
-          : Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Image.asset('assets/logo/gmwf-1.webp', width: 110, height: 110),
-                Expanded(
-                  child: Column(
-                    children: [
-                      const Text(
-                        'ہو الشافی',
-                        style: TextStyle(
-                          fontFamily: 'Jameel Noori Nastaleeq',
-                          fontSize: 36,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'Gulzar Madina Welfare Foundation',
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Free Dispensary',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white.withValues(alpha: 0.85),
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                    ],
+                Text(
+                  'Gulzar Madina Welfare Foundation',
+                  style: TextStyle(
+                    fontSize: isMobile ? 12 : 16,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: 0.3,
                   ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                Transform.rotate(
-                  angle: -0.4,
-                  child: Image.asset('assets/images/moon.webp', width: 96, height: 96),
+                Text(
+                  'Free Dispensary',
+                  style: TextStyle(
+                    fontSize: isMobile ? 10 : 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white.withValues(alpha: 0.85),
+                  ),
                 ),
               ],
             ),
+          ),
+          const SizedBox(width: 12),
+          Transform.rotate(
+            angle: -0.2,
+            child: Image.asset('assets/images/moon.webp', width: isMobile ? 40 : 50, height: isMobile ? 40 : 50),
+          ),
+        ],
+      ),
     ),
   );
 
   Widget _buildFooter(RoleThemeData t, {required bool isMobile}) => ClipRRect(
-    borderRadius: BorderRadius.vertical(bottom: Radius.circular(isMobile ? 16 : 24)),
+    borderRadius: BorderRadius.vertical(bottom: Radius.circular(isMobile ? 12 : 16)),
     child: Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isMobile ? 14 : 22),
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: isMobile ? 8 : 10),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -1396,30 +1564,262 @@ class _PatientFormState extends State<PatientForm> {
         ),
       ),
       child: Center(
-        child: Column(
-          children: [
-            Text(
-              'Gulzar Madina ${_branchName ?? ''}',
-              style: TextStyle(
-                fontSize: isMobile ? 13 : 17,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Website: gulzarmadina.com',
-              style: TextStyle(
-                fontSize: isMobile ? 11 : 14,
-                color: Colors.white.withValues(alpha: 0.8),
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+        child: Text(
+          'Gulzar Madina ${_branchName ?? ''} • gulzarmadina.com',
+          style: TextStyle(
+            fontSize: isMobile ? 11 : 13,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
         ),
       ),
     ),
   );
+
+  String? _getPatientPhone() {
+    final rawPhone = _data['phone'] ??
+        _data['patientPhone'] ??
+        _data['contact'] ??
+        _data['mobile'] ??
+        _data['guardianPhone'] ??
+        widget.queueEntry['phone'] ??
+        widget.queueEntry['contact'] ??
+        widget.queueEntry['patientPhone'];
+
+    if (rawPhone == null) return null;
+    final str = rawPhone.toString().trim();
+    return str.isEmpty ? null : str;
+  }
+
+  String _getResolvedPatientName() {
+    final candidates = [
+      _data['patientName'],
+      _data['name'],
+      _data['patient_name'],
+      widget.queueEntry['patientName'],
+      widget.queueEntry['name'],
+      widget.queueEntry['patient_name'],
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['patientName'] : null,
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['name'] : null,
+    ];
+    for (var c in candidates) {
+      if (c != null) {
+        final str = c.toString().trim();
+        if (str.isNotEmpty && str != '0' && str != 'null' && str.toLowerCase() != 'unknown' && str.toLowerCase() != 'unknown patient') {
+          return str;
+        }
+      }
+    }
+    return 'Patient';
+  }
+
+  String _getResolvedCnic() {
+    final candidates = [
+      _data['patientCnic'],
+      _data['cnic'],
+      _data['guardianCnic'],
+      _data['patientCNIC'],
+      widget.queueEntry['patientCnic'],
+      widget.queueEntry['cnic'],
+      widget.queueEntry['guardianCnic'],
+      widget.queueEntry['patientCNIC'],
+      widget.queueEntry['guardianCNIC'],
+    ];
+    for (var c in candidates) {
+      if (c != null) {
+        final str = c.toString().trim();
+        if (str.isNotEmpty &&
+            str != '0' &&
+            str != '0000000000000' &&
+            str != 'null' &&
+            !str.toLowerCase().startsWith('unknown_')) {
+          return str;
+        }
+      }
+    }
+    return 'N/A';
+  }
+
+  Future<void> _sharePatientFormPdf() async {
+    try {
+      final gender = _gender ?? _data['patientGender'] ?? _data['gender'] ?? 'N/A';
+      final age = _age != 'N/A' ? '$_age Years' : (_data['patientAge'] ?? _data['age'] ?? 'N/A').toString();
+      final phone = _getPatientPhone();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(phone != null && phone.isNotEmpty
+                ? 'Generating & attaching PDF for patient phone ($phone)...'
+                : 'Generating & attaching patient form PDF...'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      final pdfBytes = await PatientFormHelper.generateWhatsAppPdf(
+        _data,
+        _branchName ?? 'Free Dispensary',
+        gender,
+        age,
+      );
+
+      final patientName = _getResolvedPatientName();
+      final pid = _resolvedSerial.isNotEmpty ? _resolvedSerial : 'slip';
+
+      await FileActionHelper.sharePdfToWhatsApp(
+        bytes: pdfBytes,
+        fileName: 'Prescription_${patientName.replaceAll(RegExp(r'\s+'), '_')}_$pid.pdf',
+        phoneNumber: phone,
+        text: 'Assalam-o-Alaikum $patientName,\n\nThank you for your visit (Serial #$pid). Here is your PDF receipt from Gulzar Madina Free Dispensary:\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share PDF: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  String _resolveGender() {
+    final candidates = [
+      _gender,
+      _data['patientGender'],
+      _data['gender'],
+      _data['sex'],
+      _data['patientSex'],
+      widget.queueEntry['patientGender'],
+      widget.queueEntry['gender'],
+      widget.queueEntry['sex'],
+      widget.queueEntry['patientSex'],
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['gender'] : null,
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['sex'] : null,
+    ];
+    for (var val in candidates) {
+      if (val != null) {
+        final str = val.toString().trim();
+        if (str.isNotEmpty && str != 'N/A' && str != 'null') {
+          if (str.toLowerCase() == 'm' || str.toLowerCase() == 'male') return 'Male';
+          if (str.toLowerCase() == 'f' || str.toLowerCase() == 'female') return 'Female';
+          return str[0].toUpperCase() + str.substring(1);
+        }
+      }
+    }
+    return 'N/A';
+  }
+
+  String _resolveAge() {
+    // 1. Check explicit age candidates
+    final ageCandidates = [
+      _age,
+      _data['patientAge'],
+      _data['age'],
+      widget.queueEntry['patientAge'],
+      widget.queueEntry['age'],
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['age'] : null,
+    ];
+    for (var val in ageCandidates) {
+      if (val != null) {
+        final str = val.toString().trim();
+        if (str.isNotEmpty && str != 'N/A' && str != 'null' && str != '0') {
+          return str;
+        }
+      }
+    }
+
+    // 2. Check DOB candidates to calculate age
+    final dobCandidates = [
+      _data['patientDob'],
+      _data['dob'],
+      _data['dateOfBirth'],
+      _data['patientDateOfBirth'],
+      widget.queueEntry['patientDob'],
+      widget.queueEntry['dob'],
+      widget.queueEntry['dateOfBirth'],
+      (widget.queueEntry['vitals'] is Map) ? widget.queueEntry['vitals']['dob'] : null,
+    ];
+    for (var val in dobCandidates) {
+      if (val != null) {
+        if (val is DateTime) {
+          final now = DateTime.now();
+          int age = now.year - val.year;
+          if (now.month < val.month || (now.month == val.month && now.day < val.day)) {
+            age--;
+          }
+          if (age >= 0) return age.toString();
+        } else {
+          final str = val.toString().trim();
+          final parsed = DateTime.tryParse(str);
+          if (parsed != null) {
+            final now = DateTime.now();
+            int age = now.year - parsed.year;
+            if (now.month < parsed.month || (now.month == parsed.month && now.day < parsed.day)) {
+              age--;
+            }
+            if (age >= 0) return age.toString();
+          } else {
+            final yearMatch = RegExp(r'\b(19\d{2}|20\d{2})\b').firstMatch(str);
+            if (yearMatch != null) {
+              final year = int.tryParse(yearMatch.group(1)!);
+              if (year != null) {
+                final age = DateTime.now().year - year;
+                if (age >= 0 && age < 120) return age.toString();
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return 'N/A';
+  }
+
+  Future<void> _handleDownloadPdf() async {
+    try {
+      final gender = _resolveGender();
+      final ageVal = _resolveAge();
+      final age = ageVal != 'N/A' ? '$ageVal Years' : 'N/A';
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Generating Prescription Report...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+
+      final pdfBytes = await PatientFormHelper.generateWhatsAppPdf(
+        _data,
+        _branchName ?? 'Free Dispensary',
+        gender,
+        age,
+      );
+
+      final patientName = _getResolvedPatientName();
+      final pid = _resolvedSerial.isNotEmpty ? _resolvedSerial : 'slip';
+      final fileName = 'Report_${patientName.replaceAll(RegExp(r'\s+'), '_')}_$pid.pdf';
+
+      final savedPath = await FileActionHelper.getTempFilePath(fileName, pdfBytes);
+
+      if (mounted) {
+        await FileActionHelper.showFileOptions(
+          context,
+          filePath: savedPath,
+          bytes: pdfBytes,
+          fileName: fileName,
+          title: 'Patient Report Ready',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to generate report: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
 
   Widget _buildActionBar(RoleThemeData t, {required bool isMobile}) {
     final days = _daysOfMedicine;
@@ -1463,10 +1863,10 @@ class _PatientFormState extends State<PatientForm> {
           label: Text(
             dispenseLabel,
             style: TextStyle(
-              fontSize: isMobile ? 13 : 15,
+              fontSize: isMobile ? 12 : 14,
               fontWeight: FontWeight.w800,
               color: Colors.white,
-              letterSpacing: 0.5,
+              letterSpacing: 0.3,
             ),
           ),
           style: ElevatedButton.styleFrom(
@@ -1474,6 +1874,39 @@ class _PatientFormState extends State<PatientForm> {
             shadowColor: Colors.transparent,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(27)),
           ),
+        ),
+      ),
+    );
+
+    final reportBtn = Container(
+      height: 54,
+      decoration: BoxDecoration(
+        color: const Color(0xFFB91C1C),
+        borderRadius: BorderRadius.circular(27),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB91C1C).withValues(alpha: 0.3),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          )
+        ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: _handleDownloadPdf,
+        icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 20),
+        label: Text(
+          'Report',
+          style: TextStyle(
+            fontSize: isMobile ? 13 : 15,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: 0.5,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(27)),
         ),
       ),
     );
@@ -1498,9 +1931,12 @@ class _PatientFormState extends State<PatientForm> {
             ),
             child: SafeArea(
               top: false,
-              child: SizedBox(
-                width: double.infinity,
-                child: dispenseBtn,
+              child: Row(
+                children: [
+                  Expanded(flex: 6, child: dispenseBtn),
+                  const SizedBox(width: 12),
+                  Expanded(flex: 4, child: reportBtn),
+                ],
               ),
             ),
           ),
@@ -1545,12 +1981,13 @@ class _PatientFormState extends State<PatientForm> {
     final prescriptions = (_data['prescriptions'] ?? []) as List;
     final labTests = (_data['labResults'] ?? []) as List;
     final diagnosis = _data['diagnosis']?.toString() ?? '';
-    final patientName = _data['patientName'] ?? 'Unknown';
+    final patientName = _getResolvedPatientName();
     
     final serial = _resolvedSerial;
-    final cnic = _firstNonEmpty([
-      _data['patientCnic'], _data['cnic'], widget.queueEntry['patientCnic'], widget.queueEntry['cnic'], 'N/A'
-    ]);
+    final genderStr = _resolveGender();
+    final ageVal = _resolveAge();
+    final ageDisplay = ageVal != 'N/A' ? '$ageVal Years' : 'N/A';
+    final cnic = _getResolvedCnic();
     final queueType = _resolvedQueueType.toUpperCase();
 
     final inventoryMeds = prescriptions.where((m) => m['inventoryId'] != null && !PatientFormHelper.isInjectable(m)).toList();
@@ -1639,8 +2076,8 @@ class _PatientFormState extends State<PatientForm> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _infoTile(Icons.wc, 'GENDER', _gender ?? 'N/A', t, isMobile),
-              _infoTile(Icons.cake, 'AGE', _age != 'N/A' ? '$_age Years' : 'N/A', t, isMobile),
+              _infoTile(Icons.wc, 'GENDER', genderStr, t, isMobile),
+              _infoTile(Icons.cake, 'AGE', ageDisplay, t, isMobile),
               _infoTile(Icons.tag, 'TOKEN SERIAL', serial, t, isMobile),
             ],
           ),
@@ -1701,8 +2138,10 @@ class _PatientFormState extends State<PatientForm> {
           _sectionTitle('Custom Injectables', Icons.vaccines, t, isMobile: isMobile),
           _linedList(customInjectables, t, isMobile: isMobile),
         ],
-        if (inventoryInjectables.isNotEmpty || customInjectables.isNotEmpty)
+        if (inventoryInjectables.isNotEmpty || customInjectables.isNotEmpty) ...[
           _buildSyringeSelectionCard(prescriptions, t, isMobile: isMobile),
+          _buildNeedleSelectionCard(prescriptions, t, isMobile: isMobile),
+        ],
       ],
     );
 
@@ -1724,37 +2163,75 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   @override
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 700;
+    final isDark = _isDark;
     
-    // Curated GMWF Brand Clinical Teal Theme
-    const t = RoleThemeData(
-      roleLabel:             'CLINICAL',
-      bg:                    Color(0xFFF2FBF9),
-      bgCard:                Color(0xFFFFFFFF),
-      bgCardAlt:             Color(0xFFE6F7F4),
-      bgRule:                Color(0xFFCBECE6),
-      accent:                Color(0xFF00695C),
-      accentLight:           Color(0xFF0D9488),
-      accentMuted:           Color(0xFFE0F2F1),
-      accentGradient:        LinearGradient(colors: [Color(0xFF00695C), Color(0xFF0D9488)]),
-      glassTint:             Color(0x1A00695C),
-      textPrimary:           Color(0xFF002521),
-      textSecondary:         Color(0xFF004D43),
-      textTertiary:          Color(0xFF4DB6A7),
-      danger:                Color(0xFFB91C1C),
-      zakat:                 Color(0xFF2E7D32),
-      nonZakat:              Color(0xFF1565C0),
-      gmwf:                  Color(0xFFE65100),
-      cardFillTokens:        Color(0xFF00695C),
-      cardFillPrescriptions: Color(0xFF004D43),
-      cardFillDispensary:    Color(0xFF00332C),
-      chartBar1:             Color(0xFF00695C),
-      chartBar2:             Color(0xFF2E7D32),
-      chartBar3:             Color(0xFF1565C0),
-      chartGrid:             Color(0xFFCBECE6),
-    );
+    // Curated GMWF Brand Clinical Theme (Dark Mode Adaptive)
+    final t = isDark
+        ? const RoleThemeData(
+            roleLabel:             'CLINICAL',
+            bg:                    Color(0xFF0F172A),
+            bgCard:                Color(0xFF1E293B),
+            bgCardAlt:             Color(0xFF334155),
+            bgRule:                Color(0xFF475569),
+            accent:                Color(0xFF0D9488),
+            accentLight:           Color(0xFF14B8A6),
+            accentMuted:           Color(0xFF0F766E),
+            accentGradient:        LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF14B8A6)]),
+            glassTint:             Color(0x3300695C),
+            textPrimary:           Color(0xFFF8FAFC),
+            textSecondary:         Color(0xFFCBD5E1),
+            textTertiary:          Color(0xFF94A3B8),
+            danger:                Color(0xFFEF4444),
+            zakat:                 Color(0xFF22C55E),
+            nonZakat:              Color(0xFF3B82F6),
+            gmwf:                  Color(0xFFF97316),
+            cardFillTokens:        Color(0xFF0F766E),
+            cardFillPrescriptions: Color(0xFF115E59),
+            cardFillDispensary:    Color(0xFF134E4A),
+            chartBar1:             Color(0xFF0D9488),
+            chartBar2:             Color(0xFF22C55E),
+            chartBar3:             Color(0xFF3B82F6),
+            chartGrid:             Color(0xFF334155),
+          )
+        : const RoleThemeData(
+            roleLabel:             'CLINICAL',
+            bg:                    Color(0xFFF2FBF9),
+            bgCard:                Color(0xFFFFFFFF),
+            bgCardAlt:             Color(0xFFE6F7F4),
+            bgRule:                Color(0xFFCBECE6),
+            accent:                Color(0xFF00695C),
+            accentLight:           Color(0xFF0D9488),
+            accentMuted:           Color(0xFFE0F2F1),
+            accentGradient:        LinearGradient(colors: [Color(0xFF00695C), Color(0xFF0D9488)]),
+            glassTint:             Color(0x1A00695C),
+            textPrimary:           Color(0xFF002521),
+            textSecondary:         Color(0xFF004D43),
+            textTertiary:          Color(0xFF4DB6A7),
+            danger:                Color(0xFFB91C1C),
+            zakat:                 Color(0xFF2E7D32),
+            nonZakat:              Color(0xFF1565C0),
+            gmwf:                  Color(0xFFE65100),
+            cardFillTokens:        Color(0xFF00695C),
+            cardFillPrescriptions: Color(0xFF004D43),
+            cardFillDispensary:    Color(0xFF00332C),
+            chartBar1:             Color(0xFF00695C),
+            chartBar2:             Color(0xFF2E7D32),
+            chartBar3:             Color(0xFF1565C0),
+            chartGrid:             Color(0xFFCBECE6),
+          );
 
     if (_isLoadingPrescription) {
       return Center(
@@ -1770,10 +2247,10 @@ class _PatientFormState extends State<PatientForm> {
     }
     if (_data.isEmpty) {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const Icon(Icons.hourglass_empty, size: 80, color: Colors.grey),
+        Icon(Icons.hourglass_empty, size: 80, color: isDark ? const Color(0xFF94A3B8) : Colors.grey),
         const SizedBox(height: 16),
-        const Text('No prescription found yet',
-            style: TextStyle(color: Colors.grey, fontSize: 18)),
+        Text('No prescription found yet',
+            style: TextStyle(color: isDark ? const Color(0xFFCBD5E1) : Colors.grey, fontSize: 18)),
         const SizedBox(height: 16),
         ElevatedButton.icon(
           onPressed: _loadPrescription, icon: const Icon(Icons.refresh),
@@ -1784,25 +2261,26 @@ class _PatientFormState extends State<PatientForm> {
           )),
       ]));
     }
-    final bottomBarHeight = isMobile ? 148.0 : 92.0;
+    final bottomBarHeight = 76.0;
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.grey[50],
       body: Stack(children: [
         SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
           padding: EdgeInsets.only(
-              left: isMobile ? 8 : 16, right: isMobile ? 8 : 16,
-              top: isMobile ? 8 : 16, bottom: bottomBarHeight + 16),
+              left: isMobile ? 6 : 12, right: isMobile ? 6 : 12,
+              top: isMobile ? 6 : 12, bottom: bottomBarHeight + 36),
           child: Center(child: Container(
-            constraints: isMobile ? const BoxConstraints() : const BoxConstraints(maxWidth: 850),
+            constraints: isMobile ? const BoxConstraints() : const BoxConstraints(maxWidth: 950),
             decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(isMobile ? 16 : 24),
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(isMobile ? 12 : 16),
+              border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06), 
-                  blurRadius: 18, 
-                  offset: const Offset(0, 8),
+                  color: isDark ? Colors.black26 : Colors.black.withValues(alpha: 0.04), 
+                  blurRadius: 10, 
+                  offset: const Offset(0, 4),
                 )
               ],
             ),
@@ -1983,10 +2461,13 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
   }
 
   Future<void> _handleWhatsAppShare() async {
-    _showLoading('Generating WhatsApp PDF...');
+    final patientName = widget.data['patientName'] ?? widget.data['name'] ?? 'Patient';
+    final rawPhone = widget.data['phone'] ?? widget.data['contact'] ?? widget.data['patientPhone'] ?? widget.data['mobile'];
+    final phone = rawPhone != null ? rawPhone.toString().trim() : null;
+
+    _showLoading('Generating & attaching WhatsApp PDF...');
     Uint8List? pdfBytes;
     try {
-      final patientName = widget.data['patientName'] ?? 'Patient';
       final gender = widget.data['patientGender'] ?? widget.data['gender'] ?? 'N/A';
       final age = (widget.data['patientAge'] ?? widget.data['age'] ?? 'N/A').toString();
 
@@ -2007,9 +2488,12 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
     }
 
     if (pdfBytes != null) {
-      await Printing.sharePdf(
+      final pid = widget.serial.isNotEmpty ? widget.serial : 'N/A';
+      await FileActionHelper.sharePdfToWhatsApp(
         bytes: pdfBytes,
-        filename: 'Prescription_${widget.serial.isNotEmpty ? widget.serial : 'unknown'}.pdf',
+        fileName: 'Prescription_${widget.serial.isNotEmpty ? widget.serial : 'unknown'}.pdf',
+        phoneNumber: phone,
+        text: 'Assalam-o-Alaikum $patientName,\n\nThank you for your visit (Serial #$pid). Here is your PDF receipt from Gulzar Madina Free Dispensary:\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ',
       );
     }
   }

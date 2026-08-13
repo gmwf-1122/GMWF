@@ -14,13 +14,14 @@ import '../pages/branches.dart';
 import '../pages/server.dart';
 import '../pages/download_screen.dart';
 import '../pages/office/finance_page.dart';
+import '../pages/office/branches_management.dart';
 import '../pages/Dasterkhwaan/office_boy.dart';
 import '../pages/Dasterkhwaan/kitchen.dart';
 import '../pages/Dasterkhwaan/stock.dart';
 import '../pages/branches_register.dart';
+import '../pages/register.dart';
 import '../pages/dispensary/patient_detail_screen.dart';
 import '../pages/dispensary/receptionist/patient_register.dart';
-import '../pages/register.dart';
 import '../pages/overview.dart';
 import '../pages/request.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
@@ -99,6 +100,37 @@ class AppModule {
 class ModuleRegistry {
   static final List<AppModule> allModules = [
     AppModule(
+      id: 'users',
+      title: 'User Management',
+      description: 'Manage system users, roles, permissions, and online status',
+      icon: Icons.people_alt_rounded,
+      requiredPermission: AppPermission.manageUsers,
+      isFeatured: false,
+      builder: (context, data) {
+        final role = (data['role'] as String? ?? '').toLowerCase().trim();
+        final userBranch = (data['branchId'] as String? ?? '').toLowerCase().trim();
+        final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role) && (userBranch == 'all' || userBranch == 'global' || userBranch.isEmpty);
+        final isScoped = !isGlobalExec;
+        return UsersScreen(
+          branchId: isScoped ? userBranch : 'all',
+          currentUserRole: data['role']?.toString(),
+        );
+      },
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'register_user',
+      title: 'Register Staff',
+      description: 'Onboard new staff, assign branch, role, salary, and facilities',
+      icon: Icons.person_add_alt_1_rounded,
+      requiredPermission: AppPermission.manageUsers,
+      isFeatured: true,
+      builder: (context, data) {
+        return const Register();
+      },
+      category: ModuleCategory.office,
+    ),
+    AppModule(
       id: 'executive_dashboard',
       title: 'Dashboard Overview',
       description: 'Unified high-level metrics and performance tracking',
@@ -125,15 +157,32 @@ class ModuleRegistry {
       isBranchDependent: true,  // wrapper locks branch-scoped roles to own branch
       supportsGlobalWrapper: true,
       builder: (context, data) {
-        final role = (data['role'] as String? ?? '').toLowerCase();
-        final isScoped = role == 'branch manager' || role == 'supervisor';
+        final role = (data['role'] as String? ?? '').toLowerCase().trim();
+        final userBranch = (data['branchId'] as String? ?? '').toLowerCase().trim();
+        final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role) && (userBranch == 'all' || userBranch == 'global' || userBranch.isEmpty);
+        final isScoped = !isGlobalExec;
         return Branches(
-          branchId: isScoped ? (data['branchId'] as String?) : null,
+          branchId: isScoped ? userBranch : null,
           isManager: isScoped,
         );
       },
       category: ModuleCategory.dispensary,
       isFeatured: true,
+    ),
+    AppModule(
+      id: 'branches_management',
+      title: 'Branches Management',
+      description: 'Register, edit sub-facilities, and manage all organization branches',
+      icon: Icons.domain_rounded,
+      requiredPermission: AppPermission.viewBranchSpecificStats,
+      isFeatured: true,
+      builder: (context, data) {
+        return BranchesManagementPage(
+          currentUserRole: data['role']?.toString(),
+          userBranchId: data['branchId']?.toString(),
+        );
+      },
+      category: ModuleCategory.office,
     ),
     // Removed branch_manager_dashboard as it now uses the unified OverviewScreen
     AppModule(
@@ -242,30 +291,6 @@ class ModuleRegistry {
         isSupervisor: (data['role'] as String? ?? '').toLowerCase() == 'supervisor',
       ),
       category: ModuleCategory.dispensary,
-    ),
-    AppModule(
-      id: 'user_management',
-      title: 'Staff',
-      description: 'View and search administrative staff',
-      icon: Icons.people_outline,
-      requiredPermission: AppPermission.manageUsers,
-      builder: (context, data) {
-        final role = (data['role'] as String? ?? '').toLowerCase().trim();
-        final isRestricted = role == 'branch manager' || role == 'supervisor';
-        return UsersScreen(
-          branchId: isRestricted ? data['branchId'] : null,
-        );
-      },
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'register_user',
-      title: 'Register User',
-      description: 'Onboard new staff members',
-      icon: Icons.group_add_rounded,
-      requiredPermission: AppPermission.manageUsers,
-      builder: (context, data) => const Register(),
-      category: ModuleCategory.office,
     ),
     AppModule(
       id: 'ramadan_welfare',
@@ -408,7 +433,12 @@ class ModuleRegistry {
         final branchId = data['branchId'] ?? 'unknown';
         final username = data['name'] ?? data['username'] ?? 'User';
         final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
-        final isAdmin = role.contains('admin') || role.contains('chairman') || role.contains('ceo') || role.contains('hq');
+        final isAdmin = role.contains('admin') ||
+            role.contains('chairman') ||
+            role.contains('ceo') ||
+            role.contains('hq') ||
+            role.contains('manager') ||
+            role.contains('supervisor');
         return MadrassaDashboard(branchId: branchId, username: username, role: role, isAdmin: isAdmin);
       },
       category: ModuleCategory.madrassa,
@@ -596,8 +626,9 @@ class ModuleRegistry {
           'donations',
           'patients_list',
           'patient_register_standalone',
-          'register_user',
-          'reports'
+          'reports',
+          'madrassa',
+          'school_module',
         ]);
       }
 
@@ -614,8 +645,9 @@ class ModuleRegistry {
         'donations': 'Donations',
         'patients_list': 'Patients',
         'patient_register_standalone': 'Registration',
-        'register_user': 'Staff Registration',
         'reports': 'Downloads',
+        'madrassa': 'Madrassa',
+        'school_module': 'School',
       };
 
       return modules

@@ -1,6 +1,6 @@
-// lib/pages/settings/biometric_device_manager_page.dart
-
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -9,6 +9,7 @@ import '../../models/biometric_device_config.dart';
 import '../../models/biometric_credential.dart';
 import '../../services/zkteco_network_service.dart';
 import '../../services/local_storage_service.dart';
+import '../../utils/network_utils.dart';
 
 class BiometricDeviceManagerPage extends StatefulWidget {
   final String branchId;
@@ -26,12 +27,16 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   final List<Map<String, dynamic>> _livePunches = [];
   String _searchQuery = '';
   bool _isAutoAssigning = false;
+  String _pcIpAddress = 'Detecting...';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     
+    // Fetch PC LAN IP
+    _fetchPcIp();
+
     // Ensure ZKTeco network server is running
     ZkTecoNetworkService.startServer();
 
@@ -46,6 +51,36 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     });
   }
 
+  Future<void> _fetchPcIp() async {
+    if (kIsWeb) {
+      if (mounted) setState(() => _pcIpAddress = 'Cloud Sync Mode (Web)');
+      return;
+    }
+    try {
+      final ip = await getPrimaryLanIp();
+      if (ip != null && ip.isNotEmpty) {
+        if (mounted) setState(() => _pcIpAddress = ip);
+        return;
+      }
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          final a = addr.address;
+          if (!a.startsWith('127.') && !a.startsWith('169.254.')) {
+            if (mounted) setState(() => _pcIpAddress = a);
+            return;
+          }
+        }
+      }
+      if (mounted) setState(() => _pcIpAddress = '192.168.1.8');
+    } catch (_) {
+      if (mounted) setState(() => _pcIpAddress = '192.168.1.8');
+    }
+  }
+
   @override
   void dispose() {
     _punchSubscription?.cancel();
@@ -56,25 +91,38 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: const Color(0xFFF1F5F9), // Sleek slate surface
       appBar: AppBar(
         title: Text(
           'Biometric Attendance Settings & Devices',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.w600, color: Colors.white),
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 19),
         ),
-        backgroundColor: const Color(0xFF1E293B),
-        elevation: 0,
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: const Color(0xFF10B981),
-          indicatorWeight: 3,
-          labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold),
-          unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.normal),
-          tabs: const [
-            Tab(icon: Icon(Icons.router_rounded), text: 'ZKTeco Devices'),
-            Tab(icon: Icon(Icons.badge_rounded), text: 'User Biometric PINs'),
-            Tab(icon: Icon(Icons.history_rounded), text: 'Live Wi-Fi Logs'),
-          ],
+        backgroundColor: const Color(0xFF0F172A), // Rich dark slate header
+        elevation: 2,
+        shadowColor: Colors.black26,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(48),
+          child: Container(
+            color: const Color(0xFF1E293B),
+            child: TabBar(
+              controller: _tabController,
+              indicatorColor: const Color(0xFF10B981),
+              indicatorWeight: 4,
+              labelColor: Colors.white,
+              unselectedLabelColor: const Color(0xFF94A3B8), // High contrast unselected text
+              labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
+              unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+              tabs: const [
+                Tab(icon: Icon(Icons.router_rounded, size: 18), text: 'ZKTeco Devices'),
+                Tab(icon: Icon(Icons.badge_rounded, size: 18), text: 'User Biometric PINs'),
+                Tab(icon: Icon(Icons.history_rounded, size: 18), text: 'Live Scans & Logs'),
+              ],
+            ),
+          ),
         ),
       ),
       body: Column(
@@ -95,44 +143,175 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     );
   }
 
-  // ── Server Status Banner ───────────────────────────────────────────────────
-
   Widget _buildServerStatusBanner() {
+    if (kIsWeb) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEFF6FF),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFBFDBFE), width: 1.5),
+          boxShadow: const [
+            BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(
+                color: Color(0xFF2563EB),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cloud_sync_rounded, color: Colors.white, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        'Cloud Sync Active (Web View)',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          color: const Color(0xFF1E40AF),
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1D4ED8),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Web Browser Mode',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'ZKTeco hardware connects directly to your Windows Server PC on Port 8088. This Web App displays live device status & attendance synced from the Server.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w500,
+                      color: const Color(0xFF1E3A8A),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Tooltip(
+              message: 'Hardware TCP/UDP Port listener runs on the Desktop/Server PC app',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDBEAFE),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF93C5FD)),
+                ),
+                child: Text(
+                  'Port Listener: Server PC',
+                  style: GoogleFonts.inter(
+                    color: const Color(0xFF1E40AF),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11.5,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return ValueListenableBuilder<bool>(
       valueListenable: ZkTecoNetworkService.isServerRunningNotifier,
       builder: (context, isRunning, child) {
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          color: isRunning ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+          margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isRunning ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isRunning ? const Color(0xFFA7F3D0) : const Color(0xFFFECACA),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (isRunning ? const Color(0xFF10B981) : Colors.red).withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
           child: Row(
             children: [
-              Icon(
-                isRunning ? Icons.wifi_tethering_rounded : Icons.wifi_tethering_off_rounded,
-                color: isRunning ? const Color(0xFF059669) : const Color(0xFFDC2626),
-                size: 26,
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isRunning ? Icons.wifi_tethering_rounded : Icons.wifi_tethering_off_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      isRunning
-                          ? 'ZKTeco Wi-Fi Listener Active (Port 8088 / 4370)'
-                          : 'ZKTeco Wi-Fi Listener Stopped',
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.bold,
-                        color: isRunning ? const Color(0xFF065F46) : const Color(0xFF991B1B),
-                        fontSize: 14,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          isRunning ? 'ZKTeco Server Active' : 'ZKTeco Server Stopped',
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            color: isRunning ? const Color(0xFF065F46) : const Color(0xFF991B1B),
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isRunning ? const Color(0xFF047857) : const Color(0xFF991B1B),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            'PC IP: $_pcIpAddress',
+                            style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 4),
                     Text(
                       isRunning
-                          ? 'Listening for Wi-Fi punches across Office, Dispensary, and Madrassa devices on network "gmwf".'
-                          : 'Click start server to enable real-time ZKTeco punch capture.',
+                          ? 'Set your ZKTeco machine Cloud Server IP to "$_pcIpAddress" and Port to "8088".'
+                          : 'Click "Start Server" to listen for incoming fingerprint scans.',
                       style: GoogleFonts.inter(
-                        fontSize: 12,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
                         color: isRunning ? const Color(0xFF047857) : const Color(0xFFB91C1C),
                       ),
                     ),
@@ -143,18 +322,24 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 valueListenable: ZkTecoNetworkService.totalPunchesReceivedNotifier,
                 builder: (context, count, _) {
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isRunning ? const Color(0xFF10B981) : Colors.grey,
-                      borderRadius: BorderRadius.circular(20),
+                      color: isRunning ? const Color(0xFF059669) : Colors.grey[600],
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Text(
-                      '$count Punches',
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.touch_app_rounded, color: Colors.white, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          '$count Scans',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -171,9 +356,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 icon: Icon(isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 18),
                 label: Text(isRunning ? 'Stop' : 'Start'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isRunning ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                  backgroundColor: isRunning ? const Color(0xFFDC2626) : const Color(0xFF10B981),
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
                 ),
               ),
             ],
@@ -192,7 +379,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         final devices = ZkTecoNetworkService.getAllDevices();
 
         return Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -204,11 +391,12 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     children: [
                       Text(
                         'Building Biometric Devices',
-                        style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
                       ),
+                      const SizedBox(height: 2),
                       Text(
-                        'Map ZKTeco Wi-Fi readers to physical building locations (Office, Dispensary, Madrassa)',
-                        style: GoogleFonts.inter(fontSize: 13, color: Colors.grey[600]),
+                        'Map ZKTeco Wi-Fi/Ethernet readers to physical building locations',
+                        style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF64748B)),
                       ),
                     ],
                   ),
@@ -217,10 +405,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     icon: const Icon(Icons.add_rounded, size: 18),
                     label: const Text('Add Device'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF3B82F6),
+                      backgroundColor: const Color(0xFF2563EB),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
                     ),
                   ),
                 ],
@@ -229,22 +418,39 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               if (devices.isEmpty)
                 Expanded(
                   child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.router_rounded, size: 64, color: Colors.grey),
-                        const SizedBox(height: 12),
-                        Text(
-                          'No Biometric Devices Configured',
-                          style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.w600),
+                    child: Card(
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF1F5F9),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.router_rounded, size: 48, color: Color(0xFF64748B)),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No Biometric Devices Configured',
+                              style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Click "Add Device" or power on a ZKTeco device connected to your LAN for auto-discovery.',
+                              style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF64748B)),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Click "Add Device" or turn on a ZKTeco device connected to Wi-Fi "gmwf" for auto-discovery.',
-                          style: GoogleFonts.inter(fontSize: 13, color: Colors.grey),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 )
@@ -259,63 +465,165 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           ? DateFormat('hh:mm:ss a').format(dev.lastHeartbeat!)
                           : 'Never';
 
-                      return Card(
+                      // Location pill colors
+                      Color locBg = const Color(0xFFEFF6FF);
+                      Color locText = const Color(0xFF1D4ED8);
+                      if (dev.buildingLocation.toLowerCase().contains('dispensary')) {
+                        locBg = const Color(0xFFF0FDF4);
+                        locText = const Color(0xFF15803D);
+                      } else if (dev.buildingLocation.toLowerCase().contains('madrassa')) {
+                        locBg = const Color(0xFFF3E8FF);
+                        locText = const Color(0xFF6B21A8);
+                      }
+
+                      return Container(
                         margin: const EdgeInsets.only(bottom: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: BorderSide(color: Colors.grey.shade200),
-                        ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          leading: CircleAvatar(
-                            backgroundColor: isOnline ? const Color(0xFFECFDF5) : const Color(0xFFF3F4F6),
-                            child: Icon(
-                              Icons.fingerprint_rounded,
-                              color: isOnline ? const Color(0xFF10B981) : Colors.grey,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black12,
+                              blurRadius: 6,
+                              offset: Offset(0, 2),
                             ),
-                          ),
-                          title: Row(
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
                             children: [
-                              Text(
-                                dev.deviceName,
-                                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 15),
-                              ),
-                              const SizedBox(width: 10),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFEFF6FF),
+                                  color: isOnline ? const Color(0xFFECFDF5) : const Color(0xFFF1F5F9),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
-                                child: Text(
-                                  dev.buildingLocation,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: const Color(0xFF1D4ED8),
-                                  ),
+                                child: Icon(
+                                  Icons.fingerprint_rounded,
+                                  color: isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                                  size: 28,
                                 ),
                               ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            'IP: ${dev.ipAddress} | Port: ${dev.port} | SN: ${dev.serialNumber.isEmpty ? "N/A" : dev.serialNumber} | Last Seen: $lastHb',
-                            style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
-                          ),
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: isOnline ? const Color(0xFF10B981) : Colors.grey,
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text(
+                                          dev.deviceName,
+                                          style: GoogleFonts.outfit(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                            color: const Color(0xFF0F172A),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: locBg,
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: Text(
+                                            dev.buildingLocation,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: locText,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 4,
+                                      children: [
+                                        _buildDetailBadge('IP', dev.ipAddress, const Color(0xFF334155)),
+                                        _buildDetailBadge('Port', '${dev.port}', const Color(0xFF334155)),
+                                        _buildDetailBadge('SN', dev.serialNumber.isEmpty ? 'N/A' : dev.serialNumber, const Color(0xFF334155)),
+                                        _buildDetailBadge('Last Seen', lastHb, isOnline ? const Color(0xFF059669) : const Color(0xFF64748B)),
+                                      ],
+                                    ),
+                                  ],
                                 ),
                               ),
                               const SizedBox(width: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: isOnline ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 8,
+                                      height: 8,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isOnline ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      isOnline ? 'ONLINE' : 'OFFLINE',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isOnline ? const Color(0xFF047857) : const Color(0xFFB91C1C),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  if (kIsWeb) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Raw IP ping is performed by the Windows Server PC app.'),
+                                        backgroundColor: Color(0xFF2563EB),
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  final success = await ZkTecoNetworkService.pingDevice(dev.ipAddress, port: dev.port);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          success
+                                              ? '🟢 Successfully reached ZKTeco device at ${dev.ipAddress}:${dev.port}!'
+                                              : '🔴 Could not reach ${dev.ipAddress}:${dev.port}. Please check router connection.',
+                                        ),
+                                        backgroundColor: success ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                      ),
+                                    );
+                                  }
+                                },
+                                icon: const Icon(Icons.bolt_rounded, size: 16),
+                                label: const Text('Test Ping'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFF1F5F9),
+                                  foregroundColor: const Color(0xFF334155),
+                                  elevation: 0,
+                                  side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
                               IconButton(
-                                icon: const Icon(Icons.edit_rounded, color: Colors.blue),
+                                icon: const Icon(Icons.edit_rounded, color: Color(0xFF2563EB)),
+                                tooltip: 'Edit Device Settings',
                                 onPressed: () => _showAddEditDeviceDialog(device: dev),
                               ),
                             ],
@@ -329,6 +637,25 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildDetailBadge(String label, String value, Color textColor) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Text(
+        '$label: $value',
+        style: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: textColor,
+        ),
+      ),
     );
   }
 
@@ -348,22 +675,29 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         }).toList();
 
         return Padding(
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(16),
           child: Column(
             children: [
               Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      onChanged: (val) => setState(() => _searchQuery = val.trim()),
-                      decoration: InputDecoration(
-                        hintText: 'Search by Name, Biometric PIN, or Role...',
-                        prefixIcon: const Icon(Icons.search_rounded),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(color: Colors.grey.shade300),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                      ),
+                      child: TextField(
+                        onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                        style: GoogleFonts.inter(fontSize: 14, color: const Color(0xFF0F172A), fontWeight: FontWeight.w600),
+                        decoration: InputDecoration(
+                          hintText: 'Search by Employee Name, Biometric PIN, or Role...',
+                          hintStyle: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 13),
+                          prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                     ),
                   ),
@@ -395,8 +729,9 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF10B981),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -405,10 +740,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     icon: const Icon(Icons.person_add_rounded, size: 18),
                     label: const Text('Link User PIN'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF6366F1),
+                      backgroundColor: const Color(0xFF4F46E5),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
                     ),
                   ),
                 ],
@@ -417,59 +753,127 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               Expanded(
                 child: Card(
                   elevation: 0,
+                  color: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: Color(0xFFE2E8F0)),
                   ),
                   child: filtered.isEmpty
                       ? Center(
-                          child: Text(
-                            'No biometric credentials linked yet. Click "Bulk Auto-Assign PINs" to assign PINs to all existing users!',
-                            style: GoogleFonts.inter(color: Colors.grey),
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.badge_outlined, size: 48, color: Color(0xFF94A3B8)),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No Biometric PINs Linked Yet',
+                                  style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Click "Bulk Auto-Assign PINs" to assign PINs to all existing staff profiles!',
+                                  style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
                           ),
                         )
                       : ListView.separated(
                           itemCount: filtered.length,
-                          separatorBuilder: (ctx, i) => const Divider(height: 1),
+                          separatorBuilder: (ctx, i) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
                           itemBuilder: (ctx, i) {
                             final c = filtered[i];
+                            final roleName = c.entityType.replaceAll('_', ' ').toUpperCase();
+
                             return ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                               leading: Container(
-                                padding: const EdgeInsets.all(8),
+                                width: 70,
+                                height: 50,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFEEF2FF),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  'PIN\n${c.biometricPin}',
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.outfit(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
-                                    color: const Color(0xFF4F46E5),
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFF4F46E5), Color(0xFF3730A3)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
                                   ),
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: const [
+                                    BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
+                                  ],
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'PIN',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 9,
+                                        color: const Color(0xFFC7D2FE),
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                    Text(
+                                      c.biometricPin,
+                                      style: GoogleFonts.outfit(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                              title: Text(
-                                c.entityName,
-                                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                              title: Row(
+                                children: [
+                                  Text(
+                                    c.entityName,
+                                    style: GoogleFonts.outfit(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                      color: const Color(0xFF0F172A),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFF1F5F9),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                                    ),
+                                    child: Text(
+                                      roleName,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: const Color(0xFF475569),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                               subtitle: Text(
-                                'Role: ${c.entityType.toUpperCase()} | Enrolled: ${DateFormat('yyyy-MM-dd').format(c.enrolledAt)}',
-                                style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
+                                'Enrolled: ${DateFormat('yyyy-MM-dd').format(c.enrolledAt)}',
+                                style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF64748B)),
                               ),
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.fingerprint_rounded, color: Color(0xFF10B981)),
-                                    tooltip: 'Enroll Fingerprint Steps for PIN ${c.biometricPin}',
+                                  ElevatedButton.icon(
                                     onPressed: () => _showEnrollFingerprintGuide(c),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Chip(
-                                    label: Text(c.deviceSource),
-                                    backgroundColor: const Color(0xFFF1F5F9),
+                                    icon: const Icon(Icons.fingerprint_rounded, size: 16),
+                                    label: const Text('Enroll Fingerprint'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFECFDF5),
+                                      foregroundColor: const Color(0xFF047857),
+                                      elevation: 0,
+                                      side: const BorderSide(color: Color(0xFFA7F3D0)),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -485,40 +889,48 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     );
   }
 
-  // ── Tab 3: Live Wi-Fi Punch Logs ───────────────────────────────────────────
+  // ── Tab 3: Live Scans & Logs ───────────────────────────────────────────────
 
   Widget _buildLiveLogsTab() {
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Live Incoming Wi-Fi Scans',
-            style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold),
+            'Live Incoming Scans',
+            style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
           ),
           Text(
             'Real-time stream of finger scans captured from ZKTeco devices across all buildings',
-            style: GoogleFonts.inter(fontSize: 13, color: Colors.grey[600]),
+            style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF64748B)),
           ),
           const SizedBox(height: 16),
           Expanded(
             child: Card(
               elevation: 0,
+              color: Colors.white,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.grey.shade200),
+                borderRadius: BorderRadius.circular(14),
+                side: const BorderSide(color: Color(0xFFE2E8F0)),
               ),
               child: _livePunches.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          const Icon(Icons.stream_rounded, size: 48, color: Colors.grey),
-                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFF1F5F9),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.stream_rounded, size: 40, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(height: 12),
                           Text(
                             'Waiting for finger scans on ZKTeco devices...',
-                            style: GoogleFonts.inter(color: Colors.grey),
+                            style: GoogleFonts.inter(color: const Color(0xFF64748B), fontWeight: FontWeight.w600),
                           ),
                         ],
                       ),
@@ -539,11 +951,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           ),
                           title: Text(
                             '${p['entityName']} (PIN: ${p['pin']})',
-                            style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+                            style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
                           ),
                           subtitle: Text(
                             'Location: ${p['buildingLocation']} | IP: ${p['deviceIp']} | Time: ${p['timestamp']}',
-                            style: GoogleFonts.inter(fontSize: 12),
+                            style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF64748B)),
                           ),
                           trailing: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -575,7 +987,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   void _showAddEditDeviceDialog({BiometricDeviceConfig? device}) {
     final isEdit = device != null;
     final nameCtrl = TextEditingController(text: device?.deviceName ?? 'Office Entrance Scanner');
-    final ipCtrl = TextEditingController(text: device?.ipAddress ?? '192.168.1.101');
+    final ipCtrl = TextEditingController(text: device?.ipAddress ?? '192.168.1.150');
     final portCtrl = TextEditingController(text: (device?.port ?? 4370).toString());
     String location = device?.buildingLocation ?? 'Office/Dasterkhwaan';
 
@@ -583,7 +995,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(isEdit ? 'Edit ZKTeco Device' : 'Add ZKTeco Wi-Fi Device'),
+        title: Text(isEdit ? 'Edit ZKTeco Device' : 'Add ZKTeco Device'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -593,12 +1005,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
-              value: location,
+              initialValue: location,
               decoration: const InputDecoration(labelText: 'Building Location'),
               items: const [
-                DropdownMenuItem(value: 'Office/Dasterkhwaan', child: Text('Building 1: Office & Dasterkhwaan')),
-                DropdownMenuItem(value: 'Dispensary', child: Text('Building 2: Dispensary')),
-                DropdownMenuItem(value: 'Madrassa', child: Text('Building 3: Madrassa')),
+                DropdownMenuItem(value: 'Office/Dasterkhwaan', child: Text('Building 1: Office & HQ')),
+                DropdownMenuItem(value: 'Dispensary', child: Text('Building 2: Dispensary Medical Center')),
+                DropdownMenuItem(value: 'Madrassa', child: Text('Building 3: Madrassa & Hifz Department')),
+                DropdownMenuItem(value: 'School', child: Text('Building 4: GMWF Model School')),
+                DropdownMenuItem(value: 'Dasterkhwaan Kitchen', child: Text('Building 5: Dasterkhwaan Dining & Kitchen')),
               ],
               onChanged: (val) {
                 if (val != null) location = val;
@@ -607,7 +1021,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             const SizedBox(height: 10),
             TextField(
               controller: ipCtrl,
-              decoration: const InputDecoration(labelText: 'Static IP Address on Wi-Fi "gmwf"'),
+              decoration: const InputDecoration(labelText: 'Static IP Address (e.g. 192.168.1.150)'),
             ),
             const SizedBox(height: 10),
             TextField(
@@ -630,7 +1044,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 buildingLocation: location,
                 ipAddress: ipCtrl.text.trim(),
                 port: int.tryParse(portCtrl.text.trim()) ?? 4370,
-                status: 'Online',
+                status: device?.status ?? 'Offline',
               );
               await ZkTecoNetworkService.saveDeviceConfig(newConfig);
               if (mounted) Navigator.pop(ctx);
@@ -673,7 +1087,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
-              value: type,
+              initialValue: type,
               decoration: const InputDecoration(labelText: 'Entity Role'),
               items: const [
                 DropdownMenuItem(value: 'employee', child: Text('Office / Dasterkhwaan Employee')),

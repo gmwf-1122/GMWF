@@ -2,6 +2,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -9,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:open_filex/open_filex.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class UpdateInfo {
   final String latestVersion;
@@ -30,7 +32,7 @@ class UpdateInfo {
 
 class AutoUpdateService {
   /// Current installed version of the GMWF application.
-  static const String currentVersion = '1.2.9';
+  static const String currentVersion = '1.3.5';
 
   /// Default GitHub repository configuration for auto-updates.
   static const String defaultRepoOwner = 'gmwf-1122';
@@ -165,27 +167,82 @@ class AutoUpdateService {
         final assets = data['assets'] as List?;
         if (assets != null && assets.isNotEmpty) {
           if (defaultTargetPlatform == TargetPlatform.android) {
-            // Pick standard APK asset over 32-bit if multiple exist
             final apkAssets = assets.where(
               (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.apk'),
             ).toList();
 
             if (apkAssets.isNotEmpty) {
-              final preferredApk = apkAssets.firstWhere(
-                (a) => !(a['name'] ?? '').toString().toLowerCase().contains('-32bit'),
+              // Architecture-aware APK matching for split-per-abi builds
+              List<String> supportedAbis = [];
+              try {
+                final androidInfo = await DeviceInfoPlugin().androidInfo;
+                supportedAbis = androidInfo.supportedAbis;
+              } catch (_) {}
+
+              Map<String, dynamic>? selectedApk;
+
+              if (supportedAbis.isNotEmpty) {
+                for (final abi in supportedAbis) {
+                  final abiClean = abi.toLowerCase();
+                  final match = apkAssets.firstWhere(
+                    (a) {
+                      final name = (a['name'] ?? '').toString().toLowerCase();
+                      return name.contains(abiClean) ||
+                          (abiClean.contains('arm64') && name.contains('arm64')) ||
+                          (abiClean.contains('v7a') && (name.contains('v7a') || name.contains('armv7'))) ||
+                          (abiClean.contains('x86_64') && name.contains('x86_64'));
+                    },
+                    orElse: () => null,
+                  );
+                  if (match != null) {
+                    selectedApk = match;
+                    break;
+                  }
+                }
+              }
+
+              // Fallback to universal APK or first non-32bit APK if no exact ABI match
+              selectedApk ??= apkAssets.firstWhere(
+                (a) {
+                  final name = (a['name'] ?? '').toString().toLowerCase();
+                  return !name.contains('-32bit') && !name.contains('x86') && !name.contains('v7a');
+                },
                 orElse: () => apkAssets.first,
               );
-              downloadUrl = (preferredApk['browser_download_url'] ?? preferredApk['url'] ?? '').toString();
+
+              downloadUrl = (selectedApk?['browser_download_url'] ?? selectedApk?['url'] ?? '').toString();
             }
           } else if (defaultTargetPlatform == TargetPlatform.windows) {
-            final exeAsset = assets.firstWhere(
+            final exeAssets = assets.where(
               (a) => (a['name'] ?? '').toString().toLowerCase().endsWith('.exe') ||
-                     (a['name'] ?? '').toString().toLowerCase().endsWith('.msi') ||
-                     (a['name'] ?? '').toString().toLowerCase().endsWith('.zip'),
-              orElse: () => null,
-            );
-            if (exeAsset != null) {
-              downloadUrl = (exeAsset['browser_download_url'] ?? exeAsset['url'] ?? '').toString();
+                     (a['name'] ?? '').toString().toLowerCase().endsWith('.msi'),
+            ).toList();
+
+            if (exeAssets.isNotEmpty) {
+              bool is64Bit = true;
+
+              Map<String, dynamic>? selectedExe;
+
+              if (is64Bit) {
+                selectedExe = exeAssets.firstWhere(
+                  (a) {
+                    final name = (a['name'] ?? '').toString().toLowerCase();
+                    return name.contains('x64') || name.contains('win64') || name.contains('64bit');
+                  },
+                  orElse: () => null,
+                );
+              } else {
+                selectedExe = exeAssets.firstWhere(
+                  (a) {
+                    final name = (a['name'] ?? '').toString().toLowerCase();
+                    return name.contains('x86') || name.contains('win32') || name.contains('32bit');
+                  },
+                  orElse: () => null,
+                );
+              }
+
+              selectedExe ??= exeAssets.first;
+              downloadUrl = (selectedExe?['browser_download_url'] ?? selectedExe?['url'] ?? '').toString();
             }
           } else if (defaultTargetPlatform == TargetPlatform.macOS) {
             final macAsset = assets.firstWhere(
@@ -203,11 +260,13 @@ class AutoUpdateService {
         if (downloadUrl.isEmpty || downloadUrl.contains('/releases/tag/') || downloadUrl.endsWith('/releases/latest')) {
           final cleanTag = rawTag.isNotEmpty ? rawTag : 'v$tag';
           if (defaultTargetPlatform == TargetPlatform.android) {
-            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-v$tag.apk';
+            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag.apk';
           } else if (defaultTargetPlatform == TargetPlatform.windows) {
-            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-v$tag.exe';
+            bool is64Bit = true;
+            final archSuffix = is64Bit ? '-x64' : '-x86';
+            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag$archSuffix.exe';
           } else {
-            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-v$tag.dmg';
+            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag.dmg';
           }
         }
 
@@ -251,7 +310,7 @@ class AutoUpdateService {
   }) async {
     try {
       final httpClient = HttpClient();
-      httpClient.connectionTimeout = const Duration(seconds: 15);
+      httpClient.connectionTimeout = const Duration(seconds: 20);
       httpClient.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
       String currentUrl = url;
@@ -279,8 +338,24 @@ class AutoUpdateService {
         break;
       }
 
-      if (response == null || response.statusCode != 200) {
-        debugPrint('[AutoUpdateService] HTTP Download failed with status: ${response?.statusCode}');
+      if (response == null) {
+        onProgress(0.0, 'Download Failed: Server did not respond. Check network connection.');
+        httpClient.close();
+        return null;
+      }
+
+      if (response.statusCode != 200) {
+        String msg;
+        if (response.statusCode == 404) {
+          msg = 'Download Failed (HTTP 404): Update binary file not found on GitHub release server.';
+        } else if (response.statusCode == 403) {
+          msg = 'Download Failed (HTTP 403): GitHub API access forbidden or rate limit reached.';
+        } else if (response.statusCode >= 500) {
+          msg = 'Download Failed (HTTP ${response.statusCode}): Release server is temporarily unavailable.';
+        } else {
+          msg = 'Download Failed: Server returned status HTTP ${response.statusCode}.';
+        }
+        onProgress(0.0, msg);
         httpClient.close();
         return null;
       }
@@ -311,8 +386,16 @@ class AutoUpdateService {
       httpClient.close();
 
       return file;
+    } on SocketException catch (e) {
+      onProgress(0.0, 'Network Connection Error: Unable to reach update server (${e.message}). Please check internet or firewall.');
+    } on HandshakeException catch (e) {
+      onProgress(0.0, 'SSL Security Error: Handshake failed (${e.message}). Check device date & time settings.');
+    } on TimeoutException {
+      onProgress(0.0, 'Connection Timeout: Update server took too long to respond. Network connection is unstable.');
+    } on FileSystemException catch (e) {
+      onProgress(0.0, 'Storage Error: Could not write update file (${e.message}). Ensure sufficient free disk space.');
     } catch (e) {
-      debugPrint('[AutoUpdateService] Download error: $e');
+      onProgress(0.0, 'Download Failed: Unexpected error ($e)');
     }
     return null;
   }
@@ -356,7 +439,6 @@ class AutoUpdateService {
     );
 
     if (downloadedFile == null || !await downloadedFile.exists()) {
-      onProgress(0.0, 'Download failed. Please check internet connection.');
       return false;
     }
 
@@ -367,14 +449,17 @@ class AutoUpdateService {
       if (defaultTargetPlatform == TargetPlatform.windows) {
         debugPrint('[AutoUpdateService] Launching Windows installer: $filePath');
         bool processStarted = false;
+        String winErr = '';
         try {
           // Launch Inno Setup silent installer
           await Process.start(filePath, ['/verysilent', '/suppressmsgboxes', '/norestart', '/sp-']);
           processStarted = true;
         } catch (e) {
+          winErr = e.toString();
           debugPrint('[AutoUpdateService] Process.start failed ($e), attempting OpenFilex launch...');
           final result = await OpenFilex.open(filePath);
           processStarted = result.type == ResultType.done;
+          if (!processStarted) winErr = result.message;
         }
 
         if (processStarted) {
@@ -382,14 +467,13 @@ class AutoUpdateService {
           await Future.delayed(const Duration(seconds: 2));
           exit(0);
         } else {
-          onProgress(0.0, 'Failed to launch installer. Please run installer manually.');
+          onProgress(0.0, 'Windows Installation Failed: $winErr. Windows SmartScreen or Antivirus blocked execution.');
           return false;
         }
       } else if (defaultTargetPlatform == TargetPlatform.android) {
         debugPrint('[AutoUpdateService] Launching Android Package Installer for: $filePath');
         onProgress(1.0, 'Launching Package Installer...');
 
-        // Trigger native Android installer via FileProvider
         final result = await OpenFilex.open(filePath, type: "application/vnd.android.package-archive");
         debugPrint('[AutoUpdateService] OpenFilex result: ${result.type} - ${result.message}');
 
@@ -397,32 +481,34 @@ class AutoUpdateService {
           onProgress(1.0, 'Package installer opened. Complete installation on your screen.');
           return true;
         } else if (result.type == ResultType.permissionDenied) {
-          onProgress(0.0, 'Permission denied: Please allow "Install unknown apps" for GMWF in Android settings.');
-          // Fallback to opening browser link if permissions block in-app install
+          onProgress(0.0, 'Permission Denied: Android blocked installation. Please enable "Install Unknown Apps" for GMWF in Android Settings.');
           try {
             final uri = Uri.parse(effectiveUrl);
             await launchUrl(uri, mode: LaunchMode.externalApplication);
           } catch (_) {}
           return false;
+        } else if (result.type == ResultType.fileNotFound) {
+          onProgress(0.0, 'File Error: Downloaded APK file was not found at $filePath.');
+          return false;
         } else {
-          // Fallback to browser URL if direct APK launch fails on older devices
-          debugPrint('[AutoUpdateService] OpenFilex failed (${result.message}), opening browser download URL fallback...');
+          onProgress(0.0, 'Installation Failed: ${result.message} (Error Code: ${result.type}).');
           try {
             final uri = Uri.parse(effectiveUrl);
             await launchUrl(uri, mode: LaunchMode.externalApplication);
-            return true;
-          } catch (e) {
-            onProgress(0.0, 'Failed to open installer: ${result.message}');
-            return false;
-          }
+          } catch (_) {}
+          return false;
         }
       } else {
         final result = await OpenFilex.open(filePath);
-        return result.type == ResultType.done;
+        if (result.type != ResultType.done) {
+          onProgress(0.0, 'Installation Failed: ${result.message}');
+          return false;
+        }
+        return true;
       }
     } catch (e) {
       debugPrint('[AutoUpdateService] Installation trigger error: $e');
-      onProgress(0.0, 'Failed to launch installer: $e');
+      onProgress(0.0, 'Installation System Error: $e');
       return false;
     }
   }

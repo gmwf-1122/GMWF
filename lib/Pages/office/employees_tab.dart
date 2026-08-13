@@ -15,6 +15,7 @@ import 'employee_form_sheet.dart';
 import 'employee_detail_page.dart';
 import 'finance_report_helper.dart';
 import 'employee_report_page.dart';
+import '../settings/biometric_device_manager_page.dart';
 
 
 class EmployeesTab extends StatefulWidget {
@@ -135,6 +136,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
         builder: (context, Box box, _) {
           final query = _searchCtrl.text.trim().toLowerCase();
           final list = FinanceLocalStorage.getEmployees(widget.branchId).where((emp) {
+            final role = (emp['role'] ?? emp['linkedUserRole'] ?? emp['designation'] ?? '').toString().toLowerCase().trim();
+            final dept = (emp['department'] ?? emp['linkedDepartment'] ?? '').toString().toLowerCase().trim();
+            if (role.contains('guardian') || role.contains('patient') || dept.contains('guardian') || dept.contains('patient') || emp['isEmployee'] == false) {
+              return false;
+            }
+
             // Apply role
             if (_roleFilter != 'All' && emp['role'] != _roleFilter) return false;
             // Apply dept
@@ -265,6 +272,30 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   child: IconButton(
                     icon: Icon(Icons.trending_up, color: t.accent, size: 20),
                     onPressed: () => _openAnnualIncrementsDialog(context),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'ZKTeco Devices & Fingerprint PINs',
+                child: Container(
+                  height: 44,
+                  width: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.fingerprint_rounded, color: Color(0xFF059669), size: 22),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),

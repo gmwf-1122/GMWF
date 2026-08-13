@@ -35,6 +35,9 @@ class _RegisterState extends State<Register>
   String? _selectedDepartment;
   String? _selectedRole;
   String? _selectedBranch;
+  String? _selectedDispensary; // Legacy single dispensary selection ('kapayya', 'haji_camp')
+  final Set<String> _selectedDispensaries = {}; // Multi-camp assignment
+  final Map<String, String> _campSessions = {}; // Camp to mandatory session mapping
   String? _selectedDegree;
 
   final TextEditingController _usernameController       = TextEditingController();
@@ -186,12 +189,24 @@ class _RegisterState extends State<Register>
   Future<void> _loadBranches() async {
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
+      var list = snap.docs.map((d) {
+        final data = d.data();
+        return {'id': d.id, 'name': data['name'] as String? ?? d.id};
+      }).toList();
+
+      final role = _getCurrentUserRole();
+      final scopedBranchId = _getCurrentUserBranchId();
+      final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role);
+      
+      if (!isGlobalExec && scopedBranchId.isNotEmpty && scopedBranchId != 'all' && scopedBranchId != 'global') {
+        list = list.where((b) => b['id'].toString().toLowerCase().trim() == scopedBranchId).toList();
+      }
+
       setState(() {
-        _branches = snap.docs.map((d) {
-          final data = d.data();
-          return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-        }).toList()
-          ..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+        _branches = list..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+        if (_branches.isNotEmpty && !isGlobalExec) {
+          _selectedBranch = _branches.first['name'];
+        }
       });
     } catch (e) {
       _snack('Failed to load branches: $e', error: true);
@@ -353,6 +368,12 @@ class _RegisterState extends State<Register>
         degree:             degree.isNotEmpty ? degree : null,
         salary:             salary,
         studentId:          _selectedStudentId, // Pass the student ID
+        dispensaryId:       _selectedDispensary, // Pass dispensary sub-location ('kapayya', 'haji_camp')
+        dispensaryIds:      _selectedDispensaries.toList(), // Pass multi-camp assignments
+        campSchedule:       _selectedDispensaries.map((id) => {
+                              'campId': id,
+                              'session': _campSessions[id] ?? 'morning',
+                            }).toList(),
         profileImageXFile:  _profileImageXFile,
         profileImageBytes:  _profileImageBytes,
         identificationFile: _identificationFile,
@@ -376,6 +397,8 @@ class _RegisterState extends State<Register>
         _identificationBase64 = null;
         _degreeBase64         = null;
         _selectedBranch       = null;
+        _selectedDispensary   = null;
+        _selectedDispensaries.clear();
         _selectedDegree       = null;
         _selectedStudentId    = null;
         _profileImageXFile    = null;
@@ -491,6 +514,7 @@ class _RegisterState extends State<Register>
                                 _buildRoleDropdown(t),
                                 const SizedBox(height: 14),
                                 _buildBranchDropdown(t),
+                                _buildDispensaryDropdown(t),
                                 if (_selectedRole == 'Madrassa Parent') ...[
                                   const SizedBox(height: 14),
                                   _buildChildDropdown(t),
@@ -832,6 +856,31 @@ class _RegisterState extends State<Register>
     }
   }
 
+  String _getCurrentUserBranchId() {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final curUid = currentUser?.uid ?? '';
+      if (curUid.isNotEmpty && Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final curMap = Hive.box(LocalStorageService.usersBox).get(curUid);
+        if (curMap is Map) {
+          final b = (curMap['branchId'] ?? curMap['branch'] ?? '').toString().toLowerCase().trim();
+          if (b.isNotEmpty) return b;
+        }
+      }
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final currentMap = box.get('user_data') ?? box.get('currentUser');
+        if (currentMap is Map) {
+          final b = (currentMap['branchId'] ?? currentMap['branch'] ?? '').toString().toLowerCase().trim();
+          if (b.isNotEmpty) return b;
+        }
+      }
+      return '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   Widget _buildRoleDropdown(RoleThemeData t) {
     List<Map<String, dynamic>> roles = _selectedDepartment == null
         ? []
@@ -1019,6 +1068,177 @@ class _RegisterState extends State<Register>
         }
         return null;
       },
+    );
+  }
+
+  Widget _buildDispensaryDropdown(RoleThemeData t) {
+    final bool isDispensaryRelated = (_selectedDepartment?.toLowerCase() == 'dispensary') ||
+        ['doctor', 'receptionist', 'dispenser', 'rec+dis', 'doc+rec', 'doc+dis', 'doc+rec+dis', 'supervisor', 'branch manager']
+            .contains(_selectedRole?.toLowerCase().trim());
+    if (!isDispensaryRelated || _selectedBranch == null) return const SizedBox.shrink();
+
+    String bId = '';
+    try { bId = _getBranchId().toLowerCase().trim(); } catch (_) {}
+
+    List<Map<String, dynamic>> rawDispensaries = [];
+    try {
+      if (Hive.isBoxOpen('local_branches')) {
+        final raw = Hive.box('local_branches').get('branch:$bId');
+        if (raw is Map && raw['dispensaries'] is List) {
+          rawDispensaries = List<Map<String, dynamic>>.from(raw['dispensaries']);
+        }
+      }
+    } catch (_) {}
+
+    // Default for Karachi if not in local box yet
+    if (bId == 'karachi' && rawDispensaries.isEmpty) {
+      rawDispensaries = [
+        {'id': 'kapayya', 'name': 'Kapayya Dispensary'},
+        {'id': 'haji_camp', 'name': 'Haji Camp Dispensary'},
+      ];
+    }
+
+    if (rawDispensaries.isEmpty) return const SizedBox.shrink();
+
+    final isAllSelected = _selectedDispensaries.isEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14.0),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: t.bgCardAlt,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: t.bgRule),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.local_hospital_rounded, color: t.accent, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Assigned Camp Facilities & Mandatory Shift Schedule',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: t.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilterChip(
+                  label: const Text('All Dispensaries (Central)'),
+                  selected: isAllSelected,
+                  selectedColor: t.accent.withValues(alpha: 0.2),
+                  checkmarkColor: t.accent,
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: isAllSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isAllSelected ? t.accent : t.textSecondary,
+                  ),
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedDispensaries.clear();
+                      _selectedDispensary = null;
+                      _campSessions.clear();
+                    });
+                  },
+                ),
+                ...rawDispensaries.map((d) {
+                  final id = (d['id'] ?? '').toString().toLowerCase().trim();
+                  final label = (d['name'] ?? d['id'] ?? '').toString();
+                  final isSelected = _selectedDispensaries.contains(id);
+
+                  return FilterChip(
+                    label: Text(label),
+                    selected: isSelected,
+                    selectedColor: t.accent.withValues(alpha: 0.2),
+                    checkmarkColor: t.accent,
+                    labelStyle: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? t.accent : t.textSecondary,
+                    ),
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _selectedDispensaries.add(id);
+                          _campSessions[id] ??= 'morning';
+                        } else {
+                          _selectedDispensaries.remove(id);
+                          _campSessions.remove(id);
+                        }
+                        _selectedDispensary = _selectedDispensaries.isNotEmpty ? _selectedDispensaries.first : null;
+                      });
+                    },
+                  );
+                }),
+              ],
+            ),
+            if (_selectedDispensaries.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Mandatory Session per Selected Facility:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+              ),
+              const SizedBox(height: 8),
+              ..._selectedDispensaries.map((campId) {
+                final campLabel = rawDispensaries.firstWhere(
+                  (d) => d['id']?.toString().toLowerCase().trim() == campId,
+                  orElse: () => {'name': campId},
+                )['name'];
+                final currentSession = _campSessions[campId] ?? 'morning';
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.shade50.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.teal.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.location_on, size: 16, color: Colors.teal.shade800),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          campLabel,
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.teal.shade900),
+                        ),
+                      ),
+                      const Text('Shift: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                      DropdownButton<String>(
+                        value: currentSession,
+                        underline: const SizedBox.shrink(),
+                        isDense: true,
+                        items: const [
+                          DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
+                          DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
+                          DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
+                          DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() => _campSessions[campId] = val);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ],
+        ),
+      ),
     );
   }
 

@@ -4,8 +4,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/theme/app_theme.dart';
@@ -33,12 +36,23 @@ class _PatientListState extends State<PatientList>
   static const Color _blue   = Color(0xFF1976D2);
   static const Color _purple = Color(0xFF6A1B9A);
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   late final AnimationController _pulse;
   final ScrollController _scroll = ScrollController();
 
-  final String _todayKey = DateFormat('ddMMyy').format(DateTime.now());
+  String get _todayKey => CampSessionService.resolveShiftAndDateKey().dateKey;
+  String _selectedSessionFilter = 'auto';
 
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
+  List<StreamSubscription>? _todaySerialsSubs;
 
   @override
   void initState() {
@@ -67,9 +81,22 @@ class _PatientListState extends State<PatientList>
       }
     });
 
+    _startTodaySerialsListener();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tryAutoSelectSmallestPending();
     });
+  }
+
+  @override
+  void didUpdateWidget(PatientList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selectedPatient != widget.selectedPatient ||
+        widget.selectedPatient == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _tryAutoSelectSmallestPending();
+      });
+    }
   }
 
   @override
@@ -77,26 +104,120 @@ class _PatientListState extends State<PatientList>
     _pulse.dispose();
     _scroll.dispose();
     _realtimeSub?.cancel();
+    _cancelTodaySerialsListeners();
     super.dispose();
   }
 
-  // ─── Serial number helper ──────────────────────────────────────────────────
+  void _startTodaySerialsListener() {
+    _cancelTodaySerialsListeners();
+    if (widget.branchId.isEmpty) return;
+    _todaySerialsSubs = [];
+    final serialsRef = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection('serials')
+        .doc(_todayKey);
+
+    for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+      final sub = serialsRef.collection(type).snapshots().listen((snap) {
+        bool hasChanges = false;
+        for (final change in snap.docChanges) {
+          if (change.type == DocumentChangeType.added ||
+              change.type == DocumentChangeType.modified) {
+            final data = change.doc.data();
+            if (data != null) {
+              final serial = change.doc.id;
+              final entryData = Map<String, dynamic>.from(data);
+              entryData['queueType'] ??= type;
+              entryData['dateKey']   ??= _todayKey;
+              entryData['serial']    ??= serial;
+              LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+              hasChanges = true;
+            }
+          }
+        }
+        if (hasChanges && mounted) {
+          setState(() {});
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _tryAutoSelectSmallestPending();
+          });
+        }
+      }, onError: (e) {
+        debugPrint('[PatientList] Today serials listener error ($type): $e');
+      });
+      _todaySerialsSubs!.add(sub);
+    }
+  }
+
+  void _cancelTodaySerialsListeners() {
+    if (_todaySerialsSubs != null) {
+      for (final sub in _todaySerialsSubs!) {
+        sub.cancel();
+      }
+      _todaySerialsSubs = null;
+    }
+  }
+
   int _extractSerialNumber(Map<String, dynamic> p) {
-    final s     = (p['serial'] ?? '000000-999').toString();
-    final parts = s.split('-');
-    return parts.length > 1 ? int.tryParse(parts.last) ?? 999999 : 999999;
+    final s = (p['serial'] ?? p['id'] ?? '').toString();
+    return parseSequenceFromSerial(s);
+  }
+
+  String? get _userDispensaryId {
+    final active = CampSessionService.getActiveCamp();
+    if (active != null && active.isNotEmpty) return active;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final userData = Hive.box('app_settings').get('user_data');
+        if (userData is Map && userData['dispensaryId'] != null) {
+          final d = userData['dispensaryId'].toString().trim().toLowerCase();
+          if (d.isNotEmpty && d != 'all') return d;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   // ─── Two-group sort ────────────────────────────────────────────────────────
   List<Map<String, dynamic>> _getSortedQueue() {
-    final all = LocalStorageService.getLocalEntries(widget.branchId)
+    final userDisp = _userDispensaryId;
+    final activeShift = CampSessionService.getCurrentSession();
+    final targetSession = _selectedSessionFilter == 'auto'
+        ? activeShift
+        : _selectedSessionFilter;
+
+    var all = LocalStorageService.getLocalEntries(
+          widget.branchId,
+          dispensaryId: userDisp,
+          filterByCamp: true,
+        )
         .where((e) {
           final dateKey = e['dateKey']?.toString() ?? '';
           final status  = (e['status'] ?? '').toString().toLowerCase();
-          return dateKey == _todayKey &&
-              (status == 'completed' || status == 'dispensed');
+          final hasPresc = e['prescription'] != null;
+          return dateKey == _todayKey && (status == 'completed' || status == 'dispensed' || status == 'prescribed' || hasPresc);
         })
         .toList();
+
+    if (targetSession != 'all') {
+      final String? priorShift = switch (activeShift) {
+        'evening' => 'morning',
+        'night'   => 'evening',
+        _         => null,
+      };
+
+      all = all.where((entry) {
+        final s = (entry['session'] ?? '').toString().toLowerCase().trim();
+        final ds = (entry['dispenseStatus'] ?? '').toString().toLowerCase();
+        final isUndispensed = ds != 'dispensed';
+        if (s == targetSession) return true;
+        // Prior shift carryover
+        if (_selectedSessionFilter == 'auto' && priorShift != null && s == priorShift && isUndispensed) {
+          return true;
+        }
+        return false;
+      }).toList();
+    }
 
     final pending   = <Map<String, dynamic>>[];
     final onHold    = <Map<String, dynamic>>[];
@@ -113,12 +234,18 @@ class _PatientListState extends State<PatientList>
       }
     }
 
-    pending.sort(
-        (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
-    onHold.sort(
-        (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
-    dispensed.sort(
-        (a, b) => _extractSerialNumber(a).compareTo(_extractSerialNumber(b)));
+    int compareTokens(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final numA = _extractSerialNumber(a);
+      final numB = _extractSerialNumber(b);
+      if (numA != numB) return numA.compareTo(numB);
+      final dtA = a['createdAt']?.toString() ?? '';
+      final dtB = b['createdAt']?.toString() ?? '';
+      return dtA.compareTo(dtB);
+    }
+
+    pending.sort(compareTokens);
+    onHold.sort(compareTokens);
+    dispensed.sort(compareTokens);
 
     return [...pending, ...onHold, ...dispensed];
   }
@@ -166,7 +293,7 @@ class _PatientListState extends State<PatientList>
       builder: (context, constraints) {
         return Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
             borderRadius: BorderRadius.circular(isMobile ? 20 : 36),
             boxShadow: [
               BoxShadow(
@@ -187,7 +314,7 @@ class _PatientListState extends State<PatientList>
                   isMobile ? 14 : 24,
                 ),
                 decoration: BoxDecoration(
-                  color: _teal,
+                  color: _isDark ? const Color(0xFF0F766E) : _teal,
                   borderRadius: BorderRadius.vertical(
                       top: Radius.circular(isMobile ? 20 : 36)),
                 ),
@@ -215,6 +342,38 @@ class _PatientListState extends State<PatientList>
                           WidgetsBinding.instance.addPostFrameCallback(
                               (_) => _tryAutoSelectSmallestPending());
                         },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Session Filter Bar ─────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                color: Colors.teal.shade50,
+                child: Row(
+                  children: [
+                    const Icon(Icons.schedule, size: 14, color: _teal),
+                    const SizedBox(width: 6),
+                    const Text('Session:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _buildSessionChip('auto', 'Auto (${CampSessionService.getCurrentSession() == 'morning' ? 'Morning' : (CampSessionService.getCurrentSession() == 'evening' ? 'Evening' : 'Night')})'),
+                            const SizedBox(width: 6),
+                            _buildSessionChip('morning', '☀️ Morning'),
+                            const SizedBox(width: 6),
+                            _buildSessionChip('evening', '🌅 Evening'),
+                            const SizedBox(width: 6),
+                            _buildSessionChip('night', '🌙 Night'),
+                            const SizedBox(width: 6),
+                            _buildSessionChip('all', 'All Sessions'),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -336,15 +495,17 @@ class _PatientListState extends State<PatientList>
                                        margin: EdgeInsets.symmetric(
                                            vertical: isMobile ? 4 : 6),
                                        decoration: Neumorphic3DStyle.raisedDecoration(
-                                         isDark: false,
-                                         backgroundColor: isSelected
-                                             ? Colors.teal.shade50
-                                             : Colors.white,
-                                         borderRadius: isMobile ? 12 : 16,
-                                         borderColor: isSelected ? _teal : const Color(0xFFE2E8F0),
-                                         accentColor: _teal,
-                                         showGlow: isSelected,
-                                       ),
+                                          isDark: _isDark,
+                                          backgroundColor: isSelected
+                                              ? (_isDark ? const Color(0xFF1A3A3A) : Colors.teal.shade50)
+                                              : (_isDark ? const Color(0xFF1E293B) : Colors.white),
+                                          borderRadius: isMobile ? 12 : 16,
+                                          borderColor: isSelected
+                                              ? (_isDark ? const Color(0xFF0F766E) : _teal)
+                                              : (_isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                          accentColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                                          showGlow: isSelected,
+                                        ),
                                        child: ListTile(
                                         dense: isMobile,
                                         contentPadding:
@@ -389,7 +550,7 @@ class _PatientListState extends State<PatientList>
                                             fontWeight: FontWeight.w600,
                                             color: isDispensed
                                                 ? Colors.grey.shade500
-                                                : Colors.black87,
+                                                : (_isDark ? Colors.white : Colors.black87),
                                           ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
@@ -400,10 +561,10 @@ class _PatientListState extends State<PatientList>
                                             fontSize: isMobile ? 12 : 14,
                                             fontWeight: FontWeight.bold,
                                             color: isSelected
-                                                ? _teal
+                                                ? (_isDark ? const Color(0xFF38BDF8) : _teal)
                                                 : (isDispensed
                                                     ? Colors.grey.shade500
-                                                    : Colors.black54),
+                                                    : (_isDark ? const Color(0xFF94A3B8) : Colors.black54)),
                                           ),
                                         ),
                                         trailing: Icon(
@@ -455,12 +616,12 @@ class _PatientListState extends State<PatientList>
       width:   isMobile ? 68 : 80,
       padding: EdgeInsets.symmetric(vertical: isMobile ? 6 : 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(isMobile ? 14 : 20),
         border: Border.all(color: color.withValues(alpha: 0.8), width: 1.5),
         boxShadow: [
           BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.1),
+              color: _isDark ? Colors.black26 : Colors.grey.withValues(alpha: 0.1),
               blurRadius: 6,
               offset: const Offset(0, 3)),
         ],
@@ -479,6 +640,30 @@ class _PatientListState extends State<PatientList>
                   fontWeight: FontWeight.bold,
                   fontSize: isMobile ? 20 : 24)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSessionChip(String value, String label) {
+    final isSelected = _selectedSessionFilter == value;
+    return InkWell(
+      onTap: () => setState(() => _selectedSessionFilter = value),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? _teal : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? _teal : Colors.teal.shade200),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 10.5,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : Colors.teal.shade900,
+          ),
+        ),
       ),
     );
   }

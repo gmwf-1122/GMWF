@@ -14,6 +14,7 @@ import '../../widgets/gmwf_loading_view.dart';
 import '../donations/donations_screen.dart';
 import '../donations/donations_shared.dart';
 import '../../services/donations_local_storage.dart';
+import '../../services/auth_service.dart';
 
 // ─────────────────────────── Design Tokens ──────────────────────────────────
 
@@ -288,6 +289,149 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     setState(() {});
   }
 
+  Future<void> _showReverseTokensDialog() async {
+    if (_branchId == null) {
+      _showSnack('Branch not found!', isError: true);
+      return;
+    }
+
+    final tokensRef = FirebaseFirestore.instance
+        .collection('branches').doc(_branchId)
+        .collection('dasterkhwaan').doc(today)
+        .collection('tokens');
+
+    final dayRef = FirebaseFirestore.instance
+        .collection('branches').doc(_branchId)
+        .collection('dasterkhwaan').doc(today);
+
+    final unservedSnap = await tokensRef.where('served', isEqualTo: false).get();
+    final unservedDocs = unservedSnap.docs;
+    unservedDocs.sort((a, b) {
+      final numA = (a.data())['number'] as int? ?? 0;
+      final numB = (b.data())['number'] as int? ?? 0;
+      return numB.compareTo(numA);
+    });
+
+    if (unservedDocs.isEmpty) {
+      _showSnack('No unserved tokens available to reverse today.', isError: true);
+      return;
+    }
+
+    final reverseQtyCtrl = TextEditingController(text: '1');
+
+    final confirmQty = await showDialog<int>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setS) {
+          final qty = int.tryParse(reverseQtyCtrl.text) ?? 0;
+          return AlertDialog(
+            backgroundColor: _DS.surface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_DS.r22)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: _DS.redBg, borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.undo_rounded, color: _DS.red, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Text('Reverse Food Tokens', style: GoogleFonts.dmSerifDisplay(fontSize: 20, color: _DS.ink)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Unintentionally issued tokens can be voided. ${unservedDocs.length} unserved token(s) available today.',
+                  style: GoogleFonts.dmSans(fontSize: 13, color: _DS.ink3),
+                ),
+                const SizedBox(height: 16),
+                Text('TOKENS TO REVERSE', style: _TS.label(c: _DS.ink3)),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [1, 2, 3, 5, 10].map((q) {
+                    final sel = reverseQtyCtrl.text == q.toString();
+                    return GestureDetector(
+                      onTap: () => setS(() => reverseQtyCtrl.text = q.toString()),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: sel ? _DS.red : _DS.surface2,
+                          borderRadius: BorderRadius.circular(_DS.r12),
+                        ),
+                        child: Text('$q', style: GoogleFonts.dmSans(color: sel ? Colors.white : _DS.ink, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reverseQtyCtrl,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (_) => setS(() {}),
+                  style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold, color: _DS.ink),
+                  decoration: InputDecoration(
+                    hintText: 'Custom quantity…',
+                    hintStyle: GoogleFonts.dmSans(fontSize: 13, color: _DS.ink3),
+                    suffixText: '= PKR ${(qty * _pricePerToken).toStringAsFixed(0)}',
+                    suffixStyle: GoogleFonts.dmSans(color: _DS.red, fontWeight: FontWeight.bold, fontSize: 12),
+                    filled: true,
+                    fillColor: _DS.surface2,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(_DS.r14), borderSide: BorderSide.none),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('Cancel', style: GoogleFonts.dmSans(color: _DS.ink3, fontWeight: FontWeight.w600)),
+              ),
+              ElevatedButton.icon(
+                onPressed: (qty <= 0 || qty > unservedDocs.length)
+                    ? null
+                    : () => Navigator.pop(ctx, qty),
+                icon: const Icon(Icons.history_toggle_off_rounded, size: 18),
+                label: Text('Reverse $qty Token${qty != 1 ? "s" : ""}'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _DS.red,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_DS.r14)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmQty == null || confirmQty <= 0) return;
+
+    try {
+      final docsToDelete = unservedDocs.take(confirmQty).toList();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in docsToDelete) {
+        batch.delete(doc.reference);
+      }
+      batch.set(
+        dayRef,
+        {'totalTokens': FieldValue.increment(-confirmQty)},
+        SetOptions(merge: true),
+      );
+      await batch.commit();
+
+      if (!mounted) return;
+      _showSnack('Reversed $confirmQty Token${confirmQty > 1 ? "s" : ""} · PKR ${(confirmQty * _pricePerToken).toStringAsFixed(0)} voided', isError: false);
+      setState(() {});
+    } catch (e) {
+      _showSnack('Error reversing tokens: $e', isError: true);
+    }
+  }
+
   void _showSnack(String msg, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
@@ -337,6 +481,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             today:        today,
             getTodayStats: _getTodayStats,
             onGoTokens:   () => setState(() => _currentNav = 1),
+            onReverseTokens: _showReverseTokensDialog,
             onGoHistory:  () => setState(() => _currentNav = 2),
             onGoDonation: () => setState(() => _currentNav = 3),
             onLogout:     _logout,
@@ -352,6 +497,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             quantityController: _qtyCtrl,
             pricePerToken:      _pricePerToken,
             onGenerate:         _generateTokens,
+            onReverse:          _showReverseTokensDialog,
             pulseAnim:          _pulseAnim,
             getTodayStats:      _getTodayStats,
             onLogout:           _logout,
@@ -387,7 +533,11 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   }
 
   Future<void> _logout() async {
-    await FirebaseAuth.instance.signOut();
+    try {
+      await AuthService().signOut();
+    } catch (e) {
+      debugPrint('[DasterkhwaanOfficeBoy] Sign out error: $e');
+    }
     if (mounted) {
       Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
     }
@@ -471,7 +621,7 @@ class _HomeScreen extends StatelessWidget {
   final String? branchId;
   final String today;
   final Future<Map<String, dynamic>> Function() getTodayStats;
-  final VoidCallback onGoTokens, onGoHistory, onGoDonation, onLogout;
+  final VoidCallback onGoTokens, onReverseTokens, onGoHistory, onGoDonation, onLogout;
   final Animation<double> heroFade;
   final double pricePerToken;
   final bool isOfficeBoy;
@@ -483,6 +633,7 @@ class _HomeScreen extends StatelessWidget {
     required this.today,
     required this.getTodayStats,
     required this.onGoTokens,
+    required this.onReverseTokens,
     required this.onGoHistory,
     required this.onGoDonation,
     required this.onLogout,
@@ -572,6 +723,16 @@ class _HomeScreen extends StatelessWidget {
                   subtitle:  'Generate meal tokens for guests',
                   urdu:      'کھانے کا ٹوکن جاری کریں',
                   onTap:     onGoTokens,
+                ),
+                const SizedBox(height: 10),
+                _ActionCardWide(
+                  icon:      Icons.undo_rounded,
+                  iconColor: _DS.red,
+                  iconBg:    _DS.redBg,
+                  title:     'Reverse / Void Tokens',
+                  subtitle:  'Void mistakenly issued food tokens',
+                  urdu:      'ٹوکن واپس / منسوخ کریں',
+                  onTap:     onReverseTokens,
                 ),
                 if (isOfficeBoy) ...[
                   const SizedBox(height: 10),
@@ -1056,7 +1217,7 @@ class _TokensScreen extends StatelessWidget {
   final DateFormat displayFormat;
   final TextEditingController quantityController;
   final double pricePerToken;
-  final VoidCallback onGenerate, onLogout;
+  final VoidCallback onGenerate, onReverse, onLogout;
   final Animation<double> pulseAnim;
   final Future<Map<String, dynamic>> Function() getTodayStats;
   final void Function(int) onSelectQty;
@@ -1070,6 +1231,7 @@ class _TokensScreen extends StatelessWidget {
     required this.quantityController,
     required this.pricePerToken,
     required this.onGenerate,
+    required this.onReverse,
     required this.pulseAnim,
     required this.getTodayStats,
     required this.onSelectQty,
@@ -1286,6 +1448,13 @@ class _TokensScreen extends StatelessWidget {
                 pulseAnim:          pulseAnim,
                 onPressed:          onGenerate,
               ),
+              const SizedBox(height: 14),
+
+              // Reverse button
+              _ReverseButton(
+                pricePerToken: pricePerToken,
+                onPressed:     onReverse,
+              ),
             ],
           ),
         ),
@@ -1430,6 +1599,54 @@ class _IssueButton extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReverseButton extends StatelessWidget {
+  final double pricePerToken;
+  final VoidCallback onPressed;
+
+  const _ReverseButton({
+    required this.pricePerToken,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 54,
+      decoration: BoxDecoration(
+        color: _DS.redBg,
+        borderRadius: BorderRadius.circular(_DS.r22),
+        border: Border.all(color: _DS.red.withValues(alpha: 0.3), width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(_DS.r22),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.undo_rounded, size: 18, color: _DS.red),
+                const SizedBox(width: 10),
+                Text(
+                  'Reverse / Void Tokens',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _DS.red,
+                  ),
+                ),
+              ],
             ),
           ),
         ),

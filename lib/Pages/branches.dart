@@ -18,6 +18,7 @@ import 'dispensary/dispensar/inventory.dart';
 import 'office/finance_page.dart';
 import 'branches_register.dart';
 import 'dispensary/patient_detail_screen.dart';
+import 'admin/branch_facility_editor.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -1217,6 +1218,92 @@ class _BranchesState extends ConsumerState<Branches>
     );
   }
 
+  Widget _subDispensaryFilter(RoleThemeData t, String branchId) {
+    Map<String, dynamic>? branchData;
+    try {
+      if (Hive.isBoxOpen('local_branches')) {
+        final raw = Hive.box('local_branches').get('branch:${branchId.toLowerCase().trim()}');
+        if (raw is Map) branchData = Map<String, dynamic>.from(raw);
+      }
+    } catch (_) {}
+
+    List<Map<String, dynamic>> rawDispensaries = [];
+    if (branchData != null && branchData['dispensaries'] is List) {
+      rawDispensaries = List<Map<String, dynamic>>.from(branchData['dispensaries']);
+    }
+
+    // Use central defaults if none registered in local box yet
+    if (rawDispensaries.isEmpty) {
+      final defaults = LocalStorageService.getDefaultBranchFacilities(branchId);
+      final dispList = defaults['dispensaries'] ?? [];
+      if (dispList.length > 1) {
+        rawDispensaries = List<Map<String, dynamic>>.from(dispList);
+      }
+    }
+
+    // If this branch has no sub-dispensaries configured, hide sub-facility filter bar
+    if (rawDispensaries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final currentSub = ref.watch(branchSubDispensaryFilterProvider);
+    final items = [
+      {'label': 'All Facilities', 'value': null},
+      ...rawDispensaries.map((d) => {
+        'label': (d['name'] ?? d['id'] ?? '').toString(),
+        'value': (d['id'] ?? '').toString().toLowerCase().trim(),
+      }),
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: items.map((item) {
+          final val = item['value'];
+          final label = item['label'] as String;
+          final selected = currentSub == val;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6.0),
+            child: GestureDetector(
+              onTap: () => ref.read(branchSubDispensaryFilterProvider.notifier).state = val,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected ? t.accent.withValues(alpha: 0.2) : t.bgCardAlt,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected ? t.accent : t.bgRule,
+                    width: selected ? 1.5 : 1.0,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      val == null ? Icons.business_rounded : Icons.local_hospital_outlined,
+                      size: 14,
+                      color: selected ? t.accent : t.textSecondary,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected ? t.accent : t.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
   Widget _filterChip(RoleThemeData t, String label, String? type) {
     final currentFilter = ref.watch(branchTypeFilterProvider);
     final selected = currentFilter == type;
@@ -1501,8 +1588,7 @@ class _BranchesState extends ConsumerState<Branches>
     }
 
 
-    final isSupervisor = widget.branchId != null;
-    final t            = RoleThemeScope.dataOf(context);
+    final t = RoleThemeScope.dataOf(context);
 
     return LayoutBuilder(builder: (context, constraints) {
       final width = constraints.maxWidth;
@@ -1558,45 +1644,43 @@ class _BranchesState extends ConsumerState<Branches>
                   final actionsSection = Column(
                     crossAxisAlignment: isHeaderMobile ? CrossAxisAlignment.start : CrossAxisAlignment.end,
                     children: [
-                      if (!isSupervisor) ...[
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            _actionButton(
-                              t,
-                              icon: Icons.inventory_rounded,
-                              label: "Inventory",
-                              color: t.nonZakat,
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => InventoryPage(
-                                    branchId: branchId,
-                                    isDispenser: false,
-                                  ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _actionButton(
+                            t,
+                            icon: Icons.inventory_rounded,
+                            label: "Inventory",
+                            color: t.nonZakat,
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => InventoryPage(
+                                  branchId: branchId,
+                                  isDispenser: false,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 10),
-                            _actionButton(
-                              t,
-                              icon: Icons.monetization_on_outlined,
-                              label: "Finance",
-                              color: t.gmwf,
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => FinancePage(
-                                    branchId: branchId,
-                                    isAdmin: true,
-                                  ),
+                          ),
+                          const SizedBox(width: 10),
+                          _actionButton(
+                            t,
+                            icon: Icons.monetization_on_outlined,
+                            label: "Finance",
+                            color: t.gmwf,
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => FinancePage(
+                                  branchId: branchId,
+                                  isAdmin: true,
                                 ),
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                      ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
                       _dateRangeSelector(t, compact: isHeaderMobile),
                     ],
                   );
@@ -1844,6 +1928,8 @@ class _BranchesState extends ConsumerState<Branches>
                   fontWeight: FontWeight.w800, color: t.textPrimary)),
               const SizedBox(height: 10),
               _typeFilter(t),
+              const SizedBox(height: 10),
+              _subDispensaryFilter(t, branchId),
               const SizedBox(height: 16),
 
               Consumer(builder: (context, ref, _) {
@@ -1865,12 +1951,17 @@ class _BranchesState extends ConsumerState<Branches>
                   {
                     {
                           final typeFilter  = ref.watch(branchTypeFilterProvider);
+                          final subFilter   = ref.watch(branchSubDispensaryFilterProvider);
                   final multiDay2  = ref.watch(branchMultiDayFilterProvider);
                   final multiVisit2 = ref.watch(branchMultiVisitFilterProvider);
                   final filtered = allList.where((p) {
                             if (typeFilter != null &&
                                 p['type']?.toString().toLowerCase() != typeFilter) {
                               return false;
+                            }
+                            if (subFilter != null && subFilter.isNotEmpty) {
+                              final itemDisp = (p['dispensaryId'] ?? '').toString().trim().toLowerCase();
+                              if (itemDisp.isNotEmpty && itemDisp != subFilter) return false;
                             }
                             if (multiDay2) {
                               final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
@@ -2197,7 +2288,18 @@ class _BranchesState extends ConsumerState<Branches>
             );
           }
 
-          final branches = branchMaps
+          var filteredBranchMaps = branchMaps;
+          if (widget.isManager || (widget.branchId != null && widget.branchId != 'all' && widget.branchId != 'global')) {
+            final targetB = (widget.branchId ?? '').toLowerCase().trim();
+            if (targetB.isNotEmpty && targetB != 'all') {
+              filteredBranchMaps = branchMaps.where((m) {
+                final bId = (m['id'] as String).toLowerCase().trim();
+                return bId == targetB || bId.contains(targetB) || targetB.contains(bId);
+              }).toList();
+            }
+          }
+
+          final branches = filteredBranchMaps
               .map((m) => MapEntry(m['name'] as String, m['id'] as String))
               .toList();
 

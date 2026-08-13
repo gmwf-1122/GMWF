@@ -194,7 +194,10 @@ class RealtimeEvents {
     required String createdByName,
     String status = 'waiting',
   }) {
-    final dateKey = serial.split('-')[0];
+    final parts = serial.split('-');
+    final dateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+        ? (parts.length > 1 ? parts[1] : '')
+        : (parts.isNotEmpty ? parts[0] : '');
     
     return {
       'serial': serial,

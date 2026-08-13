@@ -97,30 +97,47 @@ class MadrassaLocalStorage {
     return source().distinct((a, b) => _deepEq.equals(a, b));
   }
 
-  static Future<void> downloadStudents(String branchId) async {
+  static Future<void> downloadStudents(String branchId, {bool force = false}) async {
     try {
-      final snap = await FirebaseFirestore.instance
+      final normBranch = branchId.toLowerCase().trim();
+      final syncKey = 'madrassa_students_$normBranch';
+      final lastSyncedTs = force ? null : LocalStorageService.getLastSyncedServerTimestamp(syncKey);
+
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('branches')
-          .doc(branchId)
-          .collection('madrassa_students')
-          .get();
+          .doc(normBranch)
+          .collection('madrassa_students');
 
-      final box = _getStudentsBox();
-      final prefix = '${branchId.toLowerCase().trim()}__std__';
-      
-      // Clear existing cached students for this branch first
-      final keysToDelete = box.keys.where((k) => k.toString().startsWith(prefix)).toList();
-      await box.deleteAll(keysToDelete);
-
-      final Map<String, dynamic> studentUpdates = {};
-      for (final doc in snap.docs) {
-        final key = _studentKey(branchId, doc.id);
-        studentUpdates[key] = _sanitize(doc.data());
+      if (lastSyncedTs != null) {
+        query = query.where('updatedAt', isGreaterThan: lastSyncedTs).orderBy('updatedAt', descending: false);
       }
+
+      final snap = await query.get();
+      final box = _getStudentsBox();
+      String? maxServerTs = lastSyncedTs;
+      final Map<String, dynamic> studentUpdates = {};
+
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final key = _studentKey(normBranch, doc.id);
+        studentUpdates[key] = _sanitize(data);
+
+        final docTs = data['updatedAt']?.toString();
+        if (docTs != null) {
+          if (maxServerTs == null || docTs.compareTo(maxServerTs) > 0) {
+            maxServerTs = docTs;
+          }
+        }
+      }
+
       if (studentUpdates.isNotEmpty) {
         await box.putAll(studentUpdates);
       }
+      if (maxServerTs != null) {
+        await LocalStorageService.setLastSyncedServerTimestamp(syncKey, maxServerTs);
+      }
       await box.flush();
+      debugPrint('[MadrassaLocalStorage] Downloaded ${snap.docs.length} madrassa students (Delta)');
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] Error downloading students: $e');
     }

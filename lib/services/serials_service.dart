@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:hive/hive.dart';
 
+import 'camp_session_service.dart';
+
 List<String> _dateStrings(DateTime start, DateTime end) {
   final df   = DateFormat('ddMMyy');
   final days = <String>[];
@@ -10,6 +12,104 @@ List<String> _dateStrings(DateTime start, DateTime end) {
     days.add(df.format(d));
   }
   return days;
+}
+
+/// Single source of truth sequence integer parser from serial string.
+/// Extracts the numerical sequence number regardless of prefix or hyphen format.
+int parseSequenceFromSerial(String serial) {
+  final s = serial.trim();
+  if (s.isEmpty) return 999999;
+  final parts = s.split('-');
+  
+  // If temp serial format: X-ddMMyy-KEYWORD-SEQ
+  if (parts.isNotEmpty && (parts[0] == 'X' || parts[0] == 'x')) {
+    if (parts.length >= 4) {
+      final seqPart = parts[3];
+      final numVal = int.tryParse(seqPart);
+      if (numVal != null) return numVal;
+    }
+  }
+
+  // Standard format: ddMMyy-KEYWORD-SEQ or ddMMyy-KEYWORD-SEQ-DEV1
+  if (parts.length >= 3) {
+    final seqPart = parts[2];
+    final numVal = int.tryParse(seqPart);
+    if (numVal != null) return numVal;
+  }
+  // Fallback for non-standard formats
+  final matches = RegExp(r'\d+').allMatches(s);
+  if (matches.isNotEmpty) {
+    return int.tryParse(matches.last.group(0)!) ?? 999999;
+  }
+  return 999999;
+}
+
+/// Issues a serial number atomically using a Firestore Transaction on:
+///   branches/{branchId}/counters/{dateKey}_{dispensaryTag}
+/// Returns a Map with the assigned serial, dateKey, and entryData written.
+Future<Map<String, dynamic>> issueAtomicSerialTransaction({
+  required String branchId,
+  required String dispensaryTag,
+  required String queueType,
+  required Map<String, dynamic> tokenData,
+  DateTime? time,
+}) async {
+  final normBranch = branchId.toLowerCase().trim();
+  final normTag = dispensaryTag.trim().toUpperCase();
+  final shiftInfo = CampSessionService.resolveShiftAndDateKey(time);
+  final dateKey = shiftInfo.dateKey;
+  final session = shiftInfo.session;
+
+  final counterRef = FirebaseFirestore.instance
+      .collection('branches')
+      .doc(normBranch)
+      .collection('counters')
+      .doc('${dateKey}_$normTag');
+
+  final db = FirebaseFirestore.instance;
+
+  return await db.runTransaction((transaction) async {
+    final counterSnap = await transaction.get(counterRef);
+    int currentSeq = 0;
+    if (counterSnap.exists) {
+      currentSeq = (counterSnap.data()?['lastSeq'] as num?)?.toInt() ?? 0;
+    }
+    final newSeq = currentSeq + 1;
+    final seqPadded = newSeq.toString().padLeft(newSeq > 999 ? 4 : 3, '0');
+    final serial = '$dateKey-$normTag-$seqPadded';
+
+    transaction.set(counterRef, {
+      'lastSeq': newSeq,
+      'dateKey': dateKey,
+      'dispensaryTag': normTag,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    final entryData = Map<String, dynamic>.from(tokenData);
+    entryData['serial'] = serial;
+    entryData['dateKey'] = dateKey;
+    entryData['session'] = session;
+    entryData['queueType'] = queueType;
+    entryData['branchId'] = normBranch;
+
+    final tokenRef = db
+        .collection('branches')
+        .doc(normBranch)
+        .collection('serials')
+        .doc(dateKey)
+        .collection(queueType)
+        .doc(serial);
+
+    transaction.set(tokenRef, entryData, SetOptions(merge: true));
+
+    return {
+      'serial': serial,
+      'dateKey': dateKey,
+      'session': session,
+      'seq': newSeq,
+      'entryData': entryData,
+    };
+  });
 }
 
 Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, String todayKey) async {
@@ -175,6 +275,7 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
 
         for (final doc in snap.docs) {
           final data = doc.data() as Map<String, dynamic>;
+          if (data['isDeleted'] == true) continue;
           final daysOfMedicine = (data['daysOfMedicine'] as num?)?.toInt() ?? 1;
           if (q == 'zakat') {
             zakatRevenue += 20 * daysOfMedicine;

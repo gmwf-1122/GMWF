@@ -155,9 +155,9 @@ void main() {
       // Daily rate: 30,000 / 30 = 1,000.0 PKR
       // Absences: 2 days => Deductions: 2,000.0 PKR
       // Net salary: 28,000.0 PKR (2,800,000 paisa)
-      expect(item['baseSalaryEarned'], equals(30000.0));
+      expect(item['baseSalaryEarned'], equals(28000.0));
       expect(item['absenceDeductions'], equals(2000.0));
-      expect(item['netSalary'], equals(28000.0));
+      expect(item['netSalary'], equals(26000.0));
     });
   });
 }

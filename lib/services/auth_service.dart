@@ -18,6 +18,8 @@ import '../services/local_storage_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/device_info_service.dart';
 import '../services/offline_auth_service.dart';
+import '../services/camp_session_service.dart';
+import '../services/role_simulator_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -58,6 +60,9 @@ class AuthService {
     List<String> studentIds = const [], // NEW — default empty
     String name = '',        // NEW
     String cnic = '',        // NEW
+    String? dispensaryId,    // Sub-location dispensary identifier (legacy)
+    List<String> dispensaryIds = const [], // Sub-location dispensary identifiers
+    List<Map<String, String>> campSchedule = const [], // Time-based camp schedule
   }) async {
     try {
       final lowerUsername = username.trim().toLowerCase();
@@ -110,6 +115,8 @@ class AuthService {
         'name': name,
         'cnic': cnic,
         'studentIds': studentIds,
+        'dispensaryIds': dispensaryIds.map((d) => d.trim().toLowerCase()).toList(),
+        'campSchedule': campSchedule,
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };
@@ -122,6 +129,7 @@ class AuthService {
       if (degree?.isNotEmpty ?? false)         userData['degree']          = degree!.trim();
       if (salary != null)                      userData['baseSalary']      = salary;
       if (studentId?.isNotEmpty ?? false)      userData['studentId']       = studentId!.trim();
+      if (dispensaryId?.isNotEmpty ?? false)   userData['dispensaryId']    = dispensaryId!.trim().toLowerCase();
 
       // Base64 strings (offline & storage-free) with storage upload fallback
       if (profilePictureBase64 != null && profilePictureBase64.isNotEmpty) {
@@ -305,47 +313,58 @@ class AuthService {
     debugPrint('[AuthService] Starting sign out');
 
     try {
+      RoleSimulatorService.reset();
+    } catch (_) {}
+
+    // 1. Instantly clear user session from Hive to prevent auto-login loops
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        await box.delete('user_data');
+        await box.delete('currentUser');
+        await box.delete('user');
+        await box.delete('role');
+        await box.delete('auth_token');
+        await box.flush();
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Hive app_settings clear error: $e');
+    }
+
+    try {
+      await OfflineAuthService.clearCachedUserData();
+    } catch (e) {
+      debugPrint('[AuthService] OfflineAuthService clear error: $e');
+    }
+
+    try {
+      await CampSessionService.clearActiveCamp();
+    } catch (_) {}
+
+    // 2. Sign out from Firebase Auth
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      debugPrint('[AuthService] Firebase signOut error: $e');
+    }
+
+    // 3. Fire-and-forget background cleanup tasks
+    try {
       final user = _auth.currentUser;
       if (user != null) {
         final uid = user.uid;
-        await _firestore.collection('users').doc(uid).set({
+        _firestore.collection('users').doc(uid).set({
           'isOnline': false,
           'lastLogoutAt': FieldValue.serverTimestamp(),
           'lastOnlineAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        }, SetOptions(merge: true)).catchError((_) {});
 
-        await DeviceInfoService.markUserOffline(userId: uid);
-
-        try {
-          final box = Hive.box('app_settings');
-          final userData = box.get('user_data') ?? box.get('currentUser');
-          if (userData != null && userData is Map) {
-            userData['isOnline'] = false;
-            await box.put('user_data', userData);
-          }
-        } catch (_) {}
+        DeviceInfoService.markUserOffline(userId: uid).catchError((_) {});
       }
-    } catch (e) {
-      debugPrint('[AuthService] Reset isOnline error (ignored): $e');
-    }
+    } catch (_) {}
 
-    try { await FirebaseAuth.instance.signOut(); }
-    catch (e) { debugPrint('[AuthService] Firebase signOut error (ignored): $e'); }
-
-    try { await OfflineAuthService.clearCachedUserData(); }
-    catch (e) { debugPrint('[AuthService] OfflineAuthService clear error (ignored): $e'); }
-
-    try { await LanHostManager.stopHost(); }
-    catch (e) { debugPrint('[AuthService] LanHostManager.stopHost error (ignored): $e'); }
-
-    try { await RealtimeManager().dispose(); }
-    catch (e) { debugPrint('[AuthService] RealtimeManager.dispose error (ignored): $e'); }
-
-    try {
-      final box = Hive.box('app_settings');
-      await box.delete('user_data');
-      await box.delete('currentUser');
-    } catch (e) { debugPrint('[AuthService] Hive clear error (ignored): $e'); }
+    try { LanHostManager.stopHost().catchError((_) {}); } catch (_) {}
+    try { RealtimeManager().dispose().catchError((_) {}); } catch (_) {}
 
     debugPrint('[AuthService] Sign out complete');
   }

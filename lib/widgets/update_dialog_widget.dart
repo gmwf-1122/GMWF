@@ -273,16 +273,79 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                ],
-                Text(
-                  _statusMessage,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: _isDownloading ? t.accent : Colors.red,
+                  Text(
+                    _statusMessage,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: t.accent,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                  textAlign: TextAlign.center,
-                ),
+                ] else if (_statusMessage.contains('Failed') || _statusMessage.contains('Error') || _statusMessage.contains('Denied') || _statusMessage.contains('Timeout')) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade900.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade700, width: 1.0),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 20),
+                            const SizedBox(width: 8),
+                            const Text(
+                              'Update Warning',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          _statusMessage,
+                          style: TextStyle(fontSize: 12, color: Colors.red.shade200, height: 1.35),
+                        ),
+                        const SizedBox(height: 10),
+                        InkWell(
+                          onTap: () => AutoUpdateService.launchUpdateUrl(widget.updateInfo.downloadUrl),
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade800,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.open_in_browser_rounded, color: Colors.white, size: 15),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Download File via Browser',
+                                  style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Text(
+                    _statusMessage,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: t.accent,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
                 const SizedBox(height: 16),
               ],
 

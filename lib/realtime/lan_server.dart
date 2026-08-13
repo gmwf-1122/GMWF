@@ -27,6 +27,7 @@ class LanServer {
   final Map<WebSocket, String>               _clientIps  = {};
 
   final int port;
+  final String? authToken;
 
   int _messagesReceived = 0;
   int _messagesSent     = 0;
@@ -47,7 +48,7 @@ class LanServer {
   Function(String socketId)?                             onClientDisconnected;
   Function(Map<String, dynamic>)?                        onMessageReceived;
 
-  LanServer({this.port = AppNetwork.websocketPort});
+  LanServer({this.port = AppNetwork.websocketPort, this.authToken});
 
   int get clientCount      => _clientInfo.length;
   int get messagesReceived => _messagesReceived;
@@ -222,6 +223,19 @@ class LanServer {
       final eventType = data['event_type'] as String?;
       _messagesReceived++;
 
+      // ── Auth handshake ───────────────────────────────────────────────────
+      if (eventType == 'auth_handshake' || data['type'] == 'auth_handshake') {
+        final clientToken = (data['authToken'] ?? data['token'])?.toString();
+        if (authToken != null && authToken!.isNotEmpty && clientToken != authToken) {
+          print('[LanServer] ❌ Auth handshake failed for client $socketId — invalid token');
+          socket.add(jsonEncode({'type': 'error', 'message': 'Auth Failed: Invalid token'}));
+          socket.close(1008, 'Auth Failed');
+          return;
+        }
+        socket.add(jsonEncode({'type': 'auth_ack', 'status': 'authenticated'}));
+        return;
+      }
+
       // ── Identify handshake ────────────────────────────────────────────────
       if (eventType == 'identify') {
         final role     = data['role']     as String?;
@@ -241,15 +255,18 @@ class LanServer {
         if (role != null && branchId != null) {
           final normRole = role.toLowerCase().trim();
           final normBranch = branchId.toLowerCase().trim();
+          final platform = (data['platform'] as String?)?.trim().toLowerCase() ?? 'unknown';
 
-          // DEDUPLICATION: Remove any stale socket for the same clientId or same role+username+branch
+          // DEDUPLICATION: Remove any stale socket for the same clientId or same role+username+branch+platform
+          // Platform check ensures web and native clients don't evict each other
           final staleSockets = <WebSocket>[];
           _clientInfo.forEach((ws, oldInfo) {
             if (ws != socket) {
               final sameClient = clientId != null && clientId.isNotEmpty && oldInfo['clientId'] == clientId;
               final sameIdentity = oldInfo['role'] == normRole &&
                   oldInfo['branchId'] == normBranch &&
-                  oldInfo['username'] == username;
+                  oldInfo['username'] == username &&
+                  (oldInfo['platform'] ?? 'unknown') == platform;
               if (sameClient || sameIdentity) {
                 staleSockets.add(ws);
               }
@@ -270,6 +287,7 @@ class LanServer {
             'branchId':    normBranch,
             'username':    username,
             'clientId':    clientId,
+            'platform':    platform,
             'ipAddress':   ipAddress,
             'identified':  true,
             'connectedAt': DateTime.now().toIso8601String(),

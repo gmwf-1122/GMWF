@@ -118,8 +118,13 @@ class ServerSyncManager {
 
   static String _dateKeyFromSerial(String serial, String fallback) {
     if (serial.contains('-')) {
-      final part = serial.split('-')[0];
-      if (part.length == 6 && int.tryParse(part) != null) return part;
+      final parts = serial.split('-');
+      if (parts.isNotEmpty) {
+        final part = parts[0].toUpperCase() == 'X'
+            ? (parts.length > 1 ? parts[1] : '')
+            : parts[0];
+        if (part.length == 6 && int.tryParse(part) != null) return part;
+      }
     }
     return fallback;
   }

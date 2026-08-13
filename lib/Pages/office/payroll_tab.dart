@@ -96,10 +96,16 @@ class _PayrollTabState extends State<PayrollTab> {
   }
 
   Color _mutedColorForKey(String key) {
-    final seed = key.hashCode;
-    final hue = (seed % 360).toDouble();
-    final h = (hue + 360) % 360;
-    return HSLColor.fromAHSL(1.0, h, 0.28, 0.88).toColor();
+    const palette = [
+      Color(0xFF0F172A), // Deep Slate
+      Color(0xFF047857), // Deep Emerald
+      Color(0xFF1E40AF), // Deep Royal Blue
+      Color(0xFF6B21A8), // Deep Purple
+      Color(0xFFB45309), // Amber Bronze
+      Color(0xFF0E7490), // Cyan Teal
+    ];
+    final idx = key.hashCode.abs() % palette.length;
+    return palette[idx];
   }
 
   @override
@@ -300,8 +306,16 @@ class _PayrollTabState extends State<PayrollTab> {
       if (_selectedBranchFilter != 'all') {
         final empId = item['employeeId'] as String;
         final emp = FinanceLocalStorage.getEmployee(empId);
-        final branchId = emp?['branchId']?.toString() ?? 'unknown';
-        if (branchId != _selectedBranchFilter) return false;
+        final empBranch = (emp?['branchId'] ?? '').toString().trim().toLowerCase();
+        final selBranch = _selectedBranchFilter.trim().toLowerCase();
+        final empNameBranch = FinanceLocalStorage.getBranchName(emp?['branchId']?.toString() ?? '').toLowerCase();
+        final selNameBranch = FinanceLocalStorage.getBranchName(_selectedBranchFilter).toLowerCase();
+
+        final matchCanonical = empNameBranch == selNameBranch;
+        final matchClean = empBranch.replaceAll('branch_', '') == selBranch.replaceAll('branch_', '');
+        final matchPrefix = empBranch.startsWith(selBranch) || selBranch.startsWith(empBranch);
+
+        if (!matchCanonical && !matchClean && !matchPrefix) return false;
       }
 
       if (_selectedDeptFilter != 'all') {
@@ -321,21 +335,28 @@ class _PayrollTabState extends State<PayrollTab> {
         double disbursedTotal = 0.0;
         double pendingTotal = 0.0;
 
+        // O(1) payout lookup table
+        final Map<String, List<Map<String, dynamic>>> payoutsByEmp = {};
+        for (final val in ledgerBox.values) {
+          if (val is Map) {
+            final entry = Map<String, dynamic>.from(val);
+            if (entry['monthKey'] == widget.monthKey && entry['type'] == 'payout' && entry['isVoided'] != true) {
+              final eId = entry['employeeId']?.toString();
+              if (eId != null && eId.isNotEmpty) {
+                payoutsByEmp.putIfAbsent(eId, () => []).add(entry);
+              }
+            }
+          }
+        }
+
+        final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
+        final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
+
         for (final item in list) {
           final empId = item['employeeId'] as String;
           final netSalary = (item['netSalary'] as num?)?.toDouble() ?? 0.0;
+          final payouts = payoutsByEmp[empId] ?? [];
 
-          final payouts = ledgerBox.values.where((val) {
-            if (val is! Map) return false;
-            final entry = Map<String, dynamic>.from(val);
-            return entry['employeeId'] == empId &&
-                   entry['monthKey'] == widget.monthKey &&
-                   entry['type'] == 'payout' &&
-                   entry['isVoided'] != true;
-          }).toList();
-
-          final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
-          final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
           final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
           final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
 
@@ -399,37 +420,52 @@ class _PayrollTabState extends State<PayrollTab> {
                 ),
               )
             else ...[
-              Padding(
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                child: buildMetricCardRow(
-                  theme: t,
-                  cards: [
-                    buildMetricCard(
-                      theme: t,
-                      label: 'Month Disbursement',
-                      value: '$paidCount / ${list.length} PAID',
-                      valueColor: Colors.green[600],
-                      caption: '$unpaidCount pending payout',
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  boxShadow: const [
+                    BoxShadow(color: Color(0x08000000), blurRadius: 4, offset: Offset(0, 2)),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF059669), size: 16),
+                        const SizedBox(width: 6),
+                        const Text('DISBURSEMENT: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                        Text('$paidCount / ${list.length} PAID', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF059669))),
+                        Text(' ($unpaidCount pending)', style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                      ],
                     ),
-                    buildMetricCard(
-                      theme: t,
-                      label: 'Disbursed Total',
-                      value: 'PKR ${_fmtCurrency(disbursedTotal)}',
-                      valueColor: Colors.green[600],
-                      caption: 'Cleared payout',
+                    Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                    Row(
+                      children: [
+                        const Icon(Icons.account_balance_wallet_outlined, color: Color(0xFF059669), size: 16),
+                        const SizedBox(width: 6),
+                        const Text('DISBURSED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                        Text('PKR ${_fmtCurrency(disbursedTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF059669))),
+                      ],
                     ),
-                    buildMetricCard(
-                      theme: t,
-                      label: 'Pending Total',
-                      value: 'PKR ${_fmtCurrency(pendingTotal)}',
-                      valueColor: Colors.green[600],
-                      caption: 'Est. required',
+                    Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                    Row(
+                      children: [
+                        const Icon(Icons.hourglass_empty_rounded, color: Color(0xFFD97706), size: 16),
+                        const SizedBox(width: 6),
+                        const Text('PENDING REQUIRED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
+                        Text('PKR ${_fmtCurrency(pendingTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFFD97706))),
+                      ],
                     ),
                   ],
                 ),
               ),
               Expanded(
-                child: _buildPayrollGroupedListWidget(t, list),
+                child: _buildPayrollGroupedListWidget(t, list, payoutsByEmp),
               ),
             ],
           ],
@@ -438,7 +474,7 @@ class _PayrollTabState extends State<PayrollTab> {
     );
   }
 
-  Widget _buildPayrollGroupedListWidget(RoleThemeData t, List<Map<String, dynamic>> list) {
+  Widget _buildPayrollGroupedListWidget(RoleThemeData t, List<Map<String, dynamic>> list, Map<String, List<Map<String, dynamic>>> payoutsByEmp) {
     final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
     for (final item in list) {
       final empId = item['employeeId'] as String;
@@ -473,28 +509,31 @@ class _PayrollTabState extends State<PayrollTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              margin: const EdgeInsets.only(top: 14, bottom: 8),
               width: double.infinity,
               decoration: BoxDecoration(
-                color: branchCol.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: branchCol.withOpacity(0.12)),
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0xFFCBD5E1), width: 1.0),
               ),
-              child: Row(
-                children: [
-                  Container(width: 6, height: 24, decoration: BoxDecoration(color: branchCol, borderRadius: BorderRadius.circular(2))),
-                  const SizedBox(width: 8),
-                  Text(
-                    branchName.toString().toUpperCase(),
-                    style: TextStyle(
-                      color: branchCol.withOpacity(0.95),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.0,
+              child: Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.business_rounded, color: Color(0xFF0F172A), size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      branchName.toString().toUpperCase(),
+                      style: const TextStyle(
+                        color: Color(0xFF0F172A),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.5,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             ...sortedDepts.map((deptName) {
@@ -539,35 +578,27 @@ class _PayrollTabState extends State<PayrollTab> {
                       ),
                     ),
                     Column(
-                      children: deptItems.map((item) {
-                        final empId = item['employeeId'] as String;
-                        final emp = FinanceLocalStorage.getEmployee(empId) ?? {
-                          'name': item['employeeName'],
-                          'role': 'Employee',
-                          'department': deptName,
-                          'localId': empId,
-                          'isActive': true,
-                          'branchId': branchId,
-                        };
-                        final ps = PermissionService();
-                        final ledgerBox = FinanceLocalStorage.salaryLedgerBox;
-
-                        final payouts = ledgerBox.values.where((val) {
-                          if (val is! Map) return false;
-                          final entry = Map<String, dynamic>.from(val);
-                          return entry['employeeId'] == empId &&
-                                 entry['monthKey'] == widget.monthKey &&
-                                 entry['type'] == 'payout' &&
-                                 entry['isVoided'] != true;
-                        }).toList();
-
+                      children: () {
+                        final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
                         final curMonthStr = DateFormat('yyyy-MM').format(DateTime.now());
                         final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
-                        final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
-                        final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
+                        final ps = PermissionService();
 
-                        final isExpanded = _expandedRows.contains(empId);
-                        final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_${widget.monthKey}') == true;
+                        return deptItems.map((item) {
+                          final empId = item['employeeId'] as String;
+                          final emp = FinanceLocalStorage.getEmployee(empId) ?? {
+                            'name': item['employeeName'],
+                            'role': 'Employee',
+                            'department': deptName,
+                            'localId': empId,
+                            'isActive': true,
+                            'branchId': branchId,
+                          };
+
+                          final payouts = payoutsByEmp[empId] ?? [];
+                          final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
+                          final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
+                          final isExpanded = _expandedRows.contains(empId);
 
                         final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
                         final double baseSalary = (item['fullMonthWeightedSalary'] as num?)?.toDouble() ?? (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
@@ -602,8 +633,9 @@ class _PayrollTabState extends State<PayrollTab> {
                           isExpanded: isExpanded,
                           payouts: payouts,
                         );
-                      }).toList(),
-                    ),
+                      }).toList();
+                    }(),
+                  ),
 
                   ],
                 ),
@@ -683,18 +715,18 @@ class _PayrollTabState extends State<PayrollTab> {
       decoration: BoxDecoration(
         color: t.bgCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: t.bgRule, width: 0.5),
+        border: Border(
+          left: BorderSide(color: branchCol, width: 4),
+          top: BorderSide(color: t.bgRule, width: 0.5),
+          right: BorderSide(color: t.bgRule, width: 0.5),
+          bottom: BorderSide(color: t.bgRule, width: 0.5),
+        ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(width: 4, decoration: BoxDecoration(color: branchCol, borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), bottomLeft: Radius.circular(12)))),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
                   // ── Top line: identity + status pill ──
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -895,10 +927,7 @@ class _PayrollTabState extends State<PayrollTab> {
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
+          );
   }
 
   static String _fmtCurrency(double amt) {
@@ -1421,6 +1450,7 @@ class _PayrollTabState extends State<PayrollTab> {
     final contractSalary = (emp?['currentSalary'] as num?)?.toDouble() ?? 0.0;
     final isCash = emp?['bankName'] == 'Cash' || emp?['bankName'] == null;
     String paymentMethod = isCash ? 'cash' : 'bank_transfer';
+    String selectedAccountCode = isCash ? '1030' : '1010';
 
     final activeLoans = FinanceLoansStorage.getActiveLoansForEmployee(employeeId);
     final fixedLoan = activeLoans.firstWhereOrNull((l) => l['repaymentType'] == 'fixed');
@@ -1668,13 +1698,24 @@ class _PayrollTabState extends State<PayrollTab> {
                     ),
 
                     buildDropdownField(
-                      label: 'Payment Method *',
-                      value: paymentMethod == 'cash' ? 'Cash' : (paymentMethod == 'bank_transfer' ? 'Bank Transfer' : 'Cheque'),
-                      items: ['Cash', 'Bank Transfer', 'Cheque'],
+                      label: 'Disburse From Bank/Cash Account *',
+                      value: selectedAccountCode == '1010' ? '1010 - Meezan Bank Main' :
+                             (selectedAccountCode == '1020' ? '1020 - UBL Operating Account' :
+                             (selectedAccountCode == '1050' ? '1050 - EasyPaisa Merchant' :
+                             (selectedAccountCode == '1060' ? '1060 - JazzCash Merchant' : '1030 - Cash in Hand (Petty)'))),
+                      items: [
+                        '1010 - Meezan Bank Main',
+                        '1020 - UBL Operating Account',
+                        '1030 - Cash in Hand (Petty)',
+                        '1050 - EasyPaisa Merchant',
+                        '1060 - JazzCash Merchant',
+                      ],
                       onChanged: (val) => setSheetState(() {
-                        if (val == 'Cash') paymentMethod = 'cash';
-                        if (val == 'Bank Transfer') paymentMethod = 'bank_transfer';
-                        if (val == 'Cheque') paymentMethod = 'cheque';
+                        if (val != null && val.contains('1010')) { selectedAccountCode = '1010'; paymentMethod = 'bank_transfer'; }
+                        else if (val != null && val.contains('1020')) { selectedAccountCode = '1020'; paymentMethod = 'bank_transfer'; }
+                        else if (val != null && val.contains('1050')) { selectedAccountCode = '1050'; paymentMethod = 'easypaisa'; }
+                        else if (val != null && val.contains('1060')) { selectedAccountCode = '1060'; paymentMethod = 'jazzcash'; }
+                        else { selectedAccountCode = '1030'; paymentMethod = 'cash'; }
                       }),
                       theme: t,
                     ),
@@ -1854,6 +1895,7 @@ class _PayrollTabState extends State<PayrollTab> {
                             'otherDeductionsType': otherDeductionsType,
                             'advanceAdded': 0.0,
                             'paymentMethod': paymentMethod,
+                            'accountCode': selectedAccountCode,
                             'note': noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : 'Monthly salary processed.',
                           };
 

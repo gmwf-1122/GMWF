@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/local_storage_service.dart';
@@ -211,6 +213,40 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     return extras;
   }
 
+  String get _effectiveUsername {
+    if (widget.username.trim().isNotEmpty) return widget.username.trim();
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data');
+        if (uData is Map) {
+          final name = uData['displayName'] ?? uData['username'] ?? uData['name'];
+          if (name != null && name.toString().trim().isNotEmpty) {
+            return name.toString().trim();
+          }
+        }
+      }
+    } catch (_) {}
+    return FirebaseAuth.instance.currentUser?.displayName ??
+           FirebaseAuth.instance.currentUser?.email?.split('@').first ??
+           'Branch Manager';
+  }
+
+  String get _effectiveBranchName {
+    if (_viewingBranchName.isNotEmpty && _viewingBranchName != 'Loading...' && _viewingBranchName != 'Select...') {
+      return _viewingBranchName;
+    }
+    if (widget.branchName.isNotEmpty) return widget.branchName;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data');
+        if (uData is Map && uData['branchName'] != null) {
+          return uData['branchName'].toString();
+        }
+      }
+    } catch (_) {}
+    return resolveBranchName(widget.branchId);
+  }
+
   bool get _canSwitchBranch {
     if (GlobalModuleWrapper.isWrapped(context)) return false;
     return widget.role.canSeeAllBranches && _branchOptions.length > 1;
@@ -223,6 +259,9 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final isMobile = MediaQuery.of(context).size.width < 600;
+
+    final displayUser = _effectiveUsername;
+    final displayBranch = _effectiveBranchName;
 
     if (widget.branchId.isEmpty) {
       return Scaffold(
@@ -260,8 +299,8 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_viewingBranchName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
-                      Text(widget.username, style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 10)),
+                      Text(displayBranch, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
+                      Text(displayUser, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 11, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
@@ -293,7 +332,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
               _donationsTab(),
               DonorRegistryWidget(
                 branchId: _viewingBranchId,
-                branchName: _viewingBranchName,
+                branchName: displayBranch,
               ),
             ],
           ),
@@ -311,8 +350,8 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
       body: Column(children: [
         // ── Primary Header ────────────────────────────────────────────────
         _Header(
-          branchName:      _viewingBranchName,
-          username:        widget.username,
+          branchName:      displayBranch,
+          username:        displayUser,
           role:            widget.role,
           canSwitchBranch: _canSwitchBranch,
           branchOptions:   _branchOptions,
@@ -565,42 +604,84 @@ class _BranchPicker extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final String username;
   final Color  roleColor;
-  const _Avatar({required this.username, required this.roleColor});
+  final String? photoUrl;
+
+  const _Avatar({
+    required this.username,
+    required this.roleColor,
+    this.photoUrl,
+  });
+
+  String? _resolvePhotoUrl() {
+    if (photoUrl != null && photoUrl!.trim().isNotEmpty) {
+      return photoUrl!.trim();
+    }
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data');
+        if (uData is Map) {
+          final url = uData['photoUrl'] ?? uData['photoURL'] ?? uData['profileImageUrl'] ?? uData['avatarUrl'] ?? uData['image'];
+          if (url != null && url.toString().trim().isNotEmpty) {
+            return url.toString().trim();
+          }
+        }
+      }
+    } catch (_) {}
+    return FirebaseAuth.instance.currentUser?.photoURL;
+  }
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 46, height: 46,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      border: Border.all(color: roleColor.withValues(alpha: 0.25), width: 1.5),
-      boxShadow: [
-        BoxShadow(
-          color: roleColor.withValues(alpha: 0.15),
-          blurRadius: 10,
-          spreadRadius: 1,
-        ),
-      ],
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(2.5),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [roleColor, roleColor.withValues(alpha: 0.75)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+  Widget build(BuildContext context) {
+    final imgUrl = _resolvePhotoUrl();
+
+    return Container(
+      width: 46, height: 46,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: roleColor.withValues(alpha: 0.35), width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: roleColor.withValues(alpha: 0.2),
+            blurRadius: 10,
+            spreadRadius: 1,
           ),
-          shape: BoxShape.circle,
-        ),
-        child: Center(
-          child: Text(
-            username.isNotEmpty ? username[0].toUpperCase() : '?',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
-          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: ClipOval(
+          child: imgUrl != null && imgUrl.isNotEmpty
+              ? Image.network(
+                  imgUrl,
+                  width: 42,
+                  height: 42,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => _buildLetterAvatar(),
+                )
+              : _buildLetterAvatar(),
         ),
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _buildLetterAvatar() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [roleColor, roleColor.withValues(alpha: 0.75)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          username.isNotEmpty ? username[0].toUpperCase() : 'B',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+        ),
+      ),
+    );
+  }
 }
 
 class _RolePill extends StatelessWidget {

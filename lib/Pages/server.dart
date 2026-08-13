@@ -26,6 +26,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -39,7 +40,9 @@ import '../utils/network_utils.dart';
 import '../services/local_storage_service.dart';
 import '../widgets/department_activity_widget.dart';
 import '../widgets/multi_server_control_widget.dart';
+import '../widgets/lan_hardware_status_widget.dart';
 import '../services/multi_server_service.dart';
+import '../services/zkteco_network_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected client model
@@ -282,7 +285,19 @@ class _ServerDashboardWithSyncState
       _server = LanServer(port: AppNetwork.websocketPort);
 
       _server!.onClientConnected = (socketId, info) {
+        final cId = info['clientId']?.toString();
+        final cIp = info['ipAddress']?.toString() ?? info['deviceIp']?.toString();
+        final uName = info['username']?.toString();
+
         setState(() {
+          _connectedClients.removeWhere((key, existing) {
+            if (key == socketId) return true;
+            if (cId != null && cId.isNotEmpty && existing.clientId == cId) return true;
+            if (cIp != null && cIp.isNotEmpty && existing.ipAddress == cIp) return true;
+            if (uName != null && uName.isNotEmpty && existing.username == uName) return true;
+            return false;
+          });
+
           _connectedClients[socketId] = ConnectedClient(
             socketId:    socketId,
             role:        info['role']     as String? ?? 'unknown',
@@ -360,6 +375,10 @@ class _ServerDashboardWithSyncState
 
       await _syncManager!.start();
 
+      // Start embedded ZKTeco Biometric listener on Port 8088 / 4370
+      await ZkTecoNetworkService.startServer();
+      _addLog('✅ ZKTeco Biometric Listener active on Port 8088 / 4370');
+
       MultiServerService().startHeartbeatLoop(
         branchId: widget.branchId,
         roleSupplier: () => 'primary',
@@ -409,6 +428,7 @@ class _ServerDashboardWithSyncState
       await MultiServerService().stopHeartbeat(widget.branchId);
       await _syncManager?.stop();
       await _server?.stop();
+      await ZkTecoNetworkService.stopServer();
       setState(() {
         _isRunning  = false;
         _syncManager = null;
@@ -596,13 +616,13 @@ class _ServerDashboardWithSyncState
 
     return Theme(
       data: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF0B0F19),
+        scaffoldBackgroundColor: const Color(0xFF090D16),
         cardTheme: const CardThemeData(
-          color: Color(0x801F2937),
+          color: Color(0xFF111827),
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(20)),
-            side: BorderSide(color: Color(0x0DFFFFFF)),
+            borderRadius: BorderRadius.all(Radius.circular(16)),
+            side: BorderSide(color: Color(0xFF1E293B)),
           ),
         ),
       ),
@@ -613,37 +633,63 @@ class _ServerDashboardWithSyncState
           elevation: 0,
           flexibleSpace: ClipRect(
             child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-              child: Container(color: const Color(0xFF0B0F19).withValues(alpha: 0.8)),
+              filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+              child: Container(color: const Color(0xFF090D16).withValues(alpha: 0.85)),
             ),
           ),
           title: Row(children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Colors.blueAccent, Colors.purpleAccent]),
-                borderRadius: BorderRadius.circular(12),
+                gradient: const LinearGradient(colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)]),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(color: const Color(0xFF3B82F6).withValues(alpha: 0.4), blurRadius: 10),
+                ],
               ),
-              child: const Icon(Icons.dns, size: 20, color: Colors.white),
+              child: const Icon(Icons.hub_rounded, size: 22, color: Colors.white),
             ),
-            const SizedBox(width: 12),
-            const Text('GMWF Server Matrix', style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: 1.2)),
+            const SizedBox(width: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'GMWF HYBRID COMMAND CENTER',
+                  style: GoogleFonts.outfit(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    letterSpacing: 1.5,
+                    color: Colors.white,
+                  ),
+                ),
+                Text(
+                  'Primary LAN Node • Realtime Data & Hardware Cluster',
+                  style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
+                ),
+              ],
+            ),
           ]),
           actions: [
             _buildStatusBadge(),
             const SizedBox(width: 16),
-            IconButton(
-              icon: const Icon(Icons.storage_rounded, color: Colors.blueAccent),
-              tooltip: 'View Saved Data',
+            ElevatedButton.icon(
               onPressed: () {
                 Navigator.of(context).push(MaterialPageRoute(
                   builder: (context) => ServerDataViewer(branchId: widget.branchId),
                 ));
               },
+              icon: const Icon(Icons.storage_rounded, size: 16),
+              label: Text('Data Vault', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E293B),
+                foregroundColor: const Color(0xFF38BDF8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: const BorderSide(color: Color(0xFF334155)),
+              ),
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 12),
             IconButton(
-              icon: const Icon(Icons.power_settings_new, color: Colors.white70),
+              icon: const Icon(Icons.power_settings_new, color: Color(0xFFF43F5E)),
               tooltip: 'Logout',
               onPressed: () => _showLogoutDialog(context),
             ),
@@ -653,9 +699,9 @@ class _ServerDashboardWithSyncState
         body: Container(
           decoration: const BoxDecoration(
             gradient: RadialGradient(
-              center: Alignment(0, -0.5),
-              radius: 1.5,
-              colors: [Color(0xFF1E1B4B), Color(0xFF0B0F19)],
+              center: Alignment(0, -0.6),
+              radius: 1.4,
+              colors: [Color(0xFF1E1B4B), Color(0xFF090D16)],
             ),
           ),
           child: SafeArea(
@@ -678,6 +724,8 @@ class _ServerDashboardWithSyncState
                               _navTabChip(2, 'Department Progress', Icons.domain_rounded),
                               const SizedBox(width: 8),
                               _navTabChip(3, 'Data Archive', Icons.storage_rounded),
+                              const SizedBox(width: 8),
+                              _navTabChip(4, 'LAN Hardware & Devices', Icons.hardware_rounded),
                             ],
                           ),
                         ),
@@ -693,6 +741,10 @@ class _ServerDashboardWithSyncState
                             MultiServerControlWidget(branchId: widget.branchId, onTriggerSync: _manualSync),
                             DepartmentActivityWidget(branchId: widget.branchId),
                             ServerDataViewer(branchId: widget.branchId),
+                            SingleChildScrollView(
+                              padding: const EdgeInsets.all(16),
+                              child: const LanHardwareStatusWidget(),
+                            ),
                           ],
                         ),
                       ),
@@ -1184,7 +1236,7 @@ class _ServerDashboardWithSyncState
 
   Widget _buildRunningView() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1194,23 +1246,23 @@ class _ServerDashboardWithSyncState
             crossAxisCount: 4,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 24,
-            crossAxisSpacing: 24,
-            childAspectRatio: 2.2,
+            mainAxisSpacing: 16,
+            crossAxisSpacing: 16,
+            childAspectRatio: 2.1,
             children: [
-              _buildStatCard('SERVER IP', _serverIp ?? 'Unknown', Icons.settings_ethernet, [Colors.blueAccent, Colors.cyanAccent]),
-              _buildStatCard('UPTIME', _formatUptime(), Icons.timer_outlined, [Colors.purpleAccent, Colors.pinkAccent]),
-              _buildStatCard('ACTIVE NODES', _connectedClients.length.toString(), Icons.hub, [Colors.greenAccent, Colors.tealAccent]),
+              _buildStatCard('SERVER IP ADDRESS', _serverIp ?? 'Unknown', Icons.lan_rounded, [const Color(0xFF0EA5E9), const Color(0xFF0284C7)]),
+              _buildStatCard('UPTIME CLOCK', _formatUptime(), Icons.timer_outlined, [const Color(0xFF8B5CF6), const Color(0xFF6D28D9)]),
+              _buildStatCard('ACTIVE LAN NODES', '${_connectedClients.length} Connected', Icons.hub_rounded, [const Color(0xFF10B981), const Color(0xFF059669)]),
               _buildStatCard(
-                'DATA SYNCED',
-                '$_syncedToday (${_syncQueueSize}q)',
-                Icons.cloud_done_outlined,
-                [Colors.orangeAccent, Colors.deepOrangeAccent],
+                'SYNC TELEMETRY',
+                '$_syncedToday (${_syncQueueSize} Queued)',
+                Icons.cloud_sync_rounded,
+                [const Color(0xFFF59E0B), const Color(0xFFD97706)],
               ),
             ],
           ),
 
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
 
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1219,62 +1271,65 @@ class _ServerDashboardWithSyncState
                 flex: 2,
                 child: Card(
                   child: Padding(
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(20),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
                           Container(
                             padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(color: Colors.greenAccent.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-                            child: const Icon(Icons.sensors, size: 24, color: Colors.greenAccent),
+                            decoration: BoxDecoration(color: const Color(0xFF10B981).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                            child: const Icon(Icons.sensors_rounded, size: 22, color: Color(0xFF10B981)),
                           ),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 14),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Network Details & Activity Log', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white)),
+                              Text('Node Telemetry & Network Details', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
                               const SizedBox(height: 2),
                               Text(
                                 _lastSyncTime != null
-                                    ? 'Last Sync: ${DateFormat('hh:mm:ss a').format(_lastSyncTime!)}'
-                                    : 'Realtime Server Log & LAN Sync Stream',
-                                style: const TextStyle(fontSize: 12, color: Colors.white54),
+                                    ? 'Last Cloud Sync: ${DateFormat('hh:mm:ss a').format(_lastSyncTime!)}'
+                                    : 'Realtime WebSocket & UDP Gateway Operational',
+                                style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
                               ),
                             ],
                           ),
                         ]),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 20),
                         Container(
-                          padding: const EdgeInsets.all(20),
+                          padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.black26,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: Colors.white10),
+                            color: const Color(0xFF0B0F19),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF1E293B)),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _buildDetailRow('Host IP', _serverIp ?? 'Unknown'),
-                              const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(color: Colors.white10)),
-                              _buildDetailRow('Port', AppNetwork.websocketPort.toString()),
-                              const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(color: Colors.white10)),
-                              _buildDetailRow('Branch ID', widget.branchId),
+                              _buildDetailRow('Primary Host IP', _serverIp ?? 'Unknown'),
+                              const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(color: Color(0xFF1E293B))),
+                              _buildDetailRow('WebSocket Port', AppNetwork.websocketPort.toString()),
+                              const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(color: Color(0xFF1E293B))),
+                              _buildDetailRow('ZKTeco Port', '4370 (UDP / TCP)'),
+                              const Padding(padding: EdgeInsets.symmetric(vertical: 10), child: Divider(color: Color(0xFF1E293B))),
+                              _buildDetailRow('Active Branch ID', widget.branchId),
                             ],
                           ),
                         ),
-                        const SizedBox(height: 24),
+                        const SizedBox(height: 20),
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
                             onPressed: _isOnline ? _manualSync : null,
-                            icon: const Icon(Icons.cloud_sync, size: 20),
-                            label: const Text('FORCE CLOUD SYNC'),
+                            icon: const Icon(Icons.cloud_sync_rounded, size: 18),
+                            label: Text('FORCE CLOUD SYNC', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13)),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent.withValues(alpha: 0.2),
-                              foregroundColor: Colors.blueAccent,
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              backgroundColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
+                              foregroundColor: const Color(0xFF38BDF8),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              side: const BorderSide(color: Color(0xFF0284C7)),
                             ),
                           ),
                         ),
@@ -1283,55 +1338,58 @@ class _ServerDashboardWithSyncState
                   ),
                 ),
               ),
-              const SizedBox(width: 24),
+              const SizedBox(width: 20),
               Expanded(flex: 3, child: _buildConnectedClientsPanel()),
             ],
           ),
 
-          const SizedBox(height: 32),
+          const SizedBox(height: 24),
 
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    const Icon(Icons.terminal, color: Colors.white54, size: 24),
+                    const Icon(Icons.terminal_rounded, color: Color(0xFF38BDF8), size: 22),
                     const SizedBox(width: 12),
-                    const Text('SYSTEM TERMINAL', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white70, letterSpacing: 1.5)),
+                    Text('LIVE NETWORK SYSTEM LOG STREAM', style: GoogleFonts.outfit(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.2)),
                     const Spacer(),
                     TextButton.icon(
                       onPressed: _stopServer,
-                      icon: const Icon(Icons.stop_circle, color: Colors.redAccent),
-                      label: const Text('SHUTDOWN', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                      icon: const Icon(Icons.stop_circle_outlined, color: Color(0xFFF43F5E), size: 18),
+                      label: Text('SHUTDOWN SERVER', style: GoogleFonts.inter(color: const Color(0xFFF43F5E), fontWeight: FontWeight.bold, fontSize: 12)),
                     ),
                   ]),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withValues(alpha: 0.05))),
+                    height: 220,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF050811),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF1E293B)),
+                    ),
                     child: _activityLog.isEmpty
-                        ? const Center(child: Text('Awaiting system events...', style: TextStyle(color: Colors.white30, fontFamily: 'monospace')))
+                        ? Center(child: Text('Awaiting network events & biometric punches...', style: GoogleFonts.firaCode(color: const Color(0xFF64748B), fontSize: 12)))
                         : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: _activityLog.length > 20 ? 20 : _activityLog.length,
+                            itemCount: _activityLog.length > 50 ? 50 : _activityLog.length,
                             itemBuilder: (context, index) {
                               final log = _activityLog[index];
-                              Color textColor = Colors.white70;
+                              Color textColor = const Color(0xFFCBD5E1);
                               if (log.contains('❌') || log.contains('🔴')) {
-                                textColor = Colors.redAccent;
+                                textColor = const Color(0xFFF43F5E);
                               } else if (log.contains('✅') || log.contains('🟢')) {
-                                textColor = Colors.greenAccent;
+                                textColor = const Color(0xFF10B981);
                               } else if (log.contains('⚠️')) {
-                                textColor = Colors.amberAccent;
+                                textColor = const Color(0xFFF59E0B);
                               }
                               
                               return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 6),
-                                child: Text(log, style: TextStyle(fontFamily: 'monospace', fontSize: 13, color: textColor)),
+                                padding: const EdgeInsets.symmetric(vertical: 4),
+                                child: Text(log, style: GoogleFonts.firaCode(fontSize: 12, color: textColor)),
                               );
                             },
                           ),
@@ -1340,7 +1398,7 @@ class _ServerDashboardWithSyncState
               ),
             ),
           ),
-          const SizedBox(height: 40),
+          const SizedBox(height: 24),
         ],
       ),
     );
@@ -1486,8 +1544,12 @@ class ServerSyncManager {
         }
 
         final serial    = data['serial']?.toString() ?? '';
+        final parts = serial.split('-');
+        final cleanDateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+            ? (parts.length > 1 ? parts[1] : '')
+            : (parts.isNotEmpty ? parts[0] : '');
         final dateKey   = data['dateKey']?.toString() ??
-            (serial.contains('-') ? serial.split('-')[0] : _todayKey());
+            (serial.contains('-') ? cleanDateKey : _todayKey());
         final bId       = (data['branchId'] as String?)?.trim() ?? branchId;
 
         if (serial.isNotEmpty && dateKey.isNotEmpty) {
@@ -1855,11 +1917,17 @@ class ServerSyncManager {
             : (cleanData['delta'] is num
                 ? (cleanData['delta'] as num).toDouble()
                 : double.tryParse(cleanData['delta']?.toString() ?? '') ?? 0.0);
-        if (d == 0) return;
-        await db
+        final docRef = db
             .collection('branches').doc(effectiveBranchId)
-            .collection('inventory').doc(mid)
-            .update({'quantity': FieldValue.increment(d)});
+            .collection('inventory').doc(mid);
+        await db.runTransaction((transaction) async {
+          final snapshot = await transaction.get(docRef);
+          if (snapshot.exists) {
+            final current = (snapshot.data()?['quantity'] as num?)?.toDouble() ?? 0.0;
+            final updated = (current + d).clamp(0.0, double.infinity);
+            transaction.update(docRef, {'quantity': updated});
+          }
+        });
         debugPrint('✅ update_inventory → inventory/$mid delta=$d');
         break;
 

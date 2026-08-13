@@ -19,6 +19,7 @@ import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/device_badge_widget.dart';
 import '../utils/formatters.dart';
+import '../services/camp_session_service.dart';
 
 class UserDetailScreen extends StatefulWidget {
   final String userId;
@@ -44,8 +45,25 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     with SingleTickerProviderStateMixin {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  Future<void> _updateFirebaseAuthUser(String email, String password, {String? newEmail, String? newPassword}) async {
+  Future<void> _updateFirebaseAuthUser(String email, String password, {String? newEmail, String? newPassword, String? newDisplayName}) async {
     try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      final isSelf = currentUser != null &&
+          (currentUser.email?.toLowerCase() == email.toLowerCase() || currentUser.uid == widget.userId);
+
+      if (isSelf) {
+        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != email.toLowerCase()) {
+          await currentUser.verifyBeforeUpdateEmail(newEmail);
+        }
+        if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
+          await currentUser.updatePassword(newPassword);
+        }
+        if (newDisplayName != null && newDisplayName.isNotEmpty) {
+          await currentUser.updateDisplayName(newDisplayName);
+        }
+        return;
+      }
+
       final appName = 'TempAuthApp_${DateTime.now().millisecondsSinceEpoch}';
       final secondaryApp = await Firebase.initializeApp(
         name: appName,
@@ -55,16 +73,20 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       final creds = await secondaryAuth.signInWithEmailAndPassword(email: email, password: password);
       final user = creds.user;
       if (user != null) {
-        if (newEmail != null && newEmail != email) {
+        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != email.toLowerCase()) {
           await user.verifyBeforeUpdateEmail(newEmail);
         }
-        if (newPassword != null && newPassword != password) {
+        if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
           await user.updatePassword(newPassword);
+        }
+        if (newDisplayName != null && newDisplayName.isNotEmpty) {
+          await user.updateDisplayName(newDisplayName);
         }
       }
       await secondaryApp.delete();
     } catch (e) {
       debugPrint('[UserDetailScreen] Failed to update Firebase Auth user: $e');
+      rethrow;
     }
   }
 
@@ -330,6 +352,15 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   }
 
   void _showEditDialog(Map<String, dynamic> data, RoleThemeData t) async {
+    if (!_canManageUserAccess(data)) {
+      _snack(
+        (data['role']?.toString().toLowerCase().trim() == 'chairman')
+            ? 'Access Denied: The Chairman account is 100% immutable and CANNOT be edited or restricted by ANY user.'
+            : 'Access Denied: Only the Chairman has authority to edit or manage user accounts.',
+        error: true,
+      );
+      return;
+    }
     if (!await _checkPassword(t)) return;
 
     final editKey = GlobalKey<FormState>();
@@ -386,7 +417,28 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     _addressController.text = data['address'] ?? '';
     _bankNameController.text = data['bankName'] ?? '';
     _bankAccountController.text = data['bankAccount'] ?? '';
-    _profileFile = _idFile = _degreeFile = null;
+    bool editedCanRegisterMed = data['canRegisterMedicine'] == true;
+
+    List<String> editedDispensaryIds = [];
+    if (data['dispensaryIds'] is List) {
+      editedDispensaryIds = (data['dispensaryIds'] as List).map((e) => e.toString().toLowerCase().trim()).toList();
+    } else if (data['dispensaryId'] != null) {
+      final d = data['dispensaryId'].toString().toLowerCase().trim();
+      if (d.isNotEmpty && d != 'all') editedDispensaryIds = [d];
+    }
+
+    List<Map<String, String>> editedSchedule = [];
+    if (data['campSchedule'] is List) {
+      for (final item in data['campSchedule']) {
+        if (item is Map) {
+          editedSchedule.add({
+            'campId': item['campId']?.toString() ?? '',
+            'startTime': item['startTime']?.toString() ?? '',
+            'endTime': item['endTime']?.toString() ?? '',
+          });
+        }
+      }
+    }
 
     showDialog(
       context: context,
@@ -395,6 +447,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           final isDoctor = _selectedRole != null &&
               (_selectedRole!.toLowerCase() == 'doctor' ||
                   _selectedRole!.toLowerCase().contains('doc'));
+          final isDispensaryRole = _selectedRole != null &&
+              ['doctor', 'receptionist', 'dispenser', 'rec+dis', 'doc+rec', 'doc+dis', 'doc+rec+dis', 'supervisor', 'branch manager']
+                  .contains(_selectedRole!.toLowerCase().trim());
+
           return Dialog(
             backgroundColor: t.bg,
             shape: RoundedRectangleBorder(
@@ -503,6 +559,229 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           ],
                           onChanged: (v) => setS(() => _selectedStatus = v),
                         ),
+
+                        if (isDispensaryRole) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: t.bgCardAlt,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: t.bgRule),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(Icons.local_hospital_rounded, color: t.accent, size: 20),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Assigned Camp Facilities',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: t.textPrimary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children: [
+                                    FilterChip(
+                                      label: const Text('All Dispensaries (Central)'),
+                                      selected: editedDispensaryIds.isEmpty,
+                                      selectedColor: t.accent.withValues(alpha: 0.2),
+                                      checkmarkColor: t.accent,
+                                      onSelected: (selected) {
+                                        setS(() => editedDispensaryIds.clear());
+                                      },
+                                    ),
+                                    ...['kapayya', 'haji_camp'].map((campId) {
+                                      final label = CampSessionService.getCampLabel(campId);
+                                      final isSelected = editedDispensaryIds.contains(campId);
+                                      return FilterChip(
+                                        label: Text(label),
+                                        selected: isSelected,
+                                        selectedColor: t.accent.withValues(alpha: 0.2),
+                                        checkmarkColor: t.accent,
+                                        onSelected: (selected) {
+                                          setS(() {
+                                            if (selected) {
+                                              editedDispensaryIds.add(campId);
+                                            } else {
+                                              editedDispensaryIds.remove(campId);
+                                            }
+                                          });
+                                        },
+                                      );
+                                    }),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: t.bgCardAlt,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: t.bgRule),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.schedule_rounded, color: t.accent, size: 20),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Shift Schedule (Time-based)',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: t.textPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    TextButton.icon(
+                                      icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                                      label: const Text('Add Slot', style: TextStyle(fontSize: 12)),
+                                      onPressed: () async {
+                                        String selectedCamp = editedDispensaryIds.isNotEmpty ? editedDispensaryIds.first : 'kapayya';
+                                        String selectedSession = 'morning';
+
+                                        final added = await showDialog<Map<String, String>>(
+                                          context: ctx,
+                                          builder: (dialogCtx) => StatefulBuilder(
+                                            builder: (dialogCtx, setD) {
+                                              return AlertDialog(
+                                                title: const Text('Add Mandatory Shift Schedule Slot', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                                content: Column(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    DropdownButtonFormField<String>(
+                                                      value: selectedCamp,
+                                                      decoration: const InputDecoration(labelText: 'Camp Facility'),
+                                                      items: ['kapayya', 'haji_camp'].map((id) => DropdownMenuItem(
+                                                        value: id,
+                                                        child: Text(CampSessionService.getCampLabel(id)),
+                                                      )).toList(),
+                                                      onChanged: (v) => setD(() => selectedCamp = v ?? 'kapayya'),
+                                                    ),
+                                                    const SizedBox(height: 12),
+                                                    DropdownButtonFormField<String>(
+                                                      value: selectedSession,
+                                                      decoration: const InputDecoration(labelText: 'Mandatory Shift / Session'),
+                                                      items: const [
+                                                        DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
+                                                        DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
+                                                        DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
+                                                        DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
+                                                      ],
+                                                      onChanged: (v) => setD(() => selectedSession = v ?? 'morning'),
+                                                    ),
+                                                  ],
+                                                ),
+                                                actions: [
+                                                  TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+                                                  ElevatedButton(
+                                                    onPressed: () {
+                                                      Navigator.pop(dialogCtx, {
+                                                        'campId': selectedCamp,
+                                                        'session': selectedSession,
+                                                      });
+                                                    },
+                                                    child: const Text('Add Slot'),
+                                                  ),
+                                                ],
+                                              );
+                                            },
+                                          ),
+                                        );
+
+                                        if (added != null) {
+                                          setS(() => editedSchedule.add(added));
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                if (editedSchedule.isEmpty)
+                                  Text(
+                                    'No specific shift schedule defined (Manual camp picker will be used).',
+                                    style: TextStyle(fontSize: 12, color: t.textTertiary, fontStyle: FontStyle.italic),
+                                  )
+                                else
+                                  Column(
+                                    children: editedSchedule.asMap().entries.map((e) {
+                                      final idx = e.key;
+                                      final item = e.value;
+                                      final label = CampSessionService.getCampLabel(item['campId'] ?? '');
+                                      final sessionName = switch (item['session']?.toString().toLowerCase()) {
+                                        'morning' => '☀️ Morning',
+                                        'evening' => '🌅 Evening',
+                                        'night'   => '🌙 Night',
+                                        _         => item['startTime'] != null ? '${item['startTime']} – ${item['endTime']}' : '📑 All Sessions',
+                                      };
+                                      return Container(
+                                        margin: const EdgeInsets.only(top: 6),
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: t.bgCard,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: t.bgRule),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                '$label — $sessionName',
+                                                style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
+                                            IconButton(
+                                              icon: Icon(Icons.close_rounded, size: 16, color: t.danger),
+                                              onPressed: () => setS(() => editedSchedule.removeAt(idx)),
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 12),
+                        Container(
+                          decoration: BoxDecoration(
+                            color: t.bgCardAlt,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: t.bgRule),
+                          ),
+                          child: SwitchListTile(
+                            title: Text('Allow Register Medicine Access', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: t.textPrimary)),
+                            subtitle: Text('Grants user permission to register new stock medicines', style: TextStyle(fontSize: 11, color: t.textSecondary)),
+                            value: editedCanRegisterMed,
+                            activeColor: t.accent,
+                            onChanged: (val) => setS(() => editedCanRegisterMed = val),
+                          ),
+                        ),
+
                         if (isDoctor) ...[
                           const SizedBox(height: 12),
                           _editField(t, _degreeController,
@@ -561,7 +840,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                             style: TextStyle(
                                 fontWeight: FontWeight.w700)),
                         onPressed: () async => _saveUser(ctx,
-                            editKey, data, passCtrl, isDoctor),
+                            editKey, data, passCtrl, isDoctor,
+                            dispensaryIds: editedDispensaryIds,
+                            campSchedule: editedSchedule,
+                            canRegisterMedicine: editedCanRegisterMed),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
                           foregroundColor: Colors.white,
@@ -589,26 +871,27 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       GlobalKey<FormState> key,
       Map<String, dynamic> old,
       TextEditingController passCtrl,
-      bool isDoctor) async {
+      bool isDoctor, {
+      List<String> dispensaryIds = const [],
+      List<Map<String, String>> campSchedule = const [],
+      bool? canRegisterMedicine,
+  }) async {
     if (!key.currentState!.validate()) return;
 
     final String targetRole = (old['role'] ?? '').toString().toLowerCase().trim();
-    final String currentActorRole = (Hive.box('app_settings').get('user_role') ?? 'admin').toString().toLowerCase().trim();
-    final String newStatus = (_selectedStatus ?? 'Active').toLowerCase();
-
-    final bool isRevoking = newStatus == 'suspended' || newStatus == 'terminated' || newStatus == 'inactive';
-
-    if (isRevoking) {
-      if ((targetRole == 'principal' || targetRole == 'chairman' || targetRole == 'ceo') &&
-          (currentActorRole == 'school admin' || currentActorRole == 'admin' || currentActorRole == 'branch manager')) {
-        _snack('Permission Denied: School Admin cannot revoke Principal access!', error: true);
-        return;
-      }
+    if (targetRole == 'chairman') {
+      _snack('Access Denied: The Chairman account is 100% immutable and CANNOT be edited or restricted by ANY user!', error: true);
+      return;
+    }
+    if (!_canManageUserAccess(old)) {
+      _snack('Access Denied: You do not have permission to modify user account details, roles, or access status!', error: true);
+      return;
     }
     final updates = <String, dynamic>{
       'username': _usernameController.text.trim(),                              // original casing
       'usernameLower': _usernameController.text.trim().toLowerCase(),            // for lookup
       'email': _emailController.text.trim().toLowerCase(),
+      if (canRegisterMedicine != null) 'canRegisterMedicine': canRegisterMedicine,
       'phone': _phoneController.text.trim().isNotEmpty
           ? _phoneController.text.trim()
           : null,
@@ -632,6 +915,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       'password': passCtrl.text.trim().isEmpty
           ? '1122'
           : passCtrl.text.trim(),
+      'dispensaryIds': dispensaryIds,
+      'dispensaryId': dispensaryIds.isNotEmpty ? dispensaryIds.first : null,
+      'campSchedule': campSchedule,
     };
     if (isDoctor) updates['degree'] = _degreeController.text.trim();
 
@@ -658,11 +944,25 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     try {
       final String oldEmail = old['email']?.toString() ?? '';
       final String oldPassword = old['password']?.toString() ?? '1122';
-      final String newEmail = updates['email'] as String;
-      final String newPassword = updates['password'] as String;
+      final String newEmail = (updates['email'] ?? oldEmail).toString();
+      final String newPassword = (updates['password'] ?? oldPassword).toString();
+      final String newName = (updates['name'] ?? updates['username'] ?? old['name'] ?? old['username'])?.toString() ?? '';
       final isLocal = widget.userId.startsWith('local-');
       if (!isLocal) {
-        await _updateFirebaseAuthUser(oldEmail, oldPassword, newEmail: newEmail, newPassword: newPassword);
+        try {
+          await _updateFirebaseAuthUser(
+            oldEmail,
+            oldPassword,
+            newEmail: newEmail,
+            newPassword: newPassword,
+            newDisplayName: newName,
+          );
+        } catch (e) {
+          debugPrint('[UserDetailScreen] Auth sync warning: $e');
+          if (mounted) {
+            _snack('Database updated. Note: Auth sync warning ($e)', error: true);
+          }
+        }
       }
 
       await LocalStorageService.saveUserOffline(
@@ -1053,31 +1353,40 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   const EdgeInsets.fromLTRB(20, 56, 20, 20),
               child: Row(
                 children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withValues(alpha: 0.2),
-                      image: (photoUrl != null && photoUrl.isNotEmpty)
-                          ? DecorationImage(
-                              image: (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'))
-                                  ? NetworkImage(photoUrl) as ImageProvider
-                                  : MemoryImage(ImageUploadService.decodeBase64ToBytes(photoUrl) ?? Uint8List(0)),
-                              fit: BoxFit.cover)
-                          : null,
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.4),
-                          width: 2.5),
+                  GestureDetector(
+                    onTap: () => _showEnlargedPhotoDialog(context, username, photoUrl, role, t),
+                    child: MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Tooltip(
+                        message: 'Tap to enlarge profile photo',
+                        child: Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Colors.white.withValues(alpha: 0.2),
+                            image: (photoUrl != null && photoUrl.isNotEmpty)
+                                ? DecorationImage(
+                                    image: (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'))
+                                        ? NetworkImage(photoUrl) as ImageProvider
+                                        : MemoryImage(ImageUploadService.decodeBase64ToBytes(photoUrl) ?? Uint8List(0)),
+                                    fit: BoxFit.cover)
+                                : null,
+                            border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.4),
+                                width: 2.5),
+                          ),
+                          alignment: Alignment.center,
+                          child: (photoUrl == null || photoUrl.isEmpty)
+                              ? Text(initials,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 26,
+                                      fontWeight: FontWeight.w800))
+                              : null,
+                        ),
+                      ),
                     ),
-                    alignment: Alignment.center,
-                    child: (photoUrl == null || photoUrl.isEmpty)
-                        ? Text(initials,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 26,
-                                fontWeight: FontWeight.w800))
-                        : null,
                   ),
                   const SizedBox(width: 18),
                   Expanded(
@@ -1181,6 +1490,31 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           Icons.home_outlined),
       _infoRow(t, 'Branch', branchName ?? widget.branchId,
           Icons.location_on_outlined),
+      if (data['dispensaryIds'] is List && (data['dispensaryIds'] as List).isNotEmpty)
+        _infoRow(
+          t,
+          'Assigned Camps',
+          (data['dispensaryIds'] as List)
+              .map((id) => CampSessionService.getCampLabel(id.toString()))
+              .join(', '),
+          Icons.local_hospital_outlined,
+        )
+      else if (data['dispensaryId'] != null && data['dispensaryId'].toString().isNotEmpty)
+        _infoRow(t, 'Dispensary', data['dispensaryId'] == 'kapayya'
+            ? 'Kapayya Dispensary'
+            : (data['dispensaryId'] == 'haji_camp' ? 'Haji Camp Dispensary' : data['dispensaryId'].toString().toUpperCase()),
+            Icons.local_hospital_outlined),
+      if (data['campSchedule'] is List && (data['campSchedule'] as List).isNotEmpty)
+        _infoRow(
+          t,
+          'Shift Schedule',
+          (data['campSchedule'] as List).map((s) {
+            if (s is! Map) return '';
+            final c = CampSessionService.getCampLabel(s['campId']?.toString() ?? '');
+            return '$c (${s['startTime']}–${s['endTime']})';
+          }).where((str) => str.isNotEmpty).join('\n'),
+          Icons.access_time_rounded,
+        ),
     ]);
   }
 
@@ -2171,107 +2505,225 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             ),
           ],
           const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _showRevokeAccessDialog(data, t),
-              icon: Icon(isRevoked ? Icons.key_rounded : Icons.lock_person_rounded, size: 18),
-              label: Text(
-                isRevoked ? 'Update Access / Status' : 'Revoke User Access',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showRevokeAccessDialog(data, t),
+                  icon: Icon(isRevoked ? Icons.key_rounded : Icons.lock_person_rounded, size: 18),
+                  label: Text(
+                    isRevoked ? 'Update Access / Status' : 'Revoke User Access',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isRevoked ? const Color(0xFF334155) : Colors.amber.shade900,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                ),
               ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isRevoked ? const Color(0xFF334155) : Colors.red,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 0,
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _showDeleteUserDialog(data, t),
+                  icon: const Icon(Icons.delete_forever_rounded, size: 18),
+                  label: const Text(
+                    'Delete Account',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade800,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  bool _canManageUserAccess(Map<String, dynamic> targetData) {
-    String actorRole = '';
+  bool _isChairmanActor() {
+    return _getActorRole() == 'chairman';
+  }
+
+  String _getActorRole() {
+    if (widget.currentUserRole != null && widget.currentUserRole!.isNotEmpty) {
+      return widget.currentUserRole!.toLowerCase().trim();
+    }
+    try {
+      final label = RoleThemeScope.dataOf(context).roleLabel.toLowerCase().trim();
+      if (label.isNotEmpty && label != 'overview' && label != 'system') return label;
+    } catch (_) {}
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      final uid = currentUser.uid;
+      final email = currentUser.email?.toLowerCase().trim();
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final box = Hive.box(LocalStorageService.usersBox);
+        final uDoc = box.get(uid) ?? box.get('user:$uid') ?? (email != null ? box.get('user:$email') : null);
+        if (uDoc is Map) {
+          final r = (uDoc['role'] ?? uDoc['type'] ?? uDoc['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty) return r;
+        }
+      }
+    }
 
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final box = Hive.box('app_settings');
-        final currentMap = box.get('user_data') ?? box.get('currentUser') ?? box.get('active_user');
-        if (currentMap is Map && currentMap['role'] != null) {
-          actorRole = (currentMap['role'] as String).toLowerCase().trim();
+        final r1 = (box.get('user_role') ?? box.get('role'))?.toString().toLowerCase().trim() ?? '';
+        if (r1.isNotEmpty) return r1;
+
+        final uMap = box.get('user_data') ?? box.get('currentUser') ?? box.get('active_user');
+        if (uMap is Map) {
+          final r2 = (uMap['role'] ?? uMap['type'] ?? uMap['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r2.isNotEmpty) return r2;
         }
       }
     } catch (_) {}
 
-    if (actorRole.isEmpty) {
-      try {
-        final currentMap = widget.localBox.get('user_data') ?? widget.localBox.get('currentUser') ?? widget.localBox.get('active_user');
-        if (currentMap is Map && currentMap['role'] != null) {
-          actorRole = (currentMap['role'] as String).toLowerCase().trim();
-        }
-      } catch (_) {}
-    }
-
-    if (actorRole.isEmpty) {
-      final currentUser = FirebaseAuth.instance.currentUser;
-      final actorUid = currentUser?.uid ?? '';
-      if (actorUid.isNotEmpty && Hive.isBoxOpen(LocalStorageService.usersBox)) {
-        final curMap = Hive.box(LocalStorageService.usersBox).get(actorUid);
-        if (curMap is Map && curMap['role'] != null) {
-          actorRole = (curMap['role'] as String).toLowerCase().trim();
+    try {
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUid != null && currentUid.isNotEmpty) {
+        final local = LocalStorageService.getLocalUserByUid(currentUid);
+        if (local != null) {
+          final r = (local['role'] ?? local['type'] ?? local['accountType'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty) return r;
         }
       }
-    }
+    } catch (_) {}
 
-    if (actorRole.isEmpty) {
-      actorRole = (widget.currentUserRole ?? '').toLowerCase().trim();
-    }
+    return 'admin';
+  }
 
-    if (actorRole.isEmpty && mounted) {
-      try {
-        final scope = context.dependOnInheritedWidgetOfExactType<RoleThemeScope>();
-        if (scope != null) {
-          actorRole = scope.role.name.toLowerCase().trim();
-        }
-      } catch (_) {}
-    }
-
-    // GOD MODE: Chairman role can edit, delete, or revoke ANY role at all (including CEO, HQ Manager, Admins, global roles, server, self)
-    if (actorRole == 'chairman') {
-      return true;
-    }
-
-    final actorUid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final targetUid = (targetData['uid'] ?? targetData['id'] ?? targetData['docId'] ?? '').toString();
-    if (actorUid.isNotEmpty && targetUid.isNotEmpty && actorUid == targetUid) {
-      return false;
-    }
-
+  bool _canManageUserAccess(Map<String, dynamic> targetData) {
     final targetRole = (targetData['role'] as String? ?? '').toLowerCase().trim();
 
-    // Rule 2: Server accounts protection for non-chairman
-    if (targetRole == 'server' || targetRole.contains('server')) {
+    // Chairman account is 100% immutable and CANNOT be deleted, edited, suspended, or demoted by ANY user.
+    if (targetRole == 'chairman') {
       return false;
     }
 
-    // Rule 3: Non-chairman roles CANNOT manage Administration / Executive employees (HQ Manager, CEO, Admin, Chairman)
-    final isTargetExecOrAdmin = targetRole == 'ceo' ||
-        targetRole == 'hq manager' ||
-        targetRole == 'hq_manager' ||
-        targetRole == 'admin' ||
-        targetRole == 'chairman' ||
-        targetRole == 'global user' ||
-        targetRole == 'administration';
+    final actorRole = _getActorRole();
+    const allowedRoles = {'chairman', 'global admin', 'admin', 'ceo', 'hq manager', 'branch manager', 'supervisor'};
+    return allowedRoles.contains(actorRole);
+  }
 
-    if (isTargetExecOrAdmin) {
-      return false;
+  Future<void> _showDeleteUserDialog(Map<String, dynamic> data, RoleThemeData t) async {
+    if (!_canManageUserAccess(data)) {
+      _snack('Access Denied: You do not have permission to delete ${(data['role'] as String? ?? 'User').toUpperCase()} accounts.', error: true);
+      return;
     }
 
-    return true;
+    final userName = data['name'] ?? data['username'] ?? 'User';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: t.bgCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 10),
+            Text('Delete User Account', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to PERMANENTLY delete the account for "$userName"? This action will remove their profile and access permissions completely.',
+          style: TextStyle(color: t.textSecondary, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: const Text('Delete Permanently'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    if (!await _checkPassword(t)) return;
+
+    final targetUid = widget.userId;
+    final usernameLower = (data['usernameLower'] ?? data['username'] ?? '').toString().trim().toLowerCase();
+    final targetEmail = (data['email'] ?? '').toString().trim().toLowerCase();
+    final targetPass = (data['password'] ?? '112233').toString();
+
+    try {
+      if (targetEmail.isNotEmpty) {
+        await _deleteFirebaseAuthUser(targetEmail, targetPass);
+      }
+
+      // Purge from Local Storage
+      for (final boxName in [LocalStorageService.usersBox, 'local_users', 'local']) {
+        if (Hive.isBoxOpen(boxName)) {
+          final box = Hive.box(boxName);
+          if (targetUid.isNotEmpty) await box.delete(targetUid);
+          if (usernameLower.isNotEmpty) await box.delete(usernameLower);
+          if (targetEmail.isNotEmpty) await box.delete(targetEmail);
+          final keysToDelete = <dynamic>[];
+          for (final key in box.keys) {
+            final val = box.get(key);
+            if (val is Map) {
+              final uidVal = (val['uid'] ?? val['id'] ?? '').toString();
+              final uNameVal = (val['username'] ?? '').toString().toLowerCase();
+              final emailVal = (val['email'] ?? '').toString().toLowerCase();
+              if ((targetUid.isNotEmpty && uidVal == targetUid) ||
+                  (usernameLower.isNotEmpty && uNameVal == usernameLower) ||
+                  (targetEmail.isNotEmpty && emailVal == targetEmail)) {
+                keysToDelete.add(key);
+              }
+            }
+          }
+          for (final k in keysToDelete) {
+            await box.delete(k);
+          }
+        }
+      }
+
+      // Purge from Firestore
+      if (widget.isOnline) {
+        if (targetUid.isNotEmpty) {
+          await _firestore.collection('users').doc(targetUid).delete().catchError((_) {});
+        }
+        if (usernameLower.isNotEmpty && usernameLower != targetUid) {
+          await _firestore.collection('users').doc(usernameLower).delete().catchError((_) {});
+        }
+        if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+          if (targetUid.isNotEmpty) {
+            await _firestore.collection('branches').doc(widget.branchId).collection('users').doc(targetUid).delete().catchError((_) {});
+          }
+          if (usernameLower.isNotEmpty && usernameLower != targetUid) {
+            await _firestore.collection('branches').doc(widget.branchId).collection('users').doc(usernameLower).delete().catchError((_) {});
+          }
+        }
+      }
+
+      _snack('Account deleted successfully.', success: true);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      _snack('Failed to delete account: $e', error: true);
+    }
   }
 
   Future<void> _showRevokeAccessDialog(Map<String, dynamic> data, RoleThemeData t) async {
@@ -2529,4 +2981,147 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   color: t.textSecondary)),
         ]),
       );
+
+  void _showEnlargedPhotoDialog(
+    BuildContext context,
+    String name,
+    String? photoUrl,
+    String role,
+    RoleThemeData t,
+  ) {
+    final bytes = photoUrl != null && photoUrl.trim().isNotEmpty
+        ? ImageUploadService.decodeBase64ToBytes(photoUrl)
+        : null;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 520),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F172A),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
+              boxShadow: [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: 0.25),
+                  blurRadius: 30,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header bar
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.account_circle_rounded, color: t.accent, size: 22),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Profile Photo',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      onPressed: () => Navigator.pop(ctx),
+                      tooltip: 'Close',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+
+                // Enlarged Avatar Container (320px x 320px)
+                Container(
+                  width: 320,
+                  height: 320,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFF59E0B), width: 4.0),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                        blurRadius: 24,
+                        spreadRadius: 3,
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: photoUrl != null && photoUrl.trim().isNotEmpty
+                        ? (bytes != null
+                            ? Image.memory(bytes, fit: BoxFit.cover, width: 320, height: 320)
+                            : Image.network(photoUrl, fit: BoxFit.cover, width: 320, height: 320, errorBuilder: (_, __, ___) => _buildFallbackAvatar(name, t, size: 320)))
+                        : _buildFallbackAvatar(name, t, size: 320),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // User Name & Role
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                  ),
+                  child: Text(
+                    role.toUpperCase(),
+                    style: TextStyle(
+                      color: t.accent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildFallbackAvatar(String name, RoleThemeData t, {required double size}) {
+    final initials = name.trim().isNotEmpty
+        ? name.trim().split(' ').map((e) => e[0]).take(2).join().toUpperCase()
+        : '?';
+    return Container(
+      width: size,
+      height: size,
+      color: t.accentMuted,
+      alignment: Alignment.center,
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: t.accent,
+          fontWeight: FontWeight.w900,
+          fontSize: size * 0.35,
+        ),
+      ),
+    );
+  }
 }

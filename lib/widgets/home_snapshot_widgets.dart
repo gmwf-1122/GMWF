@@ -21,6 +21,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
 import '../pages/school/utils/school_local_storage.dart';
 import '../pages/school/school_dashboard.dart';
+import '../pages/users.dart';
 
 // ════════════════════════════════════════════════════════════════════════
 // 1. Compact stat tile w/ "vs yesterday" delta
@@ -283,8 +284,8 @@ class HomeStatTileRow extends StatelessWidget {
       double aspectRatio = 2.15;
 
       if (c.maxWidth < 600) {
-        cols = 3;
-        aspectRatio = 1.6;
+        cols = 2;
+        aspectRatio = 1.85;
       } else if (c.maxWidth < 1100) {
         cols = 6;
         aspectRatio = 1.95;
@@ -498,7 +499,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Branch Performance Today',
+          Text('Dispensaries & Camps Performance Today',
               style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           // Table header
@@ -511,7 +512,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 3,
-                  child: Text('Branch', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                  child: Text('Dispensary / Camp', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 ),
                 Expanded(
                   flex: 2,
@@ -532,11 +533,11 @@ class HomeBranchPerformanceTable extends StatelessWidget {
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 24),
               child: Center(
-                child: Text('No branches to show', style: TextStyle(color: DS.neutral, fontSize: 12)),
+                child: Text('No dispensaries or camps to show', style: TextStyle(color: DS.neutral, fontSize: 12)),
               ),
             )
           else
-            ...rows.take(5).toList().asMap().entries.map((e) {
+            ...rows.toList().asMap().entries.map((e) {
               final i = e.key;
               final row = e.value;
               
@@ -2151,11 +2152,14 @@ class SnapshotDashboardData {
 
 Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> userData) async {
   final role = (userData['role'] as String? ?? 'unknown').toLowerCase().trim();
-  final isGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin'].contains(role);
-  final isFullExec = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'manager', 'hq manager', 'hqmanager', 'hq_manager', 'hq'].contains(role);
-  final isGlobalExec = isGlobal || isFullExec;
-  
   final String userBranchId = (userData['branchId'] as String? ?? '').toLowerCase().trim();
+
+  final isBranchScoped = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ||
+                         role == 'branch manager' || role == 'branch_manager' || role == 'bm' || role.contains('branch manager') || role == 'supervisor';
+
+  final isGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin'].contains(role);
+  final isFullExec = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'hq manager', 'hqmanager', 'hq_manager', 'hq'].contains(role);
+  final isGlobalExec = (isGlobal || isFullExec) && !isBranchScoped;
   
   if (isGlobalExec) {
     // 1. Get all branch IDs
@@ -2164,19 +2168,51 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     // 2. Fetch today-vs-yesterday per branch
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
     
-    // 3. Build branch rows for table
+    // 3. Build branch/camp rows for table
     final List<HomeBranchRow> branchRows = [];
     final List<BranchStats> todayStatsList = [];
     final List<BranchStats> yesterdayStatsList = [];
     
+    final karachiCamps = await fetchKarachiCampBreakdown();
+
     statsMap.forEach((bId, value) {
-      final bName = RecentActivityService.resolveBranchName(bId);
-      branchRows.add(HomeBranchRow(
-        id: bId,
-        name: bName,
-        today: value.today,
-        yesterday: value.yesterday,
-      ));
+      if (bId == 'karachi') {
+        branchRows.add(HomeBranchRow(
+          id: 'karachi_haji',
+          name: 'Karachi — Haji Camp Dispensary',
+          today: BranchStats(
+            zakat: karachiCamps.hajiCampZakat,
+            nonZakat: karachiCamps.hajiCampNonZakat,
+            gmwf: karachiCamps.hajiCampGmwf,
+            prescribed: value.today.prescribed,
+            dispensaryRevenue: karachiCamps.hajiCampRevenue,
+            donations: 0,
+          ),
+          yesterday: value.yesterday,
+        ));
+
+        branchRows.add(HomeBranchRow(
+          id: 'karachi_kapaya',
+          name: 'Karachi — Kapaya Dispensary',
+          today: BranchStats(
+            zakat: karachiCamps.kapayaZakat,
+            nonZakat: karachiCamps.kapayaNonZakat,
+            gmwf: karachiCamps.kapayaGmwf,
+            prescribed: value.today.prescribed,
+            dispensaryRevenue: karachiCamps.kapayaRevenue,
+            donations: value.today.donations,
+          ),
+          yesterday: value.yesterday,
+        ));
+      } else {
+        final bName = RecentActivityService.resolveBranchName(bId);
+        branchRows.add(HomeBranchRow(
+          id: bId,
+          name: bName,
+          today: value.today,
+          yesterday: value.yesterday,
+        ));
+      }
       todayStatsList.add(value.today);
       yesterdayStatsList.add(value.yesterday);
     });
@@ -2200,22 +2236,63 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     );
   } else {
     // Branch-locked role
-    final String branchId = userBranchId.isNotEmpty ? userBranchId : 'gujrat';
+    final String branchId = userBranchId.isNotEmpty ? userBranchId : 'karachi';
     
     // 1. Fetch today vs yesterday stats for this single branch
     final todayStats = await fetchBranchStats(branchId);
     final yesterdayStats = await fetchHistoricalDayStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
     
-    // 2. Fetch 7-day chart points
+    // 2. Build branchRows for single branch/camps
+    final List<HomeBranchRow> branchRows = [];
+    if (branchId == 'karachi') {
+      final karachiCamps = await fetchKarachiCampBreakdown();
+      branchRows.add(HomeBranchRow(
+        id: 'karachi_haji',
+        name: 'Karachi — Haji Camp Dispensary',
+        today: BranchStats(
+          zakat: karachiCamps.hajiCampZakat,
+          nonZakat: karachiCamps.hajiCampNonZakat,
+          gmwf: karachiCamps.hajiCampGmwf,
+          prescribed: todayStats.prescribed,
+          dispensaryRevenue: karachiCamps.hajiCampRevenue,
+          donations: 0,
+        ),
+        yesterday: yesterdayStats,
+      ));
+
+      branchRows.add(HomeBranchRow(
+        id: 'karachi_kapaya',
+        name: 'Karachi — Kapaya Dispensary',
+        today: BranchStats(
+          zakat: karachiCamps.kapayaZakat,
+          nonZakat: karachiCamps.kapayaNonZakat,
+          gmwf: karachiCamps.kapayaGmwf,
+          prescribed: todayStats.prescribed,
+          dispensaryRevenue: karachiCamps.kapayaRevenue,
+          donations: todayStats.donations,
+        ),
+        yesterday: yesterdayStats,
+      ));
+    } else {
+      final bName = RecentActivityService.resolveBranchName(branchId);
+      branchRows.add(HomeBranchRow(
+        id: branchId,
+        name: bName,
+        today: todayStats,
+        yesterday: yesterdayStats,
+      ));
+    }
+    
+    // 3. Fetch 7-day chart points
     final chartPoints = await fetchChartPoints([branchId], weeks: 5);
     
-    // 3. Fetch recent activity (branch-locked)
+    // 4. Fetch recent activity (branch-locked)
     final recentActivities = await RecentActivityService.getRecentActivityAsync(branchId: branchId, limit: 15);
     
     return SnapshotDashboardData(
       todayCombined: todayStats,
       yesterdayCombined: yesterdayStats,
-      branchRows: [], // empty as we hide the branch table
+      branchRows: branchRows,
       chartPoints: chartPoints,
       recentActivities: recentActivities,
     );
@@ -2226,8 +2303,43 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
 // 10. Home Snapshot Dashboard (Today-Only Widget)
 // ════════════════════════════════════════════════════════════════════════
 
-final snapshotDashboardDataProvider = FutureProvider.family<SnapshotDashboardData, Map<String, dynamic>>((ref, userData) async {
-  return fetchSnapshotDashboardData(userData);
+class _DashboardUserKey {
+  final String uid;
+  final String role;
+  final String branchId;
+  final Map<String, dynamic> userData;
+
+  const _DashboardUserKey({
+    required this.uid,
+    required this.role,
+    required this.branchId,
+    required this.userData,
+  });
+
+  factory _DashboardUserKey.fromMap(Map<String, dynamic> map) {
+    return _DashboardUserKey(
+      uid: (map['uid'] ?? '').toString(),
+      role: (map['role'] ?? '').toString().toLowerCase().trim(),
+      branchId: (map['branchId'] ?? '').toString().toLowerCase().trim(),
+      userData: map,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is _DashboardUserKey &&
+          runtimeType == other.runtimeType &&
+          uid == other.uid &&
+          role == other.role &&
+          branchId == other.branchId;
+
+  @override
+  int get hashCode => uid.hashCode ^ role.hashCode ^ branchId.hashCode;
+}
+
+final snapshotDashboardDataProvider = FutureProvider.family<SnapshotDashboardData, _DashboardUserKey>((ref, key) async {
+  return fetchSnapshotDashboardData(key.userData);
 });
 
 class HomeSnapshotDashboard extends ConsumerStatefulWidget {
@@ -2253,16 +2365,17 @@ class HomeSnapshotDashboard extends ConsumerStatefulWidget {
 }
 
 class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
+  _DashboardUserKey get _userKey => _DashboardUserKey.fromMap(widget.userData);
+
   void _refresh() {
-    ref.invalidate(snapshotDashboardDataProvider(widget.userData));
+    ref.invalidate(snapshotDashboardDataProvider(_userKey));
   }
 
   @override
   Widget build(BuildContext context) {
     final double hPad = widget.isDesktop ? 36 : 20;
 
-
-    final asyncData = ref.watch(snapshotDashboardDataProvider(widget.userData));
+    final asyncData = ref.watch(snapshotDashboardDataProvider(_userKey));
 
     return asyncData.when(
       loading: () => const Padding(
@@ -2360,6 +2473,20 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 initialTabIndex: 2,
               ),
             );
+          } else if (id == 'users') {
+            module = baseModule.id == 'users'
+                ? baseModule
+                : AppModule(
+                    id: 'users',
+                    title: 'User Management',
+                    description: 'Manage system users, roles, and online presence',
+                    icon: Icons.people_alt_rounded,
+                    category: ModuleCategory.office,
+                    builder: (context, data) => UsersScreen(
+                      branchId: data['branchId'] ?? 'all',
+                      currentUserRole: data['role']?.toString() ?? 'chairman',
+                    ),
+                  );
           }
           widget.onOpenModule(module);
         }
@@ -2388,17 +2515,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
 
 
 
-        final overallRev = today.donations + today.dispensaryRevenue;
-        final yOverallRev = yesterday.donations + yesterday.dispensaryRevenue;
-        final overallRevTile = HomeStatTile(
-          label: 'Overall Revenue',
-          value: fmtNum(overallRev),
-          prefix: 'Rs ',
-          icon: Icons.account_balance_wallet_rounded,
-          color: const Color(0xFF6366F1),
-          deltaPct: yOverallRev == 0 ? null : ((overallRev - yOverallRev) / yOverallRev) * 100,
-          onTap: () => tryOpenModule('finance'),
-        );
+        // overallRevTile removed per request
 
         final madrassaTile = HomeStatTile(
           label: 'Madrassa Attendance',
@@ -2485,43 +2602,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           onTap: () => tryOpenModule('users'),
         );
 
-        final branchesSummaryTile = HomeStatTile(
-          label: 'Branches Summary',
-          value: fmtNum(data.branchRows.length),
-          icon: Icons.store_outlined,
-          color: const Color(0xFF0D9488),
-          onTap: () => tryOpenModule('branches'),
-        );
-
-        final dasterkhwaanTokensTile = HomeStatTile(
-          label: 'Dasterkhawaan Tokens',
-          value: 'Tokens',
-          icon: Icons.room_service_rounded,
-          color: const Color(0xFFF59E0B),
-          onTap: () => tryOpenModule('office_boy'),
-        );
-
-        final dasterkhwaanStockTile = HomeStatTile(
-          label: 'Dasterkhawaan Stock',
-          value: 'Stock',
-          icon: Icons.inventory_2_outlined,
-          color: const Color(0xFFD97706),
-          onTap: () => tryOpenModule('dasterkhwaan_inventory'),
-        );
-
-        final List<HomeStatTile> statTiles = [
-          branchesSummaryTile,
-          donationsTile,
-          patientsTile,
-          overallRevTile,
-          madrassaTile,
-          employeeAttendanceTile,
-          schoolStudentsTile,
-          schoolTeachersTile,
-          dasterkhwaanTokensTile,
-          dasterkhwaanStockTile,
-          onlineUsersTile,
-        ];
+        final userRoleStr = (widget.userData['role'] as String? ?? '').toLowerCase().trim();
+        final isBranchManager = userRoleStr == 'branch manager' || userRoleStr == 'branch_manager' || userRoleStr.contains('branch manager');
+        final userBranchId = (widget.userData['branchId'] as String? ?? '').toLowerCase().trim();
 
         // Filter and sort branch rows by performance today
         final activeBranchRows = data.branchRows.where((row) {
@@ -2544,7 +2627,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           });
 
         HomeBranchRow? bestBranch;
-        if (sortedBranchRows.isNotEmpty) {
+        if (sortedBranchRows.isNotEmpty && !isBranchManager) {
           final top = sortedBranchRows.first;
           final pats = top.today.zakat + top.today.nonZakat + top.today.gmwf;
           if (top.today.donations > 0 || pats > 0 || top.today.dispensaryRevenue > 0) {
@@ -2552,69 +2635,122 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           }
         }
 
+        final topRow = sortedBranchRows.isNotEmpty ? sortedBranchRows.first : null;
+
+        final activeBranchTile = HomeStatTile(
+          label: isBranchManager ? (userBranchId.contains('karachi') ? 'Top Camp Today' : 'Active Branch') : 'Top Branch Today',
+          value: topRow != null ? topRow.name : RecentActivityService.resolveBranchName(userBranchId.isNotEmpty ? userBranchId : 'Karachi'),
+          icon: Icons.emoji_events_rounded,
+          color: const Color(0xFF0D9488),
+          onTap: () => tryOpenModule('branches'),
+        );
+
+        final branchesSummaryTile = HomeStatTile(
+          label: 'Top Branch Today',
+          value: topRow != null ? topRow.name : (bestBranch != null ? bestBranch.name : 'Karachi'),
+          icon: Icons.emoji_events_rounded,
+          color: const Color(0xFF0D9488),
+          onTap: () => tryOpenModule('branches'),
+        );
+
+        final dasterkhwaanTokensTile = HomeStatTile(
+          label: 'Dasterkhawaan Tokens',
+          value: 'Tokens',
+          icon: Icons.room_service_rounded,
+          color: const Color(0xFFF59E0B),
+          onTap: () => tryOpenModule('office_boy'),
+        );
+
+        final dasterkhwaanStockTile = HomeStatTile(
+          label: 'Dasterkhawaan Stock',
+          value: 'Stock',
+          icon: Icons.inventory_2_outlined,
+          color: const Color(0xFFD97706),
+          onTap: () => tryOpenModule('dasterkhwaan_inventory'),
+        );
+
+        final List<HomeStatTile> statTiles = [
+          if (!isBranchManager) branchesSummaryTile else activeBranchTile,
+          donationsTile,
+          patientsTile,
+          madrassaTile,
+          employeeAttendanceTile,
+          schoolStudentsTile,
+          schoolTeachersTile,
+          dasterkhwaanTokensTile,
+          dasterkhwaanStockTile,
+          onlineUsersTile,
+        ];
+
         // Layout rows
         final row2 = SizedBox(
-          height: 420,
+          height: 380,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 3, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
+              Expanded(flex: 4, child: HomeRevenueLineChart(points: data.chartPoints, t: widget.t)),
               const SizedBox(width: DS.s2),
-              Expanded(flex: 4, child: HomeBranchPerformanceTable(
-                t: widget.t,
-                rows: sortedBranchRows,
-                onTapBranch: (bId) {
-                  final branchesModule = widget.availableModules.firstWhere(
-                    (m) => m.id == 'branches',
-                    orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                  );
-                  widget.onOpenModule(branchesModule);
-                },
-              )),
+              Expanded(flex: 3, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
               const SizedBox(width: DS.s2),
               Expanded(
                 flex: 3,
-                child: bestBranch == null
-                    ? const SizedBox.shrink()
-                    : HomeBestBranchSpotlight(
-                        t: widget.t,
-                        branchName: bestBranch.name,
-                        revenue: bestBranch.today.dispensaryRevenue,
-                        donations: bestBranch.today.donations,
-                        patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
-                        growthPct: bestBranch.yesterday.dispensaryRevenue == 0
-                            ? null
-                            : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
-                                    bestBranch.yesterday.dispensaryRevenue) *
-                                100,
-                        onTap: () {
-                          final branchesModule = widget.availableModules.firstWhere(
-                            (m) => m.id == 'branches',
-                            orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                          );
-                          widget.onOpenModule(branchesModule);
-                        },
-                      ),
+                child: HomeRecentActivityFeed(
+                  activities: data.recentActivities,
+                  t: widget.t,
+                  availableModules: widget.availableModules,
+                  onOpenModule: widget.onOpenModule,
+                ),
               ),
             ],
           ),
         );
 
         final row3 = SizedBox(
-          height: 340,
+          height: 360,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 9, child: HomeRevenueLineChart(points: data.chartPoints, t: widget.t)),
+              Expanded(flex: 4, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
               const SizedBox(width: DS.s2),
-              Expanded(flex: 5, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
-              const SizedBox(width: DS.s2),
-              Expanded(flex: 6, child: HomeRecentActivityFeed(
-                activities: data.recentActivities,
-                t: widget.t,
-                availableModules: widget.availableModules,
-                onOpenModule: widget.onOpenModule,
-              )),
+              Expanded(
+                flex: 5,
+                child: HomeBranchPerformanceTable(
+                  t: widget.t,
+                  rows: sortedBranchRows,
+                  onTapBranch: (bId) {
+                    final branchesModule = widget.availableModules.firstWhere(
+                      (m) => m.id == 'branches',
+                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                    );
+                    widget.onOpenModule(branchesModule);
+                  },
+                ),
+              ),
+              if (bestBranch != null) ...[
+                const SizedBox(width: DS.s2),
+                Expanded(
+                  flex: 4,
+                  child: HomeBestBranchSpotlight(
+                    branchName: bestBranch.name,
+                    revenue: bestBranch.today.dispensaryRevenue,
+                    donations: bestBranch.today.donations,
+                    patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
+                    growthPct: bestBranch.yesterday.dispensaryRevenue == 0
+                        ? null
+                        : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
+                                bestBranch.yesterday.dispensaryRevenue) *
+                            100,
+                    onTap: () {
+                      final branchesModule = widget.availableModules.firstWhere(
+                        (m) => m.id == 'branches',
+                        orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                      );
+                      widget.onOpenModule(branchesModule);
+                    },
+                    t: widget.t,
+                  ),
+                ),
+              ],
             ],
           ),
         );
@@ -2636,6 +2772,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
             ],
           ),
         );
+
+        final roleStr = (widget.userData['role'] ?? widget.userData['userRole'] ?? '').toString().toLowerCase();
+        final isGlobalExecutive = roleStr.contains('ceo') || roleStr.contains('chairman') || roleStr.contains('hq') || roleStr.contains('global');
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2659,15 +2798,37 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               if (widget.isDesktop) ...[
                 HomeStatTileRow(tiles: statTiles),
                 const SizedBox(height: DS.s3),
-                row2,
-                const SizedBox(height: DS.s3),
                 row3,
                 const SizedBox(height: DS.s3),
+                if (!isGlobalExecutive) ...[
+                  KarachiCampSnapshotWidget(t: widget.t),
+                  const SizedBox(height: DS.s3),
+                ],
+                row2,
+                const SizedBox(height: DS.s3),
                 row4,
+                if (isGlobalExecutive) ...[
+                  const SizedBox(height: DS.s3),
+                  KarachiCampSnapshotWidget(t: widget.t),
+                ],
               ] else ...[
+                SizedBox(
+                  height: 270,
+                  child: QuickActionsRow(
+                    availableModules: widget.availableModules,
+                    t: widget.t,
+                    onOpenModule: widget.onOpenModule,
+                  ),
+                ),
+                const SizedBox(height: DS.s2),
+                HomeStatTileRow(tiles: statTiles),
+                const SizedBox(height: DS.s2),
+                if (!isGlobalExecutive) ...[
+                  KarachiCampSnapshotWidget(t: widget.t),
+                  const SizedBox(height: DS.s2),
+                ],
                 if (bestBranch != null) ...[
                   HomeBestBranchSpotlight(
-                    t: widget.t,
                     branchName: bestBranch.name,
                     revenue: bestBranch.today.dispensaryRevenue,
                     donations: bestBranch.today.donations,
@@ -2684,20 +2845,55 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                       );
                       widget.onOpenModule(branchesModule);
                     },
+                    t: widget.t,
                   ),
                   const SizedBox(height: DS.s2),
                 ],
-                SizedBox(
-                  height: 240,
-                  child: QuickActionsRow(
-                    availableModules: widget.availableModules,
-                    t: widget.t,
-                    onOpenModule: widget.onOpenModule,
-                  ),
+                SizedBox(height: 240, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
+                const SizedBox(height: DS.s2),
+                HomeBranchPerformanceTable(
+                  t: widget.t,
+                  rows: sortedBranchRows,
+                  onTapBranch: (bId) {
+                    final branchesModule = widget.availableModules.firstWhere(
+                      (m) => m.id == 'branches',
+                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                    );
+                    widget.onOpenModule(branchesModule);
+                  },
                 ),
                 const SizedBox(height: DS.s2),
-                HomeStatTileRow(tiles: statTiles),
+                HomeRevenueLineChart(points: data.chartPoints, t: widget.t),
                 const SizedBox(height: DS.s2),
+                SizedBox(height: 240, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
+                const SizedBox(height: DS.s2),
+                if (isGlobalExecutive) ...[
+                  KarachiCampSnapshotWidget(t: widget.t),
+                  const SizedBox(height: DS.s2),
+                ],
+                const SizedBox(height: DS.s2),
+                if (bestBranch != null) ...[
+                  HomeBestBranchSpotlight(
+                    branchName: bestBranch.name,
+                    revenue: bestBranch.today.dispensaryRevenue,
+                    donations: bestBranch.today.donations,
+                    patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
+                    growthPct: bestBranch.yesterday.dispensaryRevenue == 0
+                        ? null
+                        : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
+                                bestBranch.yesterday.dispensaryRevenue) *
+                            100,
+                    onTap: () {
+                      final branchesModule = widget.availableModules.firstWhere(
+                        (m) => m.id == 'branches',
+                        orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
+                      );
+                      widget.onOpenModule(branchesModule);
+                    },
+                    t: widget.t,
+                  ),
+                  const SizedBox(height: DS.s2),
+                ],
                 SizedBox(height: 240, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
                 const SizedBox(height: DS.s2),
                 HomeBranchPerformanceTable(
@@ -2734,6 +2930,349 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           ),
         );
       },
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 10. Karachi Dual-Camp Live Snapshot Widget
+// ════════════════════════════════════════════════════════════════════════
+
+class KarachiCampSnapshotWidget extends StatefulWidget {
+  final RoleThemeData t;
+  const KarachiCampSnapshotWidget({super.key, required this.t});
+
+  @override
+  State<KarachiCampSnapshotWidget> createState() => _KarachiCampSnapshotWidgetState();
+}
+
+class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
+  late Future<KarachiCampBreakdown> _breakdownFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _breakdownFuture = fetchKarachiCampBreakdown();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.t.isDarkCanvas;
+    return FutureBuilder<KarachiCampBreakdown>(
+      future: _breakdownFuture,
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? const KarachiCampBreakdown(
+          hajiCampPatients: 0, hajiCampZakat: 0, hajiCampNonZakat: 0, hajiCampGmwf: 0,
+          kapayaPatients: 0, kapayaZakat: 0, kapayaNonZakat: 0, kapayaGmwf: 0,
+        );
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: widget.t.bgCard,
+            borderRadius: BorderRadius.circular(DS.r2),
+            border: Border.all(color: widget.t.bgRule),
+            boxShadow: Neumorphic3DStyle.raisedShadows(isDark: isDark, depth: 0.8),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.location_city_rounded, color: Color(0xFF0D9488), size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Karachi Branch — Dual Dispensary Camps Breakdown',
+                        style: TextStyle(
+                          color: widget.t.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.3,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      'Combined: ${data.totalPatients} Patients Today',
+                      style: const TextStyle(
+                        color: Color(0xFF0D9488),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildCampCard(
+                      title: 'Kapaya Dispensary',
+                      total: data.kapayaPatients,
+                      revenue: data.kapayaRevenue,
+                      zakat: data.kapayaZakat,
+                      nonZakat: data.kapayaNonZakat,
+                      gmwf: data.kapayaGmwf,
+                      morningTotal: data.kapayaMorningPatients,
+                      morningZakat: data.kapayaMorningZakat,
+                      morningNonZakat: data.kapayaMorningNonZakat,
+                      morningGmwf: data.kapayaMorningGmwf,
+                      eveningTotal: data.kapayaEveningPatients,
+                      eveningZakat: data.kapayaEveningZakat,
+                      eveningNonZakat: data.kapayaEveningNonZakat,
+                      eveningGmwf: data.kapayaEveningGmwf,
+                      badgeColor: const Color(0xFF7C3AED),
+                      icon: Icons.local_hospital_rounded,
+                      isDark: isDark,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildCampCard(
+                      title: 'Haji Camp Dispensary',
+                      total: data.hajiCampPatients,
+                      revenue: data.hajiCampRevenue,
+                      zakat: data.hajiCampZakat,
+                      nonZakat: data.hajiCampNonZakat,
+                      gmwf: data.hajiCampGmwf,
+                      morningTotal: data.hajiCampMorningPatients,
+                      morningZakat: data.hajiCampMorningZakat,
+                      morningNonZakat: data.hajiCampMorningNonZakat,
+                      morningGmwf: data.hajiCampMorningGmwf,
+                      eveningTotal: data.hajiCampEveningPatients,
+                      eveningZakat: data.hajiCampEveningZakat,
+                      eveningNonZakat: data.hajiCampEveningNonZakat,
+                      eveningGmwf: data.hajiCampEveningGmwf,
+                      badgeColor: const Color(0xFF2563EB),
+                      icon: Icons.campaign_rounded,
+                      isDark: isDark,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCampCard({
+    required String title,
+    required int total,
+    required int revenue,
+    required int zakat,
+    required int nonZakat,
+    required int gmwf,
+    required int morningTotal,
+    required int morningZakat,
+    required int morningNonZakat,
+    required int morningGmwf,
+    required int eveningTotal,
+    required int eveningZakat,
+    required int eveningNonZakat,
+    required int eveningGmwf,
+    required Color badgeColor,
+    required IconData icon,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: badgeColor.withValues(alpha: isDark ? 0.15 : 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: badgeColor.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: badgeColor, size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '$total Patients',
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                'Rs $revenue',
+                style: const TextStyle(
+                  color: Color(0xFF10B981),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Morning Session Row
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.wb_sunny_rounded, color: Colors.amber, size: 13),
+                          SizedBox(width: 3),
+                          Text(
+                            'Morning',
+                            style: TextStyle(color: Colors.amber, fontSize: 10.5, fontWeight: FontWeight.w800),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$morningTotal Patients',
+                      style: TextStyle(
+                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Z: $morningZakat   NZ: $morningNonZakat   G: $morningGmwf',
+                        style: TextStyle(
+                          color: isDark ? Colors.grey.shade300 : const Color(0xFF475569),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                const Divider(height: 1, color: Colors.black12),
+                const SizedBox(height: 6),
+                // Evening Session Row
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.nights_stay_rounded, color: Colors.indigoAccent, size: 13),
+                          SizedBox(width: 3),
+                          Text(
+                            'Evening',
+                            style: TextStyle(color: Colors.indigoAccent, fontSize: 10.5, fontWeight: FontWeight.w800),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$eveningTotal Patients',
+                      style: TextStyle(
+                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Z: $eveningZakat   NZ: $eveningNonZakat   G: $eveningGmwf',
+                        style: TextStyle(
+                          color: isDark ? Colors.grey.shade300 : const Color(0xFF475569),
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Total category summary line
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Text(
+                'Total Categories: ',
+                style: TextStyle(
+                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                'Zakat: $zakat | Non-Zakat: $nonZakat | GMWF: $gmwf',
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

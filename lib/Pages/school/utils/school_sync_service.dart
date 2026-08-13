@@ -177,83 +177,83 @@ class SchoolSyncService {
     }
   }
 
-  /// Pull remote school collections from Firestore & resolve conflicts
-  Future<void> fetchRemoteSchoolData(String branchId) async {
+  /// Pull remote school collections from Firestore using delta sync & resolve conflicts
+  Future<void> fetchRemoteSchoolData(String branchId, {bool force = false}) async {
     final firestore = FirebaseFirestore.instance;
+    final collections = ['school_students', 'school_teachers', 'school_books'];
 
-    // Fetch Students
-    try {
-      final snap = await firestore
-          .collection('branches')
-          .doc(branchId)
-          .collection('school_students')
-          .get();
+    for (final col in collections) {
+      try {
+        final syncKey = '${col}_$branchId';
+        final lastSyncedTs = force ? null : LocalStorageService.getLastSyncedServerTimestamp(syncKey);
+        String? maxServerTs = lastSyncedTs;
 
-      for (final doc in snap.docs) {
-        final remote = doc.data();
-        final local = SchoolLocalStorage.getStudentCached(branchId, doc.id);
-        
-        await _resolveAndSaveRecord(
-          branchId: branchId,
-          recordId: doc.id,
-          remoteData: remote,
-          localData: local,
-          saveLocal: (data) => SchoolLocalStorage.cacheStudent(branchId, doc.id, data),
-          recordType: 'Student',
-        );
+        DocumentSnapshot? lastDoc;
+        bool hasMore = true;
+
+        while (hasMore) {
+          Query<Map<String, dynamic>> query = firestore
+              .collection('branches')
+              .doc(branchId)
+              .collection(col);
+
+          if (lastSyncedTs != null) {
+            query = query.where('updatedAt', isGreaterThan: lastSyncedTs).orderBy('updatedAt', descending: false);
+          }
+
+          query = query.limit(500);
+          if (lastDoc != null) {
+            query = query.startAfterDocument(lastDoc);
+          }
+
+          final snap = await query.get();
+
+          for (final doc in snap.docs) {
+            final remote = doc.data();
+            Map<String, dynamic>? local;
+
+            if (col == 'school_students') {
+              local = SchoolLocalStorage.getStudentCached(branchId, doc.id);
+            } else if (col == 'school_teachers') {
+              local = SchoolLocalStorage.getTeacherCached(branchId, doc.id);
+            } else if (col == 'school_books') {
+              local = SchoolLocalStorage.getBookCached(branchId, doc.id);
+            }
+
+            final docTs = remote['updatedAt']?.toString();
+            if (docTs != null) {
+              if (maxServerTs == null || docTs.compareTo(maxServerTs) > 0) {
+                maxServerTs = docTs;
+              }
+            }
+
+            await _resolveAndSaveRecord(
+              branchId: branchId,
+              recordId: doc.id,
+              remoteData: remote,
+              localData: local,
+              saveLocal: (data) async {
+                if (col == 'school_students') await SchoolLocalStorage.cacheStudent(branchId, doc.id, data);
+                if (col == 'school_teachers') await SchoolLocalStorage.cacheTeacher(branchId, doc.id, data);
+                if (col == 'school_books') await SchoolLocalStorage.cacheBook(branchId, doc.id, data);
+              },
+              recordType: col,
+            );
+          }
+
+          if (snap.docs.length < 500) {
+            hasMore = false;
+          } else {
+            lastDoc = snap.docs.last;
+          }
+        }
+
+        if (maxServerTs != null) {
+          await LocalStorageService.setLastSyncedServerTimestamp(syncKey, maxServerTs);
+        }
+      } catch (e) {
+        debugPrint('[SchoolSyncService] Remote fetch error for $col: $e');
       }
-    } catch (e) {
-      debugPrint('[SchoolSyncService] Remote student fetch error: $e');
-    }
-
-    // Fetch Teachers
-    try {
-      final snap = await firestore
-          .collection('branches')
-          .doc(branchId)
-          .collection('school_teachers')
-          .get();
-
-      for (final doc in snap.docs) {
-        final remote = doc.data();
-        final local = SchoolLocalStorage.getTeacherCached(branchId, doc.id);
-
-        await _resolveAndSaveRecord(
-          branchId: branchId,
-          recordId: doc.id,
-          remoteData: remote,
-          localData: local,
-          saveLocal: (data) => SchoolLocalStorage.cacheTeacher(branchId, doc.id, data),
-          recordType: 'Teacher',
-        );
-      }
-    } catch (e) {
-      debugPrint('[SchoolSyncService] Remote teacher fetch error: $e');
-    }
-
-    // Fetch Books
-    try {
-      final snap = await firestore
-          .collection('branches')
-          .doc(branchId)
-          .collection('school_books')
-          .get();
-
-      for (final doc in snap.docs) {
-        final remote = doc.data();
-        final local = SchoolLocalStorage.getBookCached(branchId, doc.id);
-
-        await _resolveAndSaveRecord(
-          branchId: branchId,
-          recordId: doc.id,
-          remoteData: remote,
-          localData: local,
-          saveLocal: (data) => SchoolLocalStorage.cacheBook(branchId, doc.id, data),
-          recordType: 'Book',
-        );
-      }
-    } catch (e) {
-      debugPrint('[SchoolSyncService] Remote books fetch error: $e');
     }
   }
 

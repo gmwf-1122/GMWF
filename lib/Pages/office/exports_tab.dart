@@ -1,11 +1,13 @@
 // lib/pages/office/exports_tab.dart
 
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/permission_service.dart';
+import '../../widgets/file_action_helper.dart';
 import 'finance_report_helper.dart';
 import 'shared_widgets.dart';
 
@@ -339,13 +341,23 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                   icon: const Icon(Icons.download, size: 18),
                   label: const Text('Export Document', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   onPressed: () async {
-                    if (selType == 'branch') await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth);
-                    else if (selType == 'department') await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept);
-                    else if (selType == 'consolidated') await FinanceReportHelper.exportConsolidatedAllBranchesExcel(branches: widget.branches, monthKey: _selectedMonth);
-                    else if (selType == 'branch_pdf') await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth);
-                    else if (selType == 'department_pdf') await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept);
-                    else if (selType == 'expenses_excel') await FinanceReportHelper.exportExpensesExcel(branchId: widget.branchId, monthKey: _selectedMonth);
-                    showCustomSnackBar(context, 'Export generated successfully.');
+                    Map<String, dynamic>? result;
+                    if (selType == 'branch') result = await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth);
+                    else if (selType == 'department') result = await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept);
+                    else if (selType == 'consolidated') result = await FinanceReportHelper.exportConsolidatedAllBranchesExcel(branches: widget.branches, monthKey: _selectedMonth);
+                    else if (selType == 'branch_pdf') result = await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth, context: context);
+                    else if (selType == 'department_pdf') result = await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept, context: context);
+                    else if (selType == 'expenses_excel') result = await FinanceReportHelper.exportExpensesExcel(branchId: widget.branchId, monthKey: _selectedMonth);
+
+                    if (result != null && mounted) {
+                      FileActionHelper.showFileOptions(
+                        context,
+                        filePath: result['path'] as String?,
+                        bytes: result['bytes'] as Uint8List?,
+                        fileName: result['name'] as String? ?? 'report.pdf',
+                        title: 'Monthly Report Generated',
+                      );
+                    }
                   },
                 ),
               ),
@@ -386,6 +398,23 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(border: Border.all(color: _kBorder), borderRadius: BorderRadius.circular(8)),
                 child: Text('Reconciled: $reconciledCount / $totalCount items', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kTextSecondary)),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                label: const Text('Export Audit PDF', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: () => FinanceReportHelper.exportReconciliationPdf(
+                  branchId: widget.branchId,
+                  monthKey: _selectedMonth,
+                  items: _reconcileItems,
+                  context: context,
+                ),
               ),
             ],
           ),

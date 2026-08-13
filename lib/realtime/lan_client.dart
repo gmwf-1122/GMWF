@@ -1,84 +1,85 @@
-// lib/realtime/lan_client.dart
-//
-// [P4] Pending outbox added — messages sent while the socket is disconnected
-//      (or during the reconnect window) are queued in memory and automatically
-//      drained once the connection is re-established. This prevents silent
-//      message loss on transient disconnects.
-//
-//      Design notes:
-//        - The outbox is intentionally in-memory only. LAN messages are
-//          session-scoped; persisting them across a full app restart would
-//          require deciding how to handle stale messages — a harder problem
-//          than the one being solved here.
-//        - _maxOutboxSize (100) caps memory. When exceeded the oldest message
-//          is dropped (FIFO). Adjust if your session volume is higher.
-//        - _drainOutbox() is called immediately after connect() succeeds,
-//          before the connectionController broadcasts true, so subscribers
-//          see the connection as live only after the backlog is flushed.
-//        - Re-queue on send error: if _socket.add() throws after connect,
-//          the message goes back into the outbox for the next reconnect.
-
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:math';
+import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../config/constants.dart';
 
+enum LanConnectionState { connected, reconnecting, disconnected }
+
 class LanClient {
-  WebSocket? _socket;
+  WebSocketChannel? _channel;
+  StreamSubscription? _channelSub;
   final String serverIp;
   final int port;
+  final String? authToken;
 
-  final _messageController    = StreamController<String>.broadcast();
-  final _connectionController = StreamController<bool>.broadcast();
+  final _messageController         = StreamController<String>.broadcast();
+  final _connectionController      = StreamController<bool>.broadcast();
+  final _stateController           = StreamController<LanConnectionState>.broadcast();
 
-  Stream<String> get onMessage         => _messageController.stream;
-  Stream<bool>   get onConnectionChange => _connectionController.stream;
+  Stream<String>             get onMessage           => _messageController.stream;
+  Stream<bool>               get onConnectionChange  => _connectionController.stream;
+  Stream<LanConnectionState> get connectionStateStream => _stateController.stream;
 
   bool      _isConnecting       = false;
+  bool      _isConnected        = false;
   bool      _isDisposed         = false;
   DateTime? _lastPongReceived;
   Timer?    _pingTimer;
   Timer?    _reconnectTimer;
   int       _reconnectAttempts  = 0;
+  LanConnectionState _currentState = LanConnectionState.disconnected;
 
-  // [P4] In-memory pending outbox
+  // In-memory pending outbox
   final List<Map<String, dynamic>> _pendingOutbox = [];
   static const int _maxOutboxSize = 100;
 
-  bool get isConnected => _socket?.readyState == WebSocket.open;
+  bool get isConnected => _isConnected && !_isDisposed;
+  LanConnectionState get state => _currentState;
 
   LanClient({
     required this.serverIp,
     this.port = AppNetwork.websocketPort,
+    this.authToken,
   });
+
+  void _setState(LanConnectionState s) {
+    _currentState = s;
+    _stateController.add(s);
+  }
 
   // ── Connection ─────────────────────────────────────────────────────────────
 
   Future<void> connect() async {
     if (_isConnecting || isConnected || _isDisposed) return;
     _isConnecting = true;
+    _setState(_reconnectAttempts > 0 ? LanConnectionState.reconnecting : LanConnectionState.disconnected);
+
+    // Item 9 — Mixed-Content check on Web HTTPS
+    if (kIsWeb && Uri.base.scheme == 'https') {
+      final msg = 'HTTPS Mixed-Content Error: Web client served over HTTPS cannot connect to non-TLS ws://$serverIp:$port LAN server. Host web client over HTTP or enable WSS.';
+      debugPrint('LanClient: ❌ $msg');
+      _messageController.add(jsonEncode({'type': 'error', 'message': msg}));
+      _isConnecting = false;
+      _setState(LanConnectionState.disconnected);
+      return;
+    }
 
     try {
       final url = 'ws://$serverIp:$port';
-      print('LanClient: Connecting to $url');
+      debugPrint('LanClient: Connecting to $url');
 
-      _socket = await WebSocket.connect(url).timeout(const Duration(seconds: 10));
+      final uri = Uri.parse(url);
+      _channel = WebSocketChannel.connect(uri);
 
-      _lastPongReceived = DateTime.now();
-      _startPingTimer();
-      _reconnectAttempts = 0;
-
-      _socket!.listen(
+      _channelSub?.cancel();
+      _channelSub = _channel!.stream.listen(
         (message) {
           if (_isDisposed) return;
 
-          if (message is! String) {
-            print('LanClient: Received non-string message');
-            return;
-          }
-
-          final trimmed = message.trim();
+          final trimmed = message.toString().trim();
 
           // Handle pong
           if (trimmed == 'pong' || trimmed == '{"type":"pong"}') {
@@ -86,31 +87,45 @@ class LanClient {
             return;
           }
 
-          print('LanClient: Received message: '
+          debugPrint('LanClient: Received message: '
               '${trimmed.length > 100 ? '${trimmed.substring(0, 100)}...' : trimmed}');
-          _messageController.add(message);
+          _messageController.add(trimmed);
         },
         onDone: () {
-          print('LanClient: Connection closed');
+          debugPrint('LanClient: Connection closed');
           _handleDisconnect();
         },
         onError: (error) {
-          print('LanClient: Error: $error');
+          debugPrint('LanClient: Error: $error');
           _handleDisconnect();
         },
       );
 
+      _isConnected = true;
       _isConnecting = false;
+      _lastPongReceived = DateTime.now();
+      _startPingTimer();
+      _reconnectAttempts = 0;
+      _setState(LanConnectionState.connected);
 
-      // [P4] Drain any messages queued while we were offline BEFORE
-      // broadcasting the connected state so callers see a fully ready socket.
+      // Item 10 — Send Auth Handshake
+      if (authToken != null && authToken!.isNotEmpty) {
+        sendMessage({
+          'type': 'auth_handshake',
+          'authToken': authToken,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+      }
+
+      // Drain any messages queued while offline
       _drainOutbox();
 
       _connectionController.add(true);
-      print('LanClient: Connected successfully');
+      debugPrint('LanClient: Connected successfully to $url');
     } catch (error) {
       _isConnecting = false;
-      print('LanClient: Connection failed: $error');
+      _isConnected = false;
+      debugPrint('LanClient: Connection failed: $error');
       _handleDisconnect();
     }
   }
@@ -122,10 +137,9 @@ class LanClient {
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
       if (!isConnected || _isDisposed) return;
 
-      // Force disconnect if no pong received in 60 seconds
       if (_lastPongReceived != null &&
           DateTime.now().difference(_lastPongReceived!).inSeconds > 60) {
-        print('LanClient: Pong timeout - forcing disconnect');
+        debugPrint('LanClient: Pong timeout - forcing disconnect');
         _handleDisconnect();
         return;
       }
@@ -136,36 +150,20 @@ class LanClient {
 
   // ── Send ───────────────────────────────────────────────────────────────────
 
-  /// Sends [payload] to the server.
-  ///
-  /// If the socket is not currently connected the message is placed in the
-  /// pending outbox and will be sent automatically once reconnection succeeds.
-  /// The outbox has a hard cap of [_maxOutboxSize]; when exceeded the oldest
-  /// message is silently dropped to bound memory usage.
   void sendMessage(Map<String, dynamic> payload) {
     if (!isConnected) {
-      if (_isDisposed) {
-        print('LanClient: disposed — dropping ${payload['event_type'] ?? 'unknown'}');
-        return;
-      }
-      print('LanClient: offline — queuing ${payload['event_type'] ?? 'unknown'} '
-          '(outbox size: ${_pendingOutbox.length + 1})');
+      if (_isDisposed) return;
       _pendingOutbox.add(payload);
       if (_pendingOutbox.length > _maxOutboxSize) {
-        final dropped = _pendingOutbox.removeAt(0);
-        print('LanClient: outbox full — dropped oldest: '
-            '${dropped['event_type'] ?? 'unknown'}');
+        _pendingOutbox.removeAt(0);
       }
       return;
     }
 
     try {
       final message = jsonEncode(payload);
-      _socket!.add(message);
-      print('LanClient: Sent message: ${payload['event_type'] ?? 'unknown'}');
+      _channel!.sink.add(message);
     } catch (e) {
-      print('LanClient: Error sending message: $e — re-queuing');
-      // Re-queue on failure so it is retried after the next reconnect
       _pendingOutbox.add(payload);
       if (_pendingOutbox.length > _maxOutboxSize) {
         _pendingOutbox.removeAt(0);
@@ -173,19 +171,12 @@ class LanClient {
     }
   }
 
-  // ── [P4] Drain outbox after reconnect ─────────────────────────────────────
-
-  /// Called immediately after a successful socket connect.
-  /// Flushes all messages that were queued while the socket was offline.
   void _drainOutbox() {
     if (_pendingOutbox.isEmpty) return;
-
     final toSend = List<Map<String, dynamic>>.from(_pendingOutbox);
     _pendingOutbox.clear();
-
-    print('LanClient: draining ${toSend.length} queued message(s)');
     for (final msg in toSend) {
-      sendMessage(msg); // socket is now open; this will send directly
+      sendMessage(msg);
     }
   }
 
@@ -193,27 +184,35 @@ class LanClient {
 
   void _handleDisconnect() {
     _pingTimer?.cancel();
+    _isConnected = false;
+    _isConnecting = false;
 
     try {
-      _socket?.close();
+      _channelSub?.cancel();
+      _channel?.sink.close();
     } catch (_) {}
 
-    _socket = null;
+    _channelSub = null;
+    _channel = null;
 
     if (_isDisposed) {
+      _setState(LanConnectionState.disconnected);
       _connectionController.add(false);
       return;
     }
 
-    // Exponential back-off: 2, 4, 8, 16, 32 seconds
-    final delay = [2, 4, 8, 16, 32][_reconnectAttempts.clamp(0, 4)];
+    _setState(LanConnectionState.reconnecting);
+
+    // Item 8 — Exponential backoff with random jitter (1s up to 30s cap)
+    final baseDelay = min(30, pow(2, _reconnectAttempts).toInt());
+    final jitter = Random().nextInt(1000); // 0..999 ms
+    final delayMs = (baseDelay * 1000) + jitter;
     _reconnectAttempts++;
 
-    print('LanClient: Will reconnect in $delay seconds '
-        '(attempt $_reconnectAttempts)');
+    debugPrint('LanClient: Will reconnect in ${delayMs / 1000}s (attempt $_reconnectAttempts)');
 
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(Duration(seconds: delay), () {
+    _reconnectTimer = Timer(Duration(milliseconds: delayMs), () {
       if (!_isDisposed) connect();
     });
 
@@ -222,16 +221,21 @@ class LanClient {
 
   Future<void> disconnect() async {
     _isDisposed = true;
+    _isConnected = false;
+    _isConnecting = false;
+    _setState(LanConnectionState.disconnected);
     _pingTimer?.cancel();
     _reconnectTimer?.cancel();
 
     try {
-      await _socket?.close();
+      await _channelSub?.cancel();
+      await _channel?.sink.close();
     } catch (_) {}
 
     await _messageController.close();
     await _connectionController.close();
+    await _stateController.close();
 
-    print('LanClient: Disconnected');
+    debugPrint('LanClient: Disconnected');
   }
 }

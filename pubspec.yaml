@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.2.9
+version: 1.3.5+7
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -132,8 +132,7 @@ flutter:
     - assets/logo/gmwf_splash.webp
     - assets/logo/gmwf-1.webp
     - assets/logo/twt_logo.webp
-    - assets/images/moon.webp
-    - assets/images/rx.webp
+    - assets/images/
     - assets/qr/
     - assets/fonts/NooriNastaliq.ttf
     - assets/fonts/Amiri-Regular.ttf

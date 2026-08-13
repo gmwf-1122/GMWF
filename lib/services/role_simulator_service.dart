@@ -18,16 +18,13 @@ class RoleSimulatorService {
   static bool canAccessSimulator(String? userRole) {
     if (userRole == null || userRole.isEmpty) return false;
     final r = userRole.toLowerCase().trim();
+    // Strictly restricted to Chairman and the built-in account (Ans / Global Admin)
     const allowedRoles = [
       'chairman',
-      'ceo',
-      'admin',
       'global admin',
-      'hq manager',
-      'manager',
-      'supervisor',
-      'branch manager',
-      'principal',
+      'global user',
+      'global',
+      'ans',
     ];
     return allowedRoles.any((allowed) => r.contains(allowed));
   }

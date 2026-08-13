@@ -1,5 +1,6 @@
 // lib/services/device_info_service.dart
 
+import 'dart:async';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -160,6 +161,24 @@ class DeviceInfoService {
     };
   }
 
+  static Timer? _presenceTimer;
+
+  /// Starts a 2-minute periodic presence heartbeat loop for active user
+  static void startPresenceHeartbeat() {
+    _presenceTimer?.cancel();
+    // Immediate initial touch
+    touchPresence();
+    _presenceTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      touchPresence();
+    });
+  }
+
+  /// Stops presence heartbeat loop
+  static void stopPresenceHeartbeat() {
+    _presenceTimer?.cancel();
+    _presenceTimer = null;
+  }
+
   /// Records active session details for the given user in Firestore.
   static Future<void> recordUserSession({String? userId, String? email}) async {
     try {
@@ -224,6 +243,7 @@ class DeviceInfoService {
         debugPrint('[DeviceInfoService] Branch sync warning: $e');
       }
 
+      startPresenceHeartbeat();
       debugPrint('[DeviceInfoService] Recorded session for user $uid: ${info['deviceSummary']}');
     } catch (e) {
       debugPrint('[DeviceInfoService] Failed to record user session: $e');
@@ -232,6 +252,7 @@ class DeviceInfoService {
 
   /// Sets user status to offline on logout
   static Future<void> markUserOffline({String? userId}) async {
+    stopPresenceHeartbeat();
     try {
       final uid = userId ?? FirebaseAuth.instance.currentUser?.uid;
       if (uid == null || uid.isEmpty) return;
@@ -262,5 +283,37 @@ class DeviceInfoService {
         'lastSeen': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (_) {}
+  }
+
+  /// Returns whether a user document or session map represents an active online user.
+  /// Strictly checks lastSeen/lastHeartbeat/updatedAt within [thresholdMinutes] (default 5 min).
+  static bool isUserOnline(Map<String, dynamic>? userData, {int thresholdMinutes = 5}) {
+    if (userData == null) return false;
+    if (userData['isOnline'] == false) return false;
+
+    dynamic rawTs = userData['lastSeen'] ??
+        userData['lastOnlineAt'] ??
+        userData['lastHeartbeat'] ??
+        userData['lastActive'] ??
+        userData['updatedAt'];
+
+    if (rawTs == null && userData['lastDeviceInfo'] is Map) {
+      final devMap = userData['lastDeviceInfo'] as Map;
+      rawTs = devMap['lastSeen'] ?? devMap['updatedAt'];
+    }
+
+    DateTime? lastActiveDt;
+    if (rawTs is Timestamp) {
+      lastActiveDt = rawTs.toDate();
+    } else if (rawTs is String && rawTs.isNotEmpty) {
+      lastActiveDt = DateTime.tryParse(rawTs);
+    }
+
+    if (lastActiveDt != null) {
+      final diffMinutes = DateTime.now().difference(lastActiveDt).inMinutes.abs();
+      return diffMinutes <= thresholdMinutes;
+    }
+
+    return false;
   }
 }

@@ -1,12 +1,24 @@
-// lib/pages/dispensary/dispensar/patient_form_helper.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:arabic_reshaper/arabic_reshaper.dart';
 
 class PatientFormHelper {
+  static String _processUrduText(String text) {
+    if (text.trim().isEmpty) return '';
+    final hasArabicUrdu = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]').hasMatch(text);
+    if (hasArabicUrdu) {
+      try {
+        return ArabicReshaper().reshape(text);
+      } catch (_) {
+        return text;
+      }
+    }
+    return text;
+  }
+
   // ====================== COLORS ======================
   static const Color primaryGreen = Color(0xFF4CAF50);
   static const Color primaryRed = Color(0xFFFF0000);
@@ -38,7 +50,7 @@ class PatientFormHelper {
   static int totalPerDay(String timing) =>
       parseTiming(timing).reduce((a, b) => a + b);
 
-  static bool isInjectable(Map<String, dynamic> m) {
+  static bool isInjectable(Map m) {
     final type = (m['type'] ?? '').toString().toLowerCase().trim();
     final name = (m['name'] ?? '').toString().toLowerCase();
     return type.contains('injection') ||
@@ -49,7 +61,7 @@ class PatientFormHelper {
         name.contains('inj');
   }
 
-  static String getUnitUrdu(Map<String, dynamic> med) {
+  static String getUnitUrdu(Map med) {
     final type = (med['type'] ?? '').toString().toLowerCase().trim();
     final name = (med['name'] ?? '').toString().toLowerCase();
     final dosage = (med['dosage'] ?? '').toString().toLowerCase();
@@ -64,10 +76,10 @@ class PatientFormHelper {
     return 'گولی';
   }
 
-  static String buildUrduDosageLine(Map<String, dynamic> med) {
+  static String buildUrduDosageLine(Map med) {
     final timing = med['timing']?.toString() ?? '';
     final quantity = med['quantity'] ?? 1;
-    if (isInjectable(med)) return 'مقدار: $quantity';
+    if (isInjectable(med)) return 'مقدار $quantity';
     final totalPerDayVal = totalPerDay(timing);
     num dosePerTime = 1;
     final dosage = med['dosage']?.toString() ?? '';
@@ -123,7 +135,7 @@ class PatientFormHelper {
   }
 
   /// Returns only the timing string, e.g. "1+1+1" or "Qty: 2" for injectables.
-  static String buildEnglishDosageLine(Map<String, dynamic> med) {
+  static String buildEnglishDosageLine(Map med) {
     final timing = med['timing']?.toString() ?? '';
     final quantity = med['quantity'] ?? 1;
 
@@ -148,10 +160,15 @@ class PatientFormHelper {
   // ====================== FONT HELPERS ======================
   static Future<pw.Font> getNooriFont() async {
     try {
-      final data = await rootBundle.load('assets/fonts/NooriNastaliq.ttf');
+      final data = await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
       return pw.Font.ttf(data);
     } catch (_) {
-      return pw.Font.helvetica();
+      try {
+        final data = await rootBundle.load('assets/fonts/NooriNastaliq.ttf');
+        return pw.Font.ttf(data);
+      } catch (_) {
+        return pw.Font.helvetica();
+      }
     }
   }
 
@@ -207,7 +224,7 @@ class PatientFormHelper {
             style: pw.TextStyle(font: english, fontSize: size, color: black));
 
     // Build medicine rows — name left, dosage right — no bullets
-    pw.Widget medRow(Map<String, dynamic> med) {
+    pw.Widget medRow(Map med) {
       final abbrev = _getMedAbbrevStatic(med['type']);
       final name = '$abbrev ${med['name'] ?? ''}'.trim();
       final dosage = buildEnglishDosageLine(med);
@@ -352,12 +369,6 @@ class PatientFormHelper {
             pw.SizedBox(width: logoSize, height: logoSize),
           pw.SizedBox(width: 8),
           pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-            pw.Text('ہو الشافی',
-                style: pw.TextStyle(
-                    font: urdu,
-                    fontSize: titleSize1,
-                    fontWeight: pw.FontWeight.bold,
-                    color: drColor)),
             pw.Text('Gulzar Madina Welfare Foundation',
                 style: pw.TextStyle(
                     font: english,
@@ -558,59 +569,41 @@ class PatientFormHelper {
       final quantity = m['quantity'] ?? 1;
       final total = totalPerDay(timing);
       final timingDisp = timing.replaceAll('+', '+');
-      final urduTiming = buildUrduDosageLine(m);
+      final urduTiming = _processUrduText(buildUrduDosageLine(m));
       final urduDose = (total <= 0 && !isInjectable)
-          ? 'مقدار: $quantity ${getUnitUrdu(m)}'
+          ? _processUrduText('مقدار: $quantity ${getUnitUrdu(m)}')
           : '';
-      final mealUrdu = getMealUrdu(m['meal']?.toString() ?? '');
+      final mealUrdu = _processUrduText(getMealUrdu(m['meal']?.toString() ?? ''));
       final showTiming = !isInjectable && total > 0;
       final showQty = isInjectable;
 
       if (isPrint) {
+        final dosage = buildEnglishDosageLine(m);
         return pw.Padding(
           padding: pw.EdgeInsets.symmetric(vertical: paddingVertical),
-          child: pw.Row(children: [
-            pw.Expanded(
-              child: pw.Text(name,
-                  style: pw.TextStyle(
-                      font: english,
-                      fontSize: nameSize,
-                      fontWeight: pw.FontWeight.bold)),
-            ),
-            pw.Expanded(
-              child: pw.Directionality(
-                textDirection: pw.TextDirection.rtl,
-                child: pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    if (urduTiming.isNotEmpty)
-                      pw.Text(urduTiming,
-                          textAlign: pw.TextAlign.right,
-                          style: pw.TextStyle(
-                              font: urdu,
-                              fontSize: urduSize,
-                              fontWeight: pw.FontWeight.bold)),
-                    if (urduDose.isNotEmpty)
-                      pw.Text(urduDose,
-                          textAlign: pw.TextAlign.right,
-                          style: pw.TextStyle(
-                              font: urdu,
-                              fontSize: urduSize,
-                              fontWeight: pw.FontWeight.bold)),
-                    if (mealUrdu.isNotEmpty)
-                      pw.Text(mealUrdu,
-                          textAlign: pw.TextAlign.right,
-                          style: pw.TextStyle(
-                              font: urdu,
-                              fontSize: urduSize,
-                              fontWeight: pw.FontWeight.bold)),
-                  ],
-                ),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                flex: 5,
+                child: pw.Text(name,
+                    style: pw.TextStyle(
+                        font: english,
+                        fontSize: nameSize,
+                        fontWeight: pw.FontWeight.bold)),
               ),
-            ),
-          ]),
+              pw.SizedBox(width: 6),
+              pw.Expanded(
+                flex: 5,
+                child: pw.Text(dosage,
+                    style: pw.TextStyle(
+                        font: english, fontSize: nameSize - 1, color: PdfColors.grey800)),
+              ),
+            ],
+          ),
         );
       } else {
+        final mealText = (m['meal'] ?? '').toString().trim();
         return pw.Padding(
           padding: pw.EdgeInsets.symmetric(vertical: paddingVertical),
           child: pw.Column(
@@ -618,7 +611,7 @@ class PatientFormHelper {
             children: [
               pw.Row(children: [
                 pw.Expanded(
-                  flex: 3,
+                  flex: 5,
                   child: pw.Text(name,
                       style: pw.TextStyle(
                           font: english,
@@ -627,7 +620,7 @@ class PatientFormHelper {
                 ),
                 if (showTiming)
                   pw.Expanded(
-                    flex: 3,
+                    flex: 5,
                     child: pw.RichText(
                       text: pw.TextSpan(children: [
                         pw.TextSpan(
@@ -639,7 +632,7 @@ class PatientFormHelper {
                                 color: timingColor)),
                         const pw.TextSpan(text: ' '),
                         pw.TextSpan(
-                            text: '$total/day',
+                            text: '($total/day)',
                             style: pw.TextStyle(
                                 font: english,
                                 fontSize: totalSize,
@@ -650,7 +643,7 @@ class PatientFormHelper {
                   ),
                 if (showQty)
                   pw.Expanded(
-                    flex: 3,
+                    flex: 5,
                     child: pw.Text('Qty: $quantity',
                         style: pw.TextStyle(
                             font: english,
@@ -659,39 +652,18 @@ class PatientFormHelper {
                             color: timingColor)),
                   ),
               ]),
-              if (urduTiming.isNotEmpty)
+              if (mealText.isNotEmpty)
                 pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 2),
-                    child: pw.Directionality(
-                        textDirection: pw.TextDirection.rtl,
-                        child: pw.Text(urduTiming,
-                            textAlign: pw.TextAlign.right,
-                            style: pw.TextStyle(
-                                font: urdu,
-                                fontSize: urduSize,
-                                fontWeight: pw.FontWeight.bold)))),
-              if (urduDose.isNotEmpty)
-                pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 2),
-                    child: pw.Directionality(
-                        textDirection: pw.TextDirection.rtl,
-                        child: pw.Text(urduDose,
-                            textAlign: pw.TextAlign.right,
-                            style: pw.TextStyle(
-                                font: urdu,
-                                fontSize: urduSize,
-                                fontWeight: pw.FontWeight.bold)))),
-              if (mealUrdu.isNotEmpty)
-                pw.Padding(
-                    padding: const pw.EdgeInsets.only(top: 2),
-                    child: pw.Directionality(
-                        textDirection: pw.TextDirection.rtl,
-                        child: pw.Text(mealUrdu,
-                            textAlign: pw.TextAlign.right,
-                            style: pw.TextStyle(
-                                font: urdu,
-                                fontSize: urduSize,
-                                fontWeight: pw.FontWeight.bold)))),
+                  padding: const pw.EdgeInsets.only(top: 2),
+                  child: pw.Text(
+                    mealText,
+                    style: pw.TextStyle(
+                      font: english,
+                      fontSize: nameSize - 2,
+                      color: PdfColors.grey700,
+                    ),
+                  ),
+                ),
             ],
           ),
         );
@@ -713,7 +685,17 @@ class PatientFormHelper {
     final moonBytes = await loadAssetBytes('assets/images/moon.webp');
     final rxBytes = await loadAssetBytes('assets/images/rx.webp');
     final doctorName = data['doctorName']?.toString() ?? '';
-    final patientName = data['patientName']?.toString() ?? '';
+    String patientName = 'Patient';
+    final candidateNames = [data['patientName'], data['name'], data['patient_name']];
+    for (var c in candidateNames) {
+      if (c != null) {
+        final str = c.toString().trim();
+        if (str.isNotEmpty && str != '0') {
+          patientName = str;
+          break;
+        }
+      }
+    }
     final diagnosis = data['diagnosis']?.toString() ?? '';
     final labTests = (data['labResults'] ?? []) as List;
     final prescriptions = (data['prescriptions'] ?? []) as List;

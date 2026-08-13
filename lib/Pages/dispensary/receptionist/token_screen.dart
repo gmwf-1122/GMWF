@@ -10,6 +10,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 
@@ -17,6 +19,7 @@ class TokenScreen extends StatefulWidget {
   final String branchId;
   final String receptionistId;
   final String receptionistName;
+  final String? dispensaryId;
   final Function(String cnic)? onPatientNotFound;
   final String? initialCnic;
 
@@ -25,6 +28,7 @@ class TokenScreen extends StatefulWidget {
     required this.branchId,
     required this.receptionistId,
     required this.receptionistName,
+    this.dispensaryId,
     this.onPatientNotFound,
     this.initialCnic,
   });
@@ -43,7 +47,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   Map<String, dynamic>? _patientData;
   List<Map<String, dynamic>> _patientsList = [];
   bool _hasTokenToday    = false;
+  // ignore: unused_field
   String? _guardianCnic;
+  // ignore: unused_field
   Map<String, dynamic>? _guardianPatient;
   String? _errorMessage;
   Map<String, dynamic>? _medicineRestriction;
@@ -51,13 +57,31 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
 
+  String? get _resolvedDispensaryId {
+    final active = CampSessionService.getActiveCamp();
+    if (active != null && active.isNotEmpty) return active;
+    if (widget.dispensaryId != null && widget.dispensaryId!.trim().isNotEmpty) {
+      return widget.dispensaryId!.trim().toLowerCase();
+    }
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final userData = Hive.box('app_settings').get('user_data');
+        if (userData is Map && userData['dispensaryId'] != null) {
+          final d = userData['dispensaryId'].toString().trim();
+          if (d.isNotEmpty && d.toLowerCase() != 'all') return d.toLowerCase();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   static const Color _teal  = Color(0xFF00695C);
-  static const Color _green = Color(0xFF388E3C);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
     _estimateNextSerial();
 
     if (widget.initialCnic != null && widget.initialCnic!.isNotEmpty) {
@@ -119,13 +143,99 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _onActiveCampChanged() {
+    if (mounted) {
+      _estimateNextSerial();
+      setState(() {});
+    }
+  }
+
+  DateTime? _lastActiveTime;
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _instantRefresh();
+    if (state == AppLifecycleState.paused) {
+      _lastActiveTime = DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      _instantRefresh();
+      final now = DateTime.now();
+      if (_lastActiveTime == null || now.difference(_lastActiveTime!).inMinutes >= 10) {
+        _showDispensarySafetyConfirmation();
+      }
+      _lastActiveTime = now;
+    }
+  }
+
+  void _showDispensarySafetyConfirmation() {
+    final activeCamp = _resolvedDispensaryId;
+    final label = activeCamp != null && activeCamp.isNotEmpty
+        ? CampSessionService.getCampLabel(activeCamp)
+        : 'General Branch';
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.shield_outlined, color: Colors.teal),
+            SizedBox(width: 10),
+            Text('Dispensary Safety Check'),
+          ],
+        ),
+        content: Text(
+          'You are issuing tokens for $label.\n\nIs this the correct active dispensary desk?',
+          style: const TextStyle(fontSize: 15),
+        ),
+        actions: [
+          OutlinedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showCampSelector();
+            },
+            child: const Text('Switch Dispensary'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCampSelector() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Select Active Dispensary Desk', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              ...CampSessionService.allCampsList.map((c) => ListTile(
+                    title: Text(c['label']!),
+                    onTap: () async {
+                      await CampSessionService.setActiveCamp(c['id']!);
+                      if (mounted) setState(() {});
+                      Navigator.pop(ctx);
+                    },
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     WidgetsBinding.instance.removeObserver(this);
     _realtimeSub?.cancel();
     cnicController.dispose();
@@ -134,11 +244,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   }
 
   @override
-  void didUpdateWidget(covariant TokenScreen oldWidget) {
+  void didUpdateWidget(TokenScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.initialCnic != null &&
+        widget.initialCnic!.isNotEmpty &&
         widget.initialCnic != oldWidget.initialCnic) {
-      focusAndFillCnic(widget.initialCnic!);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        focusAndFillCnic(widget.initialCnic!);
+      });
     }
   }
 
@@ -207,21 +320,26 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   }
 
   Future<bool> _tokenExistsToday(String patientId) async {
-    final datePart = DateFormat('ddMMyy').format(DateTime.now());
-    final entries  = LocalStorageService.getLocalEntries(widget.branchId);
+    final datePart   = DateFormat('ddMMyy').format(DateTime.now());
+    final activeCamp = _resolvedDispensaryId;
+    final entries    = LocalStorageService.getLocalEntries(widget.branchId, dispensaryId: activeCamp, filterByCamp: true);
     return entries.any((e) =>
         e['patientId'] == patientId && (e['dateKey'] as String?) == datePart);
   }
 
   void _estimateNextSerial() {
     final datePart   = DateFormat('ddMMyy').format(DateTime.now());
-    final localCount = LocalStorageService.getLocalEntries(widget.branchId)
+    final activeCamp = _resolvedDispensaryId;
+    final localCount = LocalStorageService.getLocalEntries(widget.branchId, dispensaryId: activeCamp, filterByCamp: true)
         .where((m) => (m['dateKey'] as String?) == datePart)
         .length;
+    final dispTag = CampSessionService.getDispensaryKeyword(activeCamp);
+    final serialStr = activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all'
+        ? '$datePart-$dispTag-${(localCount + 1).toString().padLeft(3, '0')}'
+        : '$datePart-${(localCount + 1).toString().padLeft(3, '0')}';
     if (mounted) {
       setState(() {
-        _nextSerial =
-            '$datePart-${(localCount + 1).toString().padLeft(3, '0')}';
+        _nextSerial = serialStr;
       });
     }
   }
@@ -269,8 +387,17 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       _guardianCnic = null; _guardianPatient = null;
     });
     try {
-      final localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+      var localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
           input, branchId: widget.branchId);
+      if (localResults.isEmpty) {
+        try {
+          await LocalStorageService.downloadAllPatients(widget.branchId);
+          localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+              input, branchId: widget.branchId);
+        } catch (e) {
+          debugPrint('[TokenScreen] Firestore fallback patient fetch failed: $e');
+        }
+      }
       setState(() => _patientsList = localResults);
       if (localResults.isNotEmpty) {
         if (localResults.length == 1) await _selectPatient(localResults.first);
@@ -362,35 +489,59 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         return;
       }
 
-      final now     = DateTime.now();
-      final dateKey = DateFormat('ddMMyy').format(now);
-      // Global serial — count ALL queue types
-      final localCount = LocalStorageService.getLocalEntries(widget.branchId)
-          .where((m) => (m['dateKey'] as String?) == dateKey)
-          .length;
-      final serial =
-          '$dateKey-${(localCount + 1).toString().padLeft(3, '0')}';
+      final now = DateTime.now();
+      final shiftInfo = CampSessionService.resolveShiftAndDateKey(now);
+      final dateKey = shiftInfo.dateKey;
+      final session = shiftInfo.session;
+      final activeCamp = _resolvedDispensaryId;
+      final dispTag = CampSessionService.getDispensaryKeyword(activeCamp);
 
-      // ── QUEUE TYPE FIX: resolve from patient status ──────────────────────
       final rawStatus = _patientData!['status']?.toString();
       final queueType = _resolveQueueType(rawStatus);
 
-      debugPrint(
-          '[TokenScreen] ✅ status="${_patientData!['status']}" → queueType="$queueType" serial="$serial"');
+      String serial = '';
+      Map<String, dynamic> entryData = {};
+
+      final conn = await Connectivity().checkConnectivity();
+      final isOnline = !conn.contains(ConnectivityResult.none);
 
       final vitals = <String, dynamic>{
-        'bp': bp, 'temp': temp, 'tempUnit': 'C', 'weight': weight,
+        'bp': bp.isNotEmpty ? bp : 'N/A',
+        'temp': temp.isNotEmpty ? temp : 'N/A',
+        'tempUnit': 'C',
+        'weight': weight.isNotEmpty ? weight : 'N/A',
         'age':        _patientData!['age']        ?? 0,
         'gender':     _patientData!['gender']     ?? 'Unknown',
         'bloodGroup': _patientData!['bloodGroup'] ?? 'N/A',
         if (sugar.isNotEmpty) 'sugar': sugar,
+        'receptionistVitals': {
+          'bp': bp.isNotEmpty ? bp : 'N/A',
+          'temp': temp.isNotEmpty ? temp : 'N/A',
+          'weight': weight.isNotEmpty ? weight : 'N/A',
+          if (sugar.isNotEmpty) 'sugar': sugar,
+          'addedBy': widget.receptionistName,
+          'addedById': widget.receptionistId,
+          'addedAt': now.toIso8601String(),
+        },
+        'auditTrail': [
+          {
+            'role': 'receptionist',
+            'action': 'Added initial vitals',
+            'by': widget.receptionistName,
+            'byId': widget.receptionistId,
+            'at': now.toIso8601String(),
+            'bp': bp.isNotEmpty ? bp : 'N/A',
+            'temp': temp.isNotEmpty ? temp : 'N/A',
+            'weight': weight.isNotEmpty ? weight : 'N/A',
+            if (sugar.isNotEmpty) 'sugar': sugar,
+          }
+        ],
       };
 
-      // ── FIX: queueType is ALWAYS present at top level in entryData ───────
-      final entryData = <String, dynamic>{
-        'serial':        serial,
-        'queueType':     queueType,   // TOP LEVEL — critical for SyncService
+      final baseData = <String, dynamic>{
+        'queueType':     queueType,
         'dateKey':       dateKey,
+        'session':       session,
         'patientId':     patientId,
         'patientName':   patientName,
         'patientCnic': (_patientData!['cnic']?.toString().trim().isNotEmpty == true
@@ -400,6 +551,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         'status':        'waiting',
         'vitals':        vitals,
         'branchId':      widget.branchId,
+        'dispensaryTag': dispTag,
+        if (_resolvedDispensaryId != null && _resolvedDispensaryId!.isNotEmpty)
+          'dispensaryId': _resolvedDispensaryId,
         'createdBy':     widget.receptionistId,
         'createdByName': widget.receptionistName,
         'suggestedDays': suggestedDays,
@@ -408,6 +562,37 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         if (_patientData!['guardianCnic']?.toString().trim().isNotEmpty == true)
           'guardianCnic': _patientData!['guardianCnic'].toString().trim(),
       };
+
+      if (isOnline) {
+        try {
+          final txResult = await issueAtomicSerialTransaction(
+            branchId: widget.branchId,
+            dispensaryTag: dispTag,
+            queueType: queueType,
+            tokenData: baseData,
+            time: now,
+          );
+          serial = txResult['serial'] as String;
+          entryData = Map<String, dynamic>.from(txResult['entryData'] as Map);
+        } catch (e) {
+          debugPrint('[TokenScreen] Transaction failed, falling back to temp offline serial: $e');
+        }
+      }
+
+      if (serial.isEmpty) {
+        // Offline fallback — prefixed with X- to distinguish from online serials
+        final localCount = LocalStorageService.getLocalEntries(widget.branchId, dispensaryId: activeCamp, filterByCamp: true)
+            .where((m) => (m['dateKey'] as String?) == dateKey)
+            .length;
+        final seqPadded = (localCount + 1).toString().padLeft(3, '0');
+        serial = 'X-$dateKey-$dispTag-$seqPadded';
+        entryData = {
+          ...baseData,
+          'serial': serial,
+          'isTempSerial': true,
+          'pendingSync': true,
+        };
+      }
 
       // STEP 1 — Hive (instant, offline-safe)
       await Hive.box(LocalStorageService.entriesBox)
@@ -776,149 +961,190 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     final weightCtrl    = TextEditingController();
     int suggestedDays   = 1;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogBg = isDark ? const Color(0xFF041C16) : Colors.white;
+    final titleBg = isDark ? const Color(0xFF072B21) : Colors.green.shade50;
+    final titleTextColor = isDark ? const Color(0xFF34D399) : Colors.green.shade700;
+    final sectionBg = isDark ? const Color(0xFF02140F) : Colors.grey.shade50;
+    final sectionBorder = isDark ? const Color(0xFF0D382B) : Colors.grey.shade300;
+    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
+    final labelColor = isDark ? const Color(0xFFA7F3D0) : Colors.grey.shade700;
+    final dialogBorder = isDark ? const Color(0xFF10B981) : Colors.green.shade200;
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setStateDialog) => AlertDialog(
-          backgroundColor: Colors.white,
+          backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
-              side: BorderSide(color: Colors.green.shade200, width: 1)),
+              side: BorderSide(color: dialogBorder, width: 1.5)),
           contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
           title: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.green.shade50,
+              color: titleBg,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(children: [
-              Icon(Icons.monitor_heart, color: Colors.green.shade700, size: 24),
+              Icon(Icons.monitor_heart, color: titleTextColor, size: 24),
               const SizedBox(width: 12),
-              Text('Enter Vitals',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green.shade700,
-                      fontSize: 16)),
+              Text(
+                'Enter Vitals',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: titleTextColor,
+                  fontSize: 16,
+                ),
+              ),
             ]),
           ),
           content: SizedBox(
             width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(child: TextField(
-                        controller: systolicCtrl, maxLength: 3,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: _vitalsDecoration('Systolic', Icons.favorite),
-                      )),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text('/',
-                            style: TextStyle(
-                                fontSize: 24, color: Colors.green.shade700, fontWeight: FontWeight.bold)),
-                      ),
-                      Expanded(child: TextField(
-                        controller: diastolicCtrl, maxLength: 3,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: _vitalsDecoration('Diastolic', null),
-                      )),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: tempCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    LengthLimitingTextInputFormatter(5),
-                  ],
-                  onChanged: (_) => _formatTemperatureAutoDot(tempCtrl),
-                  decoration: _vitalsDecoration(
-                      'Temperature (°C)', Icons.thermostat,
-                      hint: 'e.g. 98.6'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: sugarCtrl, maxLength: 3,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration:
-                      _vitalsDecoration('Blood Sugar (optional)', Icons.bloodtype),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: weightCtrl, maxLength: 3,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration:
-                      _vitalsDecoration('Weight (kg)', Icons.monitor_weight),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Days Suggestion (asked by patient):',
-                  style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [1, 2, 3].map((d) {
-                    final isSelected = suggestedDays == d;
-                    return Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(right: d < 3 ? 8 : 0),
-                        child: InkWell(
-                          onTap: () => setStateDialog(() => suggestedDays = d),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isSelected ? _teal : Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                color: isSelected ? _teal : Colors.green.shade200,
-                                width: 1.5,
-                              ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: sectionBg,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: sectionBorder),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Blood Pressure',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: labelColor),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Expanded(child: TextField(
+                              controller: systolicCtrl, maxLength: 3,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                              decoration: _vitalsDecoration('Systolic', Icons.favorite, isDark),
+                            )),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('/',
+                                  style: TextStyle(
+                                      fontSize: 24, color: titleTextColor, fontWeight: FontWeight.bold)),
                             ),
-                            child: Center(
-                              child: Text(
-                                '$d Day${d > 1 ? 's' : ''}',
-                                style: TextStyle(
-                                  color: isSelected ? Colors.white : _teal,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
+                            Expanded(child: TextField(
+                              controller: diastolicCtrl, maxLength: 3,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                              decoration: _vitalsDecoration('Diastolic', null, isDark),
+                            )),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: tempCtrl,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      LengthLimitingTextInputFormatter(5),
+                    ],
+                    onChanged: (_) => _formatTemperatureAutoDot(tempCtrl),
+                    style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                    decoration: _vitalsDecoration(
+                        'Temperature (°C)',
+                        Icons.thermostat,
+                        isDark,
+                        hint: 'e.g. 98.6'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: sugarCtrl, maxLength: 3,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                    decoration:
+                        _vitalsDecoration('Blood Sugar (optional)', Icons.bloodtype, isDark),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: weightCtrl, maxLength: 3,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                    decoration:
+                        _vitalsDecoration('Weight (kg)', Icons.monitor_weight, isDark),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Days Suggestion (asked by patient):',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: titleTextColor),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [1, 2, 3].map((d) {
+                      final isSelected = suggestedDays == d;
+                      final itemBg = isSelected
+                          ? _teal
+                          : (isDark ? const Color(0xFF02140F) : Colors.green.shade50);
+                      final itemBorder = isSelected
+                          ? _teal
+                          : (isDark ? const Color(0xFF0D382B) : Colors.green.shade200);
+
+                      return Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(right: d < 3 ? 8 : 0),
+                          child: InkWell(
+                            onTap: () => setStateDialog(() => suggestedDays = d),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              decoration: BoxDecoration(
+                                color: itemBg,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: itemBorder,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  '$d Day${d > 1 ? 's' : ''}',
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : (isDark ? const Color(0xFF34D399) : _teal),
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
             ),
           ),
           actions: [
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.grey.shade50,
+                color: sectionBg,
                 borderRadius: const BorderRadius.only(
                   bottomLeft: Radius.circular(20),
                   bottomRight: Radius.circular(20),
@@ -939,7 +1165,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     ),
                     child: Text('Cancel',
                         style: TextStyle(
-                            color: Colors.grey.shade600,
+                            color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
                             fontWeight: FontWeight.w500)),
                   ),
                   const SizedBox(width: 12),
@@ -950,6 +1176,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       final temp      = tempCtrl.text.trim();
                       final sugar     = sugarCtrl.text.trim();
                       final weight    = weightCtrl.text.trim();
+
                       if (systolic.isEmpty || diastolic.isEmpty ||
                           temp.isEmpty || weight.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -957,17 +1184,25 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             backgroundColor: Colors.red));
                         return;
                       }
-                      final tempVal = double.tryParse(temp);
-                      if (tempVal == null || tempVal < 80.0 || tempVal > 110.0) {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                            content: Text(
-                                'Temperature must be between 80.0 and 110.0'),
-                            backgroundColor: Colors.red));
-                        return;
+
+                      if (temp.isNotEmpty) {
+                        final tempVal = double.tryParse(temp);
+                        if (tempVal == null || tempVal < 80.0 || tempVal > 110.0) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content: Text(
+                                  'Temperature must be between 80.0 and 110.0'),
+                              backgroundColor: Colors.red));
+                          return;
+                        }
                       }
+
+                      final bpString = (systolic.isNotEmpty && diastolic.isNotEmpty)
+                          ? '$systolic/$diastolic'
+                          : (systolic.isNotEmpty ? systolic : '');
+
                       if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
                       _generateToken(
-                          bp:     '$systolic/$diastolic',
+                          bp:     bpString,
                           temp:   temp,
                           sugar:  sugar,
                           weight: weight,
@@ -1119,11 +1354,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       );
 
   // ── Build ──────────────────────────────────────────────────────────────────
+  bool get _isDark => Theme.of(context).brightness == Brightness.dark;
+
   @override
   Widget build(BuildContext context) {
     final screenWidth    = MediaQuery.of(context).size.width;
     final isMobile       = screenWidth < 600;
     final containerWidth = isMobile ? double.infinity : 480.0;
+    final isDark = _isDark;
 
     return Container(
       color: Colors.transparent,
@@ -1136,12 +1374,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             width: containerWidth,
             padding: EdgeInsets.all(isMobile ? 18 : 30),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.green.shade200, width: 1.5),
+              border: Border.all(
+                  color: isDark ? const Color(0xFF334155) : Colors.green.shade200,
+                  width: 1.5),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.green.withValues(alpha: 0.07),
+                    color: isDark ? Colors.black26 : Colors.green.withValues(alpha: 0.07),
                     blurRadius: 20,
                     offset: const Offset(0, 6)),
               ],
@@ -1154,14 +1394,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       horizontal: isMobile ? 16 : 24,
                       vertical:   isMobile ? 8  : 10),
                   decoration: BoxDecoration(
-                    color: _teal.withValues(alpha: 0.08),
+                    color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: _teal.withValues(alpha: 0.3)),
+                    border: Border.all(color: isDark ? const Color(0xFF0F766E) : _teal.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     'Next Token: ${_nextSerial ?? 'Loading...'}',
                     style: TextStyle(
-                        color: _teal, fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFF38BDF8) : _teal, fontWeight: FontWeight.bold,
                         fontSize: isMobile ? 16 : 20, letterSpacing: 0.4),
                   ),
                 ),
@@ -1173,7 +1413,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     style: TextStyle(
                         fontSize:   isMobile ? 18 : 22,
                         fontWeight: FontWeight.bold,
-                        color:      Colors.green[900])),
+                        color:      isDark ? Colors.white : Colors.green[900])),
                 SizedBox(height: isMobile ? 18 : 28),
 
                 // CNIC field
@@ -1182,7 +1422,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                   focusNode:    _cnicFocusNode,
                   maxLength:    15,
                   keyboardType: TextInputType.number,
-                  cursorColor:  Colors.green[900],
+                  cursorColor:  isDark ? const Color(0xFF38BDF8) : Colors.green[900],
                   onChanged: (v) {
                     final d = v.replaceAll(RegExp(r'[^0-9]'), '');
                     if (d.startsWith('03') && d.length <= 11) {
@@ -1197,23 +1437,23 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     }
                   },
                   onSubmitted: (_) => triggerSearch(),
-                  style: TextStyle(color: Colors.green[900]),
+                  style: TextStyle(color: isDark ? Colors.white : Colors.green[900]),
                   decoration: InputDecoration(
                     labelText:   'Guardian CNIC or Phone',
                     counterText: '',
-                    labelStyle:  const TextStyle(color: Colors.green),
-                    prefixIcon:  const Icon(Icons.badge, color: Colors.green),
+                    labelStyle:  TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.green),
+                    prefixIcon:  Icon(Icons.badge, color: isDark ? const Color(0xFF38BDF8) : Colors.green),
                     suffixIcon:  IconButton(
-                        icon: const Icon(Icons.search, color: Colors.green),
+                        icon: Icon(Icons.search, color: isDark ? const Color(0xFF38BDF8) : Colors.green),
                         onPressed: triggerSearch),
-                    filled: true, fillColor: Colors.green[50],
+                    filled: true, fillColor: isDark ? const Color(0xFF334155) : Colors.green[50],
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: Colors.green)),
+                        borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : Colors.green)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide:
-                            const BorderSide(color: Colors.green, width: 2)),
+                            BorderSide(color: isDark ? const Color(0xFF38BDF8) : Colors.green, width: 2)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1428,27 +1668,6 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       child: CircularProgressIndicator(
                           color: Colors.green)),
               ]),
-
-              if (_isRefreshing)
-                Positioned(
-                  top: 0, right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      SizedBox(width: 13, height: 13,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: Colors.white)),
-                      SizedBox(width: 6),
-                      Text('Updating...',
-                          style: TextStyle(
-                              color: Colors.white, fontSize: 11)),
-                    ]),
-                  ),
-                ),
             ]),
           ),
         ),
@@ -1479,19 +1698,29 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     return (cnic: '-', label: 'CNIC');
   }
 
-  InputDecoration _vitalsDecoration(String label, IconData? icon,
+  InputDecoration _vitalsDecoration(String label, IconData? icon, bool isDark,
           {String? hint}) =>
       InputDecoration(
-        labelText: label, hintText: hint, counterText: '', isDense: true,
+        labelText: label,
+        labelStyle: TextStyle(color: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF064E3B)),
+        hintText: hint,
+        hintStyle: TextStyle(color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8)),
+        counterText: '',
+        isDense: true,
         prefixIcon: icon != null
-            ? Icon(icon, color: Colors.green, size: 20)
+            ? Icon(icon, color: isDark ? const Color(0xFF34D399) : Colors.green.shade700, size: 20)
             : null,
-        filled: true, fillColor: Colors.white,
-        border: const OutlineInputBorder(
-            borderRadius: BorderRadius.all(Radius.circular(10))),
-        focusedBorder: const OutlineInputBorder(
-            borderRadius: BorderRadius.all(Radius.circular(10)),
-            borderSide: BorderSide(color: Colors.green, width: 2)),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF02140F) : Colors.white,
+        border: OutlineInputBorder(
+            borderRadius: const BorderRadius.all(Radius.circular(10)),
+            borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: const BorderRadius.all(Radius.circular(10)),
+            borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: const BorderRadius.all(Radius.circular(10)),
+            borderSide: BorderSide(color: isDark ? const Color(0xFF10B981) : Colors.green.shade700, width: 2)),
       );
 
   void _formatTemperatureAutoDot(TextEditingController controller) {

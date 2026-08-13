@@ -23,19 +23,19 @@ class BiometricCredential {
     this.active = true,
   });
 
-  factory BiometricCredential.fromMap(Map<String, dynamic> map) {
+  factory BiometricCredential.fromMap(Map<dynamic, dynamic> map) {
     return BiometricCredential(
       id: map['id']?.toString() ?? '',
       biometricPin: map['biometricPin']?.toString() ?? '',
       entityId: map['entityId']?.toString() ?? '',
-      entityName: map['entityName']?.toString() ?? '',
+      entityName: map['entityName']?.toString() ?? 'User',
       entityType: map['entityType']?.toString() ?? 'employee',
       branchId: map['branchId']?.toString() ?? '',
       enrolledAt: map['enrolledAt'] != null 
           ? (DateTime.tryParse(map['enrolledAt'].toString()) ?? DateTime.now())
           : DateTime.now(),
       deviceSource: map['deviceSource']?.toString() ?? 'zkteco',
-      active: map['active'] ?? true,
+      active: map['active'] != false,
     );
   }
 

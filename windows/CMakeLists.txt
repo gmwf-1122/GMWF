@@ -13,8 +13,6 @@ if(POLICY CMP194)
   cmake_policy(SET CMP194 NEW)
 endif()
 
-set(FIREBASE_CPP_SDK_VERSION 13.4.0 CACHE STRING "" FORCE)
-
 project(gmwf LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
@@ -67,6 +65,12 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+
+# Ensure extracted firebase_cpp_sdk_windows has CMakeLists.txt before plugins are loaded
+set(FIREBASE_SDK_EXTRACTED "${CMAKE_BINARY_DIR}/extracted/firebase_cpp_sdk_windows")
+if(EXISTS "${FIREBASE_SDK_EXTRACTED}")
+  file(WRITE "${FIREBASE_SDK_EXTRACTED}/CMakeLists.txt" "cmake_minimum_required(VERSION 3.14)\nproject(firebase_cpp_sdk CXX)\nset(FIREBASE_SDK_DIR \"\${CMAKE_CURRENT_SOURCE_DIR}\")\ninclude_directories(\"\${FIREBASE_SDK_DIR}/include\")\nforeach(lib firebase_app firebase_auth firebase_remote_config firebase_storage firebase_firestore firebase_database firebase_app_check)\n  if(NOT TARGET \${lib})\n    add_library(\${lib} STATIC IMPORTED GLOBAL)\n    set_target_properties(\${lib} PROPERTIES INTERFACE_INCLUDE_DIRECTORIES \"\${FIREBASE_SDK_DIR}/include\" IMPORTED_LOCATION_DEBUG \"\${FIREBASE_SDK_DIR}/libs/windows/VS2019/MD/x64/Debug/\${lib}.lib\" IMPORTED_LOCATION_RELEASE \"\${FIREBASE_SDK_DIR}/libs/windows/VS2019/MD/x64/Release/\${lib}.lib\" IMPORTED_LOCATION_PROFILE \"\${FIREBASE_SDK_DIR}/libs/windows/VS2019/MD/x64/Release/\${lib}.lib\")\n  endif()\nendforeach()\n")
+endif()
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.

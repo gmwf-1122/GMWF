@@ -15,10 +15,13 @@ import '../services/role_simulator_service.dart';
 import '../widgets/update_dialog_widget.dart';
 
 import '../utils/formatters.dart';
+import '../services/auth_service.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import '../models/patient.dart';
 import '../models/token.dart';
 
+import '../services/camp_session_service.dart';
+import '../widgets/camp_selection_dialog.dart';
 import 'dispensary/receptionist/receptionist_screen.dart';
 import 'dispensary/doctor/doctor_screen.dart';
 import 'dispensary/dispensar/inventory.dart';
@@ -184,6 +187,41 @@ class _HomeRouterState extends State<HomeRouter> {
     final uid = currentUser.uid;
     final emailLower = currentUser.email?.toLowerCase() ?? '';
 
+    // Fast resolution: Check local caches first to avoid race conditions on sign-in
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final appSettingsUser = Hive.box('app_settings').get('user_data');
+        if (appSettingsUser is Map) {
+          final m = Map<String, dynamic>.from(appSettingsUser);
+          final r = (m['role'] ?? '').toString().toLowerCase().trim();
+          final mUid = (m['uid'] ?? '').toString();
+          final mEmail = (m['email'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown' && (mUid == uid || mEmail == emailLower)) {
+            debugPrint("HomeRouter: Fast resolution from app_settings user_data (role=$r)");
+            return m;
+          }
+        }
+      }
+      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+      if (cachedData != null && cachedData.isNotEmpty) {
+        final r = (cachedData['role'] ?? '').toString().toLowerCase().trim();
+        if (r.isNotEmpty && r != 'unknown') {
+          debugPrint("HomeRouter: Fast resolution from OfflineAuthService (role=$r)");
+          return cachedData;
+        }
+      }
+      final localByUid = LocalStorageService.getLocalUserByUid(uid);
+      if (localByUid != null) {
+        final r = (localByUid['role'] ?? '').toString().toLowerCase().trim();
+        if (r.isNotEmpty && r != 'unknown') {
+          debugPrint("HomeRouter: Fast resolution from LocalStorageService (role=$r)");
+          return {...localByUid, 'uid': uid, 'email': currentUser.email};
+        }
+      }
+    } catch (e) {
+      debugPrint("HomeRouter: Error during fast local user check: $e");
+    }
+
     final isOnline = await _checkConnectivity();
 
     if (isOnline) {
@@ -337,16 +375,23 @@ class _HomeRouterState extends State<HomeRouter> {
     }
 
     // Hive fallback
-    final localByUid = LocalStorageService.getLocalUserByUid(uid);
-    if (localByUid != null) {
-      return {...localByUid, 'uid': uid, 'email': currentUser.email};
-    }
-    final localByEmail = LocalStorageService.getLocalUserByEmail(emailLower);
-    if (localByEmail != null) {
-      return {...localByEmail, 'uid': uid, 'email': currentUser.email};
+    final emailPrefix = emailLower.contains('@') ? emailLower.split('@').first : emailLower;
+    final localUser = LocalStorageService.findLocalUser(uid) ??
+                      LocalStorageService.findLocalUser(emailLower) ??
+                      LocalStorageService.findLocalUser(emailPrefix);
+    if (localUser != null) {
+      return {...localUser, 'uid': uid, 'email': currentUser.email};
     }
 
-    debugPrint("HomeRouter: Could not find user data anywhere for UID: $uid");
+    // Final attempt from OfflineAuthService
+    try {
+      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+      if (cachedData != null && cachedData.isNotEmpty) {
+        return cachedData;
+      }
+    } catch (_) {}
+
+    debugPrint("HomeRouter: Could not resolve user profile for UID: $uid");
     return null;
   }
 
@@ -408,6 +453,29 @@ class _HomeRouterState extends State<HomeRouter> {
   ) {
     final r = role.toLowerCase().trim();
 
+    // 1. HYBRID DISPENSARY ROLES (Highest precedence to prevent hybrid roles routing to manager dashboard)
+    if (r == 'rec+dis' ||
+        r == 'doc+rec' ||
+        r == 'doc+dis' ||
+        r == 'doc+rec+dis' ||
+        r.contains('hybrid') ||
+        (r.contains('rec') && r.contains('dis')) ||
+        (r.contains('doc') && r.contains('rec')) ||
+        (r.contains('doc') && r.contains('dis')) ||
+        r.contains('receptionist+dispenser') ||
+        r.contains('receptionist + dispenser') ||
+        r.contains('doctor+receptionist') ||
+        r.contains('doctor + receptionist')) {
+      debugPrint("HomeRouter: Routing Hybrid Role '$role' to HybridDispensaryScreen");
+      return HybridDispensaryScreen(
+        branchId: branchId,
+        userId: uid,
+        userName: userName,
+        role: r,
+      );
+    }
+
+    // 2. SPECIFIC SINGLE CLINIC & DISPENSARY ROLES
     switch (r) {
       case 'server':
         return ServerDashboardWithSync(branchId: branchId);
@@ -432,28 +500,8 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'pharmacist':
         return DispensarScreen(branchId: branchId);
 
-      case 'rec+dis':
-      case 'doc+rec':
-      case 'doc+dis':
-      case 'doc+rec+dis':
-        return HybridDispensaryScreen(
-          branchId: branchId,
-          userId: uid,
-          userName: userName,
-          role: r,
-        );
-
       case 'inventory':
         return InventoryPage(branchId: branchId);
-
-      case 'supervisor':
-      case 'branch manager':
-        return GlobalModularDashboard(userData: {
-          'role': r,
-          'branchId': branchId,
-          'uid': uid,
-          'name': userName,
-        });
 
       case 'office boy':
       case 'dasterkhwaan office boy':
@@ -500,72 +548,17 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'school teacher':
       case 'school principal':
         return SchoolDashboard(branchId: branchId);
-
-      default:
-        debugPrint("Unknown role: $role");
-        return Scaffold(
-          body: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF00695C), Color(0xFF004D40)],
-              ),
-            ),
-            child: Center(
-              child: Card(
-                margin: const EdgeInsets.all(24),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20)),
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.error_outline,
-                          size: 80, color: Colors.orange),
-                      const SizedBox(height: 24),
-                      const Text("Unknown Role",
-                          style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF004D40))),
-                      const SizedBox(height: 16),
-                      Text(
-                        "Your account role '$role' is not recognized.\nPlease contact your administrator.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            fontSize: 16, color: Colors.grey.shade700),
-                      ),
-                      const SizedBox(height: 32),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pushAndRemoveUntil(
-                            navigatorKey.currentContext!,
-                            MaterialPageRoute(
-                                builder: (_) => const LoginPage()),
-                            (route) => false,
-                          );
-                        },
-                        icon: const Icon(Icons.arrow_back),
-                        label: const Text("Back to Login"),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00695C),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 32, vertical: 16),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
     }
+
+    // 3. DEFAULT ALL OTHER AUTHENTICATED ROLES TO GLOBAL MODULAR DASHBOARD
+    debugPrint("HomeRouter: Routing role '$role' directly to GlobalModularDashboard");
+    return GlobalModularDashboard(userData: {
+      'role': r.isNotEmpty ? r : 'admin',
+      'branchId': branchId.isNotEmpty ? branchId : 'all',
+      'uid': uid,
+      'name': userName.isNotEmpty ? userName : 'User',
+      ...userData,
+    });
   }
 
   @override
@@ -631,8 +624,7 @@ class _HomeRouterState extends State<HomeRouter> {
                         OutlinedButton.icon(
                           onPressed: () async {
                             try {
-                              await FirebaseAuth.instance.signOut();
-                              await offline_auth.OfflineAuthService.clearCredentials();
+                              await AuthService().signOut();
                             } catch (e) {
                               debugPrint("Error signing out: $e");
                             }
@@ -663,6 +655,14 @@ class _HomeRouterState extends State<HomeRouter> {
         }
 
         final data = snapshot.data!;
+
+        try {
+          if (Hive.isBoxOpen('app_settings')) {
+            final box = Hive.box('app_settings');
+            box.put('user_data', data);
+            box.put('currentUser', data);
+          }
+        } catch (_) {}
 
         // Check real-time revocation first (fires instantly when admin revokes)
         if (_accessRevokedData != null) {
@@ -696,6 +696,16 @@ class _HomeRouterState extends State<HomeRouter> {
           rawRole = data['type'].toString();
         } else if (data['accountType'] != null && data['accountType'].toString().trim().isNotEmpty) {
           rawRole = data['accountType'].toString();
+        } else if (data['userRole'] != null && data['userRole'].toString().trim().isNotEmpty) {
+          rawRole = data['userRole'].toString();
+        } else if (data['designation'] != null && data['designation'].toString().trim().isNotEmpty) {
+          rawRole = data['designation'].toString();
+        } else if (data['position'] != null && data['position'].toString().trim().isNotEmpty) {
+          rawRole = data['position'].toString();
+        } else if (data['jobTitle'] != null && data['jobTitle'].toString().trim().isNotEmpty) {
+          rawRole = data['jobTitle'].toString();
+        } else if (data['accessRole'] != null && data['accessRole'].toString().trim().isNotEmpty) {
+          rawRole = data['accessRole'].toString();
         } else {
           try {
             if (Hive.isBoxOpen('local_users')) {
@@ -703,8 +713,9 @@ class _HomeRouterState extends State<HomeRouter> {
               final uid = data['uid']?.toString();
               final uObj = (email != null ? Hive.box('local_users').get('user:${email.toLowerCase()}') : null) ??
                           (uid != null ? Hive.box('local_users').get('user:$uid') : null);
-              if (uObj is Map && uObj['role'] != null) {
-                rawRole = uObj['role'].toString();
+              if (uObj is Map) {
+                final cachedRole = uObj['role'] ?? uObj['type'] ?? uObj['accountType'] ?? uObj['designation'];
+                if (cachedRole != null) rawRole = cachedRole.toString();
               }
             }
           } catch (_) {}
@@ -723,7 +734,7 @@ class _HomeRouterState extends State<HomeRouter> {
           rawRole = 'hq manager';
         }
 
-        final role = (rawRole.isEmpty || rawRole == 'unknown') ? 'hq manager' : rawRole;
+        final role = rawRole.isEmpty ? 'unknown' : rawRole;
 
         // ── Normalize Branch ID (handles null, 'null', empty strings) ──
         String rawBranch = (data['branchId']?.toString() ?? '').trim();
@@ -777,6 +788,33 @@ class _HomeRouterState extends State<HomeRouter> {
               'supervisor',
               'branch manager',
             ];
+
+            const dispensaryRoles = [
+              'doctor',
+              'receptionist',
+              'dispenser',
+              'rec+dis',
+              'doc+rec',
+              'doc+dis',
+              'doc+rec+dis',
+            ];
+
+            // ── Multi-Camp Gate Check ──
+            if (dispensaryRoles.contains(activeRole)) {
+              final assignedCamps = CampSessionService.getAssignedCamps(data);
+              if (assignedCamps.length >= 2) {
+                final activeCamp = CampSessionService.resolveActiveCamp(data);
+                if (activeCamp == null) {
+                  return CampSelectionDialog(
+                    assignedCamps: assignedCamps,
+                    onSelected: (selectedCampId) async {
+                      await CampSessionService.setActiveCamp(selectedCampId);
+                      setState(() {});
+                    },
+                  );
+                }
+              }
+            }
 
             Widget screenWidget;
             if (globalRoles.contains(activeRole)) {

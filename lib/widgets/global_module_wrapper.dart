@@ -19,6 +19,7 @@ import '../services/sync_service.dart';
 import 'package:hive/hive.dart';
 import '../services/local_storage_service.dart';
 import 'app_back_button.dart';
+import '../services/user_module_access_service.dart';
 import '../services/auto_update_service.dart';
 
 const String _kGlobalBranchId = 'all';
@@ -187,7 +188,11 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     // Fallback: fetch all branches from Firestore
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
-      final branches = snap.docs.map((d) {
+      final branches = snap.docs.where((d) {
+        final idLower = d.id.toLowerCase().trim();
+        final nameLower = (d.data()['name'] as String? ?? '').toLowerCase().trim();
+        return idLower != 'all' && idLower != 'global' && nameLower != 'all' && nameLower != 'global';
+      }).map((d) {
         final data = d.data();
         return {'id': d.id, 'name': data['name'] as String? ?? d.id};
       }).toList();
@@ -308,6 +313,50 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final isMobile = MediaQuery.of(context).size.width < 600;
+
+    final userId = (widget.userData['id'] ?? widget.userData['localId'] ?? widget.userData['username'] ?? '').toString();
+    final role = (widget.userData['role'] ?? '').toString();
+    final moduleId = widget.module.id;
+
+    final hasAccess = UserModuleAccessService.canUserAccessModule(
+      userId: userId,
+      role: role,
+      moduleId: moduleId,
+    );
+
+    if (!hasAccess) {
+      return Scaffold(
+        backgroundColor: t.bg,
+        appBar: AppBar(
+          backgroundColor: t.bgCard,
+          elevation: 0,
+          leading: AppBackButton(color: t.textPrimary),
+          title: Text(widget.module.title, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+        ),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_person_rounded, size: 64, color: Colors.redAccent),
+              const SizedBox(height: 16),
+              Text('Access Restricted', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32.0),
+                child: Text('Access to "${widget.module.title}" has been blocked by Chairman / Administrator.',
+                    style: TextStyle(fontSize: 13, color: t.textSecondary), textAlign: TextAlign.center),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(backgroundColor: t.accent),
+                child: const Text('Go Back'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: _isGlobal ? const Color(0xFF0D1117) : t.bg,
