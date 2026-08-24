@@ -1,5 +1,6 @@
 // lib/pages/office/attendance_tab.dart
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -7,8 +8,11 @@ import 'package:collection/collection.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/finance_ledger_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/local_biometric_service.dart';
+import '../../services/zkteco_network_service.dart';
+import '../settings/biometric_device_manager_page.dart';
 import 'bulk_attendance_dialog.dart';
 import 'bulk_individual_attendance_dialog.dart';
 import 'shared_widgets.dart';
@@ -18,6 +22,7 @@ class AttendanceTab extends StatefulWidget {
   final DateTime date;
   final ValueChanged<DateTime> onDateChanged;
   final VoidCallback onAddEmployee;
+  final Function(BuildContext context, String? employeeId)? onEditEmployee;
   final String departmentFilter;
 
   const AttendanceTab({
@@ -26,6 +31,7 @@ class AttendanceTab extends StatefulWidget {
     required this.date,
     required this.onDateChanged,
     required this.onAddEmployee,
+    this.onEditEmployee,
     this.departmentFilter = 'all',
   });
 
@@ -36,8 +42,56 @@ class AttendanceTab extends StatefulWidget {
 class _AttendanceTabState extends State<AttendanceTab> {
   // Store local modifications before saving to DB
   final Map<String, Map<String, dynamic>> _draftRecords = {};
+  final TextEditingController _searchCtrl = TextEditingController();
   String _selectedBranchFilter = 'all';
   String _selectedDeptFilter = 'all';
+  String _searchQuery = '';
+  String _statusFilter = 'all';
+  StreamSubscription? _punchSubscription;
+  bool _isSyncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 1. Listen to realtime ZKTeco punches to re-render attendance immediately
+    _punchSubscription = ZkTecoNetworkService.punchStream.listen((punch) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+    // 2. Fetch latest punches from Cloud Firestore and hardware scanners
+    _syncPunches(widget.date);
+  }
+
+  Future<void> _syncPunches([DateTime? targetDate]) async {
+    if (_isSyncing) return;
+    if (mounted) setState(() => _isSyncing = true);
+    try {
+      final date = targetDate ?? widget.date;
+      final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      // Pull latest from hardware scanners
+      await ZkTecoNetworkService.syncAllDevices();
+      // Push all local recorded attendance to Cloud Firestore
+      await ZkTecoNetworkService.syncAllRecordedAttendanceToFirestore();
+      // Download branch attendance records
+      await FinanceLocalStorage.downloadAttendance(widget.branchId, specificDateStr: dateStr, force: true);
+      // Re-route any unmapped punches
+      await ZkTecoNetworkService.processPendingUnmappedPunches();
+    } catch (e) {
+      debugPrint('[AttendanceTab] _syncPunches error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isSyncing = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _punchSubscription?.cancel();
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant AttendanceTab oldWidget) {
@@ -45,6 +99,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
     if (oldWidget.branchId != widget.branchId) {
       _selectedBranchFilter = 'all';
       _selectedDeptFilter = 'all';
+      _syncPunches(widget.date);
+    } else if (oldWidget.date != widget.date) {
+      _syncPunches(widget.date);
     }
   }
 
@@ -56,16 +113,16 @@ class _AttendanceTabState extends State<AttendanceTab> {
       isDarkCanvas: false,
       bg: const Color(0xFFF8FAFC),
       bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
+      bgCardAlt: const Color(0xFFF8FAFC),
       bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
+      accent: const Color(0xFF0F766E),
+      accentLight: const Color(0xFF14B8A6),
+      accentMuted: const Color(0xFFCCFBF1),
+      accentGradient: const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF0D9488)]),
+      glassTint: const Color(0x1A0F766E),
+      textPrimary: const Color(0xFF0F172A),
+      textSecondary: const Color(0xFF475569),
+      textTertiary: const Color(0xFF94A3B8),
       danger: const Color(0xFFEF4444),
       zakat: tOriginal.zakat,
       nonZakat: tOriginal.nonZakat,
@@ -183,10 +240,16 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
                 // Build working checklist
                 final isSunday = widget.date.weekday == DateTime.sunday;
-                final records = activeEmployees.map((emp) {
-                  final empId = emp['localId']?.toString() ?? '';
+                final allRecords = activeEmployees.map((emp) {
+                  final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
+                  final altId = emp['id']?.toString() ?? '';
                   final empDept = emp['department']?.toString() ?? '';
-                  final dbRec = dbRecords.firstWhereOrNull((r) => r['employeeId'] == empId);
+                  final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+                  
+                  final dbRec = dbRecords.firstWhereOrNull((r) =>
+                      r['employeeId']?.toString() == empId ||
+                      (altId.isNotEmpty && r['employeeId']?.toString() == altId) ||
+                      (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin)));
 
                   final isHoliday = FinanceLocalStorage.isHoliday(
                     branchId: widget.branchId,
@@ -200,46 +263,176 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     'date': dateStr,
                     'status': isSunday ? 'off' : (isHoliday ? 'holiday' : 'absent'),
                     'leaveType': null,
+                    'checkInTime': null,
                     'arrivalTime': null,
+                    'checkOutTime': null,
                     'departureTime': null,
                     'note': isHoliday ? 'Public Holiday' : null,
                     'overtimeDuration': null,
                     'halfDayType': null,
                   });
+
+                  // Ensure presence is recognized if punch times exist
+                  final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
+                  final curStatus = (record['status']?.toString() ?? '').toLowerCase();
+                  if ((curStatus.isEmpty || curStatus == 'absent' || curStatus == 'unmarked') &&
+                      checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') {
+                    record['status'] = 'present';
+                  }
+
                   record['name'] = emp['name']; // cache name for drawing card
                   record['role'] = emp['role'];
                   record['createdBy'] = emp['createdBy'];
                   record['department'] = emp['department'];
+                  record['pin'] = pin;
+                  record['biometricPin'] = pin;
                   return record;
                 }).toList();
 
-                // Compute header counts
-                int present = records.where((r) => r['status'] == 'present').length;
-                int late = records.where((r) => r['status'] == 'late').length;
-                int leave = records.where((r) => r['status'] == 'leave').length;
-                int absent = records.where((r) => r['status'] == 'absent').length;
-                int overtime = records.where((r) => r['status'] == 'overtime').length;
-                int holiday = records.where((r) => r['status'] == 'holiday').length;
+                // Compute header counts (case-insensitive & punch-time aware) from all active employees
+                int present = allRecords.where((r) {
+                  final s = (r['status']?.toString() ?? '').toLowerCase();
+                  final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
+                  return s == 'present' || (inTime != null && inTime.isNotEmpty && inTime != '--:--');
+                }).length;
+                int late = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'late').length;
+                int leave = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'leave').length;
+                int absent = allRecords.where((r) {
+                  final s = (r['status']?.toString() ?? '').toLowerCase();
+                  final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
+                  return s == 'absent' && (inTime == null || inTime.isEmpty || inTime == '--:--');
+                }).length;
+                int overtime = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'overtime').length;
+                int holiday = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'holiday').length;
+
+                // Apply search query and status filtering
+                final filteredRecords = allRecords.where((r) {
+                  // 1. Status Filter
+                  if (_statusFilter != 'all') {
+                    final s = (r['status']?.toString() ?? '').toLowerCase();
+                    final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
+                    if (_statusFilter == 'present') {
+                      if (s != 'present' && (inTime == null || inTime.isEmpty || inTime == '--:--')) return false;
+                    } else if (_statusFilter == 'absent') {
+                      if (s != 'absent' || (inTime != null && inTime.isNotEmpty && inTime != '--:--')) return false;
+                    } else if (s != _statusFilter) {
+                      return false;
+                    }
+                  }
+
+                  // 2. Search Query Filter
+                  if (_searchQuery.isNotEmpty) {
+                    final q = _searchQuery.toLowerCase();
+                    final name = (r['name'] ?? '').toString().toLowerCase();
+                    final role = (r['role'] ?? '').toString().toLowerCase();
+                    final dept = (r['department'] ?? '').toString().toLowerCase();
+                    final pin = (r['biometricPin'] ?? r['pin'] ?? '').toString().toLowerCase();
+                    final id = (r['employeeId'] ?? '').toString().toLowerCase();
+
+                    final matches = name.contains(q) ||
+                        role.contains(q) ||
+                        dept.contains(q) ||
+                        pin.contains(q) ||
+                        id.contains(q);
+                    if (!matches) return false;
+                  }
+
+                  return true;
+                }).toList();
+
+                if (filteredRecords.isEmpty) {
+                  return Column(
+                    children: [
+                      _buildCrossBranchAuthorizationBanner(t, dateStr),
+                      _buildUnmappedPunchesBanner(t),
+                      _buildSummaryStrip(
+                        total: allRecords.length,
+                        p: present,
+                        lat: late,
+                        lv: leave,
+                        a: absent,
+                        ot: overtime,
+                        isSunday: isSunday,
+                        t: t,
+                        hol: holiday,
+                        records: allRecords,
+                      ),
+                      Expanded(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32.0),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+                                  child: const Icon(Icons.search_off_rounded, size: 36, color: Color(0xFF64748B)),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  _searchQuery.isNotEmpty
+                                      ? 'No staff found matching "$_searchQuery"'
+                                      : 'No employees found with status "${_statusFilter.toUpperCase()}"',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  _searchQuery.isNotEmpty
+                                      ? 'Check spelling or search by PIN number, role, or department.'
+                                      : 'Try selecting a different status filter.',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                ),
+                                const SizedBox(height: 14),
+                                OutlinedButton.icon(
+                                  onPressed: () {
+                                    setState(() {
+                                      _searchCtrl.clear();
+                                      _searchQuery = '';
+                                      _statusFilter = 'all';
+                                    });
+                                  },
+                                  icon: const Icon(Icons.clear_all_rounded, size: 15),
+                                  label: const Text('Reset All Filters'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: const Color(0xFF0F766E),
+                                    side: const BorderSide(color: Color(0xFF0F766E)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                }
 
                 // Group by department
                 final Map<String, List<Map<String, dynamic>>> grouped = {};
-                for (final r in records) {
+                for (final r in filteredRecords) {
                   final dept = r['department']?.toString() ?? 'Other';
                   final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
                   grouped.putIfAbsent(cleanDept, () => []).add(r);
                 }
 
                 final List<Map<String, dynamic>> displayItems = [];
-                grouped.forEach((deptName, list) {
+                final sortedDepts = FinanceLedgerStorage.sortDepartmentsCanonical(grouped.keys);
+                for (final deptName in sortedDepts) {
+                  final list = grouped[deptName]!;
                   displayItems.add({'isHeader': true, 'departmentName': deptName, 'count': list.length});
                   for (final r in list) {
                     displayItems.add(r);
                   }
-                });
+                }
 
                 return Column(
                   children: [
+                    _buildCrossBranchAuthorizationBanner(t, dateStr),
+                    _buildUnmappedPunchesBanner(t),
                     _buildSummaryStrip(
+                      total: allRecords.length,
                       p: present,
                       lat: late,
                       lv: leave,
@@ -248,22 +441,25 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       isSunday: isSunday,
                       t: t,
                       hol: holiday,
+                      records: allRecords,
                     ),
                     Expanded(
                       child: LayoutBuilder(
                         builder: (layoutCtx, constraints) {
-                          final isWide = constraints.maxWidth >= 900;
+                          final isWide = constraints.maxWidth >= 750;
                           return Column(children: [
                             if (isWide)
                               Container(
-                                color: const Color(0xFFF9FAFB),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                color: const Color(0xFFF1F5F9),
+                                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                                 child: const Row(children: [
-                                  SizedBox(width: 42),
-                                  SizedBox(width: 12),
-                                  Expanded(child: Text('EMPLOYEE', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
-                                  Text('STATUS', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                                   SizedBox(width: 44),
+                                  SizedBox(width: 12),
+                                  Expanded(child: Text('EMPLOYEE & DEPARTMENT', style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
+                                  Text('PUNCH TIMES', style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                                  SizedBox(width: 50),
+                                  Text('STATUS', style: TextStyle(color: Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                                  SizedBox(width: 70),
                                 ]),
                               ),
                             Expanded(
@@ -285,7 +481,6 @@ class _AttendanceTabState extends State<AttendanceTab> {
                         },
                       ),
                     ),
-                    _buildSaveButton(records, t),
                   ],
                 );
               },
@@ -296,59 +491,547 @@ class _AttendanceTabState extends State<AttendanceTab> {
     );
   }
 
-  Widget _buildDepartmentHeader(String department, int count, RoleThemeData t) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 16.0, right: 16.0, top: 20.0, bottom: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+  // ── Cross-Branch Authorization Banner ───────────────────────────────────────
+  Widget _buildCrossBranchAuthorizationBanner(RoleThemeData t, String dateStr) {
+    if (!Hive.isBoxOpen(LocalStorageService.crossBranchPunchesBox)) {
+      return const SizedBox.shrink();
+    }
+    return ValueListenableBuilder<Box>(
+      valueListenable: Hive.box(LocalStorageService.crossBranchPunchesBox).listenable(),
+      builder: (context, box, _) {
+        final pendingList = ZkTecoNetworkService.getPendingCrossBranchPunches(
+          branchId: widget.branchId,
+          dateStr: dateStr,
+        );
+
+        if (pendingList.isEmpty) return const SizedBox.shrink();
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB), // Calm soft amber
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFDE68A), width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 18),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Cross-Branch Punch Approvals (${pendingList.length} Pending HQ Decision)',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              ...pendingList.map((punch) {
+                final pendingId = punch['id']?.toString() ?? '';
+                final name = punch['entityName']?.toString() ?? 'Employee';
+                final empBranch = punch['employeeBranchName']?.toString() ?? 'Home Branch';
+                final punchBranch = punch['punchBranchName']?.toString() ?? 'Remote Branch';
+                final timeStr = punch['timestamp'] != null
+                    ? DateFormat('hh:mm a').format(DateTime.tryParse(punch['timestamp'].toString()) ?? DateTime.now())
+                    : '--:--';
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '$name ($empBranch) punched at $punchBranch @ $timeStr',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () async {
+                          final ok = await ZkTecoNetworkService.approveCrossBranchPunch(
+                            pendingId: pendingId,
+                            reviewerName: 'HQ Manager',
+                          );
+                          if (context.mounted && ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('✅ Approved $name (Marked Present)'),
+                                backgroundColor: const Color(0xFF0F766E),
+                              ),
+                            );
+                            setState(() {});
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F766E),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          elevation: 0,
+                        ),
+                        child: const Text('Approve'),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton(
+                        onPressed: () async {
+                          final ok = await ZkTecoNetworkService.rejectCrossBranchPunch(
+                            pendingId: pendingId,
+                            reviewerName: 'HQ Manager',
+                          );
+                          if (context.mounted && ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('❌ Rejected $name (Kept Absent)'),
+                                backgroundColor: const Color(0xFFEF4444),
+                              ),
+                            );
+                            setState(() {});
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFEF4444),
+                          side: const BorderSide(color: Color(0xFFFECACA)),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: const Text('Reject'),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Unmapped Punches Notification Banner ────────────────────────────────────
+  Widget _buildUnmappedPunchesBanner(RoleThemeData t) {
+    if (!Hive.isBoxOpen(LocalStorageService.unmappedPunchesBox)) {
+      return const SizedBox.shrink();
+    }
+    return ValueListenableBuilder<Box>(
+      valueListenable: Hive.box(LocalStorageService.unmappedPunchesBox).listenable(),
+      builder: (context, box, _) {
+        final unmappedList = ZkTecoNetworkService.getUnmappedPunches();
+        if (unmappedList.isEmpty) return const SizedBox.shrink();
+
+        final uniquePins = unmappedList.map((p) => p['pin']?.toString() ?? '').where((p) => p.isNotEmpty).toSet().toList();
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFEF2F2),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: const Color(0xFFFECACA), width: 1),
+            boxShadow: [
+              BoxShadow(color: Colors.red.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Row(
             children: [
               Container(
-                width: 4,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: t.accent,
-                  borderRadius: BorderRadius.circular(2),
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFEE2E2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.fingerprint_rounded, color: Color(0xFFEF4444), size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${unmappedList.length} Unmapped Biometric Scans Detected (PINs: ${uniquePins.join(", ")})',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                    ),
+                    const SizedBox(height: 2),
+                    const Text(
+                      'Biometric punches occurred on hardware for unregistered PINs. Click "Assign PINs" to map them to your staff.',
+                      style: TextStyle(fontSize: 11.5, color: Color(0xFF7F1D1D)),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 8),
-              Text(
-                department.toUpperCase(),
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12,
-                  letterSpacing: 0.5,
+              ElevatedButton.icon(
+                onPressed: () => _showAssignUnmappedPinsDialog(context, unmappedList, t),
+                icon: const Icon(Icons.person_add_alt_1_rounded, size: 15),
+                label: const Text('Assign PINs'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFDC2626),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 0,
                 ),
               ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: t.accentMuted,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    color: t.accent,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                  ),
+              const SizedBox(width: 6),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  final assigned = await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
+                  final remapped = await ZkTecoNetworkService.processPendingUnmappedPunches();
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('✅ Auto-assigned $assigned PINs and routed $remapped punches!'),
+                        backgroundColor: const Color(0xFF0F766E),
+                      ),
+                    );
+                    setState(() {});
+                  }
+                },
+                icon: const Icon(Icons.auto_fix_high_rounded, size: 14),
+                label: const Text('Auto-Route'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF991B1B),
+                  side: const BorderSide(color: Color(0xFFFCA5A5)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+        );
+      },
+    );
+  }
+
+  void _showAssignUnmappedPinsDialog(BuildContext context, List<Map<String, dynamic>> unmappedList, RoleThemeData t) {
+    final employees = FinanceLocalStorage.getEmployees(widget.branchId).where((e) => e['isActive'] == true).toList();
+    final uniquePins = unmappedList.map((p) => p['pin']?.toString() ?? '').where((p) => p.isNotEmpty).toSet().toList();
+    final Map<String, String?> selectedEmployees = {};
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 24),
+              const SizedBox(width: 10),
+              const Text('Assign Unmapped Biometric Scans', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Select which employee each punched PIN belongs to. Once assigned, all punches for that PIN will instantly mark the employee Present with their recorded punch time.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                  ),
+                  const SizedBox(height: 16),
+                  ...uniquePins.map((pin) {
+                    final punchesForPin = unmappedList.where((p) => (p['pin']?.toString() ?? '') == pin).toList();
+                    final punchCount = punchesForPin.length;
+                    final latestTs = punchesForPin.isNotEmpty ? punchesForPin.last['timestamp']?.toString() : null;
+                    final timeLabel = latestTs != null ? DateFormat('hh:mm a').format(DateTime.tryParse(latestTs) ?? DateTime.now()) : '--:--';
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFDC2626),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text('PIN $pin', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('$punchCount scan(s) • Latest @ $timeLabel', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: selectedEmployees[pin],
+                            decoration: InputDecoration(
+                              labelText: 'Assign to Employee',
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            hint: const Text('Choose employee...'),
+                            items: employees.map((emp) {
+                              final eId = (emp['localId'] ?? emp['id']).toString();
+                              final eName = emp['name']?.toString() ?? 'Employee';
+                              final eDept = emp['department']?.toString() ?? 'Office';
+                              final curPin = emp['biometricPin']?.toString() ?? '';
+                              return DropdownMenuItem<String>(
+                                value: eId,
+                                child: Text(
+                                  '$eName ($eDept)${curPin.isNotEmpty ? " [Old PIN: $curPin]" : ""}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12.5),
+                                ),
+                              );
+                            }).toList(),
+                            onChanged: (val) {
+                              setDlgState(() {
+                                selectedEmployees[pin] = val;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                int count = 0;
+                for (final entry in selectedEmployees.entries) {
+                  final pin = entry.key;
+                  final empId = entry.value;
+                  if (empId != null && empId.isNotEmpty) {
+                    final emp = employees.firstWhereOrNull((e) => (e['localId'] ?? e['id']).toString() == empId);
+                    final empName = emp?['name']?.toString() ?? 'Employee';
+                    await ZkTecoNetworkService.mapPinToEntity(
+                      pin: pin,
+                      entityId: empId,
+                      entityName: empName,
+                      entityType: 'employee',
+                      branchId: widget.branchId,
+                    );
+                    count++;
+                  }
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Assigned $count PIN(s) and applied punches! Staff marked Present.'),
+                      backgroundColor: const Color(0xFF0F766E),
+                    ),
+                  );
+                  setState(() {});
+                }
+              },
+              icon: const Icon(Icons.check_circle_rounded, size: 16),
+              label: const Text('Save & Apply Scans'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEditEmployeePinDialog(String empId, String empName, String currentPin) {
+    final pinController = TextEditingController(text: currentPin);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 24),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Biometric PIN for $empName',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter the User ID number registered for $empName on the physical ZKTeco machine (e.g. 1, 2, 1111).',
+              style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pinController,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'ZKTeco Hardware PIN / User ID',
+                hintText: 'e.g. 1 or 1111',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '💡 Tip: Any unmapped punches matching this PIN will automatically be routed to $empName and marked Present.',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF0F766E), fontStyle: FontStyle.italic),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final newPin = pinController.text.trim();
+              if (newPin.isEmpty) return;
+              Navigator.pop(ctx);
+
+              final remapped = await ZkTecoNetworkService.mapPinToEntity(
+                pin: newPin,
+                entityId: empId,
+                entityName: empName,
+                entityType: 'employee',
+                branchId: widget.branchId,
+              );
+
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('✅ PIN $newPin assigned to $empName! Remapped $remapped previous punch(es).'),
+                    backgroundColor: const Color(0xFF0F766E),
+                  ),
+                );
+                setState(() {});
+              }
+            },
+            icon: const Icon(Icons.save_rounded, size: 16),
+            label: const Text('Save PIN'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
         ],
       ),
     );
   }
 
+  // ── Clean Department Header ───────────────────────────────────────────────
+  Widget _buildDepartmentHeader(String department, int count, RoleThemeData t) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.folder_outlined, size: 13, color: Color(0xFF64748B)),
+                const SizedBox(width: 5),
+                Text(
+                  department.toUpperCase(),
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF334155), letterSpacing: 0.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count Staff',
+            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(child: Divider(color: Color(0xFFE2E8F0), thickness: 0.5)),
+        ],
+      ),
+    );
+  }
 
+  // ── Integrated Search Bar ─────────────────────────────────────────────────
+  Widget _buildSearchBar(RoleThemeData t) {
+    return Container(
+      width: 260,
+      height: 36,
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: _searchQuery.isNotEmpty ? const Color(0xFF0F766E) : const Color(0xFFE2E8F0),
+          width: _searchQuery.isNotEmpty ? 1.2 : 1,
+        ),
+      ),
+      child: TextField(
+        controller: _searchCtrl,
+        style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A), fontWeight: FontWeight.w500),
+        decoration: InputDecoration(
+          hintText: 'Search by name, PIN, role...',
+          hintStyle: const TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+          prefixIcon: const Icon(Icons.search_rounded, size: 16, color: Color(0xFF64748B)),
+          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? InkWell(
+                  onTap: () {
+                    _searchCtrl.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: const Icon(Icons.close_rounded, size: 15, color: Color(0xFF64748B)),
+                )
+              : null,
+          suffixIconConstraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          border: InputBorder.none,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+        ),
+        onChanged: (val) {
+          setState(() {
+            _searchQuery = val.trim();
+          });
+        },
+      ),
+    );
+  }
 
+  // ── Date Picker Strip & Top Actions ────────────────────────────────────────
   Widget _buildDatePickerStrip(RoleThemeData t) {
     final today = DateTime.now();
     final isToday = widget.date.year == today.year &&
@@ -356,115 +1039,228 @@ class _AttendanceTabState extends State<AttendanceTab> {
         widget.date.day == today.day;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
       ),
       child: LayoutBuilder(builder: (_, constraints) {
-        final isNarrow = constraints.maxWidth < 600;
+        final isNarrow = constraints.maxWidth < 960;
+
         final dateRow = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.chevron_left, color: Color(0xFF374151), size: 20),
-              onPressed: () {
-                _draftRecords.clear();
-                widget.onDateChanged(widget.date.subtract(const Duration(days: 1)));
-              },
+            Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    icon: const Icon(Icons.chevron_left_rounded, color: Color(0xFF475569), size: 20),
+                    onPressed: () {
+                      _draftRecords.clear();
+                      widget.onDateChanged(widget.date.subtract(const Duration(days: 1)));
+                    },
+                  ),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: widget.date,
+                        firstDate: DateTime(2025),
+                        lastDate: DateTime.now().add(const Duration(days: 365)),
+                      );
+                      if (picked != null) {
+                        _draftRecords.clear();
+                        widget.onDateChanged(picked);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.calendar_today_rounded, color: Color(0xFF0F766E), size: 14),
+                          const SizedBox(width: 6),
+                          Text(
+                            DateFormat('EEE, d MMM yyyy').format(widget.date),
+                            style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                    icon: const Icon(Icons.chevron_right_rounded, color: Color(0xFF475569), size: 20),
+                    onPressed: () {
+                      _draftRecords.clear();
+                      widget.onDateChanged(widget.date.add(const Duration(days: 1)));
+                    },
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 4),
-            InkWell(
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: widget.date,
-                  firstDate: DateTime(2025),
-                  lastDate: DateTime.now().add(const Duration(days: 365)),
-                );
-                if (picked != null) { _draftRecords.clear(); widget.onDateChanged(picked); }
-              },
-              borderRadius: BorderRadius.circular(6),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                const Icon(Icons.calendar_month_rounded, color: Color(0xFF10B981), size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  DateFormat('EEEE, dd MMMM yyyy').format(widget.date),
-                  style: const TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.bold, fontSize: 14),
+            if (!isToday) ...[
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: () {
+                  _draftRecords.clear();
+                  widget.onDateChanged(DateTime.now());
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                  ),
+                  child: const Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
                 ),
-              ]),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.chevron_right, color: Color(0xFF374151), size: 20),
-              onPressed: () {
-                _draftRecords.clear();
-                widget.onDateChanged(widget.date.add(const Duration(days: 1)));
-              },
+              ),
+            ],
+            const SizedBox(width: 8),
+            // Instant Punch Sync Button
+            Tooltip(
+              message: 'Sync & Pull Hardware & Cloud Punches',
+              child: InkWell(
+                onTap: () => _syncPunches(widget.date),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _isSyncing ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _isSyncing ? const Color(0xFFBFDBFE) : const Color(0xFFA7F3D0), width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _isSyncing
+                          ? const SizedBox(
+                              width: 12,
+                              height: 12,
+                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF2563EB)),
+                            )
+                          : const Icon(Icons.sync_rounded, size: 14, color: Color(0xFF059669)),
+                      const SizedBox(width: 5),
+                      Text(
+                        _isSyncing ? 'Syncing...' : 'Sync Punches',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _isSyncing ? const Color(0xFF1D4ED8) : const Color(0xFF065F46),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
           ],
         );
 
-        final chips = Wrap(
-          spacing: 6,
+        final actionButtons = Wrap(
+          spacing: 8,
           runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (!isToday)
-              _dateChip('+ Today', Icons.today_rounded, const Color(0xFF10B981), const Color(0xFFECFDF5),
-                  () { _draftRecords.clear(); widget.onDateChanged(DateTime.now()); }),
-            if (isToday)
-              _dateChip('Today', Icons.circle, const Color(0xFF10B981), const Color(0xFFECFDF5), null),
-            _dateChip('Leave Range', Icons.date_range_rounded, Colors.blue, const Color(0xFFEFF6FF),
-                () => _openLeaveRangeDialog(context, t)),
-            _dateChip('Bulk Month Entry', Icons.fact_check_outlined, Colors.purple, const Color(0xFFF5F3FF),
-                () => BulkAttendanceDialog.open(context: context, branchId: widget.branchId, theme: t, onSaved: () => setState(() {}))),
-            _dateChip('Bulk Indiv. Entry', Icons.person_add_alt_1_outlined, Colors.teal, const Color(0xFFE6F4F1),
-                () => BulkIndividualAttendanceDialog.open(context: context, branchId: widget.branchId, theme: t, onSaved: () => setState(() {}))),
-            _dateChip('Add Employee', Icons.person_add_alt_1_outlined, const Color(0xFF10B981), const Color(0xFFECFDF5),
-                widget.onAddEmployee),
+            _actionChip('Leave Range', Icons.date_range_outlined, () => _openLeaveRangeDialog(context, t)),
+            _actionChip('Monthly Grid', Icons.table_chart_outlined, () => BulkAttendanceDialog.open(context: context, branchId: widget.branchId, theme: t, onSaved: () => setState(() {}))),
+            _actionChip('Biometric PINs', Icons.fingerprint_rounded, () async {
+              await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
+              if (context.mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId),
+                  ),
+                );
+              }
+            }),
+            ElevatedButton.icon(
+              onPressed: widget.onAddEmployee,
+              icon: const Icon(Icons.person_add_outlined, size: 14),
+              label: const Text('Add Employee'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF0F766E),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                elevation: 0,
+              ),
+            ),
           ],
         );
 
         if (isNarrow) {
-          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            dateRow,
-            const SizedBox(height: 8),
-            chips,
-          ]);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: dateRow),
+                  const SizedBox(width: 8),
+                  _buildSearchBar(t),
+                ],
+              ),
+              const SizedBox(height: 10),
+              actionButtons,
+            ],
+          );
         }
-        return Row(children: [
-          dateRow,
-          const SizedBox(width: 12),
-          chips,
-        ]);
+
+        return Row(
+          children: [
+            dateRow,
+            const SizedBox(width: 14),
+            _buildSearchBar(t),
+            const Spacer(),
+            actionButtons,
+          ],
+        );
       }),
     );
   }
 
-  Widget _dateChip(String label, IconData icon, Color color, Color bg, VoidCallback? onTap) {
-    return GestureDetector(
+  Widget _actionChip(String label, IconData icon, VoidCallback onTap) {
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6.5),
         decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withValues(alpha: 0.35)),
+          color: const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 5),
-          Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w600, fontSize: 11)),
-        ]),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 13, color: const Color(0xFF475569)),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: const TextStyle(color: Color(0xFF334155), fontWeight: FontWeight.w600, fontSize: 11.5),
+            ),
+          ],
+        ),
       ),
     );
   }
 
+  // ── Unified Modern Stats Bar ───────────────────────────────────────────────
   Widget _buildSummaryStrip({
+    required int total,
     required int p,
     required int lat,
     required int lv,
@@ -472,251 +1268,441 @@ class _AttendanceTabState extends State<AttendanceTab> {
     required int ot,
     required bool isSunday,
     required RoleThemeData t,
+    required List<Map<String, dynamic>> records,
     int hol = 0,
   }) {
     if (isSunday) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-        child: Row(children: [
-          Expanded(child: _statCard('Weekend Off', p + lat + lv + a, Icons.weekend_outlined, const Color(0xFF6B7280), const Color(0xFFF3F4F6))),
-          const SizedBox(width: 10),
-          Expanded(child: _statCard('Working Overtime', ot, Icons.more_time_outlined, Colors.teal, const Color(0xFFCCFBF1))),
-        ]),
+      return Container(
+        margin: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.weekend_outlined, size: 16, color: Color(0xFF64748B)),
+            const SizedBox(width: 8),
+            const Text('Sunday Weekend (Off Day)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155))),
+            const Spacer(),
+            Text('Working Overtime: $ot', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F766E))),
+          ],
+        ),
       );
     }
-    return LayoutBuilder(builder: (_, constraints) {
-      final isNarrow = constraints.maxWidth < 600;
-      final cards = [
-        _statCard('Present', p, Icons.person_rounded, const Color(0xFF10B981), const Color(0xFFD1FAE5)),
-        _statCard('Late', lat, Icons.access_time_rounded, const Color(0xFFF59E0B), const Color(0xFFFEF3C7)),
-        _statCard('Leave', lv, Icons.event_busy_rounded, const Color(0xFF3B82F6), const Color(0xFFDBEAFE)),
-        _statCard('Absent', a, Icons.person_off_rounded, const Color(0xFFEF4444), const Color(0xFFFEE2E2)),
-        if (hol > 0) _statCard('Holiday', hol, Icons.celebration_rounded, Colors.indigo, const Color(0xFFE0E7FF)),
-      ];
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-        child: isNarrow
-            ? Wrap(spacing: 8, runSpacing: 8, children: cards.map((c) => SizedBox(width: (constraints.maxWidth - 22) / 2, child: c)).toList())
-            : Row(children: cards.map((c) => Expanded(child: c)).toList()
-                .fold<List<Widget>>([], (list, w) => list.isEmpty ? [w] : [...list, const SizedBox(width: 10), w])),
-      );
-    });
-  }
 
-  Widget _statCard(String label, int val, IconData icon, Color color, Color bg) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: const Color(0xFFE2E8F0)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2))],
+        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
       ),
-      child: Row(children: [
-        Container(
-          width: 38, height: 38,
-          decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(8)),
-          child: Icon(icon, color: color, size: 20),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 2),
-          Text('$val', style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 22, height: 1.1)),
-          const Text('employees', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 9)),
-        ])),
-      ]),
-    );
-  }
+      child: LayoutBuilder(builder: (ctx, constraints) {
+        final isNarrow = constraints.maxWidth < 700;
 
-  // kept for compatibility (not called in new design but preserves the old interface)
-  Widget _buildSummaryItem(String label, int val, Color color, RoleThemeData t) {
-    return Column(children: [
-      Text(label, style: TextStyle(color: t.textTertiary, fontSize: 11)),
-      const SizedBox(height: 2),
-      Text('$val', style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 14)),
-    ]);
-  }
+        final statsPills = Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _statPill('All Staff', '$total', const Color(0xFF0F172A), const Color(0xFFF1F5F9), const Color(0xFFCBD5E1), filterKey: 'all'),
+            _statPill('Present', '$p', const Color(0xFF065F46), const Color(0xFFECFDF5), const Color(0xFFA7F3D0), filterKey: 'present'),
+            if (lat > 0)
+              _statPill('Late', '$lat', const Color(0xFF92400E), const Color(0xFFFFFBEB), const Color(0xFFFDE68A), filterKey: 'late'),
+            if (lv > 0)
+              _statPill('Leave', '$lv', const Color(0xFF1E40AF), const Color(0xFFEFF6FF), const Color(0xFFBFDBFE), filterKey: 'leave'),
+            _statPill('Absent', '$a', const Color(0xFF991B1B), const Color(0xFFFEF2F2), const Color(0xFFFECACA), filterKey: 'absent'),
+            if (hol > 0)
+              _statPill('Holiday', '$hol', const Color(0xFF3730A3), const Color(0xFFEEF2FF), const Color(0xFFC7D2FE), filterKey: 'holiday'),
+            if (_searchQuery.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.search, size: 11, color: Color(0xFF1E40AF)),
+                    const SizedBox(width: 4),
+                    Text('Searching: "$_searchQuery"', style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF1E40AF))),
+                  ],
+                ),
+              ),
+          ],
+        );
 
-  Widget _buildSundayOvertimeControls(Map<String, dynamic> record, String empId, RoleThemeData t) {
-    final status = record['status']?.toString() ?? 'off';
-    final isOt = status == 'overtime';
-    final duration = record['overtimeDuration']?.toString() ?? 'full';
+        final markAllPresentBtn = ElevatedButton.icon(
+          onPressed: () => _markAllPresent(records),
+          icon: const Icon(Icons.done_all_rounded, size: 14),
+          label: const Text('Mark All Present'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF0F766E),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            elevation: 0,
+          ),
+        );
 
-    return Row(
-      children: [
-        Text('Overtime: ', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-        const SizedBox(width: 4),
-        SizedBox(
-          height: 28,
-          child: Row(
+        if (isNarrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: !isOt ? Colors.grey[600] : t.bgCardAlt,
-                  foregroundColor: !isOt ? Colors.white : t.textSecondary,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
-                    side: BorderSide(color: !isOt ? Colors.grey[600]! : t.bgRule, width: 0.5),
-                  ),
-                ),
-                onPressed: () async {
-                  setState(() {
-                    record['status'] = 'off';
-                    record['overtimeDuration'] = null;
-                  });
-                  await _saveRecordInstantly(empId, record);
-                },
-                child: const Text('NO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: isOt ? Colors.teal : t.bgCardAlt,
-                  foregroundColor: isOt ? Colors.white : t.textSecondary,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
-                    side: BorderSide(color: isOt ? Colors.teal : t.bgRule, width: 0.5),
-                  ),
-                ),
-                onPressed: () async {
-                  setState(() {
-                    record['status'] = 'overtime';
-                    record['overtimeDuration'] = 'full';
-                  });
-                  await _saveRecordInstantly(empId, record);
-                },
-                child: const Text('YES', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              ),
+              statsPills,
+              const SizedBox(height: 8),
+              markAllPresentBtn,
             ],
-          ),
-        ),
-        if (isOt) ...[
-          const SizedBox(width: 12),
-          SizedBox(
-            height: 28,
-            child: Row(
-              children: [
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: duration == 'full' ? Colors.teal[700] : t.bgCardAlt,
-                    foregroundColor: duration == 'full' ? Colors.white : t.textSecondary,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
-                      side: BorderSide(color: duration == 'full' ? Colors.teal[700]! : t.bgRule, width: 0.5),
-                    ),
-                  ),
-                  onPressed: () async {
-                    setState(() {
-                      record['overtimeDuration'] = 'full';
-                    });
-                    await _saveRecordInstantly(empId, record);
-                  },
-                  child: const Text('Full Day', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: duration == 'half' ? Colors.teal[400] : t.bgCardAlt,
-                    foregroundColor: duration == 'half' ? Colors.white : t.textSecondary,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
-                      side: BorderSide(color: duration == 'half' ? Colors.teal[400]! : t.bgRule, width: 0.5),
-                    ),
-                  ),
-                  onPressed: () async {
-                    setState(() {
-                      record['overtimeDuration'] = 'half';
-                    });
-                    await _saveRecordInstantly(empId, record);
-                  },
-                  child: const Text('Half Day', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: statsPills),
+            const SizedBox(width: 12),
+            markAllPresentBtn,
+          ],
+        );
+      }),
     );
   }
 
+  Widget _statPill(String label, String value, Color textColor, Color bg, Color border, {required String filterKey}) {
+    final isSelected = _statusFilter == filterKey;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _statusFilter = (_statusFilter == filterKey && filterKey != 'all') ? 'all' : filterKey;
+        });
+      },
+      borderRadius: BorderRadius.circular(6),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+        decoration: BoxDecoration(
+          color: isSelected ? textColor.withOpacity(0.08) : bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: isSelected ? textColor : border,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: TextStyle(fontSize: 11, color: textColor.withOpacity(0.85), fontWeight: isSelected ? FontWeight.bold : FontWeight.w500)),
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0.5),
+              decoration: BoxDecoration(
+                color: isSelected ? textColor : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: isSelected ? Colors.white : textColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── "Mark All Present" Shortcut ───────────────────────────────────────────
+  Future<void> _markAllPresent(List<Map<String, dynamic>> records) async {
+    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    int count = 0;
+
+    for (final r in records) {
+      final empId = r['employeeId']?.toString() ?? '';
+      final isLocked = r['isLockedByAdmin'] == true || r['isManagerLocked'] == true;
+      if (isLocked) continue;
+
+      r['status'] = 'present';
+      r['checkInTime'] ??= '08:30 AM';
+      r['leaveType'] = null;
+      r['halfDayType'] = null;
+      
+      await FinanceLocalStorage.saveAttendanceRecord(
+        branchId: widget.branchId,
+        data: r,
+        performedBy: curUser,
+      );
+      _draftRecords.remove(empId);
+      count++;
+    }
+
+    if (mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Marked $count employees as Present'),
+          backgroundColor: const Color(0xFF0F766E),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ── Compact Attendance Row (Desktop / Wide Screen) ────────────────────────
   Widget _buildCompactAttendanceRow(Map<String, dynamic> record, RoleThemeData t) {
     final empId = record['employeeId']?.toString() ?? '';
-    final name = record['name']?.toString() ?? '';
-    final role = record['role']?.toString() ?? 'Employee';
+    final name = record['name']?.toString() ?? 'Employee';
+    final role = record['role']?.toString() ?? 'Staff';
     final dept = record['department']?.toString() ?? '';
-    final status = record['status']?.toString() ?? 'absent';
+    final status = (record['status']?.toString() ?? 'absent').toLowerCase();
     final isSunday = widget.date.weekday == DateTime.sunday;
-    final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
+    final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
+    final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
     final note = record['note']?.toString() ?? '';
-    final isHoliday = FinanceLocalStorage.isHoliday(branchId: widget.branchId, department: dept, dateStr: dateStr);
+
+    final rawShifts = record['shifts'];
+    final Map<String, dynamic> shifts = rawShifts is Map ? Map<String, dynamic>.from(rawShifts) : {};
+    final bool hasMultiShift = shifts.length > 1 || (shifts.containsKey('morning') && shifts.containsKey('evening'));
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 1),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 0.5)),
+        border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9), width: 1)),
       ),
       child: Row(
         children: [
-          // Avatar
-          CircleAvatar(
-            radius: 17,
-            backgroundColor: const Color(0xFFD1FAE5),
-            child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 14)),
-          ),
-          const SizedBox(width: 12),
-          // Name + role
-          Expanded(
-            child: InkWell(
-              onTap: () => _showEmployeeDetailSheet(context, empId, t),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                Row(children: [
-                  Text(name, style: const TextStyle(color: Color(0xFF111827), fontWeight: FontWeight.w700, fontSize: 13)),
-                  if (isHoliday) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(color: const Color(0xFFCCFBF1), borderRadius: BorderRadius.circular(4)),
-                      child: const Text('Holiday', style: TextStyle(color: Colors.teal, fontSize: 8, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ]),
-                Text('$role • $dept', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
-              ]),
+          // Avatar (Clickable to Edit Employee)
+          InkWell(
+            onTap: () {
+              if (widget.onEditEmployee != null) {
+                widget.onEditEmployee!(context, empId);
+              } else {
+                _showEmployeeDetailSheet(context, empId, t);
+              }
+            },
+            borderRadius: BorderRadius.circular(16),
+            child: CircleAvatar(
+              radius: 16,
+              backgroundColor: const Color(0xFFF1F5F9),
+              child: Text(
+                name.isNotEmpty ? name[0].toUpperCase() : '?',
+                style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold, fontSize: 13),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          // Status buttons
+          const SizedBox(width: 12),
+
+          // Name, Department & Biometric PIN (Clickable to Edit)
+          Expanded(
+            child: InkWell(
+              onTap: () {
+                if (widget.onEditEmployee != null) {
+                  widget.onEditEmployee!(context, empId);
+                } else {
+                  _showEmployeeDetailSheet(context, empId, t);
+                }
+              },
+              borderRadius: BorderRadius.circular(6),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(Icons.edit_outlined, size: 12, color: const Color(0xFF94A3B8).withOpacity(0.7)),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        '$role • $dept',
+                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                      ),
+                      Builder(builder: (_) {
+                        final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+                        final currentPin = cred?.biometricPin ?? (record['biometricPin']?.toString() ?? '');
+                        return InkWell(
+                          onTap: () => _showEditEmployeePinDialog(empId, name, currentPin),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Container(
+                            margin: const EdgeInsets.only(left: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: currentPin.isNotEmpty ? const Color(0xFFEFF6FF) : const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: currentPin.isNotEmpty ? const Color(0xFFBFDBFE) : const Color(0xFFFECACA)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  currentPin.isNotEmpty ? 'PIN $currentPin' : 'Set PIN',
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: currentPin.isNotEmpty ? const Color(0xFF1E40AF) : const Color(0xFFDC2626),
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? const Color(0xFF1E40AF) : const Color(0xFFDC2626)),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Check In / Check Out Timestamps
+          if (status == 'present' || status == 'late') ...[
+            if (hasMultiShift) ...[
+              ...shifts.entries.map((entry) {
+                final sKey = entry.key.toLowerCase();
+                final sLabel = sKey.startsWith('m') ? 'M' : (sKey.startsWith('e') ? 'E' : 'N');
+                final sMap = entry.value is Map ? Map<String, dynamic>.from(entry.value as Map) : <String, dynamic>{};
+                final sIn = sMap['checkInTime']?.toString() ?? '--:--';
+                final sOut = sMap['checkOutTime']?.toString() ?? '--:--';
+                final sBranch = sMap['branchName']?.toString() ?? sMap['branchId']?.toString() ?? '';
+                final isMorning = sKey.startsWith('m');
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Tooltip(
+                    message: '${isMorning ? "Morning" : (sKey.startsWith("e") ? "Evening" : "Night")} Shift${sBranch.isNotEmpty ? " • $sBranch" : ""}',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isMorning ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: isMorning ? const Color(0xFFA7F3D0) : const Color(0xFFBFDBFE), width: 0.8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$sLabel: ',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: isMorning ? const Color(0xFF047857) : const Color(0xFF1D4ED8),
+                            ),
+                          ),
+                          Text(
+                            '$sIn ➔ $sOut',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: isMorning ? const Color(0xFF065F46) : const Color(0xFF1E40AF),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ] else ...[
+              InkWell(
+                onTap: () => _pickTime(context, (time) async {
+                  setState(() {
+                    record['checkInTime'] = time;
+                    record['arrivalTime'] = time;
+                  });
+                  await _saveRecordInstantly(empId, record);
+                }),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFA7F3D0), width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.login_rounded, size: 10, color: Color(0xFF059669)),
+                      const SizedBox(width: 4),
+                      Text(
+                        checkIn != null && checkIn.isNotEmpty ? checkIn : '--:--',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF065F46)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: () => _pickTime(context, (time) async {
+                  setState(() {
+                    record['checkOutTime'] = time;
+                    record['departureTime'] = time;
+                  });
+                  await _saveRecordInstantly(empId, record);
+                }),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: checkOut != null && checkOut.isNotEmpty ? const Color(0xFFF1F5F9) : const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFE2E8F0), width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.logout_rounded, size: 10, color: Color(0xFF64748B)),
+                      const SizedBox(width: 4),
+                      Text(
+                        checkOut != null && checkOut.isNotEmpty ? checkOut : 'Set Out',
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ] else ...[
+            const Text('-- : --', style: TextStyle(color: Color(0xFFCBD5E1), fontSize: 11)),
+          ],
+
+          const SizedBox(width: 14),
+
+          // The Elegant Single-Pill Status Selector
           isSunday
               ? _buildSundayOvertimeControls(record, empId, t)
-              : Wrap(
-                  spacing: 4,
-                  children: [
-                    _buildStatusButton('P', 'present', status, const Color(0xFF10B981), t, empId, record),
-                    _buildStatusButton('L', 'late', status, const Color(0xFFF59E0B), t, empId, record),
-                    _buildStatusButton('Lv', 'leave', status, const Color(0xFF3B82F6), t, empId, record),
-                    _buildStatusButton('HD', 'half_day', status, Colors.teal, t, empId, record),
-                    _buildStatusButton('A', 'absent', status, const Color(0xFFEF4444), t, empId, record),
-                    if (isHoliday)
-                      _buildStatusButton('H', 'holiday', status, Colors.indigo, t, empId, record),
-                  ],
-                ),
-          // Note icon
+              : _buildStatusPill(status, empId, record, t),
+
+          const SizedBox(width: 6),
+
+          // Remarks / Note Icon
           IconButton(
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: Icon(note.isNotEmpty ? Icons.sticky_note_2 : Icons.note_add_outlined,
-                size: 16, color: note.isNotEmpty ? const Color(0xFF10B981) : const Color(0xFF9CA3AF)),
-            tooltip: note.isNotEmpty ? note : 'Add note',
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            icon: Icon(
+              note.isNotEmpty ? Icons.sticky_note_2_rounded : Icons.note_add_outlined,
+              size: 15,
+              color: note.isNotEmpty ? const Color(0xFF0F766E) : const Color(0xFFCBD5E1),
+            ),
+            tooltip: note.isNotEmpty ? note : 'Add remarks',
             onPressed: () => _editNoteDialog(context, empId, record, t),
           ),
         ],
@@ -724,396 +1710,358 @@ class _AttendanceTabState extends State<AttendanceTab> {
     );
   }
 
+  // ── Mobile Attendance Card Layout ─────────────────────────────────────────
+  Widget _buildAttendanceCard(Map<String, dynamic> record, RoleThemeData t) {
+    final empId = record['employeeId']?.toString() ?? '';
+    final name = record['name']?.toString() ?? 'Employee';
+    final role = record['role']?.toString() ?? 'Staff';
+    final dept = record['department']?.toString() ?? '';
+    final status = (record['status']?.toString() ?? 'absent').toLowerCase();
+    final isSunday = widget.date.weekday == DateTime.sunday;
+    final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
+    final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
+    final note = record['note']?.toString() ?? '';
+
+    final rawShifts = record['shifts'];
+    final Map<String, dynamic> shifts = rawShifts is Map ? Map<String, dynamic>.from(rawShifts) : {};
+    final bool hasMultiShift = shifts.length > 1 || (shifts.containsKey('morning') && shifts.containsKey('evening'));
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 15,
+                backgroundColor: const Color(0xFFF1F5F9),
+                child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold, fontSize: 12)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    if (widget.onEditEmployee != null) {
+                      widget.onEditEmployee!(context, empId);
+                    } else {
+                      _showEmployeeDetailSheet(context, empId, t);
+                    }
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A))),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text('$role • $dept', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                          Builder(builder: (_) {
+                            final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+                            final currentPin = cred?.biometricPin ?? (record['biometricPin']?.toString() ?? '');
+                            return InkWell(
+                              onTap: () => _showEditEmployeePinDialog(empId, name, currentPin),
+                              borderRadius: BorderRadius.circular(4),
+                              child: Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: currentPin.isNotEmpty ? const Color(0xFFEFF6FF) : const Color(0xFFFEF2F2),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: currentPin.isNotEmpty ? const Color(0xFFBFDBFE) : const Color(0xFFFECACA)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      currentPin.isNotEmpty ? 'PIN $currentPin' : 'Set PIN',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: currentPin.isNotEmpty ? const Color(0xFF1E40AF) : const Color(0xFFDC2626),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? const Color(0xFF1E40AF) : const Color(0xFFDC2626)),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              isSunday
+                  ? _buildSundayOvertimeControls(record, empId, t)
+                  : _buildStatusPill(status, empId, record, t),
+            ],
+          ),
+          if (status == 'present' || status == 'late') ...[
+            const SizedBox(height: 8),
+            if (hasMultiShift) ...[
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: shifts.entries.map((entry) {
+                  final sKey = entry.key.toLowerCase();
+                  final sLabel = sKey.startsWith('m') ? 'M' : (sKey.startsWith('e') ? 'E' : 'N');
+                  final sMap = entry.value is Map ? Map<String, dynamic>.from(entry.value as Map) : <String, dynamic>{};
+                  final sIn = sMap['checkInTime']?.toString() ?? '--:--';
+                  final sOut = sMap['checkOutTime']?.toString() ?? '--:--';
+                  final sBranch = sMap['branchName']?.toString() ?? sMap['branchId']?.toString() ?? '';
+                  final isMorning = sKey.startsWith('m');
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: isMorning ? const Color(0xFFECFDF5) : const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(5),
+                      border: Border.all(color: isMorning ? const Color(0xFFA7F3D0) : const Color(0xFFBFDBFE), width: 0.8),
+                    ),
+                    child: Text(
+                      '$sLabel: $sIn ➔ $sOut${sBranch.isNotEmpty ? " ($sBranch)" : ""}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: isMorning ? const Color(0xFF065F46) : const Color(0xFF1E40AF),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ] else ...[
+              Row(
+                children: [
+                  const Icon(Icons.login_rounded, size: 12, color: Color(0xFF059669)),
+                  const SizedBox(width: 4),
+                  Text('In: ${checkIn ?? "--:--"}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF065F46))),
+                  const SizedBox(width: 14),
+                  const Icon(Icons.logout_rounded, size: 12, color: Color(0xFF64748B)),
+                  const SizedBox(width: 4),
+                  Text('Out: ${checkOut ?? "--:--"}', style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                  const Spacer(),
+                  if (note.isNotEmpty)
+                    Text(note, style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic, color: Color(0xFF64748B))),
+                ],
+              ),
+            ],
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ── Elegant Single-Pill Status Selector (Replaces 6-Button Clutter) ────────
+  Widget _buildStatusPill(String status, String empId, Map<String, dynamic> record, RoleThemeData t) {
+    Color bg;
+    Color border;
+    Color text;
+    IconData icon;
+    String label;
+
+    switch (status) {
+      case 'present':
+        bg = const Color(0xFFECFDF5);
+        border = const Color(0xFFA7F3D0);
+        text = const Color(0xFF065F46);
+        icon = Icons.check_circle_rounded;
+        label = 'Present';
+        break;
+      case 'late':
+        bg = const Color(0xFFFFFBEB);
+        border = const Color(0xFFFDE68A);
+        text = const Color(0xFF92400E);
+        icon = Icons.schedule_rounded;
+        label = 'Late';
+        break;
+      case 'leave':
+        bg = const Color(0xFFEFF6FF);
+        border = const Color(0xFFBFDBFE);
+        text = const Color(0xFF1E40AF);
+        icon = Icons.event_busy_rounded;
+        final lType = (record['leaveType']?.toString() ?? 'Sick').toUpperCase();
+        label = 'Leave ($lType)';
+        break;
+      case 'half_day':
+        bg = const Color(0xFFF0FDFA);
+        border = const Color(0xFF99F6E4);
+        text = const Color(0xFF115E59);
+        icon = Icons.timelapse_rounded;
+        label = 'Half Day';
+        break;
+      case 'holiday':
+        bg = const Color(0xFFEEF2FF);
+        border = const Color(0xFFC7D2FE);
+        text = const Color(0xFF3730A3);
+        icon = Icons.celebration_rounded;
+        label = 'Holiday';
+        break;
+      case 'absent':
+      default:
+        bg = const Color(0xFFFEF2F2);
+        border = const Color(0xFFFECACA);
+        text = const Color(0xFF991B1B);
+        icon = Icons.cancel_outlined;
+        label = 'Absent';
+        break;
+    }
+
+    return PopupMenuButton<String>(
+      tooltip: 'Change Status',
+      offset: const Offset(0, 32),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      color: Colors.white,
+      onSelected: (newStatus) async {
+        setState(() {
+          record['status'] = newStatus;
+          if (newStatus == 'present' && (record['checkInTime'] == null || record['checkInTime'].toString().isEmpty)) {
+            record['checkInTime'] = '08:30 AM';
+            record['arrivalTime'] = '08:30 AM';
+          }
+          if (newStatus != 'present' && newStatus != 'late') {
+            record['checkInTime'] = null;
+            record['checkOutTime'] = null;
+            record['arrivalTime'] = null;
+            record['departureTime'] = null;
+          }
+          if (newStatus == 'leave') {
+            record['leaveType'] = record['leaveType'] ?? 'sick';
+          }
+          if (newStatus == 'half_day') {
+            record['halfDayType'] = record['halfDayType'] ?? 'unpaid';
+          }
+        });
+        await _saveRecordInstantly(empId, record);
+      },
+      itemBuilder: (ctx) => [
+        _buildPopupMenuItem('present', 'Present (Full Day)', Icons.check_circle_rounded, const Color(0xFF065F46), const Color(0xFFECFDF5)),
+        _buildPopupMenuItem('late', 'Late Arrival', Icons.schedule_rounded, const Color(0xFF92400E), const Color(0xFFFFFBEB)),
+        _buildPopupMenuItem('leave', 'On Approved Leave', Icons.event_busy_rounded, const Color(0xFF1E40AF), const Color(0xFFEFF6FF)),
+        _buildPopupMenuItem('half_day', 'Half Day', Icons.timelapse_rounded, const Color(0xFF115E59), const Color(0xFFF0FDFA)),
+        _buildPopupMenuItem('absent', 'Mark Absent', Icons.cancel_outlined, const Color(0xFF991B1B), const Color(0xFFFEF2F2)),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: border, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: text),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(color: text, fontWeight: FontWeight.bold, fontSize: 11),
+            ),
+            const SizedBox(width: 3),
+            Icon(Icons.arrow_drop_down_rounded, size: 14, color: text.withOpacity(0.7)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildPopupMenuItem(String value, String label, IconData icon, Color color, Color bg) {
+    return PopupMenuItem<String>(
+      value: value,
+      height: 36,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Overtime Controls for Sunday ──────────────────────────────────────────
+  Widget _buildSundayOvertimeControls(Map<String, dynamic> record, String empId, RoleThemeData t) {
+    final ot = record['overtimeDuration']?.toString() ?? 'none';
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        InkWell(
+          onTap: () async {
+            setState(() {
+              record['status'] = ot == 'full' ? 'off' : 'overtime';
+              record['overtimeDuration'] = ot == 'full' ? 'none' : 'full';
+            });
+            await _saveRecordInstantly(empId, record);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: ot == 'full' ? const Color(0xFF0F766E) : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: ot == 'full' ? const Color(0xFF0F766E) : const Color(0xFFCBD5E1)),
+            ),
+            child: Text(
+              'Full OT',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: ot == 'full' ? Colors.white : const Color(0xFF475569),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Note / Remarks Dialog ──────────────────────────────────────────────────
   void _editNoteDialog(BuildContext context, String empId, Map<String, dynamic> record, RoleThemeData t) {
     final ctrl = TextEditingController(text: record['note']?.toString() ?? '');
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: t.bgCard,
-        title: Text('Note for ${record['name']}', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
-        content: TextField(controller: ctrl, autofocus: true, maxLines: 3, style: TextStyle(color: t.textPrimary)),
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Text('Remarks for ${record['name']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLines: 3,
+          style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A)),
+          decoration: const InputDecoration(
+            hintText: 'Enter reason or attendance note...',
+            border: OutlineInputBorder(),
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: t.textSecondary))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: t.accent),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
             onPressed: () async {
               record['note'] = ctrl.text.trim();
               Navigator.pop(ctx);
               setState(() {});
               await _saveRecordInstantly(empId, record);
             },
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: const Text('Save Note'),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildAttendanceCard(Map<String, dynamic> record, RoleThemeData t) {
-    final empId = record['employeeId']?.toString() ?? '';
-    final name = record['name']?.toString() ?? '';
-    final role = record['role']?.toString() ?? 'Employee';
-    final createdBy = record['createdBy']?.toString() ?? 'System';
-    final status = record['status']?.toString() ?? 'absent';
-    final arrival = record['arrivalTime']?.toString() ?? '';
-    final departure = record['departureTime']?.toString() ?? '';
-    final note = record['note']?.toString() ?? '';
-    final isSunday = widget.date.weekday == DateTime.sunday;
-    final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
-
-    Color statusColor = Colors.grey;
-    if (status == 'present') statusColor = Colors.green;
-    else if (status == 'late') statusColor = Colors.orange;
-    else if (status == 'leave') statusColor = Colors.blue;
-    else if (status == 'half_day') statusColor = Colors.teal;
-    else if (status == 'absent') statusColor = Colors.red;
-    else if (status == 'holiday') statusColor = Colors.indigo;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.bgRule, width: 0.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.015),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          )
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Container(
-                width: 5,
-                color: isSunday ? Colors.grey : statusColor,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: InkWell(
-                  onTap: () => _showEmployeeDetailSheet(context, empId, t),
-                  borderRadius: BorderRadius.circular(6),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(name, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14)),
-                            const SizedBox(width: 6),
-                            Icon(Icons.info_outline, size: 13, color: t.accent),
-                            if (FinanceLocalStorage.isHoliday(
-                              branchId: widget.branchId,
-                              department: record['department']?.toString() ?? '',
-                              dateStr: dateStr,
-                            )) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.teal.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: Colors.teal.withOpacity(0.3)),
-                                ),
-                                child: const Text(
-                                  'Holiday',
-                                  style: TextStyle(color: Colors.teal, fontSize: 8, fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          isSunday ? '$role • Sunday Weekend' : '$role • Added by: $createdBy',
-                          style: TextStyle(color: t.textTertiary, fontSize: 11),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              if (isSunday)
-                _buildSundayOvertimeControls(record, empId, t)
-              else
-                Row(
-                  children: [
-                    _buildStatusButton('P', 'present', status, Colors.green, t, empId, record),
-                    _buildStatusButton('L', 'late', status, Colors.orange, t, empId, record),
-                    _buildStatusButton('Lv', 'leave', status, Colors.blue, t, empId, record),
-                    _buildStatusButton('HD', 'half_day', status, Colors.teal, t, empId, record),
-                    _buildStatusButton('A', 'absent', status, Colors.red, t, empId, record),
-                    if (FinanceLocalStorage.isHoliday(
-                      branchId: widget.branchId,
-                      department: record['department']?.toString() ?? '',
-                      dateStr: dateStr,
-                    ))
-                      _buildStatusButton('H', 'holiday', status, Colors.indigo, t, empId, record),
-                  ],
-                )
-            ],
-          ),
-          if (!isSunday && (status == 'present' || status == 'late')) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: InkWell(
-                    onTap: () => _pickTime(context, (time) async {
-                      setState(() {
-                        record['arrivalTime'] = time;
-                      });
-                      await _saveRecordInstantly(empId, record);
-                    }),
-                    child: Container(
-                      height: 32,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(color: t.bgCardAlt, borderRadius: BorderRadius.circular(6), border: Border.all(color: t.bgRule)),
-                      child: Row(
-                        children: [
-                          Icon(Icons.access_time, size: 12, color: t.textTertiary),
-                          const SizedBox(width: 6),
-                          Text(arrival.isNotEmpty ? 'In: $arrival' : 'Set Arrival', style: TextStyle(color: t.textSecondary, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: InkWell(
-                    onTap: () => _pickTime(context, (time) async {
-                      setState(() {
-                        record['departureTime'] = time;
-                      });
-                      await _saveRecordInstantly(empId, record);
-                    }),
-                    child: Container(
-                      height: 32,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      decoration: BoxDecoration(color: t.bgCardAlt, borderRadius: BorderRadius.circular(6), border: Border.all(color: t.bgRule)),
-                      child: Row(
-                        children: [
-                          Icon(Icons.access_time, size: 12, color: t.textTertiary),
-                          const SizedBox(width: 6),
-                          Text(departure.isNotEmpty ? 'Out: $departure' : 'Set Departure', style: TextStyle(color: t.textSecondary, fontSize: 11)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-          if (!isSunday && status == 'leave') ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Text('Leave type: ', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-                const SizedBox(width: 8),
-                DropdownButton<String>(
-                  value: record['leaveType'] ?? 'sick',
-                  dropdownColor: t.bgCard,
-                  style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
-                  items: ['sick', 'casual', 'annual', 'unpaid'].map((lt) => DropdownMenuItem(value: lt, child: Text(lt.toUpperCase()))).toList(),
-                  onChanged: (val) async {
-                    setState(() {
-                      record['leaveType'] = val;
-                    });
-                    await _saveRecordInstantly(empId, record);
-                  },
-                ),
-
-              ],
-            )
-          ],
-          if (!isSunday && status == 'half_day') ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Text('Half-day type: ', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-                const SizedBox(width: 8),
-                DropdownButton<String>(
-                  value: record['halfDayType'] ?? 'unpaid',
-                  dropdownColor: t.bgCard,
-                  style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold),
-                  items: ['unpaid', 'paid'].map((lt) => DropdownMenuItem(value: lt, child: Text(lt.toUpperCase()))).toList(),
-                  onChanged: (val) async {
-                    setState(() {
-                      record['halfDayType'] = val;
-                    });
-                    await _saveRecordInstantly(empId, record);
-                  },
-                ),
-              ],
-            )
-          ],
-          const SizedBox(height: 6),
-          // Note field
-          TextField(
-            style: TextStyle(color: t.textPrimary, fontSize: 12),
-            decoration: InputDecoration(
-              hintText: 'Add remarks...',
-              hintStyle: TextStyle(color: t.textTertiary, fontSize: 11),
-              isDense: true,
-              border: InputBorder.none,
-            ),
-            controller: TextEditingController(text: note)..selection = TextSelection.fromPosition(TextPosition(offset: note.length)),
-            onChanged: (val) {
-              record['note'] = val;
-              _draftRecords[empId] = record;
-            },
-            onSubmitted: (val) async {
-              record['note'] = val;
-              await _saveRecordInstantly(empId, record);
-            },
-            onTapOutside: (event) async {
-              await _saveRecordInstantly(empId, record);
-            },
-          ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildStatusButton(
-    String label,
-    String targetStatus,
-    String currentStatus,
-    Color activeColor,
-    RoleThemeData t,
-    String empId,
-    Map<String, dynamic> record,
-  ) {
-    final active = currentStatus == targetStatus;
-    final tip = targetStatus == 'half_day' ? 'Half Day' : targetStatus[0].toUpperCase() + targetStatus.substring(1);
-    return Tooltip(
-      message: tip,
-      child: GestureDetector(
-        onTap: () async {
-          setState(() {
-            record['status'] = targetStatus;
-            record['leaveType'] = targetStatus == 'leave' ? 'sick' : null;
-            record['halfDayType'] = targetStatus == 'half_day' ? 'unpaid' : null;
-            if (targetStatus != 'present' && targetStatus != 'late') {
-              record['arrivalTime'] = null;
-              record['departureTime'] = null;
-            }
-          });
-          await _saveRecordInstantly(empId, record);
-        },
-        child: Container(
-          height: 28,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: active ? activeColor : const Color(0xFFF9FAFB),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: active ? activeColor : const Color(0xFFE5E7EB), width: active ? 1.5 : 0.75),
-          ),
-          child: Center(
-            child: Text(label,
-                style: TextStyle(
-                  color: active ? Colors.white : const Color(0xFF6B7280),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                )),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickTime(BuildContext context, ValueChanged<String> onPicked) async {
-    final picked = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-    if (picked != null) {
-      if (context.mounted) {
-        onPicked(picked.format(context));
-      }
-    }
-  }
-
-  Widget _buildSaveButton(List<Map<String, dynamic>> records, RoleThemeData t) {
-    return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(color: t.bgCard, border: Border(top: BorderSide(color: t.bgRule))),
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: t.accent,
-          foregroundColor: Colors.white,
-          minimumSize: const Size.fromHeight(46),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        onPressed: () async {
-          try {
-            final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
-            
-            for (final r in _draftRecords.values) {
-              await FinanceLocalStorage.saveAttendanceRecord(
-                branchId: widget.branchId,
-                data: r,
-                performedBy: curUser,
-              );
-            }
-
-            // Write summary Audit log
-            await FinanceLocalStorage.logAction(
-              branchId: widget.branchId,
-              entityType: 'attendance',
-              entityId: DateFormat('yyyy-MM-dd').format(widget.date),
-              action: 'update',
-              performedBy: curUser,
-              reason: 'Marked daily attendance sheets for ${_draftRecords.length} employees.',
-            );
-
-            setState(() {
-              _draftRecords.clear();
-            });
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: const Text('Attendance sheet saved successfully!'),
-                backgroundColor: t.accent,
-                behavior: SnackBarBehavior.floating,
-              ));
-            }
-          } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                content: Text('Failed to save attendance: $e'),
-                backgroundColor: Colors.red,
-                behavior: SnackBarBehavior.floating,
-              ));
-            }
-          }
-        },
-        child: Text('Save Attendance Sheet (${_draftRecords.length} changes)', style: const TextStyle(fontWeight: FontWeight.bold)),
-      ),
-    );
-  }
-
+  // ── Employee Detail Sheet ─────────────────────────────────────────────────
   void _showEmployeeDetailSheet(BuildContext context, String employeeId, RoleThemeData t) {
     final emp = FinanceLocalStorage.getEmployee(employeeId);
     if (emp == null) return;
@@ -1123,19 +2071,19 @@ class _AttendanceTabState extends State<AttendanceTab> {
     final dept = emp['department']?.toString() ?? '';
     final cnic = emp['cnic']?.toString() ?? '';
     final phone = emp['phone']?.toString() ?? '';
-    final altPhone = emp['alternatePhone']?.toString() ?? '';
-    final address = emp['currentAddress']?.toString() ?? '';
-    final joiningDate = emp['joiningDate']?.toString() ?? 'N/A';
-    final salary = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
-    final advance = (emp['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
+    final joinStr = emp['joiningDate']?.toString() ?? '';
+    String formattedJoinDate = 'N/A';
+    if (joinStr.isNotEmpty) {
+      final dt = DateTime.tryParse(joinStr);
+      formattedJoinDate = dt != null ? DateFormat('d MMM yyyy').format(dt) : joinStr;
+    }
 
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: t.bgCard,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       builder: (ctx) {
-        return Container(
+        return Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1144,39 +2092,63 @@ class _AttendanceTabState extends State<AttendanceTab> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
-                        Text('$role • $dept', style: TextStyle(fontSize: 12, color: t.textSecondary)),
-                      ],
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                      Text('$role • $dept', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    ],
+                  ),
+                  if (widget.onEditEmployee != null)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        widget.onEditEmployee!(context, employeeId);
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 14),
+                      label: const Text('Edit Profile'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F766E),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(ctx),
-                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Divider(color: t.bgRule, height: 1),
-              const SizedBox(height: 16),
-              _buildDetailItem('Phone Number', phone.isNotEmpty ? phone : 'N/A', Icons.phone, t),
-              if (altPhone.isNotEmpty)
-                _buildDetailItem('Alternate Phone', altPhone, Icons.phone_android, t),
-              _buildDetailItem('CNIC Number', cnic.isNotEmpty ? cnic : 'N/A', Icons.badge, t),
-              _buildDetailItem('Joining Date', joiningDate, Icons.calendar_today, t),
-              _buildDetailItem('Current Base Salary', 'PKR ${NumberFormat('#,###').format(salary)}', Icons.payments, t),
-              _buildDetailItem('Advance Balance Owed', 'PKR ${NumberFormat('#,###').format(advance)}', Icons.money_off, t),
-              if (address.isNotEmpty)
-                _buildDetailItem('Current Address', address, Icons.home, t),
-              const SizedBox(height: 10),
+              const SizedBox(height: 14),
+              const Divider(height: 1, color: Color(0xFFE2E8F0)),
+              const SizedBox(height: 12),
+              _buildDetailItem('Phone Number', phone.isNotEmpty ? phone : 'N/A', Icons.phone_outlined, t),
+              _buildDetailItem('CNIC Number', cnic.isNotEmpty ? cnic : 'N/A', Icons.badge_outlined, t),
+              _buildDetailItem('Joining Date', formattedJoinDate, Icons.calendar_today_outlined, t),
             ],
           ),
         );
       },
     );
+  }
+
+  Widget _buildDetailItem(String label, String value, IconData icon, RoleThemeData t) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: const Color(0xFF0F766E)),
+          const SizedBox(width: 8),
+          Text('$label: ', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+          Text(value, style: const TextStyle(fontSize: 12, color: Color(0xFF0F172A), fontWeight: FontWeight.bold)),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pickTime(BuildContext context, ValueChanged<String> onPicked) async {
+    final picked = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+    if (picked != null && context.mounted) {
+      onPicked(picked.format(context));
+    }
   }
 
   Future<void> _saveRecordInstantly(String empId, Map<String, dynamic> record) async {
@@ -1218,213 +2190,179 @@ class _AttendanceTabState extends State<AttendanceTab> {
         return StatefulBuilder(
           builder: (diagCtx, setDiagState) {
             return AlertDialog(
-              backgroundColor: t.bgCard,
-              title: Text('Apply Leave / Absent Range', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              title: const Text('Apply Leave / Absent Range', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 15)),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Select Employee:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                    const Text('Select Employee:', style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
-                      dropdownColor: t.bgCard,
                       value: selectedEmployeeId,
-                      style: TextStyle(color: t.textPrimary, fontSize: 13),
                       decoration: InputDecoration(
                         filled: true,
-                        fillColor: t.bgCardAlt,
+                        fillColor: const Color(0xFFF8FAFC),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        border: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
+                        enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
                       ),
                       items: employees.map((emp) {
                         return DropdownMenuItem<String>(
                           value: emp['localId']?.toString() ?? '',
-                          child: Text('${emp['name']} (${emp['role']})', style: TextStyle(color: t.textPrimary)),
+                          child: Text('${emp['name']} (${emp['role']})', style: const TextStyle(fontSize: 12.5)),
                         );
                       }).toList(),
                       onChanged: (val) {
                         if (val != null) setDiagState(() => selectedEmployeeId = val);
                       },
                     ),
-                    const SizedBox(height: 16),
-                    Text('Status:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
+                    const Text('Status:', style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
-                      dropdownColor: t.bgCard,
                       value: selectedStatus,
-                      style: TextStyle(color: t.textPrimary, fontSize: 13),
                       decoration: InputDecoration(
                         filled: true,
-                        fillColor: t.bgCardAlt,
+                        fillColor: const Color(0xFFF8FAFC),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        border: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
+                        border: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
+                        enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
                       ),
-                      items: [
-                        DropdownMenuItem(value: 'leave', child: Text('Leave', style: TextStyle(color: t.textPrimary))),
-                        DropdownMenuItem(value: 'absent', child: Text('Absent', style: TextStyle(color: t.textPrimary))),
+                      items: const [
+                        DropdownMenuItem(value: 'leave', child: Text('Leave', style: TextStyle(fontSize: 12.5))),
+                        DropdownMenuItem(value: 'absent', child: Text('Absent', style: TextStyle(fontSize: 12.5))),
                       ],
                       onChanged: (val) {
                         if (val != null) setDiagState(() => selectedStatus = val);
                       },
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     if (selectedStatus == 'leave') ...[
-                      Text('Leave Type:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                      const Text('Leave Type:', style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
                       DropdownButtonFormField<String>(
-                        dropdownColor: t.bgCard,
                         value: selectedLeaveType,
-                        style: TextStyle(color: t.textPrimary, fontSize: 13),
                         decoration: InputDecoration(
                           filled: true,
-                          fillColor: t.bgCardAlt,
+                          fillColor: const Color(0xFFF8FAFC),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          border: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                          enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
+                          border: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
+                          enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
                         ),
-                        items: [
-                          DropdownMenuItem(value: 'sick', child: Text('SICK', style: TextStyle(color: t.textPrimary))),
-                          DropdownMenuItem(value: 'casual', child: Text('CASUAL', style: TextStyle(color: t.textPrimary))),
-                          DropdownMenuItem(value: 'annual', child: Text('ANNUAL', style: TextStyle(color: t.textPrimary))),
-                          DropdownMenuItem(value: 'unpaid', child: Text('UNPAID', style: TextStyle(color: t.textPrimary))),
+                        items: const [
+                          DropdownMenuItem(value: 'sick', child: Text('SICK', style: TextStyle(fontSize: 12.5))),
+                          DropdownMenuItem(value: 'casual', child: Text('CASUAL', style: TextStyle(fontSize: 12.5))),
+                          DropdownMenuItem(value: 'annual', child: Text('ANNUAL', style: TextStyle(fontSize: 12.5))),
+                          DropdownMenuItem(value: 'unpaid', child: Text('UNPAID', style: TextStyle(fontSize: 12.5))),
                         ],
                         onChanged: (val) {
                           if (val != null) setDiagState(() => selectedLeaveType = val);
                         },
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                     ],
-                    Text('Start Date:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: startDate,
-                          firstDate: DateTime(2025),
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
-                        );
-                        if (picked != null) {
-                          setDiagState(() {
-                            startDate = picked;
-                            if (endDate.isBefore(startDate)) {
-                              endDate = startDate;
-                            }
-                          });
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(border: Border.all(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(DateFormat('yyyy-MM-dd').format(startDate), style: TextStyle(color: t.textPrimary, fontSize: 13)),
-                            Icon(Icons.calendar_today, size: 16, color: t.textTertiary),
-                          ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Start Date:', style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: startDate,
+                                    firstDate: DateTime(2025),
+                                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                                  );
+                                  if (picked != null) {
+                                    setDiagState(() {
+                                      startDate = picked;
+                                      if (endDate.isBefore(startDate)) endDate = startDate;
+                                    });
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(border: Border.all(color: const Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
+                                  child: Text(DateFormat('d MMM yyyy').format(startDate), style: const TextStyle(fontSize: 12)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text('End Date:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    InkWell(
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          initialDate: endDate.isBefore(startDate) ? startDate : endDate,
-                          firstDate: startDate,
-                          lastDate: DateTime.now().add(const Duration(days: 365)),
-                        );
-                        if (picked != null) {
-                          setDiagState(() => endDate = picked);
-                        }
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(border: Border.all(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(DateFormat('yyyy-MM-dd').format(endDate), style: TextStyle(color: t.textPrimary, fontSize: 13)),
-                            Icon(Icons.calendar_today, size: 16, color: t.textTertiary),
-                          ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('End Date:', style: TextStyle(color: Color(0xFF64748B), fontSize: 11.5, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              InkWell(
+                                onTap: () async {
+                                  final picked = await showDatePicker(
+                                    context: context,
+                                    initialDate: endDate.isBefore(startDate) ? startDate : endDate,
+                                    firstDate: startDate,
+                                    lastDate: DateTime.now().add(const Duration(days: 365)),
+                                  );
+                                  if (picked != null) {
+                                    setDiagState(() => endDate = picked);
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(border: Border.all(color: const Color(0xFFE2E8F0)), borderRadius: BorderRadius.circular(8)),
+                                  child: Text(DateFormat('d MMM yyyy').format(endDate), style: const TextStyle(fontSize: 12)),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text('Remarks / Note:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: remarksCtrl,
-                      style: TextStyle(color: t.textPrimary, fontSize: 13),
-                      decoration: InputDecoration(
-                        filled: true,
-                        fillColor: t.bgCardAlt,
-                        hintText: 'Enter reason or notes...',
-                        hintStyle: TextStyle(color: t.textTertiary),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        border: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule), borderRadius: BorderRadius.circular(8)),
-                        focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: t.accent), borderRadius: BorderRadius.circular(8)),
-                      ),
+                      ],
                     ),
                   ],
                 ),
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
-                ),
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: t.accent),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E), foregroundColor: Colors.white),
                   onPressed: () async {
-                    try {
-                      int count = 0;
-                      var curr = DateTime(startDate.year, startDate.month, startDate.day);
-                      final limit = DateTime(endDate.year, endDate.month, endDate.day);
+                    int count = 0;
+                    var curr = DateTime(startDate.year, startDate.month, startDate.day);
+                    final limit = DateTime(endDate.year, endDate.month, endDate.day);
 
-                      while (curr.isBefore(limit) || curr.isAtSameMomentAs(limit)) {
-                        final dateStr = DateFormat('yyyy-MM-dd').format(curr);
-                        final record = {
-                          'employeeId': selectedEmployeeId,
-                          'date': dateStr,
-                          'status': selectedStatus,
-                          'leaveType': selectedStatus == 'leave' ? selectedLeaveType : null,
-                          'note': remarksCtrl.text.trim().isNotEmpty ? remarksCtrl.text.trim() : 'Applied range leave',
-                        };
-                        await FinanceLocalStorage.saveAttendanceRecord(
-                          branchId: widget.branchId,
-                          data: record,
-                          performedBy: curUser,
-                        );
-                        count++;
-                        curr = curr.add(const Duration(days: 1));
-                      }
-
-                      await FinanceLocalStorage.logAction(
+                    while (curr.isBefore(limit) || curr.isAtSameMomentAs(limit)) {
+                      final dateStr = DateFormat('yyyy-MM-dd').format(curr);
+                      final record = {
+                        'employeeId': selectedEmployeeId,
+                        'date': dateStr,
+                        'status': selectedStatus,
+                        'leaveType': selectedStatus == 'leave' ? selectedLeaveType : null,
+                        'note': remarksCtrl.text.trim().isNotEmpty ? remarksCtrl.text.trim() : 'Applied range leave',
+                      };
+                      await FinanceLocalStorage.saveAttendanceRecord(
                         branchId: widget.branchId,
-                        entityType: 'attendance',
-                        entityId: selectedEmployeeId,
-                        action: 'leave_range',
+                        data: record,
                         performedBy: curUser,
-                        reason: 'Recorded $count days range ($selectedStatus) from ${DateFormat('yyyy-MM-dd').format(startDate)} to ${DateFormat('yyyy-MM-dd').format(endDate)}',
                       );
+                      count++;
+                      curr = curr.add(const Duration(days: 1));
+                    }
 
-                      Navigator.pop(ctx);
-                      if (mounted) {
-                        setState(() {});
-                        showCustomSnackBar(context, 'Successfully applied $count days range.');
-                      }
-                    } catch (e) {
-                      showCustomSnackBar(ctx, e.toString().replaceAll('Exception: ', ''), error: true);
+                    Navigator.pop(ctx);
+                    if (mounted) {
+                      setState(() {});
+                      showCustomSnackBar(context, 'Successfully applied $count days.');
                     }
                   },
-                  child: const Text('Apply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Apply Range'),
                 ),
               ],
             );
@@ -1432,67 +2370,5 @@ class _AttendanceTabState extends State<AttendanceTab> {
         );
       },
     );
-  }
-
-  Widget _buildDetailItem(String label, String value, IconData icon, RoleThemeData t) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6.0),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: t.accent),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 10, color: t.textTertiary)),
-                Text(value, style: TextStyle(fontSize: 13, color: t.textPrimary, fontWeight: FontWeight.bold)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _handleMobileBiometricCheckIn(Map<String, dynamic> record, RoleThemeData t) async {
-    final empName = record['employeeName']?.toString() ?? 'Employee';
-    final empId = record['employeeId']?.toString() ?? '';
-
-    final isAuthenticated = await LocalBiometricService.authenticateUser(
-      localizedReason: 'Scan fingerprint to verify attendance for $empName',
-    );
-
-    if (!isAuthenticated) {
-      if (mounted) {
-        showCustomSnackBar(context, 'Biometric verification cancelled or failed.', error: true);
-      }
-      return;
-    }
-
-    final now = DateTime.now();
-    final timeStr = DateFormat('hh:mm a').format(now);
-
-    final updatedRecord = Map<String, dynamic>.from(record);
-    if (updatedRecord['status'] != 'present') {
-      updatedRecord['status'] = 'present';
-      updatedRecord['checkInTime'] = timeStr;
-      updatedRecord['source'] = 'Mobile App (Android Fingerprint)';
-    } else {
-      updatedRecord['checkOutTime'] = timeStr;
-    }
-
-    await FinanceLocalStorage.saveAttendanceRecord(
-      branchId: widget.branchId,
-      data: updatedRecord,
-      performedBy: 'Mobile Biometric',
-    );
-
-    if (mounted) {
-      setState(() {
-        _draftRecords[empId] = updatedRecord;
-      });
-      showCustomSnackBar(context, '✅ Attendance marked for $empName via Mobile Fingerprint ($timeStr)');
-    }
   }
 }

@@ -100,9 +100,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   }
 
   Future<bool> _checkPassword(RoleThemeData t) async {
-    final completer = Completer<bool>();
     final ctrl = TextEditingController();
-    showDialog(
+    bool verified = false;
+    await showDialog(
       context: context,
       builder: (ctx) => Dialog(
         backgroundColor: t.bgCard,
@@ -134,7 +134,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             const SizedBox(height: 20),
             Row(children: [
               Expanded(child: TextButton(
-                onPressed: () { Navigator.pop(ctx); completer.complete(false); },
+                onPressed: () => Navigator.pop(ctx),
                 style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 13),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: t.bgRule))),
                 child: Text('Cancel', style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600)),
@@ -142,8 +142,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               const SizedBox(width: 12),
               Expanded(child: ElevatedButton(
                 onPressed: () {
-                  if (ctrl.text == 'admin1122') { Navigator.pop(ctx); completer.complete(true); }
-                  else { _snack('Wrong password', error: true); }
+                  if (ctrl.text.trim() == 'admin1122') {
+                    verified = true;
+                    Navigator.pop(ctx);
+                  } else {
+                    _snack('Wrong password', error: true);
+                  }
                 },
                 style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 13),
@@ -155,11 +159,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         ),
       ),
     );
-    return completer.future;
+    return verified;
   }
 
   void _showEditDialog(Map<String, dynamic> data, RoleThemeData t) async {
-    if (!await _checkPassword(t)) return;
+    final ok = await _checkPassword(t);
+    if (!ok || !mounted) return;
     final editKey = GlobalKey<FormState>();
     final isAdult = data['isAdult'] == true;
     _nameController.text = data['name'] ?? '';
@@ -214,9 +219,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                           if (!r.hasMatch(v!)) return 'Format: 12345-1234567-1';
                           return null;
                         }),
-                  _editField(t, _phoneController, 'Phone', Icons.phone_outlined,
+                  _editField(t, _phoneController, 'Phone (11 digits)', Icons.phone_outlined,
                       type: TextInputType.phone, maxLen: 11,
-                      formatters: [FilteringTextInputFormatter.digitsOnly], validator: (v) {
+                      formatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)], validator: (v) {
                         if (v != null && v.isNotEmpty && v.length != 11) return '11 digits required';
                         return null;
                       }),

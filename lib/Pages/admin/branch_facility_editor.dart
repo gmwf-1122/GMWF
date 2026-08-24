@@ -288,7 +288,7 @@ class _BranchFacilityEditorDialogState
               // ── Section 1: Sub-Dispensaries ──────────────────────────────
               _buildSectionHeader('Dispensary Facilities (${_dispensaries.length})', Icons.local_hospital_outlined, t.accent),
               const SizedBox(height: 8),
-              _buildInputRow(_dispensaryInputCtrl, 'e.g. Kapayya Dispensary', _addDispensary, t.accent, t),
+              _buildInputRow(_dispensaryInputCtrl, 'e.g. Saddar Dispensary', _addDispensary, t.accent, t),
               const SizedBox(height: 8),
               _buildChips(_dispensaries, t.accent, (id) => setState(() => _dispensaries.removeWhere((i) => i['id'] == id)), t),
 

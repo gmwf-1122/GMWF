@@ -44,10 +44,27 @@ class _LoansTabState extends State<LoansTab> {
   String _selectedDeptFilter = 'all';
   Map<String, dynamic>? _selectedLoan;
 
+  bool get _isBranchScopedUser {
+    if (widget.branchId.isNotEmpty && widget.branchId != 'all') return true;
+    if (Hive.isBoxOpen('local_users')) {
+      final curUser = Hive.box('local_users').values.firstOrNull;
+      if (curUser is Map) {
+        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
+        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
     _selectedDeptFilter = widget.departmentFilter;
+    if (_isBranchScopedUser) {
+      _selectedBranchFilter = widget.branchId.isNotEmpty ? widget.branchId : 'karachi';
+    }
     _searchCtrl.addListener(() {
       setState(() => _searchQuery = _searchCtrl.text.toLowerCase().trim());
     });
@@ -56,7 +73,9 @@ class _LoansTabState extends State<LoansTab> {
   @override
   void didUpdateWidget(LoansTab oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.branchId != widget.branchId) {
+    if (_isBranchScopedUser) {
+      _selectedBranchFilter = widget.branchId.isNotEmpty ? widget.branchId : 'karachi';
+    } else if (oldWidget.branchId != widget.branchId) {
       _selectedBranchFilter = 'all';
       _selectedDeptFilter = widget.departmentFilter;
     } else if (oldWidget.departmentFilter != widget.departmentFilter) {
@@ -159,11 +178,23 @@ class _LoansTabState extends State<LoansTab> {
                     height: 38,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: _isBranchScopedUser ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                      border: Border.all(color: _isBranchScopedUser ? const Color(0xFFA7F3D0) : const Color(0xFFE2E8F0)),
                     ),
-                    child: DropdownButtonHideUnderline(
+                    child: _isBranchScopedUser ? Row(
+                      children: [
+                        const Icon(Icons.lock_rounded, size: 14, color: Color(0xFF059669)),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            branchNames[_selectedBranchFilter] ?? _selectedBranchFilter.toUpperCase(),
+                            style: const TextStyle(color: Color(0xFF064E3B), fontSize: 12, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ) : DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         value: _selectedBranchFilter,
                         isExpanded: true,

@@ -18,6 +18,7 @@
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:intl/intl.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/zkteco_network_service.dart';
@@ -103,13 +104,34 @@ class RealtimeRouter {
       return;
     }
 
+    final data = message['data'] as Map<String, dynamic>? ?? message;
+    final incomingVersion = (message['version'] is int)
+        ? (message['version'] as int)
+        : (int.tryParse(message['version']?.toString() ?? '') ?? (data['version'] is int ? data['version'] as int : 0));
+    final entityId = data['serial']?.toString() ?? data['patientId']?.toString() ?? data['userId']?.toString() ?? '';
+
+    if (incomingVersion > 0 && entityId.isNotEmpty) {
+      try {
+        final versionBox = await Hive.openBox<int>('realtime_entity_versions');
+        final localVersion = versionBox.get(entityId) ?? 0;
+        if (incomingVersion <= localVersion) {
+          if (kDebugMode) {
+            print('🛑 Stale update ignored for $entityId: incoming version $incomingVersion <= local $localVersion');
+          }
+          return;
+        }
+        await versionBox.put(entityId, incomingVersion);
+      } catch (e) {
+        if (kDebugMode) print('RealtimeRouter: Version check error: $e');
+      }
+    }
+
     // [P3] Persist with timestamped key so TTL prune works by prefix
     final dedupKey =
         '${DateTime.now().millisecondsSinceEpoch}_$messageId';
     await box.put(dedupKey, messageId);
 
     final type = message['event_type']?.toString() ?? '';
-    final data = message['data'] as Map<String, dynamic>? ?? message;
 
     if (kDebugMode) {
       print('''
@@ -220,6 +242,16 @@ Serial: ${data['serial'] ?? 'N/A'}
         await _handleStaffEvent(type, data);
         break;
 
+      // ── TOKEN EXCEPTION EVENTS ───────────────────────────────────────────
+      case RealtimeEvents.tokenExceptionRequest:
+        await _handleTokenExceptionRequest(data, message);
+        break;
+
+      case RealtimeEvents.tokenExceptionApproved:
+      case 'restriction_removed':
+        await _handleTokenExceptionApproved(data, message);
+        break;
+
       // ── SUPERVISOR EVENTS ─────────────────────────────────────────────────
       case RealtimeEvents.saveSupervisorAction:
       case RealtimeEvents.approveEditRequest:
@@ -294,9 +326,8 @@ Serial: ${data['serial'] ?? 'N/A'}
       }
     });
 
-    // CRITICAL: Save to Hive IMMEDIATELY
-    final box = Hive.box(LocalStorageService.entriesBox);
-    await box.put(uniqueKey, entryData);
+    // CRITICAL: Save via LocalStorageService.saveEntryLocal to enforce terminal status protection & auto-link prescriptions
+    await LocalStorageService.saveEntryLocal(branchId, serial, entryData);
 
     if (kDebugMode) print('✅ ENTRY SAVED → $uniqueKey');
 
@@ -355,32 +386,37 @@ Serial: ${data['serial'] ?? 'N/A'}
 
     // CRITICAL: Also update the entry status if we have branchId
     if (branchId.isNotEmpty) {
-      final entryKey = '$branchId-$serial';
-      final box      = Hive.box(LocalStorageService.entriesBox);
-      final entry    = box.get(entryKey);
+      final box = Hive.box(LocalStorageService.entriesBox);
+      final normBranch = branchId.toLowerCase().trim();
+      final normSerial = serial.toLowerCase().trim();
 
-      if (entry != null) {
-        final updated = Map<String, dynamic>.from(entry);
-        updated['status']         = 'completed';
-        updated['prescription']   = data;
-        updated['prescriptionId'] = data['id'] ?? serial;
-        updated['completedAt']    =
-            data['completedAt'] ?? DateTime.now().toIso8601String();
+      bool found = false;
+      for (final k in box.keys) {
+        final kStr = k.toString().toLowerCase().trim();
+        if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+          final entry = box.get(k);
+          if (entry is Map) {
+            final updated = Map<String, dynamic>.from(entry);
+            updated['status']         = 'completed';
+            updated['prescription']   = data;
+            updated['prescriptionId'] = data['id'] ?? serial;
+            updated['completedAt']    =
+                data['completedAt'] ?? DateTime.now().toIso8601String();
 
-        await box.put(entryKey, updated);
-
-        if (kDebugMode) {
-          print('╔════════════════════════════════════════════════════════════╗');
-          print('║ ✅ PRESCRIPTION SAVED TO HIVE (ROUTER)                    ║');
-          print('╠════════════════════════════════════════════════════════════╣');
-          print('║ Serial: $serial');
-          print('║ Entry Key: $entryKey');
-          print('║ Entry Status Updated: completed');
-          print('║ Prescription ID: ${updated['prescriptionId']}');
-          print('╚════════════════════════════════════════════════════════════╝');
+            await box.put(k, updated);
+            found = true;
+          }
         }
-      } else {
-        if (kDebugMode) print('⚠️ Entry not found for prescription: $entryKey');
+      }
+
+      if (kDebugMode && found) {
+        print('╔════════════════════════════════════════════════════════════╗');
+        print('║ ✅ PRESCRIPTION SAVED TO HIVE (ROUTER)                    ║');
+        print('╠════════════════════════════════════════════════════════════╣');
+        print('║ Serial: $serial');
+        print('║ Entry Status Updated: completed');
+        print('║ Prescription ID: ${data['id'] ?? serial}');
+        print('╚════════════════════════════════════════════════════════════╝');
       }
     }
 
@@ -583,9 +619,11 @@ Serial: ${data['serial'] ?? 'N/A'}
 
   static Future<void> _handleAttendanceEvent(String type, Map<String, dynamic> data) async {
     try {
-      final box = await LocalStorageService.openBoxSafe('attendance_box');
-      final id = data['id']?.toString() ?? data['punchId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
-      await box.put(id, LocalStorageService.sanitize(data));
+      final box = await LocalStorageService.openBoxSafe(LocalStorageService.attendanceBox);
+      final employeeId = (data['employeeId'] ?? data['localId'] ?? data['id'])?.toString() ?? '';
+      final dateStr = (data['date'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString();
+      final key = employeeId.isNotEmpty ? '${employeeId}_$dateStr' : (data['id']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}');
+      await box.put(key, LocalStorageService.sanitize(data));
 
       final pin = data['pin']?.toString() ?? '';
       final timeStr = data['timestamp']?.toString() ?? '';
@@ -601,7 +639,7 @@ Serial: ${data['serial'] ?? 'N/A'}
           source: source,
         );
       }
-      if (kDebugMode) print('✅ ATTENDANCE EVENT processed via LAN → $type ($id)');
+      if (kDebugMode) print('✅ ATTENDANCE EVENT processed via LAN → $type ($key)');
     } catch (e) {
       if (kDebugMode) print('❌ _handleAttendanceEvent error: $e');
     }
@@ -698,6 +736,54 @@ Serial: ${data['serial'] ?? 'N/A'}
       if (kDebugMode) print('✅ STAFF/FACULTY PROFILE saved via LAN → $type ($id)');
     } catch (e) {
       if (kDebugMode) print('❌ _handleStaffEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleTokenExceptionApproved(
+    Map<String, dynamic> data,
+    Map<String, dynamic> fullMessage,
+  ) async {
+    final branchId = (fullMessage['branchId']?.toString() ??
+                     data['branchId']?.toString() ??
+                     '').toLowerCase().trim();
+    final patientId = (data['patientId'] ?? data['id'])?.toString();
+    final reason = data['reason']?.toString() ?? 'Approved by Doctor';
+    final approvedBy = (data['approvedBy'] ?? data['doctorName'])?.toString() ?? 'Doctor';
+    final requestId = data['requestId']?.toString();
+
+    if (branchId.isNotEmpty && patientId != null && patientId.isNotEmpty) {
+      await LocalStorageService.grantTokenException(
+        branchId,
+        patientId,
+        reason: reason,
+        approvedBy: approvedBy,
+        requestId: requestId,
+      );
+      if (kDebugMode) print('✅ TOKEN EXCEPTION APPROVED & GRANTED → $branchId-$patientId ($reason)');
+    }
+  }
+
+  static Future<void> _handleTokenExceptionRequest(
+    Map<String, dynamic> data,
+    Map<String, dynamic> fullMessage,
+  ) async {
+    final requestId = data['requestId']?.toString() ??
+        'local_${DateTime.now().millisecondsSinceEpoch}';
+    final localReq = <String, dynamic>{
+      'id':          requestId,
+      'requestType': 'token_exception',
+      'status':      'pending',
+      'patientId':   data['patientId'] ?? '',
+      'patientName': data['patientName'] ?? 'Unknown',
+      'restriction': data['restriction'],
+      'branchId':    fullMessage['branchId'] ?? data['branchId'] ?? '',
+      'requestedAt': DateTime.now().toIso8601String(),
+    };
+    if (Hive.isBoxOpen('app_settings')) {
+      await Hive.box('app_settings').put(
+          'pending_exception_$requestId',
+          LocalStorageService.sanitize(localReq));
+      if (kDebugMode) print('✅ TOKEN EXCEPTION REQUEST STORED LOCALLY → $requestId');
     }
   }
 }

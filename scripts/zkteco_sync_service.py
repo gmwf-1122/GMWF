@@ -158,7 +158,14 @@ def load_synced_keys():
 
 
 def save_synced_keys(keys_set):
-    """Saves synced keys set to state file (capped at 20,000 entries)."""
+    """
+    Saves synced keys set to state file (capped at 20,000 entries).
+    
+    NOTE (Future Maintenance Item):
+    synced_keys.json accumulates processed punch document keys across long uptime runs.
+    While capped at 20,000 entries here, a formal pruning mechanism (e.g., archiving entries
+    older than N days / 90 days based on ISO timestamp parsing) should be scheduled for future maintenance.
+    """
     keys_list = list(keys_set)
     if len(keys_list) > 20000:
         keys_list = keys_list[-10000:]  # Keep latest 10k entries
@@ -214,6 +221,97 @@ def flush_offline_buffer(db):
         print(f"[WARN] Error reading offline buffer file: {e}")
 
 
+# In-memory dictionary tracking pending hardware memory clears across sync cycles.
+# This flag is intentionally in-memory only. On restart, it resets to unset,
+# meaning any device memory clear that hadn't yet executed will simply be
+# re-evaluated on the next cycle. This is a deliberate fail-safe, not an oversight.
+_pending_clears_by_ip = {}
+
+# In-memory employee directory cache (PIN -> Employee info)
+_employee_cache = {}
+_employee_cache_timestamp = 0
+
+
+def get_employee_directory(db):
+    """
+    Loads employee profiles from Firestore and indexes them by PIN and ID.
+    Cached in memory for 10 minutes to minimize Firestore read quota.
+    """
+    global _employee_cache, _employee_cache_timestamp
+    now = time.time()
+    if _employee_cache and (now - _employee_cache_timestamp < 600):
+        return _employee_cache
+
+    if not db:
+        return _employee_cache
+
+    try:
+        directory = {}
+        # 1. Fetch root employees collection
+        for doc in db.collection("employees").stream():
+            data = doc.to_dict()
+            emp_id = doc.id
+            name = data.get("name") or data.get("employeeName") or "Employee"
+            pin = str(data.get("biometricPin") or data.get("pin") or data.get("localId") or "").strip()
+            dept = data.get("department") or data.get("dept") or ""
+            branch = data.get("branchId") or data.get("branch") or ""
+            role = data.get("role") or data.get("designation") or ""
+
+            info = {
+                "name": name,
+                "employeeId": emp_id,
+                "department": dept,
+                "branchId": branch,
+                "role": role,
+            }
+            if pin:
+                directory[pin] = info
+            directory[emp_id] = info
+
+        # 2. Fetch branch subcollections
+        for branch_doc in db.collection("branches").stream():
+            b_id = branch_doc.id
+            for doc in db.collection("branches").document(b_id).collection("employees").stream():
+                data = doc.to_dict()
+                emp_id = doc.id
+                name = data.get("name") or data.get("employeeName") or "Employee"
+                pin = str(data.get("biometricPin") or data.get("pin") or data.get("localId") or "").strip()
+                dept = data.get("department") or data.get("dept") or ""
+                branch = data.get("branchId") or b_id
+                role = data.get("role") or data.get("designation") or ""
+
+                info = {
+                    "name": name,
+                    "employeeId": emp_id,
+                    "department": dept,
+                    "branchId": branch,
+                    "role": role,
+                }
+                if pin:
+                    directory[pin] = info
+                directory[emp_id] = info
+
+        _employee_cache = directory
+        _employee_cache_timestamp = now
+        print(f"[DIRECTORY] Loaded {len(directory)} employee mappings from Firestore.")
+    except Exception as e:
+        print(f"[WARN] Error refreshing employee directory: {e}")
+
+    return _employee_cache
+
+
+def has_pending_buffer_for_ip(ip):
+    """Checks if pending_punches.json contains unsent punches for the specified IP."""
+    if not os.path.exists(OFFLINE_BUFFER_FILE):
+        return False
+    try:
+        with open(OFFLINE_BUFFER_FILE, "r") as f:
+            pending = json.load(f)
+            return any(p.get("deviceIp") == ip for p in pending)
+    except Exception:
+        return False
+
+
 def fetch_and_sync_device(device_cfg, db, synced_keys, clear_memory=False):
     """
     Connects to a single ZKTeco device via pyzk on port 4370.
@@ -233,6 +331,19 @@ def fetch_and_sync_device(device_cfg, db, synced_keys, clear_memory=False):
         conn = zk.connect()
         print(f"[DEVICE] ✅ Connected to {name} ({ip})")
 
+        # Step 0: Cycle N+1 Check — If previous cycle was 100% verified synced, clear device memory now
+        if clear_memory and _pending_clears_by_ip.get(ip) is True:
+            if db and not has_pending_buffer_for_ip(ip):
+                print(f"[DEVICE] ⚠️ Executing verified 2-cycle memory clear for {name} ({ip})...")
+                try:
+                    conn.clear_attendance()
+                    _pending_clears_by_ip[ip] = False
+                    print(f"[DEVICE] ✅ Memory cleared successfully for {name} ({ip}).")
+                except Exception as ce:
+                    print(f"[DEVICE] ❌ Failed to clear memory for {name}: {ce}")
+            else:
+                print(f"[DEVICE] ℹ️ Skipping memory clear for {name}: pending offline buffer or Firestore unavailable.")
+
         # Disable device during read operation to prevent concurrent writes
         conn.disable_device()
 
@@ -241,14 +352,19 @@ def fetch_and_sync_device(device_cfg, db, synced_keys, clear_memory=False):
         print(f"[DEVICE] Read {len(attendances)} total raw log records from {name}")
 
         new_punches_count = 0
+        all_writes_succeeded = True
+
+        directory = get_employee_directory(db) if db else {}
 
         for atten in attendances:
             pin = str(atten.user_id).strip()
             timestamp_dt = atten.timestamp
             timestamp_str = timestamp_dt.isoformat()
+            timestamp_epoch = int(timestamp_dt.timestamp())
 
-            # Unique deduplication key
-            dedup_key = f"{ip}_{pin}_{timestamp_str}"
+            # Standardized epoch-based document ID & deduplication key
+            doc_id = f"{ip}_{pin}_{timestamp_epoch}"
+            dedup_key = doc_id
 
             if dedup_key in synced_keys:
                 continue
@@ -256,37 +372,65 @@ def fetch_and_sync_device(device_cfg, db, synced_keys, clear_memory=False):
             synced_keys.add(dedup_key)
             new_punches_count += 1
 
-            doc_id = f"{ip}_{pin}_{timestamp_dt.strftime('%Y%m%d_%H%M%S')}"
+            # Auto-enrich with employee details if mapped
+            emp_info = directory.get(pin) if directory else None
+            if emp_info:
+                emp_name = emp_info.get("name", f"User {pin}")
+                emp_id = emp_info.get("employeeId", "")
+                emp_dept = emp_info.get("department", "")
+                emp_branch = emp_info.get("branchId", "")
+                emp_role = emp_info.get("role", "")
+                is_mapped = True
+            else:
+                emp_name = f"Unmapped User (PIN {pin})"
+                emp_id = ""
+                emp_dept = ""
+                emp_branch = ""
+                emp_role = ""
+                is_mapped = False
 
             punch_record = {
                 "id": doc_id,
                 "doc_id": doc_id,
                 "pin": pin,
                 "timestamp": timestamp_str,
+                "timestamp_epoch": timestamp_epoch,
                 "deviceIp": ip,
                 "deviceName": name,
                 "buildingLocation": location,
                 "source": "python_zk_service",
-                "syncedAt": datetime.now().isoformat()
+                "syncedAt": datetime.now().isoformat(),
+                "employeeName": emp_name,
+                "employeeId": emp_id,
+                "department": emp_dept,
+                "branchId": emp_branch,
+                "role": emp_role,
+                "isMapped": is_mapped,
             }
 
             if db:
                 try:
                     db.collection("biometric_punches").document(doc_id).set(punch_record, merge=True)
-                    print(f"  └─ [SYNCED] PIN: {pin} | Time: {timestamp_str} | Loc: {location}")
+                    print(f"  └─ [SYNCED] {emp_name} (PIN: {pin}) | Time: {timestamp_str} | Loc: {location}")
                 except Exception as e:
                     print(f"  └─ [OFFLINE BUFFERED] Firestore error: {e}")
+                    all_writes_succeeded = False
                     save_offline_punch(punch_record)
             else:
+                all_writes_succeeded = False
                 save_offline_punch(punch_record)
 
         # Re-enable device
         conn.enable_device()
 
-        # Optional Memory Clear after verified sync
+        # Cycle N Check: If all writes succeeded and clear_memory is enabled, set pending flag for Cycle N+1
         if clear_memory and new_punches_count > 0:
-            print(f"[DEVICE] ⚠️ Clearing internal log memory for {name}...")
-            conn.clear_attendance()
+            if all_writes_succeeded:
+                _pending_clears_by_ip[ip] = True
+                print(f"[DEVICE] ℹ️ Flagged {name} ({ip}) for memory clear on NEXT sync cycle.")
+            else:
+                _pending_clears_by_ip[ip] = False
+                print(f"[DEVICE] ⚠️ Not clear-flagged: Some punches were offline-buffered for {name}.")
 
         print(f"[DEVICE] Finished {name}: {new_punches_count} new punches synced.")
 

@@ -3,7 +3,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
@@ -14,8 +13,8 @@ import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/services/camp_session_service.dart';
-import 'package:gmwf/widgets/camp_selection_dialog.dart';
 import 'user_settings_dialog.dart';
 
 import 'package:gmwf/models/patient.dart';
@@ -56,7 +55,6 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
   bool _online = true;
   bool _isSyncing = false;
-  bool _loadingBranch = true;
   String? _branchName;
   String? _resolvedName;
 
@@ -123,6 +121,8 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         'icon': Icons.medication_outlined,
         'widget': DispensarScreen(
           branchId: widget.branchId,
+          dispenserId: widget.userId,
+          dispenserName: widget.userName,
           isEmbedded: true,
         ),
       });
@@ -207,7 +207,6 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       if (mounted) {
         setState(() {
           _branchName = 'Free Dispensary';
-          _loadingBranch = false;
         });
       }
       return;
@@ -220,14 +219,12 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       if (mounted) {
         setState(() {
           _branchName = doc.data()?['name'] ?? 'Free Dispensary';
-          _loadingBranch = false;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
           _branchName = 'Free Dispensary';
-          _loadingBranch = false;
         });
       }
     }
@@ -355,128 +352,117 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
         return Scaffold(
           backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
-          appBar: AppBar(
-            automaticallyImplyLeading: false,
-            backgroundColor: headerBg,
-            elevation: 6,
-            shadowColor: Colors.black26,
-            toolbarHeight: isMobile ? 80 : 90,
-            iconTheme: const IconThemeData(color: Colors.white),
-        title: Row(
-          children: [
-            Image.asset('assets/logo/gmwf-1.webp', height: isMobile ? 45 : 55),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  GestureDetector(
-                    onLongPress: () => DispensaryUserSettingsDialog.show(
-                      context,
-                      branchId: widget.branchId,
-                      onUserUpdated: () {
-                        if (mounted) setState(() { _fetchUserNameAndConnect(); });
-                      },
+          appBar: GmwfAppBar(
+            title: 'Hybrid Desk – ${_resolvedName ?? widget.userName}',
+            subtitle: CampSessionService.getBranchAndCampDisplayName(
+              branchName: _branchName ?? 'Free Dispensary',
+              branchId: widget.branchId,
+              campId: CampSessionService.getActiveCamp(),
+            ),
+            onTitleLongPress: () => DispensaryUserSettingsDialog.show(
+              context,
+              branchId: widget.branchId,
+              onUserUpdated: () {
+                if (mounted) setState(() { _fetchUserNameAndConnect(); });
+              },
+            ),
+            titleTooltip: 'Long press for Settings',
+            connectionStatus: _connectionStatus,
+            onRetryConnection: () => ConnectionManager().reconnectNow(),
+            isOnline: _online,
+            isSyncing: _isSyncing,
+            onSync: _forceSync,
+            onLogout: _logout,
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(48),
+              child: AnimatedBuilder(
+                animation: _tabController,
+                builder: (context, _) {
+                  final activeIndex = _tabController.index;
+                  return Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                        width: 1.2,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
                     ),
-                    child: Tooltip(
-                      message: 'Long press for Settings',
-                      child: Text(
-                        'Hybrid Desk – ${_resolvedName ?? widget.userName}',
-                        style: TextStyle(
-                          fontSize: isMobile ? 18 : 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    child: TabBar(
+                      controller: _tabController,
+                      isScrollable: false,
+                      indicator: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : const Color(0xFFE8F5E9),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: const Color(0xFF10B981),
+                          width: 1.2,
                         ),
                       ),
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      splashFactory: NoSplash.splashFactory,
+                      overlayColor: WidgetStateProperty.all(Colors.transparent),
+                      dividerColor: Colors.transparent,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                      tabs: _tabs.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final t = entry.value;
+                        final isSelected = activeIndex == idx;
+                        return Tab(
+                          height: 38,
+                          child: Container(
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  t['icon'] as IconData,
+                                  size: 18,
+                                  color: isSelected
+                                      ? (isDark ? const Color(0xFF34D399) : const Color(0xFF00875A))
+                                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  t['title'] as String,
+                                  style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                    fontSize: 14,
+                                    color: isSelected
+                                        ? (isDark ? const Color(0xFF34D399) : const Color(0xFF00875A))
+                                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    CampSessionService.getBranchAndCampDisplayName(
-                      branchName: _branchName ?? 'Free Dispensary',
-                      branchId: widget.branchId,
-                      campId: CampSessionService.getActiveCamp(),
-                    ),
-                    style: TextStyle(
-                      fontSize: isMobile ? 13 : 15,
-                      color: Colors.white70,
-                    ),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
-          ],
-        ),
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          indicatorWeight: 3.5,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-          tabs: _tabs.map((t) {
-            return Tab(
-              icon: Icon(t['icon'] as IconData, size: 20),
-              text: t['title'] as String,
-            );
-          }).toList(),
-        ),
-        actions: [
-          if (!isMobile) ...[
-            ConnectionStatusBadge(
-              status: _connectionStatus,
-              onRetry: () => ConnectionManager().reconnectNow(),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 24),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-              decoration: BoxDecoration(
-                color: _online ? Colors.blue.shade700 : Colors.grey.shade600,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(_online ? Icons.cloud : Icons.cloud_off, color: Colors.white, size: 16),
-                  const SizedBox(width: 6),
-                  Text(
-                    _online ? 'Internet' : 'Offline',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          IconButton(
-            icon: _isSyncing
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync, color: Colors.white),
-            onPressed: _isSyncing ? null : _forceSync,
-            tooltip: 'Force full sync',
           ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: _logout,
-            tooltip: 'Log out',
-          ),
-          const SizedBox(width: 12),
-        ],
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        physics: const NeverScrollableScrollPhysics(), // Keep state and prevent accidental swipe
-        children: _tabs.map((t) => t['widget'] as Widget).toList(),
+      body: AnimatedBuilder(
+        animation: _tabController,
+        builder: (context, _) {
+          return IndexedStack(
+            index: _tabController.index,
+            children: _tabs.map((t) => t['widget'] as Widget).toList(),
+          );
+        },
       ),
     );
       },

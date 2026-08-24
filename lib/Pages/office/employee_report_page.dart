@@ -85,6 +85,7 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
             radius: 28,
             imageUrl: emp['profilePictureUrl']?.toString(),
             imagePath: emp['profilePicturePath']?.toString(),
+            gender: emp['gender']?.toString(),
           ),
           const SizedBox(width: 14),
           Expanded(

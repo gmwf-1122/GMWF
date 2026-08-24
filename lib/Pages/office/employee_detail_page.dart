@@ -351,6 +351,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
             radius: 28,
             imageUrl: emp['profilePictureUrl']?.toString(),
             imagePath: emp['profilePicturePath']?.toString(),
+            gender: emp['gender']?.toString(),
           ),
           const SizedBox(width: 16),
           Expanded(

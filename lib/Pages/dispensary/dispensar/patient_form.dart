@@ -11,6 +11,7 @@ import 'package:another_flushbar/flushbar.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/sync_service.dart';
 import 'patient_form_helper.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
@@ -93,16 +94,77 @@ class _PatientFormState extends State<PatientForm> {
     return 'zakat';
   }
 
+  List<dynamic> _getPrescriptionsList() {
+    final fromData = _data['prescriptions'];
+    if (fromData is List && fromData.isNotEmpty) return fromData;
+    final embeddedData = _data['prescription'];
+    if (embeddedData is Map && embeddedData['prescriptions'] is List) {
+      final list = embeddedData['prescriptions'] as List;
+      if (list.isNotEmpty) return list;
+    }
+    final fromQueue = widget.queueEntry['prescriptions'];
+    if (fromQueue is List && fromQueue.isNotEmpty) return fromQueue;
+    final embeddedQueue = widget.queueEntry['prescription'];
+    if (embeddedQueue is Map && embeddedQueue['prescriptions'] is List) {
+      final list = embeddedQueue['prescriptions'] as List;
+      if (list.isNotEmpty) return list;
+    }
+    return [];
+  }
+
+  String _getDiagnosisText() {
+    final fromData = _data['diagnosis'];
+    if (fromData != null && fromData.toString().trim().isNotEmpty) return fromData.toString().trim();
+    final embeddedData = _data['prescription'];
+    if (embeddedData is Map && embeddedData['diagnosis'] != null) {
+      final d = embeddedData['diagnosis'].toString().trim();
+      if (d.isNotEmpty) return d;
+    }
+    final fromQueue = widget.queueEntry['diagnosis'];
+    if (fromQueue != null && fromQueue.toString().trim().isNotEmpty) return fromQueue.toString().trim();
+    final embeddedQueue = widget.queueEntry['prescription'];
+    if (embeddedQueue is Map && embeddedQueue['diagnosis'] != null) {
+      final d = embeddedQueue['diagnosis'].toString().trim();
+      if (d.isNotEmpty) return d;
+    }
+    return '';
+  }
+
+  List<dynamic> _getLabResultsList() {
+    final fromData = _data['labResults'];
+    if (fromData is List && fromData.isNotEmpty) return fromData;
+    final embeddedData = _data['prescription'];
+    if (embeddedData is Map && embeddedData['labResults'] is List) {
+      final list = embeddedData['labResults'] as List;
+      if (list.isNotEmpty) return list;
+    }
+    final fromQueue = widget.queueEntry['labResults'];
+    if (fromQueue is List && fromQueue.isNotEmpty) return fromQueue;
+    final embeddedQueue = widget.queueEntry['prescription'];
+    if (embeddedQueue is Map && embeddedQueue['labResults'] is List) {
+      final list = embeddedQueue['labResults'] as List;
+      if (list.isNotEmpty) return list;
+    }
+    return [];
+  }
+
   int get _daysOfMedicine {
     final fromData = _data['daysOfMedicine'];
     if (fromData is int && fromData >= 1) return fromData;
-    final embedded = widget.queueEntry['prescription'];
+    final embedded = _data['prescription'];
     if (embedded is Map) {
       final d = embedded['daysOfMedicine'];
       if (d is int && d >= 1) return d;
     }
+    final queueEmbedded = widget.queueEntry['prescription'];
+    if (queueEmbedded is Map) {
+      final d = queueEmbedded['daysOfMedicine'];
+      if (d is int && d >= 1) return d;
+    }
     final topLevel = widget.queueEntry['daysOfMedicine'];
     if (topLevel is int && topLevel >= 1) return topLevel;
+    final suggested = _suggestedDays;
+    if (suggested >= 1) return suggested;
     return 1;
   }
 
@@ -153,17 +215,27 @@ class _PatientFormState extends State<PatientForm> {
     super.dispose();
   }
 
-  // ─── Branch name ──────────────────────────────────────────────────────────
+  static final Map<String, String> _cachedBranchNames = {};
+
   Future<void> _loadBranchName() async {
     if (widget.branchId.isEmpty) {
       if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
       return;
     }
+    if (_cachedBranchNames.containsKey(widget.branchId)) {
+      if (mounted) setState(() {
+        _branchName = _cachedBranchNames[widget.branchId];
+        _loadingBranch = false;
+      });
+      return;
+    }
     try {
       final doc = await FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId).get();
+          .collection('branches').doc(widget.branchId).get(const GetOptions(source: Source.cache));
+      final name = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
+      _cachedBranchNames[widget.branchId] = name;
       if (mounted) setState(() {
-        _branchName = doc.exists ? (doc.data()?['name'] ?? 'Free Dispensary') : 'Free Dispensary';
+        _branchName = name;
         _loadingBranch = false;
       });
     } catch (_) {
@@ -177,6 +249,22 @@ class _PatientFormState extends State<PatientForm> {
     if (!mounted) return;
     setState(() => _isLoadingPrescription = true);
     try {
+      // 1. Direct embedded check from widget.queueEntry (fastest and most accurate)
+      final directEmbedded = widget.queueEntry['prescription'];
+      if (directEmbedded is Map && directEmbedded.isNotEmpty &&
+          (directEmbedded['prescriptions'] is List || directEmbedded['complaint'] != null || directEmbedded['diagnosis'] != null)) {
+        if (mounted) {
+          setState(() {
+            _data = Map<String, dynamic>.from(directEmbedded);
+            _gender = _resolveGender();
+            _age = _resolveAge();
+            _isDispensed = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+            _isLoadingPrescription = false;
+          });
+          return;
+        }
+      }
+
       String serial = '';
       for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
         final v = widget.queueEntry[f]?.toString().trim() ?? '';
@@ -190,12 +278,25 @@ class _PatientFormState extends State<PatientForm> {
       }
       Map<String, dynamic> found = {};
       found = _searchHive(serial, cnic);
+      if (found.isEmpty && serial.isNotEmpty) {
+        final presc = LocalStorageService.getLocalPrescription(serial);
+        if (presc != null) {
+          found = presc;
+        }
+      }
       if (found.isEmpty) {
-        final entryKey = '${widget.branchId}-$serial';
-        final entry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
-        final embedded = (entry is Map) ? entry['prescription'] : null;
-        if (embedded is Map && embedded.isNotEmpty) {
-          found = Map<String, dynamic>.from(embedded);
+        final normB = widget.branchId.toLowerCase().trim();
+        final normS = serial.toLowerCase();
+        for (final k in Hive.box(LocalStorageService.entriesBox).keys) {
+          final kStr = k.toString().toLowerCase();
+          if (kStr == '$normB-$normS' || kStr.endsWith('-$normS') || kStr == normS) {
+            final entry = Hive.box(LocalStorageService.entriesBox).get(k);
+            final embedded = (entry is Map) ? entry['prescription'] : null;
+            if (embedded is Map && embedded.isNotEmpty) {
+              found = Map<String, dynamic>.from(embedded);
+              break;
+            }
+          }
         }
       }
       if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty) {
@@ -209,6 +310,20 @@ class _PatientFormState extends State<PatientForm> {
       if (found.isEmpty && serial.isNotEmpty) {
         found = await _fetchFromPrescriptionsScanAll(serial);
         if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
+      }
+      if (found.isEmpty &&
+          (widget.queueEntry['status'] == 'completed' || widget.queueEntry['dispenseStatus'] == 'dispensed') &&
+          (widget.queueEntry['isVitalsOnly'] == true ||
+              widget.queueEntry['vitalsOnly'] == true ||
+              widget.queueEntry['visitReason']?.toString().toLowerCase().contains('vitals') == true)) {
+        found = {
+          ...widget.queueEntry,
+          'condition': widget.queueEntry['condition'] ?? widget.queueEntry['complaint'] ?? 'Vitals Inspection Only',
+          'diagnosis': widget.queueEntry['diagnosis'] ?? 'Vitals Checked',
+          'prescriptions': <Map<String, dynamic>>[],
+          'labResults': <Map<String, dynamic>>[],
+          'isVitalsOnly': true,
+        };
       }
       final rawVitals = widget.queueEntry['vitals'];
       final vitals = (rawVitals is Map) ? Map<String, dynamic>.from(rawVitals) : <String, dynamic>{};
@@ -230,66 +345,38 @@ class _PatientFormState extends State<PatientForm> {
 
   Map<String, dynamic> _searchHive(String serial, String cnic) {
     final normSerial = serial.trim().toLowerCase();
-    final parts      = normSerial.split('-');
-    final numSerial  = parts.length > 1 ? parts.last : normSerial;
     final normCnic   = cnic.trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
+    final normBranch = widget.branchId.trim().toLowerCase();
+    final patientName = (widget.queueEntry['patientName'] ??
+            widget.queueEntry['name'] ??
+            _data['patientName'] ??
+            _data['name'] ??
+            '')
+        .toString()
+        .trim();
 
-    final prescBox = Hive.box(LocalStorageService.prescriptionsBox);
-
-    // 1. Direct key lookups
-    if (normCnic.isNotEmpty && normSerial.isNotEmpty) {
-      final v = prescBox.get('${normCnic}_$normSerial') ?? prescBox.get('${normCnic}_$numSerial');
-      if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
-    }
-    if (normSerial.isNotEmpty) {
-      final v = prescBox.get(normSerial) ?? prescBox.get(numSerial);
-      if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
-    }
-
-    // 2. Scan prescriptionsBox keys
-    for (final key in prescBox.keys) {
-      if (key is! String) continue;
-      final kLower = key.toLowerCase();
-      if (normSerial.isNotEmpty &&
-          (kLower.endsWith('_$normSerial') ||
-           kLower.endsWith('-$normSerial') ||
-           kLower.endsWith('_$numSerial')  ||
-           kLower.endsWith('-$numSerial'))) {
-        final v = prescBox.get(key);
-        if (v is Map && v.isNotEmpty) return Map<String, dynamic>.from(v);
-      }
-    }
-
-    // 3. Scan prescriptionsBox values
-    for (final key in prescBox.keys) {
-      final v = prescBox.get(key);
-      if (v is Map && v.isNotEmpty) {
-        final m = Map<String, dynamic>.from(v);
-        final s = (m['serial'] ?? m['id'] ?? '').toString().trim().toLowerCase();
-        final sParts = s.split('-');
-        final sNum   = sParts.length > 1 ? sParts.last : s;
-        if (s == normSerial || sNum == numSerial) return m;
-      }
-    }
-
-    // 4. Scan entriesBox for embedded prescription
-    final entriesBox = Hive.box(LocalStorageService.entriesBox);
-    for (final key in entriesBox.keys) {
-      final entry = entriesBox.get(key);
-      if (entry is Map) {
-        final eSerial = (entry['serial'] ?? entry['id'] ?? '').toString().trim().toLowerCase();
-        final eParts  = eSerial.split('-');
-        final eNum    = eParts.length > 1 ? eParts.last : eSerial;
-        if (eSerial == normSerial ||
-            eNum == numSerial ||
-            (key is String && (key.toLowerCase().endsWith('-$normSerial') || key.toLowerCase().endsWith('-$numSerial')))) {
-          final embedded = entry['prescription'];
-          if (embedded is Map && embedded.isNotEmpty) {
-            return Map<String, dynamic>.from(embedded);
-          }
+    // 1. Prioritize direct embedded prescription in entriesBox for this exact branch token
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final entriesBox = Hive.box(LocalStorageService.entriesBox);
+        final directEntry = entriesBox.get('$normBranch-$normSerial') ??
+            entriesBox.get('$normBranch-${normSerial.toUpperCase()}') ??
+            entriesBox.get(normSerial);
+        if (directEntry is Map && directEntry['prescription'] is Map) {
+          final emb = directEntry['prescription'];
+          if (emb is Map && emb.isNotEmpty) return Map<String, dynamic>.from(emb);
         }
       }
-    }
+    } catch (_) {}
+
+    // 2. Strict validated lookup in local prescriptions
+    final presc = LocalStorageService.getLocalPrescription(
+      normSerial,
+      cnic: normCnic,
+      patientName: patientName,
+      branchId: widget.branchId,
+    );
+    if (presc != null && presc.isNotEmpty) return presc;
 
     return {};
   }
@@ -411,6 +498,7 @@ class _PatientFormState extends State<PatientForm> {
   static bool _isInjectableType(String? type) {
     final t = (type ?? '').toLowerCase();
     return t.contains('injection') || t.contains('inj') ||
+        t.contains('infusion') || t.contains('inf') ||
         t.contains('drip') || t.contains('syringe') || t.contains('nebulization');
   }
 
@@ -428,6 +516,7 @@ class _PatientFormState extends State<PatientForm> {
       final type = (medMap['type']?.toString() ?? '').toLowerCase();
       final name = (medMap['name']?.toString() ?? '').toLowerCase();
       final isInjOrDripOrIV = type.contains('injection') || type.contains('inj') ||
+                              type.contains('infusion') || type.contains('inf') ||
                               type.contains('drip') || type.contains('iv') || type.contains('i.v') ||
                               name.contains('inj') || name.contains('iv') || name.contains('i.v.');
       final isSyringe = type.contains('syringe') || name.contains('syringe');
@@ -502,6 +591,14 @@ class _PatientFormState extends State<PatientForm> {
         debugPrint('[PatientForm] Hive stock decrement failed $medicineId: $e');
       }
       // Fire and forget Firestore update so it doesn't block UI loop
+      final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString();
+      final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
+      final invCol = CampSessionService.getCampInventoryPath(
+        branchId: branchId,
+        campId: patientCampId,
+        serial: patientSerial,
+      );
+
       Future<void> updateFirestore() async {
         try {
           final conn = await Connectivity().checkConnectivity();
@@ -509,7 +606,7 @@ class _PatientFormState extends State<PatientForm> {
           if (online) {
             final docRef = FirebaseFirestore.instance
                 .collection('branches').doc(branchId)
-                .collection('inventory').doc(medicineId);
+                .collection(invCol).doc(medicineId);
             await FirebaseFirestore.instance.runTransaction((transaction) async {
               final snapshot = await transaction.get(docRef);
               if (snapshot.exists) {
@@ -519,7 +616,7 @@ class _PatientFormState extends State<PatientForm> {
                 transaction.update(docRef, {'quantity': updated});
               }
             });
-            debugPrint('[PatientForm] ✅ Firestore inventory $medicineId -= $qtyNum');
+            debugPrint('[PatientForm] ✅ Firestore $invCol $medicineId -= $qtyNum');
             return;
           }
         } catch (e) {
@@ -529,6 +626,8 @@ class _PatientFormState extends State<PatientForm> {
         await LocalStorageService.enqueueSync({
           'type': 'update_inventory', 'branchId': branchId,
           'inventoryId': medicineId, 'delta': -qtyNum,
+          'campId': patientCampId,
+          'serial': patientSerial,
         });
       }
       updateFirestore();
@@ -539,6 +638,13 @@ class _PatientFormState extends State<PatientForm> {
   Future<void> _deductSyringeIfNeeded(
       String branchId, String serial, List<dynamic> allPrescriptions) async {
     final totalSyringesToDeduct = _getEffectiveSyringeCount(allPrescriptions).toDouble();
+    final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString();
+    final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
+    final invCol = CampSessionService.getCampInventoryPath(
+      branchId: branchId,
+      campId: patientCampId,
+      serial: patientSerial,
+    );
 
     if (totalSyringesToDeduct > 0.0) {
       try {
@@ -573,7 +679,7 @@ class _PatientFormState extends State<PatientForm> {
               if (online) {
                 final docRef = FirebaseFirestore.instance
                     .collection('branches').doc(branchId)
-                    .collection('inventory').doc(rawSyringeId);
+                    .collection(invCol).doc(rawSyringeId);
                 await FirebaseFirestore.instance.runTransaction((transaction) async {
                   final snapshot = await transaction.get(docRef);
                   if (snapshot.exists) {
@@ -583,7 +689,7 @@ class _PatientFormState extends State<PatientForm> {
                     transaction.update(docRef, {'quantity': updated});
                   }
                 });
-                debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore');
+                debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore $invCol');
                 return;
               }
             } catch (e) {
@@ -593,6 +699,8 @@ class _PatientFormState extends State<PatientForm> {
             await LocalStorageService.enqueueSync({
               'type': 'update_inventory', 'branchId': branchId,
               'inventoryId': rawSyringeId, 'delta': -totalSyringesToDeduct,
+              'campId': patientCampId,
+              'serial': patientSerial,
             });
           }
           updateSyringeFirestore();
@@ -638,6 +746,13 @@ class _PatientFormState extends State<PatientForm> {
   Future<void> _deductNeedleIfNeeded(
       String branchId, String serial, List<dynamic> allPrescriptions) async {
     final totalNeedlesToDeduct = _getEffectiveNeedleCount(allPrescriptions).toDouble();
+    final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString();
+    final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
+    final invCol = CampSessionService.getCampInventoryPath(
+      branchId: branchId,
+      campId: patientCampId,
+      serial: patientSerial,
+    );
 
     if (totalNeedlesToDeduct > 0.0) {
       try {
@@ -673,7 +788,7 @@ class _PatientFormState extends State<PatientForm> {
               if (online) {
                 final docRef = FirebaseFirestore.instance
                     .collection('branches').doc(branchId)
-                    .collection('inventory').doc(rawNeedleId);
+                    .collection(invCol).doc(rawNeedleId);
                 await FirebaseFirestore.instance.runTransaction((transaction) async {
                   final snapshot = await transaction.get(docRef);
                   if (snapshot.exists) {
@@ -692,6 +807,8 @@ class _PatientFormState extends State<PatientForm> {
             await LocalStorageService.enqueueSync({
               'type': 'update_inventory', 'branchId': branchId,
               'inventoryId': rawNeedleId, 'delta': -totalNeedlesToDeduct,
+              'campId': patientCampId,
+              'serial': patientSerial,
             });
           }
           updateNeedleFirestore();
@@ -709,7 +826,7 @@ class _PatientFormState extends State<PatientForm> {
     if (_isDispensed) return;
     final days = _daysOfMedicine;
 
-    final allPrescriptions = (_data['prescriptions'] as List?) ?? [];
+    final allPrescriptions = _getPrescriptionsList();
     final medicines = allPrescriptions
         .where((m) => m is Map &&
             (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
@@ -995,15 +1112,24 @@ class _PatientFormState extends State<PatientForm> {
       });
       SyncService().triggerUpload();
       if (mounted) setState(() => _isDispensed = true);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(days > 1
-              ? 'Dispensed $days-day supply successfully'
-              : 'Dispensed successfully'),
-          backgroundColor: Colors.green));
+      try {
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+              content: Text(days > 1
+                  ? 'Dispensed $days-day supply successfully'
+                  : 'Dispensed successfully'),
+              backgroundColor: Colors.green));
+        }
+      } catch (_) {}
       widget.onDispensed?.call();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: Colors.red));
+      debugPrint('[PatientForm] Dispense error: $e');
+      if (mounted) {
+        try {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+              SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: Colors.red));
+        } catch (_) {}
+      }
     } finally {
       if (mounted) setState(() => _isDispensing = false);
     }
@@ -1011,30 +1137,32 @@ class _PatientFormState extends State<PatientForm> {
 
   // ─── UI builders ──────────────────────────────────────────────────────────
 
-  Widget _sectionTitle(String title, IconData icon, RoleThemeData t, {bool isMobile = false}) =>
-      Padding(
-        padding: EdgeInsets.symmetric(vertical: isMobile ? 8 : 12),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: t.accent, size: isMobile ? 15 : 18),
+  Widget _sectionTitle(String title, IconData icon, RoleThemeData t, {bool isMobile = false}) {
+    final isDark = _isDark;
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: isMobile ? 8 : 12),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
           ),
-          const SizedBox(width: 10),
-          Text(
-            title, 
-            style: TextStyle(
-              color: t.textPrimary,
-              fontWeight: FontWeight.w800,
-              fontSize: isMobile ? 15 : 17,
-              letterSpacing: 0.2,
-            ),
+          child: Icon(icon, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 15 : 18),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          title, 
+          style: TextStyle(
+            color: isDark ? const Color(0xFFF1F5F9) : t.textPrimary,
+            fontWeight: FontWeight.w800,
+            fontSize: isMobile ? 15 : 17,
+            letterSpacing: 0.2,
           ),
-        ]),
-      );
+        ),
+      ]),
+    );
+  }
 
   Widget _linedList(List items, RoleThemeData t, {bool isLab = false, bool isMobile = false}) {
     if (items.isEmpty) return const SizedBox.shrink();
@@ -1054,6 +1182,23 @@ class _PatientFormState extends State<PatientForm> {
       children: items.map((item) {
         final abbrev = _getMedAbbrev(item['type']);
         final rawName = item['name']?.toString() ?? '';
+        String dose = (item['dose'] ?? item['dosage'] ?? '').toString().trim();
+        if (dose.isEmpty || dose.contains('+')) {
+          final invId = (item['inventoryId'] ?? item['id'] ?? item['medicineId'])?.toString();
+          if (invId != null && invId.isNotEmpty) {
+            try {
+              if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+                final stockBox = Hive.box(LocalStorageService.stockBox);
+                final stockItem = stockBox.get('stock:$invId') ?? stockBox.get(invId);
+                if (stockItem is Map) {
+                  final stockDose = (stockItem['dose'] ?? stockItem['strength'] ?? '').toString().trim();
+                  if (stockDose.isNotEmpty) dose = stockDose;
+                }
+              }
+            } catch (_) {}
+          }
+        }
+        if (dose.contains('+')) dose = '';
         final displayName = '$abbrev $rawName'.trim();
         final urduLine = PatientFormHelper.buildUrduDosageLine(item);
         final mealUrdu = PatientFormHelper.getMealUrdu(item['meal']?.toString() ?? '');
@@ -1062,6 +1207,7 @@ class _PatientFormState extends State<PatientForm> {
         final perDayQty = ((item['quantity'] ?? 1) as num).toInt();
         final totalQty = isSyrup ? 1 : (isInj ? perDayQty : perDayQty * days);
         
+        final isDark = _isDark;
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: EdgeInsets.symmetric(
@@ -1069,9 +1215,9 @@ class _PatientFormState extends State<PatientForm> {
             vertical: isMobile ? 10 : 12,
           ),
           decoration: BoxDecoration(
-            color: t.bgCardAlt.withValues(alpha: 0.35),
+            color: isDark ? const Color(0xFF1E293B) : t.bgCardAlt.withValues(alpha: 0.35),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: t.bgRule.withValues(alpha: 0.7)),
+            border: Border.all(color: isDark ? const Color(0xFF334155) : t.bgRule.withValues(alpha: 0.7)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1081,13 +1227,37 @@ class _PatientFormState extends State<PatientForm> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayName,
-                      style: TextStyle(
-                        color: t.textPrimary,
-                        fontWeight: FontWeight.w800,
-                        fontSize: isMobile ? 13.5 : 16,
-                      ),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          displayName,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : t.textPrimary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: isMobile ? 13.5 : 16,
+                          ),
+                        ),
+                        if (dose.isNotEmpty) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
+                            ),
+                            child: Text(
+                              dose,
+                              style: TextStyle(
+                                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                                fontSize: isMobile ? 10 : 11.5,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 6),
                     Row(
@@ -1095,13 +1265,13 @@ class _PatientFormState extends State<PatientForm> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: t.accent.withValues(alpha: 0.1),
+                            color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             isSyrup ? '1 Bottle' : (isInj ? 'Single Dose' : '$perDayQty/day'),
                             style: TextStyle(
-                              color: t.accent,
+                              color: isDark ? const Color(0xFF2DD4BF) : t.accent,
                               fontSize: isMobile ? 10 : 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1112,13 +1282,13 @@ class _PatientFormState extends State<PatientForm> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: t.zakat.withValues(alpha: 0.1),
+                              color: isDark ? const Color(0xFF14532D) : t.zakat.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               'Qty: $totalQty total',
                               style: TextStyle(
-                                color: t.zakat,
+                                color: isDark ? const Color(0xFF4ADE80) : t.zakat,
                                 fontSize: isMobile ? 10 : 11,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1142,7 +1312,7 @@ class _PatientFormState extends State<PatientForm> {
                         style: TextStyle(
                           fontFamily: 'Jameel Noori Nastaleeq',
                           fontSize: isMobile ? 15 : 18,
-                          color: t.textSecondary,
+                          color: isDark ? const Color(0xFFE2E8F0) : t.textSecondary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1156,7 +1326,7 @@ class _PatientFormState extends State<PatientForm> {
                           style: TextStyle(
                             fontFamily: 'Jameel Noori Nastaleeq',
                             fontSize: isMobile ? 13 : 15,
-                            color: t.textTertiary,
+                            color: isDark ? const Color(0xFF94A3B8) : t.textTertiary,
                           ),
                         ),
                       ),
@@ -1315,6 +1485,7 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   Widget _buildSyringeSelectionCard(List<dynamic> allPrescriptions, RoleThemeData t, {required bool isMobile}) {
+    final isDark = _isDark;
     final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return const SizedBox.shrink();
     final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 3);
@@ -1323,19 +1494,19 @@ class _PatientFormState extends State<PatientForm> {
       margin: EdgeInsets.only(top: isMobile ? 12 : 16),
       padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        color: t.accent.withValues(alpha: 0.08),
+        color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.3) : t.accent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: t.accent.withValues(alpha: 0.2)),
+        border: Border.all(color: isDark ? const Color(0xFF2DD4BF).withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.15),
+              color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.vaccines_rounded, color: t.accent, size: isMobile ? 22 : 26),
+            child: Icon(Icons.vaccines_rounded, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 22 : 26),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1367,15 +1538,15 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.remove_circle_outline),
-                color: t.accent,
+                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
                 iconSize: isMobile ? 24 : 28,
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: t.accent.withValues(alpha: 0.4)),
+                  border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
                 ),
                 child: Text(
                   '$effectiveCount',
@@ -1391,7 +1562,7 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.add_circle_outline),
-                color: t.accent,
+                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
                 iconSize: isMobile ? 24 : 28,
               ),
             ],
@@ -1402,6 +1573,7 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   Widget _buildNeedleSelectionCard(List<dynamic> allPrescriptions, RoleThemeData t, {required bool isMobile}) {
+    final isDark = _isDark;
     final autoCount = _getAutoNeedleCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return const SizedBox.shrink();
     final effectiveCount = (_selectedNeedleCount ?? autoCount).clamp(0, 3);
@@ -1410,19 +1582,19 @@ class _PatientFormState extends State<PatientForm> {
       margin: EdgeInsets.only(top: isMobile ? 8 : 12),
       padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
+        color: isDark ? const Color(0xFF14532D).withValues(alpha: 0.3) : const Color(0xFFE8F5E9),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFA5D6A7)),
+        border: Border.all(color: isDark ? const Color(0xFF4ADE80).withValues(alpha: 0.4) : const Color(0xFFA5D6A7)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFC8E6C9),
+              color: isDark ? const Color(0xFF14532D) : const Color(0xFFC8E6C9),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.pin_outlined, color: const Color(0xFF2E7D32), size: isMobile ? 22 : 26),
+            child: Icon(Icons.pin_outlined, color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32), size: isMobile ? 22 : 26),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1454,15 +1626,15 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedNeedleCount = (effectiveCount - 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.remove_circle_outline),
-                color: const Color(0xFF2E7D32),
+                color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32),
                 iconSize: isMobile ? 24 : 28,
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFA5D6A7)),
+                  border: Border.all(color: isDark ? const Color(0xFF4ADE80) : const Color(0xFFA5D6A7)),
                 ),
                 child: Text(
                   '$effectiveCount',
@@ -1478,7 +1650,7 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedNeedleCount = (effectiveCount + 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.add_circle_outline),
-                color: const Color(0xFF2E7D32),
+                color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32),
                 iconSize: isMobile ? 24 : 28,
               ),
             ],
@@ -1504,7 +1676,7 @@ class _PatientFormState extends State<PatientForm> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Image.asset('assets/logo/gmwf-1.webp', width: isMobile ? 42 : 54, height: isMobile ? 42 : 54),
+          Image.asset('assets/logo/gmwf-1.webp', width: isMobile ? 54 : 70, height: isMobile ? 54 : 70),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1543,8 +1715,8 @@ class _PatientFormState extends State<PatientForm> {
           ),
           const SizedBox(width: 12),
           Transform.rotate(
-            angle: -0.2,
-            child: Image.asset('assets/images/moon.webp', width: isMobile ? 40 : 50, height: isMobile ? 40 : 50),
+            angle: -0.42,
+            child: Image.asset('assets/images/moon.webp', width: isMobile ? 52 : 68, height: isMobile ? 52 : 68),
           ),
         ],
       ),
@@ -1924,9 +2096,9 @@ class _PatientFormState extends State<PatientForm> {
               vertical: isMobile ? 12 : 18,
             ),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.85),
+              color: _isDark ? const Color(0xFF0F172A).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.85),
               border: Border(
-                top: BorderSide(color: t.bgRule.withValues(alpha: 0.5), width: 1.5),
+                top: BorderSide(color: _isDark ? const Color(0xFF334155) : t.bgRule.withValues(alpha: 0.5), width: 1.5),
               ),
             ),
             child: SafeArea(
@@ -1977,10 +2149,141 @@ class _PatientFormState extends State<PatientForm> {
     );
   }
 
+  Widget _buildVitalsCard(Map<String, dynamic> vitals, RoleThemeData t, {required bool isMobile, required bool isVitalsOnly}) {
+    final bp = (vitals['bp'] ?? 'N/A').toString();
+    final temp = (vitals['temp'] ?? 'N/A').toString();
+    final weight = (vitals['weight'] ?? 'N/A').toString();
+    final sugar = (vitals['sugar'] ?? 'N/A').toString();
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: EdgeInsets.all(isMobile ? 12 : 16),
+      decoration: BoxDecoration(
+        color: isVitalsOnly ? const Color(0xFFF3E8FF) : const Color(0xFFE6FFFA),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isVitalsOnly ? const Color(0xFFD8B4FE) : const Color(0xFF99F6E4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isVitalsOnly ? Icons.health_and_safety_rounded : Icons.monitor_heart_rounded,
+                color: isVitalsOnly ? const Color(0xFF7E22CE) : const Color(0xFF0F766E),
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isVitalsOnly ? '🩺 Vitals Inspection Token (Vital Signs)' : '🩺 Patient Vital Signs',
+                style: TextStyle(
+                  fontSize: isMobile ? 13 : 15,
+                  fontWeight: FontWeight.bold,
+                  color: isVitalsOnly ? const Color(0xFF6B21A8) : const Color(0xFF0F766E),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _vitalBadge(
+                  label: 'Blood Pressure',
+                  value: (bp.isEmpty || bp == 'N/A') ? 'N/A' : bp,
+                  icon: Icons.favorite_rounded,
+                  color: const Color(0xFFDC2626),
+                  isMobile: isMobile,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _vitalBadge(
+                  label: 'Temperature',
+                  value: (temp.isEmpty || temp == 'N/A') ? 'N/A' : '$temp °C',
+                  icon: Icons.thermostat_rounded,
+                  color: const Color(0xFFD97706),
+                  isMobile: isMobile,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _vitalBadge(
+                  label: 'Weight',
+                  value: (weight.isEmpty || weight == 'N/A') ? 'N/A' : '$weight kg',
+                  icon: Icons.scale_rounded,
+                  color: const Color(0xFF2563EB),
+                  isMobile: isMobile,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _vitalBadge(
+                  label: 'Blood Sugar',
+                  value: (sugar.isEmpty || sugar == 'N/A') ? 'N/A' : '$sugar mg/dL',
+                  icon: Icons.water_drop_rounded,
+                  color: const Color(0xFF0D9488),
+                  isMobile: isMobile,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _vitalBadge({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+    required bool isMobile,
+  }) {
+    final isDark = _isDark;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: isMobile ? 14 : 16, color: color),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: isMobile ? 8.5 : 10,
+              fontWeight: FontWeight.w600,
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: isMobile ? 10.5 : 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildContent(RoleThemeData t, {required bool isMobile}) {
-    final prescriptions = (_data['prescriptions'] ?? []) as List;
-    final labTests = (_data['labResults'] ?? []) as List;
-    final diagnosis = _data['diagnosis']?.toString() ?? '';
+    final prescriptions = _getPrescriptionsList();
+    final labTests = _getLabResultsList();
+    final diagnosis = _getDiagnosisText();
     final patientName = _getResolvedPatientName();
     
     final serial = _resolvedSerial;
@@ -1989,6 +2292,22 @@ class _PatientFormState extends State<PatientForm> {
     final ageDisplay = ageVal != 'N/A' ? '$ageVal Years' : 'N/A';
     final cnic = _getResolvedCnic();
     final queueType = _resolvedQueueType.toUpperCase();
+
+    final rawVitals = widget.queueEntry['vitals'] ?? _data['vitals'];
+    final vitals = (rawVitals is Map) ? Map<String, dynamic>.from(rawVitals) : <String, dynamic>{};
+    final isVitalsOnly = widget.queueEntry['isVitalsOnly'] == true ||
+        widget.queueEntry['vitalsOnly'] == true ||
+        _data['isVitalsOnly'] == true ||
+        _data['vitalsOnly'] == true;
+
+    final bp = (vitals['bp'] ?? '').toString();
+    final temp = (vitals['temp'] ?? '').toString();
+    final weight = (vitals['weight'] ?? '').toString();
+    final sugar = (vitals['sugar'] ?? '').toString();
+    final hasAnyVitals = (bp.isNotEmpty && bp != 'N/A') ||
+        (temp.isNotEmpty && temp != 'N/A') ||
+        (weight.isNotEmpty && weight != 'N/A') ||
+        (sugar.isNotEmpty && sugar != 'N/A');
 
     final inventoryMeds = prescriptions.where((m) => m['inventoryId'] != null && !PatientFormHelper.isInjectable(m)).toList();
     final inventoryInjectables = prescriptions.where((m) => m['inventoryId'] != null && PatientFormHelper.isInjectable(m)).toList();
@@ -2039,6 +2358,25 @@ class _PatientFormState extends State<PatientForm> {
                   ],
                 ),
               ),
+              if (isVitalsOnly)
+                Container(
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF3E8FF),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFFC084FC)),
+                  ),
+                  child: const Text(
+                    '🩺 VITALS',
+                    style: TextStyle(
+                      color: Color(0xFF7E22CE),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
@@ -2091,6 +2429,48 @@ class _PatientFormState extends State<PatientForm> {
         _buildDaysBanner(t, isMobile: isMobile),
         const SizedBox(height: 12),
         patientInfoCard,
+        if (hasAnyVitals || isVitalsOnly)
+          _buildVitalsCard(vitals, t, isMobile: isMobile, isVitalsOnly: isVitalsOnly),
+        if (isVitalsOnly && prescriptions.isEmpty)
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(top: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F3FF),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFDDD6FE)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.health_and_safety_rounded, color: Color(0xFF7C3AED), size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Text(
+                        'Vitals Inspection Token',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF5B21B6),
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'This patient arrived for vitals inspection only. No medicines are prescribed.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFF6D28D9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         if (diagnosis.isNotEmpty) ...[
           SizedBox(height: isMobile ? 12 : 20),
           _sectionTitle('Diagnosis', Icons.medical_services, t, isMobile: isMobile),
@@ -2145,8 +2525,9 @@ class _PatientFormState extends State<PatientForm> {
       ],
     );
 
+    final isDark = _isDark;
     return Container(
-      color: Colors.white,
+      color: isDark ? const Color(0xFF0F172A) : Colors.white,
       padding: EdgeInsets.all(basePadding),
       child: isMobile
           ? Column(crossAxisAlignment: CrossAxisAlignment.start,
@@ -2154,7 +2535,7 @@ class _PatientFormState extends State<PatientForm> {
           : IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
               if (labTests.isNotEmpty) ...[
                 Expanded(flex: 3, child: _buildLabOrPhysioSection(labTests, t, isMobile: false)),
-                Container(width: 1, color: Colors.grey.shade300,
+                Container(width: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
                     margin: const EdgeInsets.symmetric(horizontal: 20)),
               ],
               Expanded(flex: 7, child: medicineBody),
@@ -2162,14 +2543,14 @@ class _PatientFormState extends State<PatientForm> {
     );
   }
 
-  @override
   bool get _isDark {
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
       }
     } catch (_) {}
-    return false;
+    return Theme.of(context).brightness == Brightness.dark;
   }
 
   @override

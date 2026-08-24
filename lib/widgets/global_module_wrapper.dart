@@ -73,13 +73,13 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   @override
   void initState() {
     super.initState();
-    final rawBranchId = widget.userData['branchId'] as String? ?? '';
+    final rawBranchId = (widget.userData['branchId'] as String? ?? '').trim();
+    final normalizedBranchId = (rawBranchId == 'global' || rawBranchId.isEmpty) ? 'all' : rawBranchId;
     if (widget.module.id == 'finance' && !_isBranchScoped) {
       _selectedBranchId = 'all';
       _selectedBranchName = 'All Branches (Consolidated)';
     } else {
-      _selectedBranchId =
-          rawBranchId == _kGlobalBranchId ? null : rawBranchId.trim();
+      _selectedBranchId = normalizedBranchId;
     }
 
     _pillAnim = AnimationController(
@@ -232,13 +232,16 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     if (_selectedBranchId != null) {
       final exists = _branches.any((b) => b['id'] == _selectedBranchId);
       if (!exists) {
-        _selectedBranchId = null;
-        _selectedBranchName = null;
+        _selectedBranchId = 'all';
+        _selectedBranchName = 'All Branches (Consolidated)';
       } else {
         final b = _branches.firstWhere((b) => b['id'] == _selectedBranchId);
         _selectedBranchName = b['name'];
         _pillAnim.forward();
       }
+    } else {
+      _selectedBranchId = 'all';
+      _selectedBranchName = 'All Branches (Consolidated)';
     }
   }
 

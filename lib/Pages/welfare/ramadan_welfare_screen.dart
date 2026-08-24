@@ -216,7 +216,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
     }
     final phoneDigits = phone.replaceAll(RegExp(r'[^0-9]'), '');
     if (phoneDigits.length != 11) {
-      _showError('Please enter a valid 11-digit Pakistani mobile phone number (e.g. 03001234567).');
+      _showError('Please enter a valid 11-digit mobile phone number (e.g. 03001234567).');
       return;
     }
 

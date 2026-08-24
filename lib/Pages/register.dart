@@ -15,6 +15,7 @@ import '../services/auth_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/local_storage_service.dart';
 import '../services/image_upload_service.dart';
+import '../services/zkteco_network_service.dart';
 import '../widgets/media_upload_tile.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
@@ -35,7 +36,7 @@ class _RegisterState extends State<Register>
   String? _selectedDepartment;
   String? _selectedRole;
   String? _selectedBranch;
-  String? _selectedDispensary; // Legacy single dispensary selection ('kapayya', 'haji_camp')
+  String? _selectedDispensary; // Legacy single dispensary selection ('saddar', 'haji_camp')
   final Set<String> _selectedDispensaries = {}; // Multi-camp assignment
   final Map<String, String> _campSessions = {}; // Camp to mandatory session mapping
   String? _selectedDegree;
@@ -48,6 +49,7 @@ class _RegisterState extends State<Register>
   final TextEditingController _addressController        = TextEditingController();
   final TextEditingController _bankNameController       = TextEditingController();
   final TextEditingController _bankAccountController    = TextEditingController();
+  final TextEditingController _biometricPinController   = TextEditingController();
   final TextEditingController _customDegreeController   = TextEditingController();
   final TextEditingController _salaryController         = TextEditingController();
   final TextEditingController _studentRollSearchController = TextEditingController();
@@ -351,9 +353,18 @@ class _RegisterState extends State<Register>
         }
       }
 
+      final enteredPin = _biometricPinController.text.trim();
+      if (enteredPin.isNotEmpty) {
+        final conflict = ZkTecoNetworkService.findPinConflict(enteredPin);
+        if (conflict != null) {
+          _snack('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.', error: true);
+          return;
+        }
+      }
+
       final branchId = _getBranchId();
 
-      await _authService.signUp(
+      final registeredUid = await _authService.signUp(
         email:              email,
         password:           _passwordController.text.trim(),
         username:           username,
@@ -367,6 +378,7 @@ class _RegisterState extends State<Register>
         bankAccount:        _bankAccountController.text.trim().isNotEmpty ? _bankAccountController.text.trim() : null,
         degree:             degree.isNotEmpty ? degree : null,
         salary:             salary,
+        biometricPin:       enteredPin.isNotEmpty ? enteredPin : null,
         studentId:          _selectedStudentId, // Pass the student ID
         dispensaryId:       _selectedDispensary, // Pass dispensary sub-location ('kapayya', 'haji_camp')
         dispensaryIds:      _selectedDispensaries.toList(), // Pass multi-camp assignments
@@ -383,9 +395,20 @@ class _RegisterState extends State<Register>
         degreeBase64:         _degreeBase64,
       );
 
+      if (enteredPin.isNotEmpty && registeredUid.isNotEmpty) {
+        await ZkTecoNetworkService.assignPinToEntity(
+          entityId: registeredUid,
+          entityName: username,
+          entityType: 'user',
+          branchId: branchId,
+          customPin: enteredPin,
+        );
+      }
+
       final registeredName = _usernameController.text.trim();
       // Reset the form so the admin can register another user without leaving the page.
       _formKey.currentState!.reset();
+      _biometricPinController.clear();
       setState(() {
         _selectedDepartment   = null;
         _selectedRole         = null;
@@ -558,7 +581,7 @@ class _RegisterState extends State<Register>
                                       validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
                                   _buildField(t,
                                       controller: _phoneController,
-                                      label: 'Phone',
+                                      label: 'Phone (11 digits)',
                                       icon: Icons.phone_outlined,
                                       keyboardType: TextInputType.phone,
                                       inputFormatters: [
@@ -615,6 +638,13 @@ class _RegisterState extends State<Register>
                                     icon: Icons.payments_outlined,
                                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
+                                const SizedBox(height: 14),
+                                _buildField(t,
+                                    controller: _biometricPinController,
+                                    label: 'Biometric Scanner PIN (Optional)',
+                                    icon: Icons.fingerprint_rounded,
+                                    keyboardType: TextInputType.number,
+                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
                               ]),
                             ),
 
@@ -1093,7 +1123,7 @@ class _RegisterState extends State<Register>
     // Default for Karachi if not in local box yet
     if (bId == 'karachi' && rawDispensaries.isEmpty) {
       rawDispensaries = [
-        {'id': 'kapayya', 'name': 'Kapayya Dispensary'},
+        {'id': 'saddar', 'name': 'Saddar Dispensary'},
         {'id': 'haji_camp', 'name': 'Haji Camp Dispensary'},
       ];
     }

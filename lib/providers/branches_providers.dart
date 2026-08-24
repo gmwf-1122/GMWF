@@ -9,6 +9,7 @@ import 'dart:io' as io;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/serials_service.dart';
@@ -21,6 +22,9 @@ import '../services/serials_service.dart';
 /// Holds the optional branchId for single-branch (supervisor) mode.
 /// Set this from the widget before watching [branchesListProvider].
 final singleBranchIdProvider = StateProvider<String?>((ref) => null);
+
+/// Holds the active branchId tab selected externally (e.g. from Dashboard performance table).
+final selectedBranchTabIdProvider = StateProvider<String?>((ref) => null);
 
 /// Streams the list of branches as [{id, name}] maps, sorted by name.
 final branchesListProvider =
@@ -71,6 +75,9 @@ final branchTypeFilterProvider = StateProvider<String?>((ref) => null);
 
 /// Selected sub-dispensary facility filter: null = All, 'kapayya', 'haji_camp'
 final branchSubDispensaryFilterProvider = StateProvider<String?>((ref) => null);
+
+/// Selected shift filter: null = All, 'day', 'night'
+final branchShiftFilterProvider = StateProvider<String?>((ref) => null);
 
 final branchMultiDayFilterProvider = StateProvider<bool>((ref) => false);
 
@@ -128,7 +135,21 @@ class DispensaryNotifier
     ref.onDispose(() {
       _todaySubscription?.cancel();
     });
-    return const DispensaryState();
+
+    final dateRange = ref.watch(branchDateRangeProvider);
+    final DateTime effectiveStart;
+    final DateTime effectiveEnd;
+    if (dateRange.start != null && dateRange.end != null) {
+      effectiveStart = dateRange.start!;
+      effectiveEnd = dateRange.end!.add(const Duration(days: 1));
+    } else {
+      final now = DateTime.now();
+      effectiveStart = DateTime(now.year, now.month, now.day);
+      effectiveEnd = DateTime(now.year, now.month, now.day + 1);
+    }
+
+    Future.microtask(() => load(effectiveStart, effectiveEnd));
+    return const DispensaryState(isSyncing: true);
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -254,8 +275,7 @@ class DispensaryNotifier
         .snapshots()
         .listen((snap) async {
       try {
-        final rawDocs =
-            snap.docs.map((d) => Map<String, dynamic>.from(d.data())).toList();
+        final rawDocs = await _fetchDispensaryDocsForDay(todayKey);
         List<Map<String, dynamic>> enrichedToday;
         try {
           enrichedToday =
@@ -295,14 +315,7 @@ class DispensaryNotifier
   Future<void> _fetchAndMergeToday(
       String todayKey, List<Map<String, dynamic>> currentList) async {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('branches/$branchId/dispensary/$todayKey/$todayKey')
-          .get();
-      final rawDocs = snap.docs.map((d) {
-        final m = Map<String, dynamic>.from(d.data());
-        if ((m['serial'] ?? '').toString().isEmpty) m['serial'] = d.id;
-        return m;
-      }).toList();
+      final rawDocs = await _fetchDispensaryDocsForDay(todayKey);
 
       List<Map<String, dynamic>> enrichedToday;
       try {
@@ -325,10 +338,6 @@ class DispensaryNotifier
       await _computeVisitsAndEmit(currentList);
     } catch (e, stack) {
       print('[DispensaryNotifier] _fetchAndMergeToday error: $e');
-      try {
-        final file = io.File('e:/GMWF/gmwf/debug_branches.txt');
-        await file.writeAsString('\n=== ERROR IN _fetchAndMergeToday ===\n$e\n$stack\n', mode: io.FileMode.append);
-      } catch (_) {}
     }
   }
 
@@ -396,23 +405,83 @@ class DispensaryNotifier
 
   Future<List<Map<String, dynamic>>> _fetchDispensaryDocsForDay(
       String dayKey) async {
+    final Map<String, Map<String, dynamic>> combined = {};
+
+    // 1. Try Firestore dispensary collection
     try {
       final snap = await FirebaseFirestore.instance
           .collection('branches/$branchId/dispensary/$dayKey/$dayKey')
-          .get();
-      return snap.docs.map((doc) {
+          .get()
+          .timeout(const Duration(seconds: 4));
+      for (final doc in snap.docs) {
         final d = Map<String, dynamic>.from(doc.data());
         d['id'] = doc.id;
-        return d;
-      }).toList();
-    } catch (e, stack) {
-      print('[DispensaryNotifier] _fetchDispensaryDocsForDay error: $e');
-      try {
-        final file = io.File('e:/GMWF/gmwf/debug_branches.txt');
-        await file.writeAsString('\n=== ERROR IN _fetchDispensaryDocsForDay ===\n$e\n$stack\n', mode: io.FileMode.append);
-      } catch (_) {}
-      rethrow;
-    }
+        final s = (d['serial'] ?? doc.id).toString().trim().toLowerCase();
+        if (s.isNotEmpty) combined[s] = d;
+      }
+    } catch (_) {}
+
+    // 2. Try Firestore serials collections if needed
+    try {
+      final queues = ['zakat', 'non-zakat', 'gmwf'];
+      final snaps = await Future.wait(queues.map((q) => FirebaseFirestore.instance
+          .collection('branches/$branchId/serials/$dayKey/$q')
+          .where('dispenseStatus', isEqualTo: 'dispensed')
+          .get()
+          .timeout(const Duration(seconds: 3)))).catchError((_) => <QuerySnapshot<Map<String, dynamic>>>[]);
+      for (final snap in snaps) {
+        for (final doc in snap.docs) {
+          final d = Map<String, dynamic>.from(doc.data());
+          d['id'] = doc.id;
+          final s = (d['serial'] ?? doc.id).toString().trim().toLowerCase();
+          if (s.isNotEmpty && !combined.containsKey(s)) combined[s] = d;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Try Local Storage (dispensaryBox & entriesBox)
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+        final dBox = Hive.box(LocalStorageService.dispensaryBox);
+        for (final k in dBox.keys) {
+          final val = dBox.get(k);
+          if (val is Map) {
+            final d = Map<String, dynamic>.from(val);
+            final b = (d['branchId'] ?? '').toString().toLowerCase().trim();
+            final dk = (d['dateKey'] ?? d['date'] ?? '').toString().trim();
+            if ((b == branchId || b.isEmpty) && (dk == dayKey || dk.isEmpty)) {
+              final s = (d['serial'] ?? d['id'] ?? k).toString().trim().toLowerCase();
+              if (s.isNotEmpty && !combined.containsKey(s)) combined[s] = d;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final eBox = Hive.box(LocalStorageService.entriesBox);
+        for (final k in eBox.keys) {
+          final val = eBox.get(k);
+          if (val is Map) {
+            final d = Map<String, dynamic>.from(val);
+            final b = (d['branchId'] ?? '').toString().toLowerCase().trim();
+            final dk = (d['dateKey'] ?? '').toString().trim();
+            final status = (d['dispenseStatus'] ?? d['status'] ?? '').toString().toLowerCase().trim();
+            if ((b == branchId || b.isEmpty) && dk == dayKey && (status == 'dispensed' || status == 'completed')) {
+              final s = (d['serial'] ?? d['id'] ?? k).toString().trim().toLowerCase();
+              final parts = s.split('-');
+              final canonical = parts.length > 2 ? '${parts[1]}-${parts[2]}' : (parts.length > 1 ? '${parts[0]}-${parts[1]}' : s);
+              if (!combined.containsKey(s) && !combined.containsKey(canonical)) {
+                combined[canonical] = d;
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    return combined.values.toList();
   }
 
   // ── Static utility helpers ──────────────────────────────────────────────────
@@ -511,9 +580,11 @@ final dispensaryProvider = AutoDisposeNotifierProviderFamily<DispensaryNotifier,
     DispensaryState, String>(DispensaryNotifier.new);
 
 /// Streams the serials count summary for a given branchId, automatically
-/// reacting to date range changes.
+/// reacting to date range, sub-dispensary, and shift changes.
 final serialsSummaryProvider = StreamProvider.family<Map<String, int>, String>((ref, branchId) {
   final dateRange = ref.watch(branchDateRangeProvider);
+  final subFilter = ref.watch(branchSubDispensaryFilterProvider);
+  final shiftFilter = ref.watch(branchShiftFilterProvider);
   
   // Calculate effectiveStart and effectiveEnd
   final DateTime effectiveStart;
@@ -527,5 +598,28 @@ final serialsSummaryProvider = StreamProvider.family<Map<String, int>, String>((
     effectiveEnd = DateTime(now.year, now.month, now.day + 1);
   }
   
-  return serialsCountStream(branchId, effectiveStart, effectiveEnd);
+  return serialsCountStream(
+    branchId, 
+    effectiveStart, 
+    effectiveEnd, 
+    subDispensary: subFilter,
+    shift: shiftFilter,
+  );
+});
+
+/// Streams the full breakdown matrix (Saddar vs Haji Camp, Day vs Night) for executive comparison.
+final facilityShiftBreakdownProvider = StreamProvider.family<Map<String, Map<String, int>>, String>((ref, branchId) {
+  final dateRange = ref.watch(branchDateRangeProvider);
+  final DateTime effectiveStart;
+  final DateTime effectiveEnd;
+  if (dateRange.start != null && dateRange.end != null) {
+    effectiveStart = dateRange.start!;
+    effectiveEnd = dateRange.end!.add(const Duration(days: 1));
+  } else {
+    final now = DateTime.now();
+    effectiveStart = DateTime(now.year, now.month, now.day);
+    effectiveEnd = DateTime(now.year, now.month, now.day + 1);
+  }
+
+  return facilityShiftBreakdownStream(branchId, effectiveStart, effectiveEnd);
 });

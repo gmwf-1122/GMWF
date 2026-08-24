@@ -1,4 +1,4 @@
-// lib/realtime/realtime_events.dart
+import 'dart:math';
 
 class RealtimeEvents {
   // ---- Core protocol keys ----
@@ -103,8 +103,18 @@ class RealtimeEvents {
     final cleanData = Map<String, dynamic>.from(data);
     cleanData.remove('branchId'); // Remove if accidentally included in data
     
+    final msgId = 'msg_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999999)}';
+    final version = (data['version'] is int)
+        ? (data['version'] as int)
+        : (int.tryParse(data['version']?.toString() ?? '') ?? DateTime.now().millisecondsSinceEpoch);
+    final deviceId = (data['deviceId'] ?? data['device_id'] ?? data['_deviceId'])?.toString() ?? 'device_local';
+
     final map = {
       eventType: type,
+      'messageId': msgId,
+      '_messageId': msgId,
+      'version': version,
+      'deviceId': deviceId,
       RealtimeEvents.data: cleanData,
       RealtimeEvents.timestamp: DateTime.now().toIso8601String(),
     };

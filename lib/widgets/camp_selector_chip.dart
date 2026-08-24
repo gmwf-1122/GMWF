@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 
 /// Reusable Camp Selector Chip for AppBars & Headers.
@@ -29,16 +30,32 @@ class CampSelectorChip extends StatefulWidget {
 class _CampSelectorChipState extends State<CampSelectorChip> {
   @override
   Widget build(BuildContext context) {
-    if (widget.branchId != null && !CampSessionService.hasCampsForBranch(widget.branchId)) {
+    final effBranch = widget.branchId ?? (() {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          final uData = box.get('user_data') ?? box.get('currentUser');
+          if (uData is Map) {
+            final b = (uData['branchId'] ?? uData['branch'] ?? uData['selectedBranchId'])?.toString();
+            if (b != null && b.isNotEmpty) return b;
+          }
+          final cb = box.get('current_branch_id')?.toString();
+          if (cb != null && cb.isNotEmpty) return cb;
+        }
+      } catch (_) {}
+      return null;
+    })();
+
+    if (effBranch != null && !CampSessionService.hasCampsForBranch(effBranch)) {
       return const SizedBox.shrink(); // Non-camp branches (Madrassa, School, Office, etc.) do NOT display camp chips!
     }
 
-    final activeCampId = CampSessionService.getActiveCamp() ?? 'kapayya';
+    final activeCampId = CampSessionService.getActiveCamp(effBranch) ?? 'saddar';
     final activeCampLabel = CampSessionService.getCampLabel(activeCampId);
     final options = CampSessionService.getAvailableCampOptions();
 
     // Hide entirely for single-camp users who have no need to switch
-    if (options.length <= 1) {
+    if (options.length <= 1 || CampSessionService.isSingleContextUser(branchId: effBranch)) {
       return const SizedBox.shrink();
     }
 

@@ -22,7 +22,7 @@ class InventoryPdfHelper {
 
   // ── Type helpers ──────────────────────────────────────────────────────────
   static const _typeOrder = [
-    'Tablet', 'Capsule', 'Syrup', 'Injection',
+    'Tablet', 'Capsule', 'Syrup', 'Injection', 'Infusion',
     'Drip', 'Drip Set', 'Syringe', 'Cannula', 'Needle', 'Nebulization',
   ];
 
@@ -36,7 +36,8 @@ class InventoryPdfHelper {
         'Capsule'      => 'CAPSULES',
         'Syrup'        => 'SYRUPS',
         'Injection'    => 'INJECTIONS',
-        'Drip'         => 'DRIPS',
+        'Infusion'     => 'INFUSIONS',
+        'Drip'         => 'INFUSIONS',
         'Drip Set'     => 'DRIP SETS',
         'Syringe'      => 'SYRINGES',
         'Cannula'      => 'CANNULAS',
@@ -50,7 +51,8 @@ class InventoryPdfHelper {
         'Capsule'      => 'Cap.',
         'Syrup'        => 'Syr.',
         'Injection'    => 'Inj.',
-        'Drip'         => 'Drip',
+        'Infusion'     => 'Inf.',
+        'Drip'         => 'Inf.',
         'Drip Set'     => 'D.Set',
         'Syringe'      => 'Syg.',
         'Cannula'      => 'Can.',

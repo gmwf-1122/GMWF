@@ -8,6 +8,7 @@ import 'package:collection/collection.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/finance_ledger_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/permission_service.dart';
 import 'shared_widgets.dart';
@@ -16,6 +17,7 @@ import 'employee_detail_page.dart';
 import 'finance_report_helper.dart';
 import 'employee_report_page.dart';
 import '../settings/biometric_device_manager_page.dart';
+import '../../services/zkteco_network_service.dart';
 
 
 class EmployeesTab extends StatefulWidget {
@@ -42,6 +44,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
   String _deptFilter = 'All';
   String _statusFilter = 'Active';
   String _branchFilter = 'All';
+  String _enrollmentFilter = 'All'; // 'All', 'Enrolled', 'Not Enrolled'
 
   // Defaults used to decide whether a filter counts as "active" for the
   // Filters button badge + removable chip row. See redesign plan §3.C:
@@ -60,6 +63,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
     if (_deptFilter != 'All') count++;
     if (_branchFilter != 'All') count++;
     if (_statusFilter != _defaultStatus) count++;
+    if (_enrollmentFilter != 'All') count++;
     return count;
   }
 
@@ -90,6 +94,50 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final h = (hue + 360) % 360;
     final col = HSLColor.fromAHSL(1.0, h, 0.28, 0.88).toColor();
     return col;
+  }
+
+  bool get _isBranchScopedUser {
+    final role = widget.userRole.toLowerCase().trim();
+    if (role.contains('branch manager') || role.contains('branch_manager') || role == 'bm' || role == 'supervisor') {
+      return true;
+    }
+    if (Hive.isBoxOpen('local_users')) {
+      final curUser = Hive.box('local_users').values.firstOrNull;
+      if (curUser is Map) {
+        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
+        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  String _getEffectiveUserBranch() {
+    if (Hive.isBoxOpen('local_users')) {
+      final curUser = Hive.box('local_users').values.firstOrNull;
+      if (curUser is Map) {
+        final bId = (curUser['branchId']?.toString() ?? '').trim();
+        if (bId.isNotEmpty && bId != 'all') return bId;
+      }
+    }
+    return widget.branchId.isNotEmpty ? widget.branchId : 'karachi';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isBranchScopedUser) {
+      _branchFilter = _getEffectiveUserBranch();
+    }
+  }
+
+  @override
+  void didUpdateWidget(EmployeesTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_isBranchScopedUser) {
+      _branchFilter = _getEffectiveUserBranch();
+    }
   }
 
   @override
@@ -164,6 +212,15 @@ class _EmployeesTabState extends State<EmployeesTab> {
             if (_statusFilter == 'Temporary Leave' && status != 'Temporary Leave') return false;
             if (_statusFilter == 'Left' && status != 'Left') return false;
             if (_statusFilter == 'Inactive' && status == 'Active') return false;
+
+            // Apply Biometric Enrollment status
+            if (_enrollmentFilter != 'All') {
+              final empId = emp['localId']?.toString() ?? emp['id']?.toString() ?? '';
+              final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+              final isEnrolled = cred != null && cred.active && cred.biometricPin.isNotEmpty;
+              if (_enrollmentFilter == 'Enrolled' && !isEnrolled) return false;
+              if (_enrollmentFilter == 'Not Enrolled' && isEnrolled) return false;
+            }
 
             if (query.isNotEmpty) {
               final name = emp['name']?.toString().toLowerCase() ?? '';
@@ -329,6 +386,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   _buildFilterChip('Branch: ${_getBranchName(_branchFilter)}', t, () => setState(() => _branchFilter = 'All')),
                 if (_statusFilter != _defaultStatus)
                   _buildFilterChip('Status: $_statusFilter', t, () => setState(() => _statusFilter = _defaultStatus)),
+                if (_enrollmentFilter != 'All')
+                  _buildFilterChip('Biometrics: $_enrollmentFilter', t, () => setState(() => _enrollmentFilter = 'All')),
               ],
             ),
           ],
@@ -413,6 +472,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             _deptFilter = 'All';
                             _branchFilter = 'All';
                             _statusFilter = _defaultStatus;
+                            _enrollmentFilter = 'All';
                           });
                           setState(() {});
                         },
@@ -421,6 +481,16 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     ],
                   ),
                   const SizedBox(height: 10),
+                  buildDropdownField(
+                    label: 'Biometric Enrollment',
+                    value: _enrollmentFilter,
+                    items: const ['All', 'Enrolled', 'Not Enrolled'],
+                    onChanged: (val) {
+                      setSheetState(() => _enrollmentFilter = val!);
+                      setState(() {});
+                    },
+                    theme: t,
+                  ),
                   buildDropdownField(
                     label: 'Role',
                     value: _roleFilter,
@@ -444,7 +514,29 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     },
                     theme: t,
                   ),
-                  if (widget.branches.length > 1)
+                  if (_isBranchScopedUser) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFA7F3D0)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lock_rounded, size: 16, color: Color(0xFF059669)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Branch: ${_getBranchName(_branchFilter)} (Locked)',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF064E3B)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else if (widget.branches.length > 1)
                     StatefulBuilder(
                       builder: (filterBranchCtx, setFilterBranchState) {
                         final allBranches = FinanceLocalStorage.getAllBranches(widget.branches)
@@ -567,11 +659,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final displayItems = <Map<String, dynamic>>[];
     for (final branchKey in sortedBranches) {
       final branchDepts = grouped[branchKey]!;
-      final sortedDepartments = branchDepts.keys.toList()..sort((a, b) {
-        if (a == 'Unassigned') return 1;
-        if (b == 'Unassigned') return -1;
-        return a.compareTo(b);
-      });
+      final sortedDepartments = FinanceLedgerStorage.sortDepartmentsCanonical(branchDepts.keys);
 
       final branchCount = sortedDepartments.fold<int>(0, (count, deptKey) => count + branchDepts[deptKey]!.length);
       displayItems.add({'type': 'branchHeader', 'branchName': _displayBranchName(branchKey), 'count': branchCount});
@@ -652,41 +740,68 @@ class _EmployeesTabState extends State<EmployeesTab> {
   }
 
   Widget _buildDepartmentHeader(String departmentName, int count, RoleThemeData t) {
-    final col = _mutedColorForKey(departmentName);
+    final isOffice = departmentName.toUpperCase().contains('OFFICE');
+    final headerBg = isOffice ? const Color(0xFFECFDF5) : t.bgCardAlt;
+    final headerBorder = isOffice ? const Color(0xFFA7F3D0) : t.bgRule;
+    final iconColor = isOffice ? const Color(0xFF059669) : const Color(0xFF064E3B);
+    final titleColor = isOffice ? const Color(0xFF064E3B) : t.textPrimary;
+
     return Container(
-      margin: const EdgeInsets.only(top: 6, bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      margin: const EdgeInsets.only(top: 10, bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: t.bgCardAlt,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: t.bgRule),
+        color: headerBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: headerBorder, width: isOffice ? 1.5 : 1.0),
+        boxShadow: isOffice ? const [
+          BoxShadow(color: Color(0x08059669), blurRadius: 8, offset: Offset(0, 2)),
+        ] : [],
       ),
       child: Row(
         children: [
-          Icon(Icons.label_outline_rounded, color: col.withOpacity(0.95), size: 16),
+          Icon(
+            isOffice ? Icons.business_rounded : Icons.label_outline_rounded,
+            color: iconColor,
+            size: 16,
+          ),
           const SizedBox(width: 8),
           Text(
             departmentName.toUpperCase(),
             style: TextStyle(
-              color: t.textPrimary,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
-              fontSize: 11,
-              letterSpacing: 0.5,
+              color: titleColor,
+              letterSpacing: 0.8,
             ),
           ),
+          if (isOffice) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: const Color(0xFF059669),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'TOP',
+                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 0.5),
+              ),
+            ),
+          ],
           const Spacer(),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: col.withOpacity(0.12),
+              color: isOffice ? const Color(0xFF059669).withValues(alpha: 0.12) : t.bgCard,
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: isOffice ? const Color(0xFFA7F3D0) : t.bgRule),
             ),
             child: Text(
-              '$count EMPLOYEES',
+              '$count EMPLOYEE${count == 1 ? '' : 'S'}',
               style: TextStyle(
-                color: col.withOpacity(0.95),
-                fontSize: 9,
-                fontWeight: FontWeight.bold,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: isOffice ? const Color(0xFF059669) : t.textSecondary,
               ),
             ),
           ),
@@ -747,6 +862,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 radius: 16,
                 imageUrl: emp['profilePictureUrl']?.toString(),
                 imagePath: emp['profilePicturePath']?.toString(),
+                gender: emp['gender']?.toString(),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -769,16 +885,81 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       '$role • $dept',
                       style: TextStyle(fontSize: 12, color: t.textSecondary),
                     ),
-                    if (branchName.isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.location_on_outlined, size: 11, color: t.textTertiary),
-                          const SizedBox(width: 4),
-                          Text(branchName, style: TextStyle(fontSize: 11, color: t.textTertiary)),
-                        ],
-                      ),
-                    ],
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (branchName.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_on_outlined, size: 11, color: t.textTertiary),
+                              const SizedBox(width: 3),
+                              Text(branchName, style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                            ],
+                          ),
+                        Builder(
+                          builder: (_) {
+                            final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+                            final isEnrolled = cred != null && cred.active && cred.biometricPin.isNotEmpty;
+
+                            if (isEnrolled) {
+                              return InkWell(
+                                onTap: () => _showEditPinDialog(context, empId, name, cred.biometricPin, emp['branchId']?.toString() ?? widget.branchId),
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFECFDF5),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFFA7F3D0)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.fingerprint_rounded, size: 11, color: Color(0xFF059669)),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        'PIN: ${cred.biometricPin}',
+                                        style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF065F46)),
+                                      ),
+                                      const SizedBox(width: 3),
+                                      const Icon(Icons.edit_outlined, size: 9, color: Color(0xFF059669)),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            } else {
+                              return InkWell(
+                                onTap: () => _showEditPinDialog(context, empId, name, '', emp['branchId']?.toString() ?? widget.branchId),
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFFFFBEB),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: const [
+                                      Icon(Icons.fingerprint_rounded, size: 11, color: Color(0xFFD97706)),
+                                      SizedBox(width: 3),
+                                      Text(
+                                        'Set PIN (+)',
+                                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF92400E)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1557,6 +1738,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                               
                               final proposedSalary = (currentSalary * (1 + percent / 100)).roundToDouble();
 
+                              String formattedJoin = 'N/A';
+                              if (joinStr.isNotEmpty) {
+                                final dt = DateTime.tryParse(joinStr);
+                                formattedJoin = dt != null ? DateFormat('d MMM yyyy').format(dt) : joinStr;
+                              }
+
                               return Card(
                                 color: t.bgCardAlt,
                                 margin: const EdgeInsets.only(bottom: 6),
@@ -1574,7 +1761,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                   subtitle: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text('$role • Joined: ${joinStr.isNotEmpty ? joinStr : "N/A"}', style: TextStyle(color: t.textSecondary, fontSize: 11)),
+                                      Text('$role • Joined: $formattedJoin', style: TextStyle(color: t.textSecondary, fontSize: 11)),
                                       const SizedBox(height: 2),
                                       Row(
                                         children: [
@@ -2380,6 +2567,105 @@ class _EmployeesTabState extends State<EmployeesTab> {
           },
         );
       },
+    );
+  }
+
+  void _showEditPinDialog(BuildContext context, String empId, String name, String currentPin, String branchId) {
+    final pinCtrl = TextEditingController(text: currentPin);
+    showDialog(
+      context: context,
+      builder: (diagCtx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: [
+            const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Biometric PIN — $name',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the unique numeric PIN for physical ZKTeco fingerprint/face scanners.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: pinCtrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              decoration: InputDecoration(
+                labelText: 'Scanner PIN (e.g. 159)',
+                labelStyle: const TextStyle(color: Color(0xFF64748B)),
+                filled: true,
+                fillColor: const Color(0xFFF8FAFC),
+                prefixIcon: const Icon(Icons.pin_outlined, color: Color(0xFF0F766E)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F766E), width: 1.5)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(diagCtx),
+            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF0F766E),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              final newPin = pinCtrl.text.trim();
+              if (newPin.isEmpty) {
+                showCustomSnackBar(context, 'Please enter a numeric PIN.', error: true);
+                return;
+              }
+              final conflict = ZkTecoNetworkService.findPinConflict(newPin, excludeEntityId: empId);
+              if (conflict != null) {
+                showCustomSnackBar(
+                  context,
+                  '❌ PIN $newPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please enter a unique PIN.',
+                  error: true,
+                );
+                return;
+              }
+              await ZkTecoNetworkService.assignPinToEntity(
+                entityId: empId,
+                entityName: name,
+                entityType: 'employee',
+                branchId: branchId,
+                customPin: newPin,
+              );
+              final emp = FinanceLocalStorage.getEmployee(empId);
+              if (emp != null) {
+                emp['biometricPin'] = newPin;
+                await FinanceLocalStorage.saveEmployee(
+                  branchId: branchId,
+                  data: emp,
+                  performedBy: Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin',
+                );
+              }
+              Navigator.pop(diagCtx);
+              setState(() {});
+              showCustomSnackBar(context, '✅ Updated $name to Biometric PIN: $newPin');
+            },
+            child: const Text('Save PIN'),
+          ),
+        ],
+      ),
     );
   }
 }

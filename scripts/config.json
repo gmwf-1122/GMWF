@@ -1,5 +1,6 @@
 {
-    "sync_interval_seconds": 15,
+    "_architecture_note": "Only the Python daemon polls hardware and writes attendance data; Dart app is read-only for punches.",
+    "sync_interval_seconds": 300,
     "firebase_credentials_path": "serviceAccountKey.json",
     "clear_memory_after_sync": false,
     "devices": [

@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../services/image_upload_service.dart';
 import '../models/school_grade.dart';
 import '../models/school_student.dart';
 import '../models/school_teacher.dart';
@@ -415,13 +416,32 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
               const SizedBox(height: 12),
               Row(
                 children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
-                    child: Text(
-                      student.rollNo.isNotEmpty ? student.rollNo : '1',
-                      style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
+                  // Top Student Profile Avatar
+                  Builder(
+                    builder: (context) {
+                      final bytes = ImageUploadService.decodeBase64ToBytes(student.photoUrl);
+                      if (bytes != null && bytes.isNotEmpty) {
+                        return CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                          backgroundImage: MemoryImage(bytes),
+                        );
+                      } else if (student.photoUrl.startsWith('http')) {
+                        return CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                          backgroundImage: NetworkImage(student.photoUrl),
+                        );
+                      }
+                      return CircleAvatar(
+                        radius: 20,
+                        backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                        child: Text(
+                          student.rollNo.isNotEmpty ? student.rollNo : '1',
+                          style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(width: 12),
                   Expanded(

@@ -14,9 +14,11 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'dart:async';
 
 import '../config/constants.dart';
+import '../services/camp_session_service.dart';
 
 class LanServer {
   HttpServer? _server;
@@ -42,6 +44,10 @@ class LanServer {
   static const _dedupTtl       = Duration(hours: 24);
   static const _dedupMaxSize   = 50000; // hard cap to prevent unbounded growth
   Timer? _dedupPurgeTimer;
+
+  // ── [FIX 5] In-memory & disk persisted record version arbiter map ──────────
+  final Map<String, int> _recordVersionMap = {};
+  final Map<String, String> _recordDeviceMap = {};
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Function(String socketId, Map<String, dynamic> info)? onClientConnected;
@@ -140,14 +146,23 @@ class LanServer {
         final payload = utf8.encode('${AppNetwork.udpMessagePrefix}$ipShown:$port');
         final broadcastAddr = InternetAddress('255.255.255.255');
         
-        _udpTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        InternetAddress? subnetBroadcast;
+        final parts = ipShown.split('.');
+        if (parts.length == 4) {
+          subnetBroadcast = InternetAddress('${parts[0]}.${parts[1]}.${parts[2]}.255');
+        }
+        
+        _udpTimer = Timer.periodic(const Duration(seconds: 2), (_) {
           try {
             _udpSocket?.send(payload, broadcastAddr, AppNetwork.udpBroadcastPort);
+            if (subnetBroadcast != null) {
+              _udpSocket?.send(payload, subnetBroadcast, AppNetwork.udpBroadcastPort);
+            }
           } catch (e) {
-            print('[LanServer] UDP send error: $e');
+            if (kDebugMode) print('[LanServer] UDP send error: $e');
           }
         });
-        print('[LanServer] UDP Broadcaster started.');
+        print('[LanServer] UDP Broadcaster started for $ipShown.');
       });
     } catch (e) {
       print('[LanServer] Failed to start UDP broadcast: $e');
@@ -213,7 +228,11 @@ class LanServer {
 
     // Ping / pong keep-alive.
     if (trimmed == 'ping' || trimmed == '{"type":"ping"}') {
-      socket.add('pong');
+      socket.add(jsonEncode({
+        'type': 'pong',
+        'event_type': 'pong',
+        'serverEpoch': DateTime.now().millisecondsSinceEpoch,
+      }));
       return;
     }
     if (trimmed == 'pong' || trimmed == '{"type":"pong"}') return;
@@ -238,6 +257,19 @@ class LanServer {
 
       // ── Identify handshake ────────────────────────────────────────────────
       if (eventType == 'identify') {
+        final clientProtocol = (data['protocolVersion'] as num?)?.toInt() ?? 1;
+        if (clientProtocol < 2) {
+          print('[LanServer] ❌ Protocol version mismatch for client $socketId (protocol v$clientProtocol < 2). Rejecting connection.');
+          socket.add(jsonEncode({
+            'type': 'error',
+            'event_type': 'version_mismatch',
+            'code': 'VERSION_MISMATCH_REJECTED',
+            'message': 'Protocol version mismatch. Please update app to v1.3.7 or higher.'
+          }));
+          socket.close(1008, 'VERSION_MISMATCH_REJECTED');
+          return;
+        }
+
         final role     = data['role']     as String?;
         final branchId = data['branchId'] as String?;
         final clientId = data['_clientId'] as String?;
@@ -257,17 +289,12 @@ class LanServer {
           final normBranch = branchId.toLowerCase().trim();
           final platform = (data['platform'] as String?)?.trim().toLowerCase() ?? 'unknown';
 
-          // DEDUPLICATION: Remove any stale socket for the same clientId or same role+username+branch+platform
-          // Platform check ensures web and native clients don't evict each other
+          // DEDUPLICATION: Remove any stale socket ONLY if the exact same clientId is reconnecting
           final staleSockets = <WebSocket>[];
           _clientInfo.forEach((ws, oldInfo) {
             if (ws != socket) {
               final sameClient = clientId != null && clientId.isNotEmpty && oldInfo['clientId'] == clientId;
-              final sameIdentity = oldInfo['role'] == normRole &&
-                  oldInfo['branchId'] == normBranch &&
-                  oldInfo['username'] == username &&
-                  (oldInfo['platform'] ?? 'unknown') == platform;
-              if (sameClient || sameIdentity) {
+              if (sameClient) {
                 staleSockets.add(ws);
               }
             }
@@ -302,12 +329,13 @@ class LanServer {
 
           // Confirm identification to client.
           socket.add(jsonEncode({
-            'event_type': 'identified',
-            'role':       role,
-            'branchId':   branchId,
-            'username':   username,
-            'clientId':   clientId,
-            'timestamp':  DateTime.now().toIso8601String(),
+            'event_type':   'identified',
+            'role':         role,
+            'branchId':     branchId,
+            'username':     username,
+            'clientId':     clientId,
+            'timestamp':    DateTime.now().toIso8601String(),
+            'serverEpoch':  DateTime.now().millisecondsSinceEpoch,
           }));
 
           onClientConnected?.call(socketId, info);
@@ -325,7 +353,7 @@ class LanServer {
       }
 
       // ── [DEDUP] Server-side deduplication ─────────────────────────────────
-      final messageId = data['_messageId'] as String?;
+      final messageId = (data['_messageId'] ?? data['messageId'])?.toString();
       if (messageId != null && messageId.isNotEmpty) {
         if (_processedMessageIds.containsKey(messageId)) {
           // Already processed — send immediate ACK so client removes from outbox
@@ -349,6 +377,37 @@ class LanServer {
           'messageId':  messageId,
           'duplicate':  false,
         }));
+      }
+
+      // ── [FIX 5] Server Authoritative Version Check with Disk Persistence & Tie-Breaker ──
+      final innerData = (data['data'] as Map?)?.cast<String, dynamic>() ?? data;
+      final recordId = (innerData['serial'] ?? innerData['patientId'] ?? innerData['userId'])?.toString();
+      final incomingVersion = (data['version'] is int)
+          ? (data['version'] as int)
+          : (int.tryParse(data['version']?.toString() ?? '') ?? 0);
+      final incomingDeviceId = (data['deviceId'] ?? data['_clientId'] ?? '').toString();
+
+      if (recordId != null && recordId.isNotEmpty && incomingVersion > 0) {
+        final knownVersion = _recordVersionMap[recordId] ?? 0;
+        if (incomingVersion < knownVersion) {
+          print('[LanServer] 🛑 Stale update for recordId=$recordId (version $incomingVersion < $knownVersion) — dropping broadcast');
+          return;
+        }
+        if (incomingVersion == knownVersion) {
+          // Tie-breaker: compare deviceId or client timestamp to break concurrent ties
+          final knownDeviceId = _recordDeviceMap[recordId] ?? '';
+          if (incomingDeviceId.isNotEmpty && knownDeviceId.isNotEmpty && incomingDeviceId == knownDeviceId) {
+            print('[LanServer] 🛑 Duplicate version $incomingVersion from same device $incomingDeviceId — dropping');
+            return;
+          }
+        }
+        _recordVersionMap[recordId] = incomingVersion;
+        if (incomingDeviceId.isNotEmpty) _recordDeviceMap[recordId] = incomingDeviceId;
+        try {
+          if (Hive.isBoxOpen('server_record_versions')) {
+            Hive.box('server_record_versions').put(recordId, incomingVersion);
+          }
+        } catch (_) {}
       }
 
       // ── Enrich and route ──────────────────────────────────────────────────
@@ -384,6 +443,11 @@ class LanServer {
     final messageJson = jsonEncode(message);
     int sentCount = 0;
 
+    final inner = (message['data'] is Map)
+        ? Map<String, dynamic>.from(message['data'] as Map)
+        : message;
+    final serial = (inner['serial'] ?? inner['id'])?.toString().trim();
+
     for (final client in List<WebSocket>.from(_clients)) {
       if (client == sender) continue;
       if (client.readyState != WebSocket.open) continue;
@@ -391,9 +455,17 @@ class LanServer {
       final info = _clientInfo[client];
       if (info == null || info['identified'] != true) continue;
 
-      final clientBranch = (info['branchId'] as String?) ?? '';
+      final clientBranch = (info['branchId'] as String?)?.toLowerCase().trim() ?? '';
+      if (messageBranch.isNotEmpty && clientBranch.isNotEmpty && clientBranch != messageBranch) {
+        continue;
+      }
       if (clientBranch != messageBranch && clientBranch != senderBranch) {
         continue;
+      }
+      if (serial != null && serial.isNotEmpty) {
+        if (!CampSessionService.isSerialMatchingBranch(serial, clientBranch)) {
+          continue;
+        }
       }
 
       try {

@@ -7,6 +7,7 @@
 //  • Regular guardians continue to work as before (their linked studentIds).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -95,7 +96,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
 
   Future<void> _logout() async {
     try {
-      await OfflineAuthService.clearCredentials();
+      await OfflineAuthService.clearCachedUserData();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginPage()),
@@ -807,9 +808,22 @@ class _FamilySummaryView extends StatelessWidget {
                                 d['studentPhotoBase64'])
                             ?.toString();
 
-                        final currentLines = int.tryParse(d['currentLines']?.toString() ?? '0') ?? 0;
+                        int maxLogLines = 0;
+                        int sumSabakLogs = 0;
+                        for (var logDoc in logsDocs) {
+                          final map = logDoc.data() as Map<String, dynamic>? ?? {};
+                          final sLog = map[studentId] as Map<String, dynamic>?;
+                          if (sLog != null) {
+                            final sL = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
+                            if (sL != null && sL > 0) sumSabakLogs += sL;
+                            final cL = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+                            if (cL != null && cL > maxLogLines) maxLogLines = cL;
+                          }
+                        }
+                        final currentLinesProfile = int.tryParse(d['currentLines']?.toString() ?? '0') ?? 0;
+                        final currentLines = [currentLinesProfile, maxLogLines, sumSabakLogs].reduce(math.max);
                         final prevLines = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
-                        final totalMemorized = currentLines + prevLines;
+                        final totalMemorized = (currentLines + prevLines).clamp(0, 8640);
                         const total = 8640;
                         final pct = totalMemorized / total;
 
@@ -817,23 +831,27 @@ class _FamilySummaryView extends StatelessWidget {
 
                         int sabakDelta = 0;
                         bool hasSabak = false;
-                        if (todayStudentLog != null && todayStudentLog.containsKey('currentLines')) {
-                          final todayCumulativeLines = todayStudentLog['currentLines'] as int? ?? currentLines;
+                        if (todayStudentLog != null) {
                           hasSabak = true;
-                          int prevCumulativeLines = -1;
-                          for (var logDoc in logsDocs) {
-                            if (logDoc.id == todayStr) continue;
-                            final map = logDoc.data() as Map<String, dynamic>? ?? {};
-                            final sLog = map[studentId] as Map<String, dynamic>?;
-                            if (sLog != null && sLog.containsKey('currentLines')) {
-                              prevCumulativeLines = sLog['currentLines'] as int? ?? 0;
-                              break;
+                          if (todayStudentLog.containsKey('sabakLines') && todayStudentLog['sabakLines'] != null) {
+                            sabakDelta = (todayStudentLog['sabakLines'] as num?)?.toInt() ?? 0;
+                          } else if (todayStudentLog.containsKey('currentLines')) {
+                            final todayCumulativeLines = todayStudentLog['currentLines'] as int? ?? currentLines;
+                            int prevCumulativeLines = -1;
+                            for (var logDoc in logsDocs) {
+                              if (logDoc.id == todayStr) continue;
+                              final map = logDoc.data() as Map<String, dynamic>? ?? {};
+                              final sLog = map[studentId] as Map<String, dynamic>?;
+                              if (sLog != null && sLog.containsKey('currentLines')) {
+                                prevCumulativeLines = sLog['currentLines'] as int? ?? 0;
+                                break;
+                              }
                             }
+                            if (prevCumulativeLines == -1) {
+                              prevCumulativeLines = prevLines;
+                            }
+                            sabakDelta = (todayCumulativeLines - prevCumulativeLines).clamp(0, 8640);
                           }
-                          if (prevCumulativeLines == -1) {
-                            prevCumulativeLines = prevLines;
-                          }
-                          sabakDelta = (todayCumulativeLines - prevCumulativeLines).clamp(0, 8640);
                         }
 
                         final hasTodayLog = todayStudentLog != null;

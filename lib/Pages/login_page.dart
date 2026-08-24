@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -97,6 +98,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<bool> _hasRealInternet() async {
+    if (!kIsWeb && Platform.environment.containsKey('FLUTTER_TEST')) {
+      return false;
+    }
     try {
       final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 2));
       if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
@@ -269,7 +273,10 @@ class _LoginPageState extends State<LoginPage> {
 
       if (isRevoked) {
         await FirebaseAuth.instance.signOut();
-        await OfflineAuthService.clearCredentials();
+        final userKey = (userData['uid'] ?? userData['email'] ?? userData['username'] ?? '').toString();
+        if (userKey.isNotEmpty) {
+          await OfflineAuthService.clearCredentialsForUser(userKey);
+        }
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => AccessRevokedScreen(userData: userData, reason: userStatus)),
@@ -471,6 +478,9 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       if (userData == null) {
+        debugPrint('[LoginPage] OfflineAuthService verification returned null, checking local_users fallback');
+        final localOk = await _tryLocalUsersFallbackLogin(input, password);
+        if (localOk) return true;
         debugPrint('[LoginPage] Offline login failed — no matching credentials');
         return false;
       }
@@ -486,7 +496,10 @@ class _LoginPageState extends State<LoginPage> {
           userData['isActive'] == false;
 
       if (isRevoked) {
-        await OfflineAuthService.clearCredentials();
+        final userKey = (userData['uid'] ?? userData['email'] ?? userData['username'] ?? '').toString();
+        if (userKey.isNotEmpty) {
+          await OfflineAuthService.clearCredentialsForUser(userKey);
+        }
         if (mounted) {
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => AccessRevokedScreen(userData: userData, reason: userStatus)),
@@ -513,15 +526,16 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<bool> _tryLocalUsersFallbackLogin(String input, String password) async {
     try {
-      final box = Hive.box('local_users');
+      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
       final lowerInput = input.trim().toLowerCase();
       for (final val in box.values) {
         if (val is Map) {
           final u = Map<String, dynamic>.from(val);
           final email = (u['email']?.toString() ?? '').toLowerCase();
           final username = (u['username']?.toString() ?? '').toLowerCase();
+          final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase();
           final savedPass = u['password']?.toString() ?? '1122';
-          if ((username == lowerInput || email == lowerInput) && savedPass == password) {
+          if ((username == lowerInput || usernameLower == lowerInput || email == lowerInput) && savedPass == password) {
             if (mounted) {
               Flushbar(
                 message: "Welcome back, ${u['username']}!",
@@ -1359,8 +1373,9 @@ class _LoginPageState extends State<LoginPage> {
           const SizedBox(height: 16),
 
           // Footer Notice
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Icon(Icons.contact_support_outlined, size: 14, color: badgeColor),
               const SizedBox(width: 5),
@@ -1431,25 +1446,35 @@ class _LoginPageState extends State<LoginPage> {
           ),
         );
         if (confirm == true) {
-          await OfflineAuthService.clearCredentials();
+          final targetUser = _usernameOrEmailController.text.trim().isNotEmpty
+              ? _usernameOrEmailController.text.trim()
+              : (await OfflineAuthService.getCachedUsername() ?? '');
+          if (targetUser.isNotEmpty) {
+            await OfflineAuthService.clearCredentialsForUser(targetUser);
+          } else {
+            await OfflineAuthService.clearCachedUserData();
+          }
           if (!mounted) return;
           _usernameOrEmailController.clear();
           _passwordController.clear();
           Flushbar(
-            message: "Saved login cleared. Please sign in.",
+            message: targetUser.isNotEmpty ? "Saved login for '$targetUser' cleared." : "Saved login session cleared.",
             backgroundColor: Colors.orange.shade700,
             duration: const Duration(seconds: 3),
           ).show(context);
         }
       },
-      child: Image.asset(
-        "assets/logo/gmwf-1.webp",
-        height: height,
-        fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => const Icon(
-          Icons.local_pharmacy_rounded,
-          size: 80,
-          color: Color(0xFF10B981),
+      child: Hero(
+        tag: 'gmwf_app_logo',
+        child: Image.asset(
+          "assets/logo/gmwf-1.webp",
+          height: height,
+          fit: BoxFit.contain,
+          errorBuilder: (_, _, _) => const Icon(
+            Icons.local_pharmacy_rounded,
+            size: 80,
+            color: Color(0xFF10B981),
+          ),
         ),
       ),
     );

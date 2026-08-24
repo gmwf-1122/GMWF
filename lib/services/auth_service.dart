@@ -63,6 +63,7 @@ class AuthService {
     String? dispensaryId,    // Sub-location dispensary identifier (legacy)
     List<String> dispensaryIds = const [], // Sub-location dispensary identifiers
     List<Map<String, String>> campSchedule = const [], // Time-based camp schedule
+    String? biometricPin,
   }) async {
     try {
       final lowerUsername = username.trim().toLowerCase();
@@ -104,6 +105,23 @@ class AuthService {
 
       final uid = user.uid;
 
+      String creatorEmail = currentAdminUser?.email ?? '';
+      String creatorUid   = currentAdminUser?.uid ?? '';
+      String creatorName  = '';
+      String creatorRole  = '';
+
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+          if (uData is Map) {
+            creatorName = (uData['username'] ?? uData['name'] ?? '').toString();
+            creatorRole = (uData['role'] ?? '').toString();
+            if (creatorEmail.isEmpty) creatorEmail = (uData['email'] ?? '').toString();
+            if (creatorUid.isEmpty) creatorUid = (uData['uid'] ?? '').toString();
+          }
+        }
+      } catch (_) {}
+
       final userData = <String, dynamic>{
         'uid': uid,
         'username': username.trim(),        // original casing preserved
@@ -117,6 +135,12 @@ class AuthService {
         'studentIds': studentIds,
         'dispensaryIds': dispensaryIds.map((d) => d.trim().toLowerCase()).toList(),
         'campSchedule': campSchedule,
+        if (biometricPin != null && biometricPin.trim().isNotEmpty) 'biometricPin': biometricPin.trim(),
+        'createdBy': creatorEmail.isNotEmpty ? creatorEmail : (creatorName.isNotEmpty ? creatorName : 'Direct Registration'),
+        'createdByName': creatorName.isNotEmpty ? creatorName : (creatorEmail.isNotEmpty ? creatorEmail : 'Admin'),
+        'createdById': creatorUid,
+        'createdByRole': creatorRole,
+        'createdAtLocal': DateTime.now().toIso8601String(),
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       };

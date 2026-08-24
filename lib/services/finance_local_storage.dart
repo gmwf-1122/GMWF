@@ -887,14 +887,55 @@ class FinanceLocalStorage {
   static List<Map<String, dynamic>> getAttendanceForDate(String branchId, String dateStr) {
     final results = <Map<String, dynamic>>[];
     
-    // We can load all active employees and map their attendance
+    // Load all active employees and map their attendance
     final employees = getEmployees(branchId);
     for (final emp in employees) {
-      final empId = emp['localId'] as String;
-      final key = '${empId}_$dateStr';
-      final att = attendanceBox.get(key);
+      final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
+      final altId = emp['id']?.toString() ?? '';
+      final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+      final name = (emp['name'] ?? '').toString().trim().toLowerCase();
+      
+      dynamic att;
+      if (empId.isNotEmpty) {
+        att = attendanceBox.get('${empId}_$dateStr');
+      }
+      if (att == null && altId.isNotEmpty && altId != empId) {
+        att = attendanceBox.get('${altId}_$dateStr');
+      }
+      // If still not found by direct composite key, search attendanceBox values for matching date, employeeId, pin, or name
+      if (att == null) {
+        for (final v in attendanceBox.values) {
+          if (v is Map) {
+            final recDate = v['date']?.toString() ?? '';
+            if (recDate == dateStr) {
+              final recEmpId = (v['employeeId'] ?? v['localId'] ?? v['id'])?.toString() ?? '';
+              final recPin = (v['pin'] ?? v['biometricPin'])?.toString().trim() ?? '';
+              final recName = (v['employeeName'] ?? v['name'])?.toString().trim().toLowerCase() ?? '';
+              
+              final matchId = empId.isNotEmpty && recEmpId == empId;
+              final matchAltId = altId.isNotEmpty && recEmpId == altId;
+              final matchPin = pin.isNotEmpty && (recPin == pin || (int.tryParse(pin) != null && int.tryParse(pin) == int.tryParse(recPin)));
+              final matchName = name.isNotEmpty && recName.isNotEmpty && (recName == name || recName.contains(name) || name.contains(recName));
+
+              if (matchId || matchAltId || matchPin || matchName) {
+                att = v;
+                break;
+              }
+            }
+          }
+        }
+      }
+
       if (att is Map) {
-        results.add(Map<String, dynamic>.from(att));
+        final rec = Map<String, dynamic>.from(att);
+        // Ensure presence is inferred if punch times exist
+        final checkIn = rec['checkInTime']?.toString() ?? rec['arrivalTime']?.toString();
+        final rawStatus = (rec['status']?.toString() ?? '').toLowerCase();
+        if ((rawStatus.isEmpty || rawStatus == 'absent' || rawStatus == 'unmarked') &&
+            checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') {
+          rec['status'] = 'present';
+        }
+        results.add(rec);
       } else {
         // Return default placeholder
         results.add({
@@ -902,7 +943,9 @@ class FinanceLocalStorage {
           'date': dateStr,
           'status': 'absent',
           'leaveType': null,
+          'checkInTime': null,
           'arrivalTime': null,
+          'checkOutTime': null,
           'departureTime': null,
           'note': null,
           'markedBy': 'System',
@@ -1664,7 +1707,7 @@ class FinanceLocalStorage {
 
         try {
           final reversalJe = JournalEntry(
-            id: 'JE_VOID_PAYOUT_${entry['localId']}_${DateTime.now().millisecondsSinceEpoch}',
+            id: 'JE_VOID_PAYOUT_${entry['localId']}_${const Uuid().v4()}',
             branchId: branchId,
             date: DateFormat('yyyy-MM-dd').format(DateTime.now()),
             sourceType: 'PAYROLL_VOID',
@@ -2180,57 +2223,95 @@ class FinanceLocalStorage {
     }
   }
 
-  static Future<void> downloadAttendance(String branchId, {bool force = false}) async {
+  static Future<void> downloadAttendance(String branchId, {bool force = false, String? specificDateStr}) async {
     final key = 'attendance_$branchId';
-    if (!force && !_shouldRefresh(key)) {
+    if (!force && specificDateStr == null && !_shouldRefresh(key)) {
       debugPrint('[FinanceLS] Skipping downloadAttendance — cache is fresh');
       return;
     }
     try {
-      // NOTE: requires a Firestore composite index on (branchId) for this collectionGroup — create in Firebase console if query fails with FCON.
-      Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collectionGroup('records');
-      if (branchId != 'all' && branchId.isNotEmpty) {
-        q = q.where('branchId', isEqualTo: branchId);
-      }
-      final snap = await q.get();
       final box = attendanceBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
-        final pathSegments = doc.reference.path.split('/');
-        if (pathSegments.length >= 6 && pathSegments[2] == 'employee_attendance') {
-          final docBranchId = pathSegments[1];
-          final dateStr = pathSegments[3];
-          final employeeId = doc.id;
+      final List<String> branches;
+      if (branchId == 'all' || branchId.isEmpty) {
+        final empBranches = employeesBox.values
+            .whereType<Map>()
+            .map((m) => (m['branchId'] ?? '').toString().trim())
+            .where((b) => b.isNotEmpty && b != 'all' && b != 'global')
+            .toSet()
+            .toList();
+        branches = empBranches.isNotEmpty ? empBranches : ['gujrat', 'sialkot', 'rawalpindi', 'karachi'];
+      } else {
+        branches = [branchId];
+      }
 
-          if (branchId != 'all' && branchId.isNotEmpty && docBranchId != branchId) {
-            continue;
-          }
+      for (final bId in branches) {
+        try {
+          if (specificDateStr != null && specificDateStr.isNotEmpty) {
+            final recSnap = await FirebaseFirestore.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('employee_attendance')
+                .doc(specificDateStr)
+                .collection('records')
+                .get();
 
-          final key = '${employeeId}_$dateStr';
-          final localRecord = box.get(key);
-          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
-            continue;
-          }
+            for (final doc in recSnap.docs) {
+              final employeeId = doc.id;
+              final rKey = '${employeeId}_$specificDateStr';
+              final localRecord = box.get(rKey);
+              if (localRecord is Map && localRecord['syncStatus'] == 'pending') continue;
 
-          final data = doc.data();
-          final record = Map<String, dynamic>.from(data);
-          record['syncStatus'] = 'synced';
+              final data = doc.data();
+              final record = Map<String, dynamic>.from(data);
+              record['syncStatus'] = 'synced';
+              for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
+                if (record[field] is Timestamp) {
+                  record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+                }
+              }
+              updates[rKey] = _sanitize(record);
+            }
+          } else {
+            final dateDocsSnap = await FirebaseFirestore.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('employee_attendance')
+                .limit(30)
+                .get();
 
-          for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
-            if (record[field] is Timestamp) {
-              record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+            for (final dateDoc in dateDocsSnap.docs) {
+              final dStr = dateDoc.id;
+              final recSnap = await dateDoc.reference.collection('records').get();
+              for (final doc in recSnap.docs) {
+                final employeeId = doc.id;
+                final rKey = '${employeeId}_$dStr';
+                final localRecord = box.get(rKey);
+                if (localRecord is Map && localRecord['syncStatus'] == 'pending') continue;
+
+                final data = doc.data();
+                final record = Map<String, dynamic>.from(data);
+                record['syncStatus'] = 'synced';
+                for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
+                  if (record[field] is Timestamp) {
+                    record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+                  }
+                }
+                updates[rKey] = _sanitize(record);
+              }
             }
           }
-
-          updates[key] = _sanitize(record);
+        } catch (be) {
+          debugPrint('[FinanceLS] Branch $bId attendance download note: $be');
         }
       }
+
       if (updates.isNotEmpty) {
         await box.putAll(updates);
+        await box.flush();
       }
-      await box.flush();
       await _markRefreshed('attendance_$branchId');
-      debugPrint('[FinanceLS] Downloaded attendance');
+      debugPrint('[FinanceLS] Downloaded ${updates.length} attendance records for $branchId');
     } catch (e) {
       debugPrint('[FinanceLS] downloadAttendance error: $e');
     }
@@ -2716,7 +2797,7 @@ class FinanceLocalStorage {
 
       String empId = existingEmp?['id']?.toString() ?? existingEmp?['localId']?.toString() ?? '';
       if (empId.isEmpty) {
-        empId = 'EMP_${DateTime.now().millisecondsSinceEpoch}';
+        empId = 'EMP_${const Uuid().v4()}';
       }
 
       final deptName = (department != null && department.isNotEmpty)

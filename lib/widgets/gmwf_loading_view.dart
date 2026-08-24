@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import '../constants/navigator_key.dart';
 
 class GmwfLoadingView extends StatefulWidget {
   final String? message;
@@ -35,11 +36,6 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
   bool _showEmergencyButton = false;
   int _messageIndex = 0;
 
-  static const _darkBg = Color(0xFF0A0F1A);
-  static const _accent = Color(0xFF2E7D32);
-  static const _accentLight = Color(0xFF4CAF50);
-  static const _gold = Color(0xFFD4A94C);
-
   final List<String> _defaultMessages = [
     "Initializing system...",
     "Syncing branch data...",
@@ -50,7 +46,6 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
   void initState() {
     super.initState();
 
-    // Gentle pulse glow
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2200),
@@ -60,7 +55,6 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Entry animation
     _entryController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -78,7 +72,6 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
       ),
     );
 
-    // Shimmer for the progress bar
     _shimmerController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -100,7 +93,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
       });
     }
 
-    _emergencyTimer = Timer(const Duration(seconds: 15), () {
+    _emergencyTimer = Timer(const Duration(seconds: 12), () {
       if (mounted) {
         setState(() => _showEmergencyButton = true);
       }
@@ -121,242 +114,349 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isTablet = size.width > 600;
-    final logoSize = (size.shortestSide * 0.16).clamp(80.0, 150.0);
+    final logoSize = (size.shortestSide * 0.16).clamp(80.0, 130.0);
 
-    final displayMessage =
-        widget.message ?? _defaultMessages[_messageIndex];
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Theme Tokens matching LoginPage exactly
+    final bgColor = isDark ? const Color(0xFF031611) : const Color(0xFFEFF6F0);
+    final cardBg = isDark ? const Color(0xFF041C16).withValues(alpha: 0.92) : Colors.white;
+    final cardBorder = isDark ? const Color(0xFF10B981).withValues(alpha: 0.3) : Colors.white;
+    final cardShadow = isDark
+        ? Colors.black.withValues(alpha: 0.4)
+        : const Color(0xFF047857).withValues(alpha: 0.08);
+    final badgeColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final badgeDivider = isDark ? const Color(0xFF047857) : const Color(0xFFA7F3D0);
+    final titleMain = isDark ? Colors.white : const Color(0xFF064E3B);
+    final titleAccent = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final subtitleColor = isDark ? Colors.white.withValues(alpha: 0.5) : const Color(0xFF4B5563);
+    final shimmerColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final shimmerTrack = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFF059669).withValues(alpha: 0.12);
+    final glowColor = isDark ? const Color(0xFF10B981) : const Color(0xFF059669);
+
+    final displayMessage = widget.message ?? _defaultMessages[_messageIndex];
 
     final content = FadeTransition(
       opacity: _fadeIn,
       child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // ── Logo with glow ring ──────────────────────────────
-            AnimatedBuilder(
-              animation: Listenable.merge([_pulseController, _entryController]),
-              builder: (_, child) {
-                return Transform.scale(
-                  scale: _logoScale.value,
-                  child: Container(
-                    width: logoSize + 36,
-                    height: logoSize + 36,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: _accent.withValues(alpha: 0.15 * _pulseAnim.value),
-                          blurRadius: 40 * _pulseAnim.value,
-                          spreadRadius: 8 * _pulseAnim.value,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 440),
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+            decoration: BoxDecoration(
+              color: cardBg,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: cardBorder,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: cardShadow,
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
+                ),
+                BoxShadow(
+                  color: glowColor.withValues(alpha: isDark ? 0.08 : 0.04),
+                  blurRadius: 30,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // ── Logo with Glowing Ring & Shared-Element Hero Tag ────────
+                AnimatedBuilder(
+                  animation: Listenable.merge([_pulseController, _entryController]),
+                  builder: (_, child) {
+                    return Transform.scale(
+                      scale: _logoScale.value,
+                      child: Container(
+                        width: logoSize + 32,
+                        height: logoSize + 32,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: glowColor.withValues(alpha: 0.25 * _pulseAnim.value),
+                              blurRadius: 40 * _pulseAnim.value,
+                              spreadRadius: 6 * _pulseAnim.value,
+                            ),
+                          ],
                         ),
-                        BoxShadow(
-                          color: _gold.withValues(alpha: 0.08 * _pulseAnim.value),
-                          blurRadius: 60 * _pulseAnim.value,
-                          spreadRadius: 4 * _pulseAnim.value,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isDark ? const Color(0xFF02140F) : const Color(0xFFF8FAFC),
+                            border: Border.all(
+                              color: glowColor.withValues(alpha: 0.4 + 0.3 * _pulseAnim.value),
+                              width: 2,
+                            ),
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          child: child,
+                        ),
+                      ),
+                    );
+                  },
+                  child: ClipOval(
+                    child: Container(
+                      color: Colors.white,
+                      padding: const EdgeInsets.all(8),
+                      child: AspectRatio(
+                        aspectRatio: 1.0,
+                        child: Hero(
+                          tag: 'gmwf_app_logo',
+                          child: Image.asset(
+                            'assets/logo/gmwf-1.webp',
+                            width: logoSize,
+                            height: logoSize,
+                            cacheWidth: 400,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => Icon(
+                              Icons.local_pharmacy,
+                              size: logoSize * 0.6,
+                              color: glowColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // ── Tagline Badge ─────────────────────────────────────────
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(width: 16, child: Divider(color: badgeDivider, thickness: 1.5)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text(
+                        "GMWF SYSTEM INITIALIZATION",
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5,
+                          color: badgeColor,
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 16, child: Divider(color: badgeDivider, thickness: 1.5)),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Title ─────────────────────────────────────────────────
+                RichText(
+                  textAlign: TextAlign.center,
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, fontFamily: 'Roboto'),
+                    children: [
+                      TextSpan(text: "Gulzar ", style: TextStyle(color: titleMain)),
+                      TextSpan(text: "Madina", style: TextStyle(color: titleAccent)),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 4),
+
+                Text(
+                  'Welfare Foundation Management System',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: subtitleColor,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // ── Shimmer Progress Bar ─────────────────────────────────
+                SizedBox(
+                  width: isTablet ? 220 : 180,
+                  child: AnimatedBuilder(
+                    animation: _shimmerController,
+                    builder: (_, _) {
+                      return Container(
+                        height: 3.5,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(2),
+                          color: shimmerTrack,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(2),
+                          child: CustomPaint(
+                            painter: _ShimmerBarPainter(
+                              progress: _shimmerAnim.value,
+                              color: shimmerColor,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // ── Status Message ────────────────────────────────────────
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: Text(
+                    displayMessage,
+                    key: ValueKey(displayMessage),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: badgeColor,
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ),
+
+                if (widget.subMessage != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    widget.subMessage!,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: subtitleColor,
+                    ),
+                  ),
+                ],
+
+                // ── Emergency Action Card ─────────────────────────────────
+                if (_showEmergencyButton) ...[
+                  const SizedBox(height: 28),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: isDark ? 0.1 : 0.06),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          "Taking longer than expected?",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orangeAccent,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          "Initializing local database & sync engine...",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: subtitleColor,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            if (navigatorKey.currentState != null) {
+                              navigatorKey.currentState!.pushReplacementNamed('/home');
+                            } else {
+                              Navigator.pushReplacementNamed(context, '/home');
+                            }
+                          },
+                          icon: const Icon(Icons.bolt, size: 16),
+                          label: const Text("Launch Main Dashboard", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF059669),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: const Color(0xFF131B2E),
-                        border: Border.all(
-                          color: _accent.withValues(alpha: 0.3 + 0.2 * _pulseAnim.value),
-                          width: 2,
-                        ),
-                      ),
-                      padding: const EdgeInsets.all(10),
-                      child: child,
-                    ),
                   ),
-                );
-              },
-              child: ClipOval(
-                child: Container(
-                  color: Colors.white,
-                  padding: const EdgeInsets.all(8),
-                  child: AspectRatio(
-                    aspectRatio: 1.0,
-                    child: Image.asset(
-                      'assets/logo/gmwf-1.webp',
-                      width: logoSize,
-                      height: logoSize,
-                      cacheWidth: 400,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => Icon(
-                        Icons.local_pharmacy,
-                        size: logoSize * 0.6,
-                        color: _accent,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+                ],
+              ],
             ),
-
-            const SizedBox(height: 28),
-
-            // ── Title ────────────────────────────────────────────
-            Text(
-              'GMWF',
-              style: TextStyle(
-                fontSize: isTablet ? 26 : 22,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-                letterSpacing: 4,
-              ),
-            ),
-
-            const SizedBox(height: 4),
-
-            Text(
-              'Management System',
-              style: TextStyle(
-                fontSize: isTablet ? 13 : 11,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.4),
-                letterSpacing: 2,
-              ),
-            ),
-
-            const SizedBox(height: 28),
-
-            // ── Shimmer progress bar ─────────────────────────────
-            SizedBox(
-              width: isTablet ? 200 : 160,
-              child: AnimatedBuilder(
-                animation: _shimmerController,
-                builder: (_, _) {
-                  return Container(
-                    height: 3,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(2),
-                      color: Colors.white.withValues(alpha: 0.06),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(2),
-                      child: CustomPaint(
-                        painter: _ShimmerBarPainter(
-                          progress: _shimmerAnim.value,
-                          color: _accent,
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-
-            const SizedBox(height: 20),
-
-            // ── Status message ───────────────────────────────────
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              child: Text(
-                displayMessage,
-                key: ValueKey(displayMessage),
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: isTablet ? 14 : 12,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.white.withValues(alpha: 0.45),
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
-
-            if (widget.subMessage != null) ...[
-              const SizedBox(height: 6),
-              Text(
-                widget.subMessage!,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: isTablet ? 12 : 10,
-                  color: Colors.white.withValues(alpha: 0.3),
-                ),
-              ),
-            ],
-
-            // ── Emergency button ─────────────────────────────────
-            if (_showEmergencyButton) ...[
-              const SizedBox(height: 32),
-              Container(
-                padding: const EdgeInsets.all(14),
-                margin: const EdgeInsets.symmetric(horizontal: 24),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text(
-                      "Taking longer than usual?",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.orange,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "The system might be offline or blocked.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.white.withValues(alpha: 0.4),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pushReplacementNamed(context, '/');
-                      },
-                      icon: const Icon(Icons.flash_on, size: 16),
-                      label: const Text("Force Start Offline", style: TextStyle(fontSize: 12)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
 
     if (widget.isFullPage) {
       return Scaffold(
-        body: Container(
-          decoration: const BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(0, -0.2),
-              radius: 1.2,
-              colors: [
-                Color(0xFF0F1A2E),
-                _darkBg,
-                Color(0xFF060A12),
-              ],
-              stops: [0.0, 0.5, 1.0],
+        backgroundColor: bgColor,
+        body: Stack(
+          children: [
+            // ── Islamic Arch Backdrop (assets/images/2.webp) ────────────────
+            Positioned(
+              top: 0,
+              bottom: 0,
+              left: 0,
+              width: 500,
+              child: Opacity(
+                opacity: isDark ? 0.25 : 0.18,
+                child: Image.asset(
+                  'assets/images/2.webp',
+                  fit: BoxFit.fitHeight,
+                  alignment: Alignment.topLeft,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
+              ),
             ),
-          ),
-          child: SafeArea(child: content),
+
+            // ── Ambient Glows ───────────────────────────────────────────────
+            Positioned(
+              top: -80,
+              left: -80,
+              child: Container(
+                width: 320,
+                height: 320,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: glowColor.withValues(alpha: isDark ? 0.12 : 0.06),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -80,
+              right: -80,
+              child: Container(
+                width: 350,
+                height: 350,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: glowColor.withValues(alpha: isDark ? 0.15 : 0.08),
+                ),
+              ),
+            ),
+
+            // ── Main Centered Glass Card Content ─────────────────────────────
+            SafeArea(child: content),
+          ],
         ),
       );
     }
 
     return Container(
-      color: _darkBg,
+      color: bgColor,
       child: content,
     );
   }
@@ -372,7 +472,7 @@ class _ShimmerBarPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final barWidth = size.width * 0.4;
+    final barWidth = size.width * 0.45;
     final x = (progress * size.width) - barWidth / 2;
 
     final paint = Paint()
@@ -400,3 +500,5 @@ class _ShimmerBarPainter extends CustomPainter {
   bool shouldRepaint(covariant _ShimmerBarPainter old) =>
       old.progress != progress;
 }
+
+

@@ -23,6 +23,7 @@ import 'local_storage_service.dart';
 import 'sync_service.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
+import 'serials_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -266,10 +267,17 @@ class FirestoreService {
   }
 
   Future<String> _generateNextSerial(String branchId, String dateKey) async {
-    final localCount = LocalStorageService.getLocalEntries(branchId)
-        .where((e) => (e['dateKey'] as String?) == dateKey)
-        .length;
-    final nextNumber = localCount + 1;
+    final localEntries = LocalStorageService.getLocalEntries(branchId)
+        .where((e) => (e['dateKey'] as String?) == dateKey);
+    int maxSeq = 0;
+    for (final e in localEntries) {
+      final serial = (e['serial'] ?? e['id'] ?? '').toString();
+      final seq = parseSequenceFromSerial(serial);
+      if (seq < 999999 && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+    final nextNumber = maxSeq + 1;
     return '$dateKey-${nextNumber.toString().padLeft(3, '0')}';
   }
 

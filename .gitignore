@@ -55,9 +55,14 @@ Installer/
 
 # Temp data files
 temp_hive/
+temp_hive*/
 temp_hive_inspect/
 temp_inspect_hive/
 .sentry-native/
+synced_keys.json
+scripts/synced_keys.json
+scripts/pending_punches.json
+*serviceAccountKey*.json
 
 # Scratch / debug files
 *.xlsx
@@ -65,5 +70,7 @@ temp_inspect_hive/
 *.pdf
 *.patch
 *.png
+scratch/test_output.json
 build_output.txt
 debug_branches.txt
+

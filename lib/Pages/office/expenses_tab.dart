@@ -28,27 +28,42 @@ class ExpensesTab extends StatefulWidget {
 class _ExpensesTabState extends State<ExpensesTab> {
   DateTime _selectedDate = DateTime.now();
   bool _viewAllBranches = false;
+  bool get _isBranchScopedUser {
+    if (widget.branchId.isNotEmpty && widget.branchId != 'all') return true;
+    if (Hive.isBoxOpen('local_users')) {
+      final curUser = Hive.box('local_users').values.firstOrNull;
+      if (curUser is Map) {
+        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
+        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   final List<String> _categories = [
-    'Masjid',
-    'Dasterkhawaan',
-    'School',
     'Office',
+    'Administration',
+    'Dasterkhawaan',
     'Dispensary',
-    'Home',
+    'Madrassa',
+    'School',
     'Other',
   ];
 
   @override
   void initState() {
     super.initState();
-    // Default global roles to view all branches summary if the initial branch is 'all'
-    if (widget.branchId == 'all') {
+    if (_isBranchScopedUser) {
+      _viewAllBranches = false;
+    } else if (widget.branchId == 'all') {
       _viewAllBranches = true;
     }
   }
 
   String _getEffectiveBranchId() {
+    if (_isBranchScopedUser) return widget.branchId.isNotEmpty ? widget.branchId : 'karachi';
     if (_viewAllBranches) return 'all';
     return widget.branchId;
   }

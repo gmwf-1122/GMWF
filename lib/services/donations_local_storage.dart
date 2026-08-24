@@ -22,6 +22,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
+import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
 import '../models/donation_models.dart';
@@ -246,8 +247,7 @@ class DonationsLocalStorage {
 
   static String _donorKey(String donorId) => 'donor_$donorId';
 
-  static String _newLocalId() =>
-      DateTime.now().millisecondsSinceEpoch.toString();
+  static String _newLocalId() => const Uuid().v4();
 
   static String _today() => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
@@ -518,7 +518,7 @@ class DonationsLocalStorage {
     String? reason,
   }) async {
     final log = AuditLogEntry(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      id: const Uuid().v4(),
       collection: collection,
       documentId: documentId,
       action: action,

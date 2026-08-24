@@ -138,60 +138,16 @@ class ConnectionManager {
   Future<void> _tryConnect() async {
     if (!_running || _disposed) return;
 
-    // ── [FIX-NET-1] Dedicated-server fast-path (and Web Fallback) ──────────────
-    // Skip all discovery when a fixed server IP is configured OR if running on Web.
-    // Web browsers cannot perform UDP/mDNS network discovery due to security limits.
-    if (AppNetwork.useDedicatedServer || kIsWeb) {
-      String? targetIp;
-      
-      if (AppNetwork.useDedicatedServer) {
-        targetIp = AppNetwork.dedicatedServerIp;
-      } else if (kIsWeb) {
-        // 1. Check local Hive storage for saved server IP
-        final saved = _getSavedServer();
-        if (saved != null && saved.$1.isNotEmpty) {
-          targetIp = saved.$1;
-        }
-
-        // 2. Query Firestore for activeServerIp published by server/windows app for this branch
-        if ((targetIp == null || targetIp.isEmpty || targetIp == '127.0.0.1' || targetIp == 'localhost') && _isFirebaseReady) {
-          if (_branchId != null && _branchId!.isNotEmpty) {
-            try {
-              final doc = await FirebaseFirestore.instance
-                  .collection('branches').doc(_branchId).get()
-                  .timeout(const Duration(seconds: 4));
-              final fsIp = doc.data()?['activeServerIp']?.toString().trim();
-              if (fsIp != null && fsIp.isNotEmpty) {
-                targetIp = fsIp;
-                debugPrint('[ConnectionManager] Discovered activeServerIp from Firestore: $targetIp');
-              }
-            } catch (e) {
-              debugPrint('[ConnectionManager] Could not fetch activeServerIp from Firestore: $e');
-            }
-          }
-        }
-
-        // 3. Fallback to Uri.base.host / 127.0.0.1
-        if (targetIp == null || targetIp.isEmpty) {
-          targetIp = Uri.base.host;
-          if (targetIp.isEmpty || targetIp == 'localhost') {
-            targetIp = '127.0.0.1';
-          }
-        }
-      }
-
-      final resolvedIp = targetIp ?? '127.0.0.1';
-
+    // ── Dedicated-server mode ──────────────────────────────────────────────────
+    if (AppNetwork.useDedicatedServer) {
+      final targetIp = AppNetwork.dedicatedServerIp;
       _emit(ConnectionStatus(
         state: LanConnectionState.connecting,
-        ip: resolvedIp,
+        ip: targetIp,
         port: AppNetwork.websocketPort,
-        message: 'Connecting to $resolvedIp...',
+        message: 'Connecting to $targetIp...',
       ));
-      final ok = await _connectTo(
-        resolvedIp,
-        AppNetwork.websocketPort,
-      );
+      final ok = await _connectTo(targetIp, AppNetwork.websocketPort);
       if (!ok) {
         _emit(ConnectionStatus(
           state: LanConnectionState.disconnected,
@@ -203,28 +159,7 @@ class ConnectionManager {
       return;
     }
 
-    // ── Auto-discovery path ────────────────────────────────────────────────
-    final connList = await Connectivity().checkConnectivity();
-    final hasNetwork = connList.contains(ConnectivityResult.wifi) ||
-        connList.contains(ConnectivityResult.ethernet) ||
-        connList.contains(ConnectivityResult.other);
-
-    if (!hasNetwork) {
-      _emit(const ConnectionStatus(
-        state: LanConnectionState.disconnected,
-        // [FIX-NET-3] Clearer message to distinguish no-WiFi from no-server
-        message: 'No WiFi or LAN detected. Connect all devices to the same network.',
-      ));
-      _scheduleReconnect();
-      return;
-    }
-
-    _emit(const ConnectionStatus(
-      state: LanConnectionState.searching,
-      message: 'Looking for server...',
-    ));
-
-    // Try last-known server first (fastest path after first connection).
+    // ── Fast-path 1: Try last-known server (instant sub-second connection) ─────
     final saved = _getSavedServer();
     if (saved != null) {
       debugPrint('[ConnectionManager] Trying saved server: ${saved.$1}:${saved.$2}');
@@ -233,8 +168,77 @@ class ConnectionManager {
         final ok = await _connectTo(saved.$1, saved.$2);
         if (ok) return;
       } else {
-        debugPrint('[ConnectionManager] Saved server unreachable, falling back to discovery');
+        debugPrint('[ConnectionManager] Saved server unreachable, trying Firestore discovery');
       }
+    }
+
+    // ── Fast-path 2: Query Firestore for activeServerIp published by branch server ──
+    if (_isFirebaseReady && _branchId != null && _branchId!.isNotEmpty) {
+      try {
+        final doc = await FirebaseFirestore.instance
+            .collection('branches').doc(_branchId).get()
+            .timeout(const Duration(seconds: 3));
+        final fsIp = doc.data()?['activeServerIp']?.toString().trim();
+        final fsPort = (doc.data()?['activeServerPort'] as num?)?.toInt() ?? AppNetwork.websocketPort;
+        if (fsIp != null && fsIp.isNotEmpty && fsIp != '127.0.0.1' && fsIp != 'localhost') {
+          debugPrint('[ConnectionManager] Probing Firestore-published activeServerIp: $fsIp:$fsPort');
+          final reachable = await LanDiscovery.isReachable(fsIp, fsPort);
+          if (reachable) {
+            final ok = await _connectTo(fsIp, fsPort);
+            if (ok) return;
+          }
+        }
+      } catch (e) {
+        debugPrint('[ConnectionManager] Firestore activeServerIp check: $e');
+      }
+    }
+
+    // Web fallback if no LAN discovery available
+    if (kIsWeb) {
+      final List<String> candidateIps = [];
+
+      // 1. Host from URL (if opened directly as http://192.168.1.x:port)
+      final host = Uri.base.host.trim();
+      if (host.isNotEmpty && host != 'localhost' && !host.contains('firebase') && !host.contains('web.app')) {
+        candidateIps.add(host);
+      }
+
+      // 2. Common LAN server IPs
+      candidateIps.addAll(['127.0.0.1', '192.168.1.100', '192.168.0.100', '192.168.1.10', '192.168.1.150', '192.168.1.200']);
+
+      final distinctCandidates = candidateIps.toSet().toList();
+      for (final targetIp in distinctCandidates) {
+        _emit(ConnectionStatus(
+          state: LanConnectionState.connecting,
+          ip: targetIp,
+          port: AppNetwork.websocketPort,
+          message: 'Connecting to $targetIp...',
+        ));
+        final ok = await _connectTo(targetIp, AppNetwork.websocketPort);
+        if (ok) return;
+      }
+
+      _emit(ConnectionStatus(
+        state: LanConnectionState.disconnected,
+        message: 'Could not connect to branch server on LAN. Ensure the server PC is running and accessible on port ${AppNetwork.websocketPort}.',
+      ));
+      _scheduleReconnect();
+      return;
+    }
+
+    // ── Auto-discovery path (UDP broadcast + fast parallel subnet scan + mDNS) ─
+    final connList = await Connectivity().checkConnectivity();
+    final hasNetwork = connList.contains(ConnectivityResult.wifi) ||
+        connList.contains(ConnectivityResult.ethernet) ||
+        connList.contains(ConnectivityResult.other);
+
+    if (!hasNetwork) {
+      _emit(const ConnectionStatus(
+        state: LanConnectionState.disconnected,
+        message: 'No WiFi or LAN detected. Connect all devices to the same network.',
+      ));
+      _scheduleReconnect();
+      return;
     }
 
     _emit(const ConnectionStatus(
@@ -242,9 +246,8 @@ class ConnectionManager {
       message: 'Scanning network for server...',
     ));
 
-    // [FIX-NET-2] Increased timeout from 15 s → 25 s
     final found = await LanDiscovery.findServer(
-      timeout: const Duration(seconds: 25),
+      timeout: const Duration(seconds: 8),
       onStatus: (s) => _emit(ConnectionStatus(
         state: LanConnectionState.searching,
         message: s,
@@ -254,7 +257,6 @@ class ConnectionManager {
     if (found == null) {
       _emit(const ConnectionStatus(
         state: LanConnectionState.disconnected,
-        // [FIX-NET-3] Actionable message — most common cause is AP isolation
         message: 'Server not found. Ensure all devices are on the same WiFi/LAN '
             'and AP isolation is disabled on the router. '
             'Or set dedicatedServerIp in AppNetwork.',
@@ -428,20 +430,27 @@ class ConnectionManager {
     // Don't use saved server when dedicated mode is on — always use the fixed IP.
     if (AppNetwork.useDedicatedServer) return null;
     try {
-      final box  = Hive.box('app_settings');
-      final ip   = box.get(_savedIpKey)   as String?;
-      final port = box.get(_savedPortKey) as int?;
-      if (ip != null && port != null) return (ip, port);
+      if (Hive.isBoxOpen('app_settings')) {
+        final box  = Hive.box('app_settings');
+        final ip   = box.get(_savedIpKey)   as String?;
+        final port = box.get(_savedPortKey) as int?;
+        if (ip != null && port != null && ip.isNotEmpty && ip != '127.0.0.1' && ip != 'localhost') {
+          return (ip, port);
+        }
+      }
     } catch (_) {}
     return null;
   }
 
   void _saveServer(String ip, int port) {
     if (AppNetwork.useDedicatedServer) return; // no need to cache a fixed address
+    if (ip.isEmpty || ip == '127.0.0.1' || ip == 'localhost') return; // NEVER cache loopback address
     try {
-      final box = Hive.box('app_settings');
-      box.put(_savedIpKey,   ip);
-      box.put(_savedPortKey, port);
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        box.put(_savedIpKey,   ip);
+        box.put(_savedPortKey, port);
+      }
     } catch (_) {}
   }
 

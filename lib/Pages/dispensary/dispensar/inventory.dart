@@ -46,7 +46,9 @@ class InventoryPage extends StatefulWidget {
 }
 
 class _InventoryPageState extends State<InventoryPage>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   // ── Palette ───────────────────────────────────────────────────────────────
   static const _teal = Color(0xFF00695C);
   static const _tealDark = Color(0xFF004D40);
@@ -91,30 +93,25 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   bool get _canRegisterMedicine {
-    if (widget.isReadOnly) return false;
-    if (widget.isAdmin || widget.isSupervisor) return true;
-
+    if (widget.isReadOnly || widget.isDispenser || widget.isDoctor) return false;
+    String r = '';
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        final uData = Hive.box('app_settings').get('user_data');
-        if (uData is Map && uData['canRegisterMedicine'] == true) {
-          return true;
+        final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (uData is Map) {
+          r = (uData['role'] ?? uData['userRole'] ?? '').toString().trim().toLowerCase();
         }
       }
     } catch (_) {}
 
-    final normBranchId = widget.branchId.toLowerCase().trim();
-    final activeCamp = (CampSessionService.getActiveCamp() ?? '').toLowerCase().trim();
-    final branchName = _getBranchName().toLowerCase().trim();
-
-    final isGujrat = normBranchId.contains('gujrat') || activeCamp.contains('gujrat') || branchName.contains('gujrat');
-
-    if (isGujrat) {
-      if (widget.isDoctor) return true;
-      if (widget.isDispenser) return false;
+    if (r.contains('doctor') || r.contains('dispens') || r.contains('hybrid') || r.contains('reception')) {
+      return false;
     }
 
-    return true;
+    if (widget.isAdmin || widget.isSupervisor || r.contains('chairman') || r.contains('hqmanager') || r.contains('hq_manager') || r.contains('manager') || r.contains('admin') || r.contains('supervisor') || r.contains('president')) {
+      return true;
+    }
+    return false;
   }
 
   static const _editRequestTypes = {'edit_medicine', 'delete_medicine'};
@@ -124,6 +121,7 @@ class _InventoryPageState extends State<InventoryPage>
         'Capsule' => const Color(0xFF6A1B9A),
         'Syrup' => const Color(0xFFF57F17),
         'Injection' => const Color(0xFFC62828),
+        'Infusion' => const Color(0xFF00695C),
         'Drip' => const Color(0xFF00695C),
         'Drip Set' => const Color(0xFF00838F),
         'Syringe' => const Color(0xFFAD1457),
@@ -144,6 +142,7 @@ class _InventoryPageState extends State<InventoryPage>
   int _page = 0;
   final int _perPage = 25;
   List<String> _batchKeys = ['All Batches'];
+  String? _selectedCampFilter;
   final ScrollController _scrollController = ScrollController();
   int _displayLimit = 50;
   bool _isExportingPdf = false;
@@ -160,8 +159,8 @@ class _InventoryPageState extends State<InventoryPage>
   final _logState = BehaviorSubject<List<Map<String, dynamic>>>();
 
   final List<String> _types = [
-    'All', 'Tablet', 'Capsule', 'Syrup', 'Injection',
-    'Drip', 'Drip Set', 'Syringe', 'Cannula', 'Needle', 'Nebulization', 'Dressing Item', 'Consumables', 'Others',
+    'All', 'Tablet', 'Capsule', 'Syrup', 'Injection', 'Infusion',
+    'Drip Set', 'Syringe', 'Cannula', 'Needle', 'Nebulization', 'Dressing Item', 'Consumables', 'Others',
   ];
 
   @override
@@ -184,9 +183,30 @@ class _InventoryPageState extends State<InventoryPage>
     _loadDataFromHive();
   }
 
+  @override
+  void didUpdateWidget(covariant InventoryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.branchId != widget.branchId) {
+      _fireInvSub?.cancel();
+      _logCombinedSub?.cancel();
+      _rawItems.clear();
+      _groupedBatches.clear();
+      _filteredBatches.clear();
+      _displayItems.clear();
+      _initSync();
+      _loadDataFromHive();
+    }
+  }
+
   void _initSync() {
-    // 1. Download full inventory to ensure all stock items exist in local Hive cache
-    LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
+    final activeCamp = CampSessionService.getActiveCamp();
+    final invCol = CampSessionService.getCampInventoryPath(
+      branchId: widget.branchId,
+      campId: activeCamp,
+    );
+
+    // 1. Download inventory in background (using cached Hive immediately for 0ms load)
+    LocalStorageService.downloadInventory(widget.branchId, forceFull: false, campId: activeCamp).then((_) {
       if (mounted) _loadDataFromHive();
     });
 
@@ -194,7 +214,7 @@ class _InventoryPageState extends State<InventoryPage>
     _fireInvSub = FirebaseFirestore.instance
         .collection('branches')
         .doc(widget.branchId)
-        .collection('inventory')
+        .collection(invCol)
         .snapshots()
         .listen((snap) {
       for (final change in snap.docChanges) {
@@ -202,7 +222,7 @@ class _InventoryPageState extends State<InventoryPage>
           LocalStorageService.deleteLocalStockItem(change.doc.id);
         } else {
           LocalStorageService.saveLocalInventoryItem(
-              {...change.doc.data() as Map<String, dynamic>, 'id': change.doc.id, 'branchId': widget.branchId});
+              {...change.doc.data() as Map<String, dynamic>, 'id': change.doc.id, 'branchId': widget.branchId, 'campId': activeCamp});
         }
       }
       if (mounted) _loadDataFromHive();
@@ -307,15 +327,19 @@ class _InventoryPageState extends State<InventoryPage>
           (b.isNotEmpty && normBranch.contains(b));
     }).toList();
 
-    final activeCamp = CampSessionService.getActiveCamp();
-    if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
-      final normCamp = activeCamp.replaceAll(RegExp(r'[^a-z0-9]'), '');
-      filtered = filtered.where((v) {
-        final rawD = (v['dispensaryId'] ?? v['campId'])?.toString().toLowerCase().trim();
-        if (rawD == null || rawD.isEmpty || rawD == 'all' || rawD == 'main') return true;
-        final normD = rawD.replaceAll(RegExp(r'[^a-z0-9]'), '');
-        return normD == normCamp || normD.contains(normCamp) || normCamp.contains(normD);
-      }).toList();
+    if (CampSessionService.hasCampsForBranch(widget.branchId)) {
+      final activeCamp = _selectedCampFilter ?? 'all';
+      if (activeCamp.isNotEmpty && activeCamp != 'all') {
+        filtered = filtered.where((v) {
+          return CampSessionService.matchesCamp(
+            selectedCamp: activeCamp,
+            dispensaryId: v['dispensaryId']?.toString(),
+            campId: v['campId']?.toString(),
+            dispensaryTag: v['dispensaryTag']?.toString(),
+            serial: (v['barcode'] ?? v['code'] ?? v['id'])?.toString(),
+          );
+        }).toList();
+      }
     }
 
     if (mounted) {
@@ -485,6 +509,7 @@ class _InventoryPageState extends State<InventoryPage>
       'Capsule' => FontAwesomeIcons.capsules,
       'Syrup' => FontAwesomeIcons.bottleDroplet,
       'Injection' => FontAwesomeIcons.syringe,
+      'Infusion' => FontAwesomeIcons.bottleDroplet,
       'Drip' => FontAwesomeIcons.bottleDroplet,
       'Drip Set' => FontAwesomeIcons.kitMedical,
       'Syringe' => FontAwesomeIcons.syringe,
@@ -810,6 +835,7 @@ class _InventoryPageState extends State<InventoryPage>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final bool isWrapped = GlobalModuleWrapper.isWrapped(context);
     final double screenWidth = MediaQuery.of(context).size.width;
     final bool isMobile = screenWidth < 800;
@@ -942,6 +968,7 @@ class _InventoryPageState extends State<InventoryPage>
         ]),
         actions: [
           CampSelectorChip(
+            branchId: widget.branchId,
             onCampChanged: (newCamp) {
               _loadDataFromHive();
             },
@@ -1047,20 +1074,98 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _stockTab() {
     if (_rawItems.isEmpty) {
       return Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 480),
+          margin: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
           child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-            Icon(Icons.inventory_2_outlined,
-                size: 72, color: Colors.grey[300]),
-            const SizedBox(height: 14),
-            Text(
-                widget.isAdmin
-                    ? 'No medicines in local stock.'
-                    : 'No medicines in local stock.\nChecking cloud...',
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.inventory_2_outlined, size: 64, color: _teal),
+              const SizedBox(height: 14),
+              Text(
+                'No Medicines in ${_getBranchName()} Stock',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: _textLight, fontSize: 15)),
-          ]));
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: _isDark ? Colors.white : _textDark,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Stock for this branch has not been loaded or added yet. You can add medicines from the Universal Proforma or sync from cloud.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _isDark ? const Color(0xFF94A3B8) : _textLight,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 10,
+                children: [
+                  if (!_isSupervisorOrReadOnly)
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _teal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => UniversalProformaSheetPage(
+                              branchId: widget.branchId,
+                              isAdmin: widget.isAdmin,
+                              isDispenser: widget.isDispenser,
+                            ),
+                          ),
+                        ).then((_) => _loadDataFromHive());
+                      },
+                      icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                      label: const Text('Add From Proforma'),
+                    ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _isDark ? const Color(0xFF5EEAD4) : _teal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      side: BorderSide(color: _isDark ? const Color(0xFF5EEAD4) : _teal),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: () {
+                      LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
+                        if (mounted) _loadDataFromHive();
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('🔄 Syncing branch inventory from cloud...'), duration: Duration(seconds: 2)),
+                      );
+                    },
+                    icon: const Icon(Icons.cloud_sync_outlined, size: 18),
+                    label: const Text('Sync Cloud'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     final screenWidth = MediaQuery.of(context).size.width;
@@ -1077,6 +1182,36 @@ class _InventoryPageState extends State<InventoryPage>
           }),
         ),
       ],
+    );
+  }
+
+  Widget _buildCampFilterChip(String campId, String label) {
+    final active = _selectedCampFilter ?? 'all';
+    final isSelected = active == campId;
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedCampFilter = campId;
+          _displayLimit = 50;
+          _loadDataFromHive();
+        });
+      },
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? _teal : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+            color: isSelected ? Colors.white : (_isDark ? Colors.grey.shade300 : const Color(0xFF374151)),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1176,17 +1311,27 @@ class _InventoryPageState extends State<InventoryPage>
           ),
         ),
       ),
-      const SizedBox(width: 8),
-      CampSelectorChip(
-        textColor: _isDark ? Colors.white : _textDark,
-        bgColor: _isDark ? const Color(0xFF334155) : _white,
-        borderColor: _isDark ? const Color(0xFF475569) : Colors.grey.shade200,
-        onCampChanged: (newCamp) {
-          setState(() {
-            _loadDataFromHive();
-          });
-        },
-      ),
+      if (CampSessionService.hasCampsForBranch(widget.branchId)) ...[
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(
+            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildCampFilterChip('all', '🏥 All Camps'),
+              const SizedBox(width: 4),
+              _buildCampFilterChip('saddar', '📍 Saddar'),
+              const SizedBox(width: 4),
+              _buildCampFilterChip('haji', '📍 Haji Camp'),
+            ],
+          ),
+        ),
+      ],
     ];
 
     // Universal Proforma Sheet Button
@@ -1539,14 +1684,12 @@ class _InventoryPageState extends State<InventoryPage>
     
     final cols = [
       _Col('#', w * 0.04, null),
-      _Col('Formula', w * 0.27, 'name'),
-      _Col('Barcode', w * 0.12, null),
-      _Col('Type', w * 0.10, null),
-      _Col('Dose', w * 0.10, 'dose'),
-      _Col('Qty', w * 0.07, 'quantity'),
-      _Col('Price', w * 0.10, 'price'),
+      _Col('Formula', w * 0.35, 'name'),
+      _Col('Barcode', w * 0.15, null),
+      _Col('Type', w * 0.12, null),
+      _Col('Dose', w * 0.12, 'dose'),
+      _Col('Qty', w * 0.08, 'quantity'),
       _Col('Expiry', w * 0.14, 'expiry'),
-      _Col('Status', w * 0.06, null),
     ];
 
     final tableWidget = Column(
@@ -1580,7 +1723,6 @@ class _InventoryPageState extends State<InventoryPage>
               final b = data[i];
               final qty = b['quantity'] as int;
               final type = b['type'] as String;
-              final price = b['price'] as double;
               final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
               final lowStock = qty < 10;
               final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
@@ -1665,10 +1807,6 @@ class _InventoryPageState extends State<InventoryPage>
                                   fontSize: 12.5))),
                       _dCell(
                           cols[6].w,
-                          Text(_fmtPrice(price),
-                              style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5, fontWeight: FontWeight.w500))),
-                      _dCell(
-                          cols[7].w,
                           Text(expText,
                               style: TextStyle(
                                   color: _isDark
@@ -1676,11 +1814,6 @@ class _InventoryPageState extends State<InventoryPage>
                                       : (expSoon ? _red : _textDark),
                                   fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
                                   fontSize: 12.5))),
-                      _dCell(
-                          cols[8].w,
-                          Center(
-                            child: _statusDot(lowStock: lowStock, expSoon: expSoon),
-                          )),
                     ]),
                   ],
                 ),
@@ -2934,6 +3067,7 @@ class _InventoryPageState extends State<InventoryPage>
         'Capsule' => const Color(0xFFC084FC),
         'Syrup' => const Color(0xFFFDBA74),
         'Injection' => const Color(0xFFFCA5A5),
+        'Infusion' => const Color(0xFF5EEAD4),
         'Drip' => const Color(0xFF5EEAD4),
         'Drip Set' => const Color(0xFF67E8F9),
         'Syringe' => const Color(0xFFF472B6),

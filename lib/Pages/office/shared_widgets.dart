@@ -387,6 +387,7 @@ Widget buildInitialsAvatar({
   double radius = 20,
   String? imageUrl,
   String? imagePath,
+  String? gender,
 }) {
   bool hasLocal = false;
   if (!kIsWeb && imagePath != null && imagePath.isNotEmpty) {
@@ -400,6 +401,33 @@ Widget buildInitialsAvatar({
   Uint8List? base64Bytes;
   if (hasRemote) {
     base64Bytes = ImageUploadService.decodeBase64ToBytes(imageUrl);
+  }
+
+  final isFemale = gender?.toLowerCase() == 'female';
+  final isMale = gender?.toLowerCase() == 'male';
+
+  Widget buildGenderFallback() {
+    if (isFemale) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: const Color(0xFFFCE7F3),
+        child: Icon(Icons.face_3_rounded, size: radius * 1.25, color: const Color(0xFFDB2777)),
+      );
+    } else if (isMale) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: const Color(0xFFE0F2FE),
+        child: Icon(Icons.face_6_rounded, size: radius * 1.25, color: const Color(0xFF0284C7)),
+      );
+    }
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: theme.accentMuted,
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
+      ),
+    );
   }
 
   if (hasLocal || hasRemote) {
@@ -417,31 +445,17 @@ Widget buildInitialsAvatar({
       child: Container(
         width: radius * 2,
         height: radius * 2,
-        color: theme.accentMuted,
+        color: isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : theme.accentMuted),
         child: Image(
           image: imageProvider,
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
-            return Center(
-              child: Text(
-                name.isNotEmpty ? name[0].toUpperCase() : '?',
-                style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
-              ),
-            );
-          },
+          errorBuilder: (context, error, stackTrace) => buildGenderFallback(),
         ),
       ),
     );
   }
 
-  return CircleAvatar(
-    radius: radius,
-    backgroundColor: theme.accentMuted,
-    child: Text(
-      name.isNotEmpty ? name[0].toUpperCase() : '?',
-      style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
-    ),
-  );
+  return buildGenderFallback();
 }
 
 // ── List row ─────────────────────────────────────────────────────────────────

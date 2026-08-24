@@ -1,4 +1,4 @@
-// lib/pages/dispensary/doctor/patient_info.dart
+// lib/pages/dispensary/doctor/patient_info.dart (updated)
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +14,7 @@ class PatientInfo extends StatelessWidget {
   final String? doctorName;
   final String? branchId;
   final ValueChanged<Map<String, dynamic>>? onVitalsUpdated;
+  final VoidCallback? onSkipPatient;
 
   const PatientInfo({
     super.key,
@@ -22,6 +23,7 @@ class PatientInfo extends StatelessWidget {
     this.doctorName,
     this.branchId,
     this.onVitalsUpdated,
+    this.onSkipPatient,
   });
 
   static const Color _teal  = Color(0xFF00695C);
@@ -37,50 +39,68 @@ class PatientInfo extends StatelessWidget {
   }) {
     return Container(
       padding: EdgeInsets.symmetric(
-        vertical: compact ? 6 : 8,
-        horizontal: compact ? 4 : 6,
+        vertical: compact ? 6 : 10,
+        horizontal: compact ? 4 : 8,
       ),
-      margin: EdgeInsets.symmetric(horizontal: compact ? 2 : 4),
+      margin: EdgeInsets.symmetric(horizontal: compact ? 2.5 : 4),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(compact ? 10 : 16),
+        borderRadius: BorderRadius.circular(compact ? 10 : 14),
+        boxShadow: [
+          BoxShadow(
+            color: backgroundColor.withValues(alpha: 0.35),
+            blurRadius: 7,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: Colors.white, size: compact ? 14 : 18),
-          SizedBox(height: compact ? 2 : 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: compact ? 8 : 10.5,
-            ),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white.withValues(alpha: 0.95), size: compact ? 13 : 17),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.95),
+                    fontWeight: FontWeight.bold,
+                    fontSize: compact ? 10 : 12.5,
+                    letterSpacing: 0.3,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          SizedBox(height: compact ? 1 : 2),
+          const SizedBox(height: 4),
           Text(
             value,
             style: TextStyle(
               color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: compact ? 10 : 12.5,
+              fontWeight: FontWeight.w900,
+              fontSize: compact ? 13 : 18,
+              letterSpacing: 0.4,
             ),
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
           if (auditSubtext != null && auditSubtext.isNotEmpty) ...[
-            const SizedBox(height: 1),
+            const SizedBox(height: 2),
             Text(
               auditSubtext,
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.85),
-                fontSize: compact ? 7 : 8.5,
+                color: Colors.white.withValues(alpha: 0.9),
+                fontSize: compact ? 8 : 10,
                 fontStyle: FontStyle.italic,
+                fontWeight: FontWeight.w500,
               ),
               textAlign: TextAlign.center,
               maxLines: 1,
@@ -429,6 +449,8 @@ class PatientInfo extends StatelessWidget {
           'at': recV['addedAt'] ?? patient['createdAt'] ?? '',
           'bp': recV['bp'] ?? vitals['bp'] ?? 'N/A',
           'temp': recV['temp'] ?? vitals['temp'] ?? 'N/A',
+          'sugar': recV['sugar'] ?? vitals['sugar'] ?? 'N/A',
+          'weight': recV['weight'] ?? vitals['weight'] ?? 'N/A',
         });
       }
       if (docV.isNotEmpty) {
@@ -439,74 +461,259 @@ class PatientInfo extends StatelessWidget {
           'at': docV['updatedAt'] ?? '',
           'bp': docV['bp'] ?? 'N/A',
           'temp': docV['temp'] ?? 'N/A',
+          'sugar': docV['sugar'] ?? vitals['sugar'] ?? 'N/A',
+          'weight': docV['weight'] ?? vitals['weight'] ?? 'N/A',
         });
       }
     }
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Icon(Icons.history_rounded, color: Colors.blue.shade800, size: 24),
-            const SizedBox(width: 8),
-            const Text('Vitals Audit Trail', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: SizedBox(
-          width: 400,
-          child: auditList.isEmpty
-              ? const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('No audit history available for this entry.', textAlign: TextAlign.center),
-                )
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: auditList.length,
-                  separatorBuilder: (ctx, i) => const Divider(),
-                  itemBuilder: (_, i) {
-                    final item = auditList[i];
-                    final isDoc = item['role'] == 'doctor';
-                    return ListTile(
-                      dense: true,
-                      leading: CircleAvatar(
-                        backgroundColor: isDoc ? Colors.amber.shade100 : Colors.blue.shade100,
-                        child: Icon(
-                          isDoc ? Icons.medical_services : Icons.support_agent,
-                          color: isDoc ? Colors.amber.shade900 : Colors.blue.shade900,
-                          size: 18,
-                        ),
+        clipBehavior: Clip.antiAlias,
+        child: Container(
+          width: 520,
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? const Color(0xFF1E293B)
+                : Colors.white,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Header Banner ──────────────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF0F766E), Color(0xFF0D9488)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      title: Text(
-                        '${item['action'] ?? 'Vitals recorded'} by ${item['by'] ?? 'User'}',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                      subtitle: Column(
+                      child: const Icon(Icons.history_toggle_off_rounded,
+                          color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(width: 14),
+                    const Expanded(
+                      child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const SizedBox(height: 2),
-                          Text('BP: ${item['bp'] ?? 'N/A'}  •  Temp: ${item['temp'] ?? 'N/A'}°C',
-                              style: const TextStyle(fontSize: 12, color: Colors.black87)),
-                          if (item['at'] != null && item['at'].toString().isNotEmpty)
-                            Text(
-                              item['at'].toString().replaceAll('T', ' ').split('.')[0],
-                              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                            ),
+                          Text('Vitals Audit Trail',
+                              style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white)),
+                          SizedBox(height: 2),
+                          Text('Complete record of patient vital entries',
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.white70)),
                         ],
                       ),
-                    );
-                  },
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
                 ),
+              ),
+
+              // ── Content ───────────────────────────────────────────────────
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 480),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: auditList.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 30),
+                          child: Center(
+                            child: Text(
+                              'No vitals audit history available for this entry.',
+                              style: TextStyle(color: Colors.grey, fontSize: 14),
+                            ),
+                          ),
+                        )
+                      : Column(
+                          children: auditList.asMap().entries.map((entry) {
+                            final item = entry.value;
+                            final isDoc = item['role'] == 'doctor';
+                            final roleColor = isDoc ? Colors.amber.shade800 : Colors.teal.shade700;
+                            final roleBg = isDoc ? Colors.amber.shade50 : Colors.teal.shade50;
+                            final roleIcon = isDoc ? Icons.medical_services_rounded : Icons.support_agent_rounded;
+
+                            final bpStr = (item['bp'] ?? 'N/A').toString();
+                            final tempStr = (item['temp'] ?? 'N/A').toString();
+                            final sugarStr = (item['sugar'] ?? 'N/A').toString();
+                            final weightStr = (item['weight'] ?? 'N/A').toString();
+                            final timeRaw = item['at']?.toString() ?? '';
+                            final formattedTime = timeRaw.isNotEmpty
+                                ? timeRaw.replaceAll('T', ' ').split('.')[0]
+                                : '';
+
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 14),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: roleBg.withValues(alpha: 0.6),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: roleColor.withValues(alpha: 0.3),
+                                    width: 1.2),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: roleColor,
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Icon(roleIcon, color: Colors.white, size: 16),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              item['action'] ?? 'Vitals recorded',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14,
+                                                  color: roleColor),
+                                            ),
+                                            if (formattedTime.isNotEmpty)
+                                              Text(
+                                                'Recorded by ${item['by'] ?? 'User'} • $formattedTime',
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.grey.shade700),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: roleColor.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(20),
+                                        ),
+                                        child: Text(
+                                          isDoc ? 'DOCTOR' : 'RECEPTIONIST',
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: roleColor),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      _auditVitalChip('BP', bpStr, Icons.favorite_rounded, Colors.red.shade700),
+                                      _auditVitalChip('Temp', tempStr == 'N/A' ? 'N/A' : '$tempStr°C', Icons.thermostat_rounded, Colors.orange.shade800),
+                                      _auditVitalChip('Sugar', sugarStr == 'N/A' ? 'N/A' : '$sugarStr mg/dL', Icons.opacity_rounded, Colors.purple.shade700),
+                                      _auditVitalChip('Weight', weightStr == 'N/A' ? 'N/A' : '${weightStr}kg', Icons.monitor_weight_rounded, Colors.green.shade800),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                ),
+              ),
+
+              // ── Footer ────────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Close Audit Trail', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Close'),
+      ),
+    );
+  }
+
+  Widget _auditVitalChip(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
+          ),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.black87),
           ),
         ],
       ),
     );
+  }
+
+  String? _resolveGuardianName(Map<String, dynamic> patient) {
+    if (patient['guardianName'] != null && patient['guardianName'].toString().trim().isNotEmpty) {
+      return patient['guardianName'].toString().trim();
+    }
+    final gCnic = (patient['guardianCnic'] ?? '').toString().trim();
+    if (gCnic.isEmpty) return null;
+
+    try {
+      final bId = branchId ?? patient['branchId']?.toString();
+      final list = LocalStorageService.searchPatientsByCnicOrGuardian(gCnic, branchId: bId);
+      for (final p in list) {
+        final isAdult = p['isAdult'] == true ||
+            (p['guardianCnic'] == null || (p['guardianCnic'] as String).trim().isEmpty);
+        if (isAdult) {
+          final gName = (p['patientName'] ?? p['name'] ?? p['fullName'])?.toString().trim();
+          if (gName != null && gName.isNotEmpty) return gName;
+        }
+      }
+      if (list.isNotEmpty) {
+        final gName = (list.first['patientName'] ?? list.first['name'] ?? list.first['fullName'])?.toString().trim();
+        if (gName != null && gName.isNotEmpty) return gName;
+      }
+    } catch (_) {}
+    return null;
   }
 
   @override
@@ -538,69 +745,159 @@ class PatientInfo extends StatelessWidget {
     final recSugar = recVitals['sugar'];
     final recWeight = recVitals['weight'];
 
+    final patientName = (patient['patientName'] ?? patient['name'] ?? 'Unknown Patient').toString();
+    final guardianName = _resolveGuardianName(patient);
+    final isChild = (patient['guardianCnic'] != null && patient['guardianCnic'].toString().trim().isNotEmpty) ||
+        (patient['isAdult'] == false);
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return LayoutBuilder(builder: (context, constraints) {
-      final isNarrow = constraints.maxWidth < 480;
-      final compact  = constraints.maxWidth < 360;
+      final isNarrow = constraints.maxWidth < 600;
+      final compact  = constraints.maxWidth < 420;
 
       final vitalsList = [
-        {'label': 'Age',    'value': (vitals['age'] ?? patient['age'] ?? '-').toString(), 'icon': Icons.calendar_today, 'color': _teal, 'sub': null},
-        {'label': 'Gender', 'value': vitals['gender'] ?? patient['gender'] ?? '-',        'icon': Icons.person_outline, 'color': Colors.blue[700]!, 'sub': null},
-        {'label': 'Blood',  'value': vitals['bloodGroup'] ?? patient['bloodGroup'] ?? '-','icon': Icons.bloodtype,       'color': Colors.red[700]!, 'sub': null},
-        {'label': 'BP',     'value': vitals['bp'] ?? '-',                                 'icon': Icons.favorite,        'color': Colors.red, 'sub': hasDocUpdate && recBp != null && recBp.toString() != vitals['bp']?.toString() ? 'Rec: $recBp' : null},
-        {'label': 'Temp',   'value': vitals['temp'] != null ? "${vitals['temp']}°C" : '-','icon': Icons.thermostat,      'color': Colors.orange, 'sub': hasDocUpdate && recTemp != null && recTemp.toString() != vitals['temp']?.toString() ? 'Rec: $recTemp°C' : null},
-        {'label': 'Sugar',  'value': vitals['sugar'] ?? '-',                              'icon': Icons.opacity,         'color': Colors.purple, 'sub': hasDocUpdate && recSugar != null && recSugar.toString() != vitals['sugar']?.toString() ? 'Rec: $recSugar' : null},
-        {'label': 'Weight', 'value': vitals['weight'] != null ? "${vitals['weight']}kg" : '-','icon': Icons.monitor_weight,'color': Colors.green[700]!, 'sub': hasDocUpdate && recWeight != null && recWeight.toString() != vitals['weight']?.toString() ? 'Rec: ${recWeight}kg' : null},
+        {'label': 'Age',    'value': (vitals['age'] ?? patient['age'] ?? '-').toString(), 'icon': Icons.calendar_today_rounded, 'color': isDark ? const Color(0xFF0F766E) : _teal, 'sub': null},
+        {'label': 'Gender', 'value': vitals['gender'] ?? patient['gender'] ?? '-',        'icon': Icons.person_outline_rounded, 'color': isDark ? const Color(0xFF1D4ED8) : Colors.blue.shade700, 'sub': null},
+        {'label': 'Blood',  'value': vitals['bloodGroup'] ?? patient['bloodGroup'] ?? '-','icon': Icons.bloodtype_rounded,       'color': isDark ? const Color(0xFFB91C1C) : Colors.red.shade700, 'sub': null},
+        {'label': 'BP',     'value': vitals['bp'] ?? '-',                                 'icon': Icons.favorite_rounded,        'color': const Color(0xFFE11D48), 'sub': hasDocUpdate && recBp != null && recBp.toString() != vitals['bp']?.toString() ? 'Rec: $recBp' : null},
+        {'label': 'Temp',   'value': vitals['temp'] != null ? "${vitals['temp']}°C" : '-','icon': Icons.thermostat_rounded,      'color': const Color(0xFFD97706), 'sub': hasDocUpdate && recTemp != null && recTemp.toString() != vitals['temp']?.toString() ? 'Rec: $recTemp°C' : null},
+        {'label': 'Sugar',  'value': vitals['sugar'] ?? '-',                              'icon': Icons.water_drop_rounded,      'color': const Color(0xFF7C3AED), 'sub': hasDocUpdate && recSugar != null && recSugar.toString() != vitals['sugar']?.toString() ? 'Rec: $recSugar' : null},
+        {'label': 'Weight', 'value': vitals['weight'] != null ? "${vitals['weight']}kg" : '-','icon': Icons.monitor_weight_rounded,'color': isDark ? const Color(0xFF15803D) : Colors.green.shade700, 'sub': hasDocUpdate && recWeight != null && recWeight.toString() != vitals['weight']?.toString() ? 'Rec: ${recWeight}kg' : null},
       ];
 
       return Padding(
-        padding: EdgeInsets.fromLTRB(
-          isNarrow ? 12 : 20,
-          isNarrow ? 10 : 16,
-          isNarrow ? 12 : 20,
-          isNarrow ? 10 : 16,
+        padding: EdgeInsets.symmetric(
+          horizontal: isNarrow ? 12 : 16,
+          vertical: 10,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // ── Patient name + serial badge + Edit Vitals / Audit ────────────
+            // ── Top Row: Name on Left, Actions on Right ────────────────────
             Row(
               children: [
-                Icon(Icons.person, color: _teal, size: isNarrow ? 20 : 26),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    patient['patientName'] ?? patient['name'] ?? 'Unknown Patient',
-                    style: TextStyle(
-                      fontSize: isNarrow ? 15 : 20,
-                      fontWeight: FontWeight.bold,
-                      color: _teal,
+                Container(
+                  width: isNarrow ? 32 : 36,
+                  height: isNarrow ? 32 : 36,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF134E4A) : const Color(0xFFCCFBF1),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                      width: 1.5,
                     ),
-                    overflow: TextOverflow.ellipsis,
+                  ),
+                  child: Icon(
+                    Icons.person_rounded,
+                    color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                    size: isNarrow ? 18 : 20,
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isNarrow ? 8 : 14,
-                    vertical: isNarrow ? 4 : 7,
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          patientName,
+                          style: TextStyle(
+                            fontSize: isNarrow ? 16 : 19,
+                            fontWeight: FontWeight.w900,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            letterSpacing: -0.2,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isChild && guardianName != null && guardianName.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF134E4A) : Colors.teal.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade200),
+                          ),
+                          child: Text(
+                            'Guardian: $guardianName',
+                            style: TextStyle(
+                              fontSize: isNarrow ? 10 : 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (patient['isVitalsOnly'] == true || patient['vitalsOnly'] == true) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF6B21A8) : Colors.purple.shade700,
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.purple.withValues(alpha: 0.25),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          child: const Text(
+                            '🩺 VITALS ONLY',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
+                ),
+                const SizedBox(width: 8),
+                // Serial Token Badge
+                Container(
+                  height: 32,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isNarrow ? 10 : 14,
+                  ),
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: _amber.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: _amber, width: 2),
+                    color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFFF59E0B) : const Color(0xFFFBBF24),
+                      width: 1.5,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.amber.withValues(alpha: isDark ? 0.2 : 0.15),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.confirmation_number, color: _amber, size: isNarrow ? 14 : 18),
-                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.confirmation_number_rounded,
+                        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                        size: isNarrow ? 14 : 16,
+                      ),
+                      const SizedBox(width: 6),
                       Text(
                         patient['serial'] ?? '-',
                         style: TextStyle(
-                          color: _amber,
-                          fontSize: isNarrow ? 12 : 16,
-                          fontWeight: FontWeight.bold,
+                          color: isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309),
+                          fontSize: isNarrow ? 11.5 : 13,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
                         ),
                       ),
                     ],
@@ -608,30 +905,81 @@ class PatientInfo extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 // Edit Vitals Button
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal.shade700,
-                    foregroundColor: Colors.white,
+                InkWell(
+                  onTap: () => _showEditVitalsDialog(context, patient),
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    height: 32,
                     padding: EdgeInsets.symmetric(
-                      horizontal: isNarrow ? 8 : 12,
-                      vertical: isNarrow ? 4 : 8,
+                      horizontal: isNarrow ? 10 : 12,
                     ),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F766E) : _teal,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _teal.withValues(alpha: 0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 1.5),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.edit_note_rounded, color: Colors.white, size: isNarrow ? 16 : 18),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Edit BP/Temp',
+                          style: TextStyle(
+                            fontSize: isNarrow ? 11 : 12,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  icon: Icon(Icons.edit_note_rounded, size: isNarrow ? 14 : 18),
-                  label: Text(
-                    'Edit BP/Temp',
-                    style: TextStyle(fontSize: isNarrow ? 11 : 13, fontWeight: FontWeight.bold),
+                ),
+                if (onSkipPatient != null) ...[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: onSkipPatient,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      height: 32,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: isNarrow ? 10 : 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFFC2410C) : const Color(0xFFEA580C),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.deepOrange.withValues(alpha: 0.3),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1.5),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.skip_next_rounded, color: Colors.white, size: isNarrow ? 16 : 18),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Skip',
+                            style: TextStyle(
+                              fontSize: isNarrow ? 11 : 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  onPressed: () => _showEditVitalsDialog(context, patient),
-                ),
-                const SizedBox(width: 6),
-                // Audit Trail Info Button
-                IconButton(
-                  tooltip: 'View Vitals Audit History',
-                  icon: Icon(Icons.history_rounded, color: Colors.blue.shade700, size: isNarrow ? 20 : 22),
-                  onPressed: () => _showAuditTrailDialog(context, patient),
-                ),
+                ],
                 if (patient['suggestedDays'] != null) ...[
                   const SizedBox(width: 8),
                   (() {
@@ -647,35 +995,44 @@ class PatientInfo extends StatelessWidget {
                     final hasMismatch = suggested != prescribed && existingPresc != null;
 
                     return Container(
+                      height: 32,
                       padding: EdgeInsets.symmetric(
                         horizontal: isNarrow ? 8 : 12,
-                        vertical: isNarrow ? 4 : 6,
                       ),
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: hasMismatch ? Colors.orange.shade50 : Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(10),
+                        color: hasMismatch
+                            ? (isDark ? const Color(0xFF451A03) : const Color(0xFFFFF7ED))
+                            : (isDark ? const Color(0xFF064E3B) : const Color(0xFFECFDF5)),
+                        borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: hasMismatch ? Colors.orange.shade300 : Colors.green.shade300,
-                          width: 1.5,
+                          color: hasMismatch
+                              ? (isDark ? const Color(0xFFF97316) : const Color(0xFFFDBA74))
+                              : (isDark ? const Color(0xFF10B981) : const Color(0xFFA7F3D0)),
+                          width: 1.2,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            hasMismatch ? Icons.warning_amber_rounded : Icons.info_outline,
-                            color: hasMismatch ? Colors.orange.shade800 : Colors.green.shade800,
-                            size: isNarrow ? 14 : 18,
+                            hasMismatch ? Icons.warning_amber_rounded : Icons.info_outline_rounded,
+                            color: hasMismatch
+                                ? (isDark ? const Color(0xFFFB923C) : Colors.orange.shade800)
+                                : (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)),
+                            size: isNarrow ? 14 : 16,
                           ),
-                          const SizedBox(width: 6),
+                          const SizedBox(width: 5),
                           Text(
                             hasMismatch
-                                ? 'Mismatched: $suggested Paid vs $prescribed Prescribed'
-                                : 'Asked for $suggested day${suggested > 1 ? 's' : ''} medicine',
+                                ? '$suggested Paid vs $prescribed Prescribed'
+                                : '$suggested day${suggested > 1 ? 's' : ''} requested',
                             style: TextStyle(
-                              color: hasMismatch ? Colors.orange.shade900 : Colors.green.shade900,
-                              fontSize: isNarrow ? 11 : 13,
-                              fontWeight: FontWeight.bold,
+                              color: hasMismatch
+                                  ? (isDark ? const Color(0xFFFED7AA) : Colors.orange.shade900)
+                                  : (isDark ? const Color(0xFFA7F3D0) : const Color(0xFF065F46)),
+                              fontSize: isNarrow ? 10.5 : 12,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ],
@@ -686,9 +1043,9 @@ class PatientInfo extends StatelessWidget {
               ],
             ),
 
-            SizedBox(height: isNarrow ? 8 : 12),
+            const SizedBox(height: 10),
 
-            // ── Vital tiles — wraps on narrow screens ──────────────────────
+            // ── Vital tiles ───────────────────────────────────────────────
             isNarrow
                 ? Wrap(
                     spacing: 4,
@@ -709,7 +1066,7 @@ class PatientInfo extends StatelessWidget {
                     }).toList(),
                   )
                 : SizedBox(
-                    height: compact ? 72 : 88,
+                    height: 80,
                     child: Row(
                       children: vitalsList.map((v) => Expanded(
                         child: _buildVital(

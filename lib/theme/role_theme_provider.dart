@@ -38,6 +38,8 @@ class RoleThemeScope extends InheritedWidget {
       final isDarkMode = Hive.box('app_settings').get('is_dark_mode', defaultValue: false) as bool;
       if (isDarkMode) {
         data = data.toDarkMode();
+      } else {
+        data = data.toLightMode();
       }
     }
     return data;

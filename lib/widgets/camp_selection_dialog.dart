@@ -17,7 +17,9 @@ class CampSelectionDialog extends StatelessWidget {
   });
 
   static const Map<String, String> _knownLabels = {
-    'kapayya': 'Kapayya Dispensary',
+    'saddar': 'Saddar Dispensary',
+    'kapayya': 'Saddar Dispensary',
+    'kapaya': 'Saddar Dispensary',
     'haji_camp': 'Haji Camp Dispensary',
   };
 

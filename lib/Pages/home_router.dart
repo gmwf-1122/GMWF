@@ -800,7 +800,7 @@ class _HomeRouterState extends State<HomeRouter> {
             ];
 
             // ── Multi-Camp Gate Check ──
-            if (dispensaryRoles.contains(activeRole)) {
+            if (dispensaryRoles.contains(activeRole) && CampSessionService.hasCampsForBranch(branchId)) {
               final assignedCamps = CampSessionService.getAssignedCamps(data);
               if (assignedCamps.length >= 2) {
                 final activeCamp = CampSessionService.resolveActiveCamp(data);

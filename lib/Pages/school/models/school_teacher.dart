@@ -20,6 +20,9 @@ class SchoolTeacher {
   final String branchId;
   final String photoUrl;
   final String cnicUrl;
+  final String experienceLetterUrl;
+  final String joiningLetterUrl;
+  final String degreesUrl;
   final List<Map<String, String>> additionalDocuments;
   final String joiningDate;
   final String syncStatus; // 'synced', 'pending', 'failed'
@@ -45,6 +48,9 @@ class SchoolTeacher {
     required this.branchId,
     this.photoUrl = '',
     this.cnicUrl = '',
+    this.experienceLetterUrl = '',
+    this.joiningLetterUrl = '',
+    this.degreesUrl = '',
     this.additionalDocuments = const [],
     this.joiningDate = '',
     this.syncStatus = 'synced',
@@ -87,6 +93,9 @@ class SchoolTeacher {
       branchId: map['branchId']?.toString() ?? '',
       photoUrl: map['photoUrl']?.toString() ?? '',
       cnicUrl: map['cnicUrl']?.toString() ?? '',
+      experienceLetterUrl: map['experienceLetterUrl']?.toString() ?? '',
+      joiningLetterUrl: map['joiningLetterUrl']?.toString() ?? '',
+      degreesUrl: map['degreesUrl']?.toString() ?? '',
       additionalDocuments: docs,
       joiningDate: map['joiningDate']?.toString() ?? '',
       syncStatus: map['syncStatus']?.toString() ?? 'synced',
@@ -114,6 +123,9 @@ class SchoolTeacher {
       'branchId': branchId,
       'photoUrl': photoUrl,
       'cnicUrl': cnicUrl,
+      'experienceLetterUrl': experienceLetterUrl,
+      'joiningLetterUrl': joiningLetterUrl,
+      'degreesUrl': degreesUrl,
       'additionalDocuments': additionalDocuments,
       'joiningDate': joiningDate,
       'syncStatus': syncStatus,
@@ -140,6 +152,9 @@ class SchoolTeacher {
     String? branchId,
     String? photoUrl,
     String? cnicUrl,
+    String? experienceLetterUrl,
+    String? joiningLetterUrl,
+    String? degreesUrl,
     List<Map<String, String>>? additionalDocuments,
     String? joiningDate,
   }) {
@@ -163,6 +178,9 @@ class SchoolTeacher {
       branchId: branchId ?? this.branchId,
       photoUrl: photoUrl ?? this.photoUrl,
       cnicUrl: cnicUrl ?? this.cnicUrl,
+      experienceLetterUrl: experienceLetterUrl ?? this.experienceLetterUrl,
+      joiningLetterUrl: joiningLetterUrl ?? this.joiningLetterUrl,
+      degreesUrl: degreesUrl ?? this.degreesUrl,
       additionalDocuments: additionalDocuments ?? this.additionalDocuments,
       joiningDate: joiningDate ?? this.joiningDate,
     );

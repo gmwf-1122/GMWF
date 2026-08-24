@@ -22,6 +22,7 @@ import '../services/local_storage_service.dart';
 import '../pages/school/utils/school_local_storage.dart';
 import '../pages/school/school_dashboard.dart';
 import '../pages/users.dart';
+import '../providers/branches_providers.dart';
 
 // ════════════════════════════════════════════════════════════════════════
 // 1. Compact stat tile w/ "vs yesterday" delta
@@ -89,162 +90,215 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
     );
 
     final tileContent = AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeOutQuart,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      transform: Matrix4.translationValues(0.0, _hov ? -3.5 : 0.0, 0.0),
       decoration: BoxDecoration(
-        color: isDark 
-            ? (_hov ? const Color(0xFF1F2937) : const Color(0xFF0F172A))
-            : (_hov ? Colors.white : t.bgCard),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: _hov
-              ? categoryColor.withValues(alpha: 0.6)
-              : (isDark ? const Color(0xFF1E293B) : t.bgRule),
-          width: _hov ? 2.0 : 1.2,
-        ),
-        boxShadow: _hov
-            ? Neumorphic3DStyle.raisedShadows(isDark: isDark, depth: 1.25, accentColor: categoryColor, showGlow: true)
-            : Neumorphic3DStyle.raisedShadows(isDark: isDark, depth: 0.9),
+        boxShadow: [
+          BoxShadow(
+            color: categoryColor.withValues(alpha: _hov ? (isDark ? 0.35 : 0.22) : (isDark ? 0.12 : 0.06)),
+            blurRadius: _hov ? 24 : 14,
+            spreadRadius: _hov ? 1.5 : 0,
+            offset: Offset(0, _hov ? 8 : 4),
+          ),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.03),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20.8),
-        child: Stack(
-          children: [
-            // Background radial glow on hover
-            if (_hov)
-              Positioned(
-                top: -35, right: -35,
-                child: Container(
-                  width: 90, height: 90,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: [
-                        categoryColor.withValues(alpha: 0.18),
-                        Colors.transparent,
+        borderRadius: BorderRadius.circular(22),
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: isDark
+                    ? [
+                        const Color(0xFF1E293B).withValues(alpha: _hov ? 0.88 : 0.68),
+                        const Color(0xFF0F172A).withValues(alpha: _hov ? 0.82 : 0.60),
+                      ]
+                    : [
+                        Colors.white.withValues(alpha: _hov ? 0.95 : 0.85),
+                        Colors.white.withValues(alpha: _hov ? 0.85 : 0.70),
                       ],
-                    ),
-                  ),
-                ),
               ),
-            
-            // Top accent indicator line
-            Positioned(
-              left: 0, right: 0, top: 0,
-              height: 3,
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [categoryColor, categoryColor.withValues(alpha: 0.3)],
-                  ),
-                ),
+              border: Border.all(
+                color: _hov
+                    ? categoryColor.withValues(alpha: isDark ? 0.65 : 0.50)
+                    : (isDark
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.white.withValues(alpha: 0.65)),
+                width: _hov ? 1.4 : 1.0,
               ),
             ),
-
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Icon container with dynamic rotation on hover
-                  AnimatedRotation(
-                    turns: _hov ? 0.03 : 0,
-                    duration: const Duration(milliseconds: 300),
-                    curve: Curves.easeOutBack,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      padding: const EdgeInsets.all(7),
+            child: Stack(
+              children: [
+                // Localized ambient radial glow spot behind badge
+                Positioned(
+                  top: -24,
+                  left: -24,
+                  width: 90,
+                  height: 90,
+                  child: IgnorePointer(
+                    child: Container(
                       decoration: BoxDecoration(
-                        gradient: _hov ? categoryGradient : null,
-                        color: !_hov 
-                            ? (isDark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.1)) 
-                            : null,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        widget.icon,
-                        color: _hov ? Colors.white : categoryColor,
-                        size: 15,
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            categoryColor.withValues(alpha: _hov ? (isDark ? 0.30 : 0.20) : (isDark ? 0.16 : 0.10)),
+                            categoryColor.withValues(alpha: 0.0),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  
-                  // Text fields
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          widget.label,
-                          style: TextStyle(
-                            color: isDark ? t.textSecondary : const Color(0xFF6B7280),
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            if (widget.prefix != null)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 3),
-                                child: Text(
-                                  widget.prefix!,
-                                  style: TextStyle(
-                                    color: categoryColor.withValues(alpha: 0.8),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            Flexible(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  widget.value,
-                                  style: TextStyle(
-                                    color: isDark ? t.textPrimary : const Color(0xFF111827),
-                                    fontSize: 15.5,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: -0.4,
-                                    height: 1.1,
-                                  ),
-                                ),
-                              ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 11, 12, 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Floating squircle badge with gradient & soft shadow
+                      AnimatedRotation(
+                        turns: _hov ? 0.02 : 0,
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOutBack,
+                        child: Container(
+                          padding: const EdgeInsets.all(8.5),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(13),
+                            gradient: categoryGradient,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.35),
+                              width: 0.9,
                             ),
-                          ],
+                            boxShadow: [
+                              BoxShadow(
+                                color: categoryColor.withValues(alpha: _hov ? 0.40 : 0.25),
+                                blurRadius: _hov ? 10 : 6,
+                                offset: const Offset(0, 3),
+                              ),
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.20),
+                                blurRadius: 1,
+                                offset: const Offset(-1, -1),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            widget.icon,
+                            color: Colors.white,
+                            size: 16,
+                          ),
                         ),
-                        const SizedBox(height: 2),
-                        Row(
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Text info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              !hasDelta
-                                  ? Icons.fiber_new_rounded
-                                  : (isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded),
-                              size: 10,
-                              color: deltaColor,
-                            ),
-                            const SizedBox(width: 2),
                             Text(
-                              !hasDelta ? 'New today' : '${widget.deltaPct!.abs().toStringAsFixed(0)}% vs yesterday',
-                              style: TextStyle(color: deltaColor, fontSize: 8.5, fontWeight: FontWeight.w700),
+                              widget.label,
+                              style: TextStyle(
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.1,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                if (widget.prefix != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 3),
+                                    child: Text(
+                                      widget.prefix!,
+                                      style: TextStyle(
+                                        color: categoryColor,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                Flexible(
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      widget.value,
+                                      style: TextStyle(
+                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                        fontSize: 16.5,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.5,
+                                        height: 1.1,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            // Delta pill badge
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: deltaColor.withValues(alpha: isDark ? 0.18 : 0.10),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: deltaColor.withValues(alpha: isDark ? 0.28 : 0.18),
+                                  width: 0.6,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    !hasDelta
+                                        ? Icons.fiber_new_rounded
+                                        : (isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded),
+                                    size: 9.5,
+                                    color: deltaColor,
+                                  ),
+                                  const SizedBox(width: 2.5),
+                                  Text(
+                                    !hasDelta ? 'New today' : '${widget.deltaPct!.abs().toStringAsFixed(0)}% vs yesterday',
+                                    style: TextStyle(
+                                      color: deltaColor,
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.1,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -488,175 +542,354 @@ class HomeBranchPerformanceTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(DS.s2 + 4),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: t.bgRule),
-        boxShadow: Neumorphic3DStyle.raisedShadows(isDark: t.isDarkCanvas, depth: 0.9),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Dispensaries & Camps Performance Today',
-              style: TextStyle(color: t.textPrimary, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-          const SizedBox(height: DS.s2),
-          // Table header
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: t.bgRule, width: 1.0)),
+    final isDark = t.isDarkCanvas;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      const Color(0xFF1E293B).withValues(alpha: 0.85),
+                      const Color(0xFF0F172A).withValues(alpha: 0.72),
+                    ]
+                  : [
+                      Colors.white.withValues(alpha: 0.94),
+                      Colors.white.withValues(alpha: 0.82),
+                    ],
             ),
-            child: const Row(
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: Text('Dispensary / Camp', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Center(child: Text('Donations (Rs)', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700))),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Center(child: Text('Patients', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700))),
-                ),
-                Expanded(
-                  flex: 2,
-                  child: Center(child: Text('Revenue (Rs)', style: TextStyle(color: DS.neutral, fontSize: 10, fontWeight: FontWeight.w700))),
-                ),
-              ],
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.14)
+                  : Colors.white.withValues(alpha: 0.65),
+              width: 1.0,
             ),
-          ),
-          if (rows.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text('No dispensaries or camps to show', style: TextStyle(color: DS.neutral, fontSize: 12)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
               ),
-            )
-          else
-            ...rows.toList().asMap().entries.map((e) {
-              final i = e.key;
-              final row = e.value;
-              
-              // Compute donations, patients, revenue and their deltas
-              final don = row.today.donations;
-              final yDon = row.yesterday.donations;
-              final double? donDelta = yDon == 0 ? null : ((don - yDon) / yDon) * 100;
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Dispensaries & Camps Performance Today',
+                    style: TextStyle(
+                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0EA5E9).withValues(alpha: isDark ? 0.20 : 0.10),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF0EA5E9).withValues(alpha: 0.3),
+                        width: 0.8,
+                      ),
+                    ),
+                    child: const Text(
+                      'LIVE FEED',
+                      style: TextStyle(
+                        color: Color(0xFF0EA5E9),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              // Table header pill
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFF1F5F9).withValues(alpha: 0.8),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Text('Dispensary / Camp', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Center(child: Text('Donations', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Center(child: Text('Patients', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Center(child: Text('Revenue', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Expanded(
+                child: rows.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No dispensaries or camps to show',
+                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                        ),
+                      )
+                    : SingleChildScrollView(
+                        physics: const BouncingScrollPhysics(),
+                        child: Column(
+                          children: rows.asMap().entries.map((e) {
+                            final i = e.key;
+                            final row = e.value;
+                            
+                            final don = row.today.donations;
+                            final yDon = row.yesterday.donations;
+                            final double? donDelta = yDon == 0 ? null : ((don - yDon) / yDon) * 100;
 
-              final pats = row.today.zakat + row.today.nonZakat + row.today.gmwf;
-              final yPats = row.yesterday.zakat + row.yesterday.nonZakat + row.yesterday.gmwf;
-              final double? patsDelta = yPats == 0 ? null : ((pats - yPats) / yPats) * 100;
+                            final pats = row.today.zakat + row.today.nonZakat + row.today.gmwf;
+                            final yPats = row.yesterday.zakat + row.yesterday.nonZakat + row.yesterday.gmwf;
+                            final double? patsDelta = yPats == 0 ? null : ((pats - yPats) / yPats) * 100;
 
-              final rev = row.today.dispensaryRevenue;
-              final yRev = row.yesterday.dispensaryRevenue;
-              final double? revDelta = yRev == 0 ? null : ((rev - yRev) / yRev) * 100;
+                            final rev = row.today.dispensaryRevenue;
+                            final yRev = row.yesterday.dispensaryRevenue;
+                            final double? revDelta = yRev == 0 ? null : ((rev - yRev) / yRev) * 100;
 
-              final bool isDark = t.isDarkCanvas;
-
-              return InkWell(
-                onTap: onTapBranch != null ? () => onTapBranch!(row.id) : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: isDark ? t.bgRule : DS.border, width: 0.5)),
+                            return _BranchPerformanceRow(
+                              rank: i + 1,
+                              name: row.name,
+                              don: don,
+                              donDelta: donDelta,
+                              pats: pats,
+                              patsDelta: patsDelta,
+                              rev: rev,
+                              revDelta: revDelta,
+                              isDark: isDark,
+                              onTap: onTapBranch != null ? () => onTapBranch!(row.id) : null,
+                            );
+                          }).toList(),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 6),
+              // View all branches link
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    if (onTapBranch != null) onTapBranch!('all');
+                  },
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                   child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Branch name with rank
-                      Expanded(
-                        flex: 3,
-                        child: Row(
-                          children: [
-                            _RankBadge(rank: i + 1),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                row.name,
-                                style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w700),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
+                      Text(
+                        'View all branches',
+                        style: TextStyle(
+                          color: t.accent,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      // Donations
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(fmtNum(don), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
-                              if (donDelta != null) _deltaIndicator(donDelta),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Patients
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(fmtNum(pats), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
-                              if (patsDelta != null) _deltaIndicator(patsDelta),
-                            ],
-                          ),
-                        ),
-                      ),
-                      // Revenue
-                      Expanded(
-                        flex: 2,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(fmtNum(rev), style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w800)),
-                              if (revDelta != null) _deltaIndicator(revDelta),
-                            ],
-                          ),
-                        ),
-                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.arrow_forward_rounded, color: t.accent, size: 13),
                     ],
                   ),
                 ),
-              );
-            }),
-          // View all branches link
-          Center(
-            child: TextButton(
-              onPressed: () {
-                if (onTapBranch != null) onTapBranch!('all');
-              },
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('View all branches', style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.w700)),
-                  const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, color: t.accent, size: 12),
-                ],
               ),
-            ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BranchPerformanceRow extends StatefulWidget {
+  final int rank;
+  final String name;
+  final int don;
+  final double? donDelta;
+  final int pats;
+  final double? patsDelta;
+  final int rev;
+  final double? revDelta;
+  final bool isDark;
+  final VoidCallback? onTap;
+
+  const _BranchPerformanceRow({
+    required this.rank,
+    required this.name,
+    required this.don,
+    required this.donDelta,
+    required this.pats,
+    required this.patsDelta,
+    required this.rev,
+    required this.revDelta,
+    required this.isDark,
+    this.onTap,
+  });
+
+  @override
+  State<_BranchPerformanceRow> createState() => _BranchPerformanceRowState();
+}
+
+class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
+  bool _hov = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hov = true),
+      onExit: (_) => setState(() => _hov = false),
+      cursor: widget.onTap != null ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          margin: const EdgeInsets.symmetric(vertical: 2.5),
+          padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
+          decoration: BoxDecoration(
+            color: _hov
+                ? (isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04))
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              // Branch name with rank
+              Expanded(
+                flex: 4,
+                child: Row(
+                  children: [
+                    _RankBadge(rank: widget.rank),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        widget.name,
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Donations
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        fmtNum(widget.don),
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (widget.donDelta != null) _deltaIndicator(widget.donDelta!, isDark),
+                    ],
+                  ),
+                ),
+              ),
+              // Patients
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        fmtNum(widget.pats),
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (widget.patsDelta != null) _deltaIndicator(widget.patsDelta!, isDark),
+                    ],
+                  ),
+                ),
+              ),
+              // Revenue
+              Expanded(
+                flex: 2,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        fmtNum(widget.rev),
+                        style: TextStyle(
+                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      if (widget.revDelta != null) _deltaIndicator(widget.revDelta!, isDark),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _deltaIndicator(double delta) {
+  Widget _deltaIndicator(double delta, bool isDark) {
     final isUp = delta >= 0;
     final color = isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 9, color: color),
-        const SizedBox(width: 2),
-        Text('${delta.abs().toStringAsFixed(0)}%', style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w700)),
-      ],
+    return Container(
+      margin: const EdgeInsets.only(top: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(isUp ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, size: 8.5, color: color),
+          const SizedBox(width: 1.5),
+          Text(
+            '${delta.abs().toStringAsFixed(0)}%',
+            style: TextStyle(color: color, fontSize: 8.5, fontWeight: FontWeight.w800),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -667,24 +900,122 @@ class _RankBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTop = rank == 1;
+    if (rank == 1) {
+      return Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFEF08A), Color(0xFFF59E0B), Color(0xFFD97706)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFF59E0B).withValues(alpha: 0.50),
+              blurRadius: 7,
+              offset: const Offset(0, 2),
+            ),
+          ],
+          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+        ),
+        child: const Center(
+          child: Icon(
+            Icons.emoji_events_rounded,
+            color: Colors.white,
+            size: 15,
+          ),
+        ),
+      );
+    }
+
+    if (rank == 2) {
+      return Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFF8FAFC), Color(0xFF94A3B8), Color(0xFF64748B)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF94A3B8).withValues(alpha: 0.40),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+        ),
+        child: const Center(
+          child: Icon(
+            Icons.emoji_events_rounded,
+            color: Colors.white,
+            size: 14,
+          ),
+        ),
+      );
+    }
+
+    if (rank == 3) {
+      return Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFFEDD5), Color(0xFFD97706), Color(0xFF9A3412)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFD97706).withValues(alpha: 0.40),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+        ),
+        child: const Center(
+          child: Icon(
+            Icons.emoji_events_rounded,
+            color: Colors.white,
+            size: 13,
+          ),
+        ),
+      );
+    }
+
     return Container(
-      width: 22,
-      height: 22,
+      width: 24,
+      height: 24,
       decoration: BoxDecoration(
-        color: isTop ? const Color(0xFFF59E0B).withValues(alpha: 0.15) : DS.neutralBg,
         shape: BoxShape.circle,
-        border: Border.all(color: isTop ? const Color(0xFFF59E0B) : DS.border),
+        color: const Color(0xFF64748B).withValues(alpha: 0.12),
+        border: Border.all(
+          color: const Color(0xFF64748B).withValues(alpha: 0.25),
+          width: 0.8,
+        ),
       ),
       child: Center(
-          child: Text('$rank',
-              style: TextStyle(
-                  color: isTop ? const Color(0xFFC2760C) : DS.neutral, fontSize: 10, fontWeight: FontWeight.w800))),
+        child: Text(
+          '$rank',
+          style: const TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 10.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
     );
   }
 }
 
-class HomeBestBranchSpotlight extends StatelessWidget {
+class HomeBestBranchSpotlight extends StatefulWidget {
   final String branchName;
   final int revenue;
   final int donations;
@@ -692,6 +1023,7 @@ class HomeBestBranchSpotlight extends StatelessWidget {
   final double? growthPct;
   final VoidCallback onTap;
   final RoleThemeData? t;
+  final String title;
 
   const HomeBestBranchSpotlight({
     super.key,
@@ -702,153 +1034,301 @@ class HomeBestBranchSpotlight extends StatelessWidget {
     required this.growthPct,
     required this.onTap,
     this.t,
+    this.title = 'Best Branch Today',
   });
 
   @override
+  State<HomeBestBranchSpotlight> createState() => _HomeBestBranchSpotlightState();
+}
+
+class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
+  bool _hov = false;
+
+  @override
   Widget build(BuildContext context) {
-    final hasGrowth = growthPct != null;
-    final isUp = hasGrowth && growthPct! >= 0;
+    final hasGrowth = widget.growthPct != null;
+    final isUp = hasGrowth && widget.growthPct! >= 0;
+    final isDark = widget.t?.isDarkCanvas ?? false;
 
-    final accent1 = t?.accent ?? const Color(0xFF0F766E);
-    final accent2 = Color.lerp(accent1, Colors.black, 0.35) ?? const Color(0xFF0B524D);
-    final accent3 = Color.lerp(accent1, Colors.black, 0.55) ?? const Color(0xFF073834);
-
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [accent1, accent2, accent3],
-            stops: const [0.0, 0.55, 1.0],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hov = true),
+      onExit: (_) => setState(() => _hov = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(0.0, _hov ? -4.0 : 0.0, 0.0),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFF59E0B).withValues(alpha: _hov ? (isDark ? 0.40 : 0.28) : (isDark ? 0.22 : 0.12)),
+                blurRadius: _hov ? 28 : 18,
+                spreadRadius: _hov ? 2 : 0,
+                offset: Offset(0, _hov ? 10 : 5),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
           ),
-          borderRadius: BorderRadius.circular(DS.r2),
-          boxShadow: [
-            BoxShadow(
-              color: accent1.withValues(alpha: 0.35),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Best Branch Today',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        branchName,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.5,
-                          height: 1.2,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text(
-                          'Top Performer',
-                          style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w800, letterSpacing: 0.5),
-                        ),
-                      ),
-                    ],
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: isDark
+                        ? [
+                            const Color(0xFF451A03).withValues(alpha: 0.90),
+                            const Color(0xFF1E293B).withValues(alpha: 0.92),
+                            const Color(0xFF0F172A).withValues(alpha: 0.96),
+                          ]
+                        : [
+                            const Color(0xFFFFFBEB).withValues(alpha: 0.98),
+                            const Color(0xFFFEF3C7).withValues(alpha: 0.92),
+                            Colors.white.withValues(alpha: 0.98),
+                          ],
+                  ),
+                  border: Border.all(
+                    color: _hov
+                        ? const Color(0xFFF59E0B).withValues(alpha: 0.70)
+                        : (isDark
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
+                            : const Color(0xFFF59E0B).withValues(alpha: 0.40)),
+                    width: _hov ? 1.5 : 1.0,
                   ),
                 ),
-                // 3D Golden trophy on solid 100% white circle
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.18),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+                child: Stack(
+                  children: [
+                    // Ambient radial glow behind trophy
+                    Positioned(
+                      top: -15,
+                      right: -15,
+                      width: 110,
+                      height: 110,
+                      child: IgnorePointer(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: RadialGradient(
+                              colors: [
+                                const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.22),
+                                const Color(0xFFF59E0B).withValues(alpha: 0.0),
+                              ],
+                            ),
+                          ),
+                        ),
                       ),
-                    ],
-                  ),
-                  child: ShaderMask(
-                    shaderCallback: (bounds) => const LinearGradient(
-                      colors: [
-                        Color(0xFFFFF176),
-                        Color(0xFFF59E0B),
-                        Color(0xFFB45309),
-                      ],
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                    ).createShader(bounds),
-                    child: const Icon(
-                      Icons.emoji_events_rounded,
-                      color: Colors.white,
-                      size: 34,
                     ),
-                  ),
+
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                                          ),
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.star_rounded, color: Colors.white, size: 11),
+                                            SizedBox(width: 3),
+                                            Text(
+                                              '#1 TOP PERFORMER',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w900,
+                                                letterSpacing: 0.6,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    widget.branchName,
+                                    style: TextStyle(
+                                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                      fontSize: 16.5,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.4,
+                                      height: 1.2,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            // Floating 3D Golden trophy badge
+                            AnimatedRotation(
+                              turns: _hov ? 0.04 : 0,
+                              duration: const Duration(milliseconds: 260),
+                              curve: Curves.easeOutBack,
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  ),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: const Color(0xFFF59E0B).withValues(alpha: 0.55),
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                                      blurRadius: 12,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: ShaderMask(
+                                  shaderCallback: (bounds) => const LinearGradient(
+                                    colors: [
+                                      Color(0xFFFFF176),
+                                      Color(0xFFF59E0B),
+                                      Color(0xFFB45309),
+                                    ],
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                  ).createShader(bounds),
+                                  child: const Icon(
+                                    Icons.emoji_events_rounded,
+                                    color: Colors.white,
+                                    size: 28,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Container(
+                          height: 1,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [
+                                Colors.transparent,
+                                isDark ? Colors.white.withValues(alpha: 0.18) : const Color(0xFFF59E0B).withValues(alpha: 0.25),
+                                Colors.transparent,
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        // 4 Modern metric cards in compact layout
+                        Expanded(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              _metricRow(Icons.payments_rounded, 'Revenue', fmtPKR(widget.revenue), isDark, valueColor: const Color(0xFF10B981)),
+                              _metricRow(Icons.volunteer_activism_rounded, 'Donations', fmtPKR(widget.donations), isDark),
+                              _metricRow(Icons.people_alt_rounded, 'Patients', widget.patients.toString(), isDark),
+                              _metricRow(
+                                isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                                'Growth',
+                                hasGrowth
+                                    ? '${isUp ? '+' : ''}${widget.growthPct!.toStringAsFixed(0)}% vs yesterday'
+                                    : 'No prev. data',
+                                isDark,
+                                valueColor: hasGrowth
+                                    ? (isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444))
+                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-            const SizedBox(height: 20),
-            const Divider(color: Colors.white30, height: 1),
-            const SizedBox(height: 14),
-            // Details list
-            _metricRow(Icons.payments_outlined, 'Revenue', fmtPKR(revenue)),
-            const SizedBox(height: 10),
-            _metricRow(Icons.volunteer_activism_outlined, 'Donations', fmtPKR(donations)),
-            const SizedBox(height: 10),
-            _metricRow(Icons.people_alt_outlined, 'Patients', patients.toString()),
-            const SizedBox(height: 10),
-            _metricRow(
-              Icons.trending_up_rounded,
-              'Growth',
-              hasGrowth
-                  ? '${isUp ? '+' : ''}${growthPct!.toStringAsFixed(0)}% vs yesterday'
-                  : 'No data for yesterday',
-              valueColor: hasGrowth
-                  ? (isUp ? const Color(0xFFD1FAE5) : const Color(0xFFFFE4E6))
-                  : Colors.white.withValues(alpha: 0.85),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _metricRow(IconData icon, String label, String value, {Color valueColor = Colors.white}) {
-    return Row(
-      children: [
-        Icon(icon, color: Colors.white.withValues(alpha: 0.85), size: 16),
-        const SizedBox(width: 8),
-        Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.90), fontSize: 12, fontWeight: FontWeight.w600)),
-        const Spacer(),
-        Text(value, style: TextStyle(color: valueColor, fontSize: 13, fontWeight: FontWeight.w800)),
-      ],
+  Widget _metricRow(IconData icon, String label, String value, bool isDark, {Color? valueColor}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFFDE68A).withValues(alpha: 0.75),
+          width: 0.8,
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: const Color(0xFFF59E0B).withValues(alpha: 0.06),
+                  blurRadius: 4,
+                  offset: const Offset(0, 1.5),
+                ),
+              ],
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+            size: 14,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            value,
+            style: TextStyle(
+              color: valueColor ?? (isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A)),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -864,113 +1344,193 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
     final int total = s.zakat + s.nonZakat + s.gmwf;
     final bool isDark = t.isDarkCanvas;
     
-    return Container(
-      padding: const EdgeInsets.all(DS.s2 + 4),
-      decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
-        borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: isDark ? t.bgRule : DS.border),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Patients by Category',
-              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
-          const SizedBox(height: DS.s2),
-          Expanded(
-            child: total == 0
-                ? const Center(
-                    child: Text('No patients today', style: TextStyle(color: DS.neutral, fontSize: 12)),
-                  )
-                : Row(
-                    children: [
-                      // Legend column
-                      Expanded(
-                        flex: 6,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _donutLegendItem('Zakat', s.zakat, total, const Color(0xFF10B981), Icons.assignment_ind_rounded),
-                            const SizedBox(height: 8),
-                            _donutLegendItem('Non-Zakat', s.nonZakat, total, const Color(0xFF3B82F6), Icons.badge_rounded),
-                            const SizedBox(height: 8),
-                            _donutLegendItem('GMWF', s.gmwf, total, const Color(0xFFF59E0B), Icons.child_care_rounded),
-                          ],
-                        ),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(24),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      const Color(0xFF1E293B).withValues(alpha: 0.85),
+                      const Color(0xFF0F172A).withValues(alpha: 0.72),
+                    ]
+                  : [
+                      Colors.white.withValues(alpha: 0.98),
+                      const Color(0xFFF8FAFC).withValues(alpha: 0.90),
+                    ],
+            ),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.14)
+                  : const Color(0xFFE2E8F0).withValues(alpha: 0.85),
+              width: 1.0,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Patients by Category',
+                    style: TextStyle(
+                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.20 : 0.12),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.35 : 0.30),
+                        width: 0.8,
                       ),
-                      const SizedBox(width: DS.s2),
-                      // Donut ring
-                      Expanded(
-                        flex: 5,
-                        child: AspectRatio(
-                          aspectRatio: 1.0,
-                          child: CustomPaint(
-                            painter: _DonutChartPainter(
-                              zakat: s.zakat.toDouble(),
-                              nonZakat: s.nonZakat.toDouble(),
-                              gmwf: s.gmwf.toDouble(),
-                              total: total.toDouble(),
+                    ),
+                    child: Text(
+                      '$total TOTAL',
+                      style: const TextStyle(
+                        color: Color(0xFF10B981),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Expanded(
+                child: total == 0
+                    ? const Center(
+                        child: Text('No patients today', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                      )
+                    : Row(
+                        children: [
+                          // Legend column with frosted pill cards
+                          Expanded(
+                            flex: 6,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _donutLegendItem('Zakat', s.zakat, total, const Color(0xFF10B981), Icons.assignment_ind_rounded, isDark),
+                                _donutLegendItem('Non-Zakat', s.nonZakat, total, const Color(0xFF3B82F6), Icons.badge_rounded, isDark),
+                                _donutLegendItem('GMWF', s.gmwf, total, const Color(0xFFF59E0B), Icons.child_care_rounded, isDark),
+                              ],
                             ),
-                            child: Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(
-                                    total.toString(),
-                                    style: TextStyle(
-                                      color: isDark ? t.textPrimary : const Color(0xFF111827),
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: -0.5,
-                                      height: 1.0,
-                                    ),
+                          ),
+                          const SizedBox(width: 14),
+                          // Donut ring
+                          Expanded(
+                            flex: 5,
+                            child: AspectRatio(
+                              aspectRatio: 1.0,
+                              child: CustomPaint(
+                                painter: _DonutChartPainter(
+                                  zakat: s.zakat.toDouble(),
+                                  nonZakat: s.nonZakat.toDouble(),
+                                  gmwf: s.gmwf.toDouble(),
+                                  total: total.toDouble(),
+                                  isDark: isDark,
+                                ),
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        total.toString(),
+                                        style: TextStyle(
+                                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: -0.5,
+                                          height: 1.0,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        'Total Patients',
+                                        style: TextStyle(
+                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 2),
-                                  const Text(
-                                    'Total Patients',
-                                    style: TextStyle(
-                                      color: DS.neutral,
-                                      fontSize: 8.5,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _donutLegendItem(String label, int val, int total, Color color, IconData icon) {
+  Widget _donutLegendItem(String label, int val, int total, Color color, IconData icon, bool isDark) {
     final double pct = total == 0 ? 0.0 : (val / total) * 100;
-    final bool isDark = t.isDarkCanvas;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.1)),
+        color: isDark ? color.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.90),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withValues(alpha: isDark ? 0.25 : 0.20),
+          width: 0.8,
+        ),
+        boxShadow: isDark
+            ? []
+            : [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.06),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(5),
+            padding: const EdgeInsets.all(5.5),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(6),
+              gradient: LinearGradient(
+                colors: [color, color.withValues(alpha: 0.80)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(7),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.30),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
-            child: Icon(icon, color: color, size: 12),
+            child: Icon(icon, color: Colors.white, size: 12),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -980,19 +1540,38 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(color: DS.neutral, fontSize: 9.5, fontWeight: FontWeight.w700),
+                  style: TextStyle(
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 const SizedBox(height: 1),
                 Text(
                   val.toString(),
-                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w900),
+                  style: TextStyle(
+                    color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ],
             ),
           ),
-          Text(
-            '${pct.toStringAsFixed(1)}%',
-            style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w800),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: isDark ? 0.20 : 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              '${pct.toStringAsFixed(1)}%',
+              style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
         ],
       ),
@@ -1005,12 +1584,14 @@ class _DonutChartPainter extends CustomPainter {
   final double nonZakat;
   final double gmwf;
   final double total;
+  final bool isDark;
 
   _DonutChartPainter({
     required this.zakat,
     required this.nonZakat,
     required this.gmwf,
     required this.total,
+    required this.isDark,
   });
 
   @override
@@ -1019,6 +1600,17 @@ class _DonutChartPainter extends CustomPainter {
     final radius = min(size.width, size.height) / 2;
     final rect = Rect.fromCircle(center: center, radius: radius - 10);
     
+    // Background track ring
+    final paintTrack = Paint()
+      ..color = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 14
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawArc(rect, 0, 2 * pi, false, paintTrack);
+
+    if (total == 0) return;
+
     final paintZ = Paint()
       ..color = const Color(0xFF10B981)
       ..style = PaintingStyle.stroke
@@ -1041,24 +1633,29 @@ class _DonutChartPainter extends CustomPainter {
 
     if (zakat > 0) {
       final sweepZ = (zakat / total) * 2 * pi;
-      canvas.drawArc(rect, startAngle + 0.05, sweepZ - 0.1, false, paintZ);
+      canvas.drawArc(rect, startAngle + 0.05, (sweepZ - 0.1).clamp(0.01, 2 * pi), false, paintZ);
       startAngle += sweepZ;
     }
 
     if (nonZakat > 0) {
       final sweepNz = (nonZakat / total) * 2 * pi;
-      canvas.drawArc(rect, startAngle + 0.05, sweepNz - 0.1, false, paintNz);
+      canvas.drawArc(rect, startAngle + 0.05, (sweepNz - 0.1).clamp(0.01, 2 * pi), false, paintNz);
       startAngle += sweepNz;
     }
 
     if (gmwf > 0) {
       final sweepGm = (gmwf / total) * 2 * pi;
-      canvas.drawArc(rect, startAngle + 0.05, sweepGm - 0.1, false, paintGm);
+      canvas.drawArc(rect, startAngle + 0.05, (sweepGm - 0.1).clamp(0.01, 2 * pi), false, paintGm);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(_DonutChartPainter oldDelegate) =>
+      oldDelegate.zakat != zakat ||
+      oldDelegate.nonZakat != nonZakat ||
+      oldDelegate.gmwf != gmwf ||
+      oldDelegate.total != total ||
+      oldDelegate.isDark != isDark;
 }
 
 class HomeRecentDonationsTable extends StatelessWidget {
@@ -1299,12 +1896,21 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
       return Container(
         height: 250,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: widget.t.isDarkCanvas ? const Color(0xFF1E232D) : Colors.white,
           borderRadius: BorderRadius.circular(DS.r2),
           border: Border.all(color: DS.border),
         ),
-        child: const Center(
-          child: CircularProgressIndicator(),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.show_chart_rounded, size: 28, color: DS.neutral.withValues(alpha: 0.5)),
+              const SizedBox(height: 8),
+              const Text('Weekly Revenue & Token Trend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: DS.neutral)),
+              const SizedBox(height: 4),
+              Text('Syncing trend data...', style: TextStyle(fontSize: 11, color: DS.neutral.withValues(alpha: 0.6))),
+            ],
+          ),
         ),
       );
     }
@@ -1669,7 +2275,54 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sortedRows = List<HomeBranchRow>.from(rows)
+    // Consolidate camps into collective branch rows with normalized keys and clean names
+    final Map<String, HomeBranchRow> branchMap = {};
+    for (final r in rows) {
+      final rawKey = r.id.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+      final isKarachi = rawKey.contains('karachi') || r.name.toLowerCase().contains('karachi');
+      final isJalalpur = rawKey.contains('jalal') || r.name.toLowerCase().contains('jalal');
+      final isGujrat = rawKey.contains('gujrat') || r.name.toLowerCase().contains('gujrat');
+      final isSialkot = rawKey.contains('sialkot') || r.name.toLowerCase().contains('sialkot');
+      final isRawalpindi = rawKey.contains('rawalpindi') || rawKey.contains('pindi') || r.name.toLowerCase().contains('rawalpindi');
+
+      final String branchKey = isKarachi
+          ? 'karachi'
+          : (isJalalpur
+              ? 'jalalpur_jattan'
+              : (isGujrat
+                  ? 'gujrat'
+                  : (isSialkot
+                      ? 'sialkot'
+                      : (isRawalpindi ? 'rawalpindi' : rawKey))));
+      final String branchName = isKarachi
+          ? 'Karachi'
+          : (isJalalpur
+              ? 'Jalalpur Jattan'
+              : (isGujrat
+                  ? 'Gujrat'
+                  : (isSialkot
+                      ? 'Sialkot'
+                      : (isRawalpindi ? 'Rawalpindi' : r.name))));
+
+      if (!branchMap.containsKey(branchKey)) {
+        branchMap[branchKey] = HomeBranchRow(
+          id: branchKey,
+          name: branchName,
+          today: r.today,
+          yesterday: r.yesterday,
+        );
+      } else {
+        final existing = branchMap[branchKey]!;
+        branchMap[branchKey] = HomeBranchRow(
+          id: branchKey,
+          name: branchName,
+          today: combineBranchStats([existing.today, r.today]),
+          yesterday: combineBranchStats([existing.yesterday, r.yesterday]),
+        );
+      }
+    }
+
+    final sortedRows = branchMap.values.toList()
       ..sort((a, b) => b.today.tokens.compareTo(a.today.tokens));
 
     final maxTokens = sortedRows.isEmpty
@@ -2026,10 +2679,9 @@ class QuickActionsRow extends StatelessWidget {
                     if (action['id'] == 'employee_attendance') {
                       module = baseModule.copyWith(
                         title: 'Employee Attendance',
-                        builder: (context, data) => FinancePage(
+                        builder: (context, data) => EmployeeAttendancePage(
                           branchId: data['branchId'] ?? 'all',
                           isAdmin: true,
-                          initialTabIndex: 1,
                         ),
                       );
                     } else if (action['id'] == 'madrassa_students') {
@@ -2154,16 +2806,42 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
   final role = (userData['role'] as String? ?? 'unknown').toLowerCase().trim();
   final String userBranchId = (userData['branchId'] as String? ?? '').toLowerCase().trim();
 
-  final isBranchScoped = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ||
-                         role == 'branch manager' || role == 'branch_manager' || role == 'bm' || role.contains('branch manager') || role == 'supervisor';
+  final isExecutiveOrGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin', 'hq manager', 'hqmanager', 'hq_manager', 'hq', 'admin', 'director', 'head office'].contains(role) ||
+      role.contains('ceo') ||
+      role.contains('chairman') ||
+      role.contains('hq') ||
+      role.contains('global') ||
+      role.contains('director') ||
+      role.contains('executive');
 
-  final isGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin'].contains(role);
-  final isFullExec = ['admin', 'global admin', 'ceo', 'chairman', 'global user', 'hq manager', 'hqmanager', 'hq_manager', 'hq'].contains(role);
-  final isGlobalExec = (isGlobal || isFullExec) && !isBranchScoped;
+  final isBranchScoped = !isExecutiveOrGlobal && (
+      (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ||
+      role == 'branch manager' || role == 'branch_manager' || role == 'bm' || role.contains('branch manager') || role == 'supervisor'
+  );
+
+  final isGlobalExec = isExecutiveOrGlobal || !isBranchScoped;
   
   if (isGlobalExec) {
-    // 1. Get all branch IDs
-    final branchIds = await RecentActivityService.getAllBranchIdsAsync();
+    // 1. Get all branch IDs and consolidate Karachi sub-camps and branch aliases
+    final rawBranchIds = await RecentActivityService.getAllBranchIdsAsync();
+    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpur_jattan', 'rawalpindi'};
+    for (final id in rawBranchIds) {
+      final norm = id.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+      if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
+        cleanBranchIds.add('karachi');
+      } else if (norm.contains('jalal')) {
+        cleanBranchIds.add('jalalpur_jattan');
+      } else if (norm.contains('gujrat')) {
+        cleanBranchIds.add('gujrat');
+      } else if (norm.contains('sialkot')) {
+        cleanBranchIds.add('sialkot');
+      } else if (norm.contains('rawalpindi') || norm.contains('pindi')) {
+        cleanBranchIds.add('rawalpindi');
+      } else if (norm.isNotEmpty && norm != 'all' && norm != 'global' && norm != 'unknown') {
+        cleanBranchIds.add(norm);
+      }
+    }
+    final branchIds = cleanBranchIds.toList();
     
     // 2. Fetch today-vs-yesterday per branch
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
@@ -2177,33 +2855,40 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
 
     statsMap.forEach((bId, value) {
       if (bId == 'karachi') {
+        final hajiToday = BranchStats(
+          zakat: karachiCamps.hajiCampZakat,
+          nonZakat: karachiCamps.hajiCampNonZakat,
+          gmwf: karachiCamps.hajiCampGmwf,
+          prescribed: value.today.prescribed,
+          dispensaryRevenue: karachiCamps.hajiCampRevenue,
+          donations: 0,
+        );
+
+        final saddarToday = BranchStats(
+          zakat: karachiCamps.kapayaZakat,
+          nonZakat: karachiCamps.kapayaNonZakat,
+          gmwf: karachiCamps.kapayaGmwf,
+          prescribed: value.today.prescribed,
+          dispensaryRevenue: karachiCamps.kapayaRevenue,
+          donations: value.today.donations,
+        );
+
         branchRows.add(HomeBranchRow(
           id: 'karachi_haji',
           name: 'Karachi — Haji Camp Dispensary',
-          today: BranchStats(
-            zakat: karachiCamps.hajiCampZakat,
-            nonZakat: karachiCamps.hajiCampNonZakat,
-            gmwf: karachiCamps.hajiCampGmwf,
-            prescribed: value.today.prescribed,
-            dispensaryRevenue: karachiCamps.hajiCampRevenue,
-            donations: 0,
-          ),
+          today: hajiToday,
           yesterday: value.yesterday,
         ));
 
         branchRows.add(HomeBranchRow(
-          id: 'karachi_kapaya',
-          name: 'Karachi — Kapaya Dispensary',
-          today: BranchStats(
-            zakat: karachiCamps.kapayaZakat,
-            nonZakat: karachiCamps.kapayaNonZakat,
-            gmwf: karachiCamps.kapayaGmwf,
-            prescribed: value.today.prescribed,
-            dispensaryRevenue: karachiCamps.kapayaRevenue,
-            donations: value.today.donations,
-          ),
+          id: 'karachi_saddar',
+          name: 'Karachi — Saddar Dispensary',
+          today: saddarToday,
           yesterday: value.yesterday,
         ));
+
+        todayStatsList.add(hajiToday);
+        todayStatsList.add(saddarToday);
       } else {
         final bName = RecentActivityService.resolveBranchName(bId);
         branchRows.add(HomeBranchRow(
@@ -2212,8 +2897,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           today: value.today,
           yesterday: value.yesterday,
         ));
+        todayStatsList.add(value.today);
       }
-      todayStatsList.add(value.today);
       yesterdayStatsList.add(value.yesterday);
     });
     
@@ -2261,8 +2946,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       ));
 
       branchRows.add(HomeBranchRow(
-        id: 'karachi_kapaya',
-        name: 'Karachi — Kapaya Dispensary',
+        id: 'karachi_saddar',
+        name: 'Karachi — Saddar Dispensary',
         today: BranchStats(
           zakat: karachiCamps.kapayaZakat,
           nonZakat: karachiCamps.kapayaNonZakat,
@@ -2289,8 +2974,12 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     // 4. Fetch recent activity (branch-locked)
     final recentActivities = await RecentActivityService.getRecentActivityAsync(branchId: branchId, limit: 15);
     
+    final todayCombined = branchId == 'karachi' && branchRows.isNotEmpty 
+        ? combineBranchStats(branchRows.map((r) => r.today).toList()) 
+        : todayStats;
+
     return SnapshotDashboardData(
-      todayCombined: todayStats,
+      todayCombined: todayCombined,
       yesterdayCombined: yesterdayStats,
       branchRows: branchRows,
       chartPoints: chartPoints,
@@ -2338,8 +3027,179 @@ class _DashboardUserKey {
   int get hashCode => uid.hashCode ^ role.hashCode ^ branchId.hashCode;
 }
 
+Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynamic> userData) async {
+  final role = (userData['role'] as String? ?? 'unknown').toLowerCase().trim();
+  final String userBranchId = (userData['branchId'] as String? ?? '').toLowerCase().trim();
+
+  final isExecutiveOrGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin', 'hq manager', 'hqmanager', 'hq_manager', 'hq', 'admin', 'director', 'head office'].contains(role) ||
+      role.contains('ceo') ||
+      role.contains('chairman') ||
+      role.contains('hq') ||
+      role.contains('global') ||
+      role.contains('director') ||
+      role.contains('executive');
+
+  final isBranchScoped = !isExecutiveOrGlobal && (
+      (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ||
+      role == 'branch manager' || role == 'branch_manager' || role == 'bm' || role.contains('branch manager') || role == 'supervisor'
+  );
+
+  final isGlobalExec = isExecutiveOrGlobal || !isBranchScoped;
+
+  if (isGlobalExec) {
+    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpur_jattan', 'rawalpindi'};
+    for (final id in RecentActivityService.getAllBranchIds()) {
+      final norm = id.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+      if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
+        cleanBranchIds.add('karachi');
+      } else if (norm.contains('jalal')) {
+        cleanBranchIds.add('jalalpur_jattan');
+      } else if (norm.contains('gujrat')) {
+        cleanBranchIds.add('gujrat');
+      } else if (norm.contains('sialkot')) {
+        cleanBranchIds.add('sialkot');
+      } else if (norm.contains('rawalpindi') || norm.contains('pindi')) {
+        cleanBranchIds.add('rawalpindi');
+      } else if (norm.isNotEmpty && norm != 'all' && norm != 'global' && norm != 'unknown') {
+        cleanBranchIds.add(norm);
+      }
+    }
+    final branchIds = cleanBranchIds.toList();
+
+    final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
+    final List<HomeBranchRow> branchRows = [];
+    final List<BranchStats> todayStatsList = [];
+    final List<BranchStats> yesterdayStatsList = [];
+
+    final karachiCamps = await fetchKarachiCampBreakdown();
+
+    statsMap.forEach((bId, value) {
+      if (bId == 'karachi') {
+        final hajiToday = BranchStats(
+          zakat: karachiCamps.hajiCampZakat,
+          nonZakat: karachiCamps.hajiCampNonZakat,
+          gmwf: karachiCamps.hajiCampGmwf,
+          prescribed: value.today.prescribed,
+          dispensaryRevenue: karachiCamps.hajiCampRevenue,
+          donations: 0,
+        );
+
+        final saddarToday = BranchStats(
+          zakat: karachiCamps.kapayaZakat,
+          nonZakat: karachiCamps.kapayaNonZakat,
+          gmwf: karachiCamps.kapayaGmwf,
+          prescribed: value.today.prescribed,
+          dispensaryRevenue: karachiCamps.kapayaRevenue,
+          donations: value.today.donations,
+        );
+
+        branchRows.add(HomeBranchRow(
+          id: 'karachi_haji',
+          name: 'Karachi — Haji Camp Dispensary',
+          today: hajiToday,
+          yesterday: value.yesterday,
+        ));
+
+        branchRows.add(HomeBranchRow(
+          id: 'karachi_saddar',
+          name: 'Karachi — Saddar Dispensary',
+          today: saddarToday,
+          yesterday: value.yesterday,
+        ));
+
+        todayStatsList.add(hajiToday);
+        todayStatsList.add(saddarToday);
+      } else {
+        final bName = RecentActivityService.resolveBranchName(bId);
+        branchRows.add(HomeBranchRow(
+          id: bId,
+          name: bName,
+          today: value.today,
+          yesterday: value.yesterday,
+        ));
+        todayStatsList.add(value.today);
+      }
+      yesterdayStatsList.add(value.yesterday);
+    });
+
+    final todayCombined = combineBranchStats(todayStatsList);
+    final yesterdayCombined = combineBranchStats(yesterdayStatsList);
+    final chartPoints = await fetchLocalChartPoints(branchIds, weeks: 5);
+    final recentActivities = RecentActivityService.getRecentActivity(limit: 15);
+
+    return SnapshotDashboardData(
+      todayCombined: todayCombined,
+      yesterdayCombined: yesterdayCombined,
+      branchRows: branchRows,
+      chartPoints: chartPoints,
+      recentActivities: recentActivities,
+    );
+  } else {
+    final branchId = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ? userBranchId : 'karachi';
+
+    final todayStats = await fetchLocalBranchStats(branchId, DateTime.now());
+    final yesterdayStats = await fetchLocalBranchStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
+
+    final List<HomeBranchRow> branchRows = [];
+    if (branchId == 'karachi') {
+      final karachiCamps = await fetchKarachiCampBreakdown();
+      branchRows.add(HomeBranchRow(
+        id: 'karachi_saddar',
+        name: 'Karachi — Saddar Dispensary',
+        today: BranchStats(
+          zakat: karachiCamps.kapayaZakat,
+          nonZakat: karachiCamps.kapayaNonZakat,
+          gmwf: karachiCamps.kapayaGmwf,
+          prescribed: todayStats.prescribed,
+          dispensaryRevenue: karachiCamps.kapayaRevenue,
+          donations: todayStats.donations,
+        ),
+        yesterday: yesterdayStats,
+      ));
+      branchRows.add(HomeBranchRow(
+        id: 'karachi_haji',
+        name: 'Karachi — Haji Camp Dispensary',
+        today: BranchStats(
+          zakat: karachiCamps.hajiCampZakat,
+          nonZakat: karachiCamps.hajiCampNonZakat,
+          gmwf: karachiCamps.hajiCampGmwf,
+          prescribed: todayStats.prescribed,
+          dispensaryRevenue: karachiCamps.hajiCampRevenue,
+          donations: 0,
+        ),
+        yesterday: yesterdayStats,
+      ));
+    } else {
+      branchRows.add(HomeBranchRow(
+        id: branchId,
+        name: RecentActivityService.resolveBranchName(branchId),
+        today: todayStats,
+        yesterday: yesterdayStats,
+      ));
+    }
+
+    final chartPoints = await fetchLocalChartPoints([branchId], weeks: 5);
+    final recentActivities = RecentActivityService.getRecentActivity(
+      branchId: (branchId == 'all' || branchId == 'global') ? null : branchId,
+      limit: 15,
+    );
+
+    return SnapshotDashboardData(
+      todayCombined: todayStats,
+      yesterdayCombined: yesterdayStats,
+      branchRows: branchRows,
+      chartPoints: chartPoints,
+      recentActivities: recentActivities,
+    );
+  }
+}
+
 final snapshotDashboardDataProvider = FutureProvider.family<SnapshotDashboardData, _DashboardUserKey>((ref, key) async {
-  return fetchSnapshotDashboardData(key.userData);
+  try {
+    return await fetchSnapshotDashboardData(key.userData).timeout(const Duration(milliseconds: 3500));
+  } catch (e) {
+    return buildLocalSnapshotDashboardData(key.userData);
+  }
 });
 
 class HomeSnapshotDashboard extends ConsumerStatefulWidget {
@@ -2366,45 +3226,171 @@ class HomeSnapshotDashboard extends ConsumerStatefulWidget {
 
 class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
   _DashboardUserKey get _userKey => _DashboardUserKey.fromMap(widget.userData);
+  late Future<SnapshotDashboardData> _localFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeSnapshotDashboard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.userData != widget.userData) {
+      _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+    }
+  }
 
   void _refresh() {
+    setState(() {
+      _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+    });
     ref.invalidate(snapshotDashboardDataProvider(_userKey));
   }
 
   @override
   Widget build(BuildContext context) {
     final double hPad = widget.isDesktop ? 36 : 20;
+    final isDark = widget.t.isDarkCanvas;
 
     final asyncData = ref.watch(snapshotDashboardDataProvider(_userKey));
 
     return asyncData.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 80.0),
-        child: Center(
-          child: CircularProgressIndicator(),
-        ),
+      loading: () => FutureBuilder<SnapshotDashboardData>(
+        future: _localFuture,
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          if (data != null) {
+            return _buildBodyWithData(data, hPad: hPad);
+          }
+          return _buildLoadingSkeleton(hPad, isDark);
+        },
       ),
-      error: (err, stack) => Padding(
-        padding: EdgeInsets.all(hPad),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+      error: (err, stack) => FutureBuilder<SnapshotDashboardData>(
+        future: _localFuture,
+        builder: (context, snapshot) {
+          final data = snapshot.data;
+          if (data != null) {
+            return _buildBodyWithData(data, hPad: hPad);
+          }
+          return Padding(
+            padding: EdgeInsets.all(hPad),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline_rounded, size: 40, color: Colors.redAccent),
+                  const SizedBox(height: 12),
+                  Text('Failed to load snapshot dashboard: $err',
+                      style: const TextStyle(color: DS.neutral, fontSize: 13), textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: _refresh,
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+      data: (data) => _buildBodyWithData(data, hPad: hPad),
+    );
+  }
+
+  Widget _buildLoadingSkeleton(double hPad, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              const Icon(Icons.error_outline_rounded, size: 40, color: Colors.redAccent),
-              const SizedBox(height: 12),
-              Text('Failed to load snapshot dashboard: $err',
-                  style: const TextStyle(color: DS.neutral, fontSize: 13), textAlign: TextAlign.center),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: _refresh,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Retry'),
+              Container(
+                width: 180,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white.withValues(alpha: 0.10) : Colors.black.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(widget.t.accent),
+                ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          // Skeleton stat tiles row
+          SizedBox(
+            height: 110,
+            child: Row(
+              children: List.generate(
+                widget.isDesktop ? 5 : 2,
+                (index) => Expanded(
+                  child: Container(
+                    margin: EdgeInsets.only(right: index == (widget.isDesktop ? 4 : 1) ? 0 : 12),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.8),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // Skeleton main chart/card area
+          Container(
+            height: 280,
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+              ),
+            ),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(widget.t.accent),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Loading live snapshot metrics...',
+                    style: TextStyle(
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
-      data: (data) {
+    );
+  }
+
+  Widget _buildBodyWithData(SnapshotDashboardData data, {required double hPad}) {
         final today = data.todayCombined;
         final yesterday = data.yesterdayCombined;
 
@@ -2427,10 +3413,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           if (id == 'employee_attendance') {
             module = baseModule.copyWith(
               title: 'Employee Attendance',
-              builder: (context, data) => FinancePage(
+              builder: (context, data) => EmployeeAttendancePage(
                 branchId: data['branchId'] ?? 'all',
                 isAdmin: true,
-                initialTabIndex: 1,
               ),
             );
           } else if (id == 'madrassa_attendance') {
@@ -2606,15 +3591,8 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         final isBranchManager = userRoleStr == 'branch manager' || userRoleStr == 'branch_manager' || userRoleStr.contains('branch manager');
         final userBranchId = (widget.userData['branchId'] as String? ?? '').toLowerCase().trim();
 
-        // Filter and sort branch rows by performance today
-        final activeBranchRows = data.branchRows.where((row) {
-          final pats = row.today.zakat + row.today.nonZakat + row.today.gmwf;
-          return row.today.donations > 0 || pats > 0 || row.today.dispensaryRevenue > 0;
-        }).toList();
-
-        final displayBranchRows = activeBranchRows.isNotEmpty ? activeBranchRows : data.branchRows;
-
-        final sortedBranchRows = List<HomeBranchRow>.from(displayBranchRows)
+        // Display all branches and camps, sorting active ones to the top
+        final sortedBranchRows = List<HomeBranchRow>.from(data.branchRows)
           ..sort((a, b) {
             final aPats = a.today.zakat + a.today.nonZakat + a.today.gmwf;
             final bPats = b.today.zakat + b.today.nonZakat + b.today.gmwf;
@@ -2627,7 +3605,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           });
 
         HomeBranchRow? bestBranch;
-        if (sortedBranchRows.isNotEmpty && !isBranchManager) {
+        if (sortedBranchRows.isNotEmpty) {
           final top = sortedBranchRows.first;
           final pats = top.today.zakat + top.today.nonZakat + top.today.gmwf;
           if (top.today.donations > 0 || pats > 0 || top.today.dispensaryRevenue > 0) {
@@ -2638,7 +3616,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         final topRow = sortedBranchRows.isNotEmpty ? sortedBranchRows.first : null;
 
         final activeBranchTile = HomeStatTile(
-          label: isBranchManager ? (userBranchId.contains('karachi') ? 'Top Camp Today' : 'Active Branch') : 'Top Branch Today',
+          label: isBranchManager ? 'Top Camp Today' : 'Top Branch Today',
           value: topRow != null ? topRow.name : RecentActivityService.resolveBranchName(userBranchId.isNotEmpty ? userBranchId : 'Karachi'),
           icon: Icons.emoji_events_rounded,
           color: const Color(0xFF0D9488),
@@ -2682,23 +3660,25 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           onlineUsersTile,
         ];
 
-        // Layout rows
+        // Layout rows with GPU layer caching via RepaintBoundary
         final row2 = SizedBox(
           height: 380,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 4, child: HomeRevenueLineChart(points: data.chartPoints, t: widget.t)),
+              Expanded(flex: 4, child: RepaintBoundary(child: HomeRevenueLineChart(points: data.chartPoints, t: widget.t))),
               const SizedBox(width: DS.s2),
-              Expanded(flex: 3, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
+              Expanded(flex: 3, child: RepaintBoundary(child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows))),
               const SizedBox(width: DS.s2),
               Expanded(
                 flex: 3,
-                child: HomeRecentActivityFeed(
-                  activities: data.recentActivities,
-                  t: widget.t,
-                  availableModules: widget.availableModules,
-                  onOpenModule: widget.onOpenModule,
+                child: RepaintBoundary(
+                  child: HomeRecentActivityFeed(
+                    activities: data.recentActivities,
+                    t: widget.t,
+                    availableModules: widget.availableModules,
+                    onOpenModule: widget.onOpenModule,
+                  ),
                 ),
               ),
             ],
@@ -2706,51 +3686,44 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         );
 
         final row3 = SizedBox(
-          height: 360,
+          height: 385,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(flex: 4, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
+              Expanded(flex: 4, child: RepaintBoundary(child: HomePatientsByCategoryDonut(t: widget.t, s: today))),
               const SizedBox(width: DS.s2),
               Expanded(
                 flex: 5,
-                child: HomeBranchPerformanceTable(
-                  t: widget.t,
-                  rows: sortedBranchRows,
-                  onTapBranch: (bId) {
-                    final branchesModule = widget.availableModules.firstWhere(
-                      (m) => m.id == 'branches',
-                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                    );
-                    widget.onOpenModule(branchesModule);
-                  },
+                child: RepaintBoundary(
+                  child: HomeBranchPerformanceTable(
+                    t: widget.t,
+                    rows: sortedBranchRows,
+                    onTapBranch: (bId) => _navigateToBranch(bId),
+                  ),
                 ),
               ),
               if (bestBranch != null) ...[
                 const SizedBox(width: DS.s2),
                 Expanded(
                   flex: 4,
-                  child: HomeBestBranchSpotlight(
-                    branchName: bestBranch.name,
-                    revenue: bestBranch.today.dispensaryRevenue,
-                    donations: bestBranch.today.donations,
+                  child: RepaintBoundary(
+                    child: HomeBestBranchSpotlight(
+                      branchName: bestBranch.name,
+                      revenue: bestBranch.today.dispensaryRevenue,
+                      donations: bestBranch.today.donations,
                     patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
                     growthPct: bestBranch.yesterday.dispensaryRevenue == 0
                         ? null
                         : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
                                 bestBranch.yesterday.dispensaryRevenue) *
                             100,
-                    onTap: () {
-                      final branchesModule = widget.availableModules.firstWhere(
-                        (m) => m.id == 'branches',
-                        orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                      );
-                      widget.onOpenModule(branchesModule);
-                    },
+                    onTap: () => _navigateToBranch(bestBranch!.id),
                     t: widget.t,
+                    title: isBranchManager ? 'Top Camp Today' : 'Best Branch Today',
                   ),
                 ),
-              ],
+              ),
+            ],
             ],
           ),
         );
@@ -2838,14 +3811,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                         : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
                                 bestBranch.yesterday.dispensaryRevenue) *
                             100,
-                    onTap: () {
-                      final branchesModule = widget.availableModules.firstWhere(
-                        (m) => m.id == 'branches',
-                        orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                      );
-                      widget.onOpenModule(branchesModule);
-                    },
+                    onTap: () => _navigateToBranch(bestBranch!.id),
                     t: widget.t,
+                    title: isBranchManager ? 'Top Camp Today' : 'Best Branch Today',
                   ),
                   const SizedBox(height: DS.s2),
                 ],
@@ -2854,13 +3822,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 HomeBranchPerformanceTable(
                   t: widget.t,
                   rows: sortedBranchRows,
-                  onTapBranch: (bId) {
-                    final branchesModule = widget.availableModules.firstWhere(
-                      (m) => m.id == 'branches',
-                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                    );
-                    widget.onOpenModule(branchesModule);
-                  },
+                  onTapBranch: (bId) => _navigateToBranch(bId),
                 ),
                 const SizedBox(height: DS.s2),
                 HomeRevenueLineChart(points: data.chartPoints, t: widget.t),
@@ -2871,46 +3833,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                   KarachiCampSnapshotWidget(t: widget.t),
                   const SizedBox(height: DS.s2),
                 ],
-                const SizedBox(height: DS.s2),
-                if (bestBranch != null) ...[
-                  HomeBestBranchSpotlight(
-                    branchName: bestBranch.name,
-                    revenue: bestBranch.today.dispensaryRevenue,
-                    donations: bestBranch.today.donations,
-                    patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
-                    growthPct: bestBranch.yesterday.dispensaryRevenue == 0
-                        ? null
-                        : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
-                                bestBranch.yesterday.dispensaryRevenue) *
-                            100,
-                    onTap: () {
-                      final branchesModule = widget.availableModules.firstWhere(
-                        (m) => m.id == 'branches',
-                        orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                      );
-                      widget.onOpenModule(branchesModule);
-                    },
-                    t: widget.t,
-                  ),
-                  const SizedBox(height: DS.s2),
-                ],
-                SizedBox(height: 240, child: HomePatientsByCategoryDonut(t: widget.t, s: today)),
-                const SizedBox(height: DS.s2),
-                HomeBranchPerformanceTable(
-                  t: widget.t,
-                  rows: sortedBranchRows,
-                  onTapBranch: (bId) {
-                    final branchesModule = widget.availableModules.firstWhere(
-                      (m) => m.id == 'branches',
-                      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
-                    );
-                    widget.onOpenModule(branchesModule);
-                  },
-                ),
-                const SizedBox(height: DS.s2),
-                HomeRevenueLineChart(points: data.chartPoints, t: widget.t),
-                const SizedBox(height: DS.s2),
-                SizedBox(height: 240, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
                 const SizedBox(height: DS.s2),
                 SizedBox(
                   height: 330,
@@ -2929,8 +3851,32 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
             ],
           ),
         );
-      },
+  }
+
+  void _navigateToBranch(String rawBranchId) {
+    final normB = rawBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+    if (normB == 'karachi_saddar') {
+      ref.read(selectedBranchTabIdProvider.notifier).state = 'karachi';
+      ref.read(branchSubDispensaryFilterProvider.notifier).state = 'saddar';
+    } else if (normB == 'karachi_haji') {
+      ref.read(selectedBranchTabIdProvider.notifier).state = 'karachi';
+      ref.read(branchSubDispensaryFilterProvider.notifier).state = 'haji_camp';
+    } else if (normB.contains('karachi')) {
+      ref.read(selectedBranchTabIdProvider.notifier).state = 'karachi';
+      ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
+    } else if (normB.contains('jalal')) {
+      ref.read(selectedBranchTabIdProvider.notifier).state = 'jalalpur_jattan';
+      ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
+    } else if (normB.isNotEmpty && normB != 'all' && normB != 'global') {
+      ref.read(selectedBranchTabIdProvider.notifier).state = normB;
+      ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
+    }
+
+    final branchesModule = widget.availableModules.firstWhere(
+      (m) => m.id == 'branches',
+      orElse: () => widget.availableModules.firstWhere((m) => m.id == 'executive_dashboard'),
     );
+    widget.onOpenModule(branchesModule);
   }
 }
 
@@ -3017,7 +3963,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                 children: [
                   Expanded(
                     child: _buildCampCard(
-                      title: 'Kapaya Dispensary',
+                      title: 'Saddar Dispensary',
                       total: data.kapayaPatients,
                       revenue: data.kapayaRevenue,
                       zakat: data.kapayaZakat,

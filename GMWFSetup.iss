@@ -7,7 +7,7 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.3.5
+AppVersion=1.4.0
 AppPublisher=GMWF Pvt. Ltd
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -22,7 +22,7 @@ DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.3.5-x64
+OutputBaseFilename=GMWF-v1.4.0-x64
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression

@@ -18,6 +18,9 @@ import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/offline_auth_service.dart';
 
+import 'package:gmwf/services/network_health_service.dart';
+import 'package:gmwf/services/auto_update_service.dart';
+
 class SyncService {
   static final SyncService _instance = SyncService._internal();
   factory SyncService() => _instance;
@@ -37,6 +40,8 @@ class SyncService {
   void start(String branchId, {List<String>? authorizedBranches}) {
     _currentBranchId = branchId;
     _authorizedBranches = authorizedBranches ?? [];
+
+    NetworkHealthService().start();
     
     _connectivitySub?.cancel();
     _connectivitySub = Connectivity().onConnectivityChanged.listen((results) {
@@ -123,12 +128,14 @@ class SyncService {
 
     bool isOnline = true;
     try {
-      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      if (!NetworkHealthService().isStableOnline) {
+        isOnline = false;
+      } else if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         final connectivity = await Connectivity().checkConnectivity();
         isOnline = connectivity.any((r) => r != ConnectivityResult.none);
       }
     } catch (_) {
-      isOnline = true;
+      isOnline = NetworkHealthService().isStableOnline;
     }
 
     if (isOnline && !_isUploading) {
@@ -244,6 +251,20 @@ class SyncService {
       final queueBox = Hive.box(LocalStorageService.syncBox);
       if (queueBox.isEmpty) return;
 
+      // Minimum-Version Fleet Lock Check
+      try {
+        final versionDoc = await _db.collection('app_config').doc('version').get();
+        if (versionDoc.exists) {
+          final minVersion = versionDoc.data()?['min_supported_version']?.toString();
+          if (minVersion != null && AutoUpdateService.compareVersions(AutoUpdateService.currentVersion, minVersion) < 0) {
+            debugPrint('[SyncService] ⛔ App version (${AutoUpdateService.currentVersion}) is below minimum supported version ($minVersion). Sync halted.');
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('[SyncService] Version check warning: $e');
+      }
+
       final sortedKeys = queueBox.keys.toList()
         ..sort((a, b) {
           final ta = DateTime.tryParse(queueBox.get(a)?['createdAt'] ?? '2000-01-01T00:00:00Z') ?? DateTime(2000);
@@ -264,6 +285,7 @@ class SyncService {
 
         if (attempts >= 5) {
           final retryForeverTypes = {
+            'save_patient', 'save_entry', 'save_prescription', 'update_serial_status', 'save_dispensary_charge',
             'save_donation', 'update_donation', 'delete_donation', 'save_bank_slip',
             'update_inventory', 'add_inventory_stock', 'register_medicine',
             'save_token_exception_request', 'approve_token_exception',
@@ -321,19 +343,47 @@ class SyncService {
                 result['entryData'] as Map<String, dynamic>,
               );
             } else {
-              await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
+              final upperSerial = serial.trim().toUpperCase();
+              data['serial'] = upperSerial;
+              final campDocKey = CampSessionService.getCampDateDocId(
+                branchId: branchId,
+                dateKey: dateKey,
+                campId: data['campId']?.toString() ?? data['dispensaryId']?.toString(),
+                dispensaryTag: data['dispensaryTag']?.toString(),
+                serial: upperSerial,
+              );
+              await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(upperSerial).set(data, SetOptions(merge: true));
+              if (serial != upperSerial) {
+                try {
+                  await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial.toLowerCase()).delete();
+                } catch (_) {}
+              }
             }
           }
           else if (type == 'save_prescription') {
-            final serial = action['serial'] as String?;
+            final rawSerial = action['serial'] as String?;
             final data   = Map<String, dynamic>.from(action['data'] ?? {});
-            if (serial == null) throw Exception('Missing serial');
+            if (rawSerial == null) throw Exception('Missing serial');
+            final serial = rawSerial.trim().toUpperCase();
+            data['serial'] = serial;
             final patientCnic = (data['patientCnic'] ?? data['cnic'] ?? data['patientCNIC'] ?? 'unknown_$serial').toString().trim().replaceAll('-', '').replaceAll(' ', '');
             await _db.collection('branches').doc(branchId).collection('prescriptions').doc(patientCnic).collection('prescriptions').doc(serial).set(data, SetOptions(merge: true));
             
             final queueType = resolveQueueType(action['queueType']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['queueType']?.toString());
             final dateKey   = action['dateKey']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey();
-            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set({'status': 'completed', 'completedAt': data['completedAt'] ?? DateTime.now().toUtc().toIso8601String()}, SetOptions(merge: true));
+            final campDocKey = CampSessionService.getCampDateDocId(
+              branchId: branchId,
+              dateKey: dateKey,
+              campId: data['campId']?.toString() ?? data['dispensaryId']?.toString(),
+              dispensaryTag: data['dispensaryTag']?.toString(),
+              serial: serial,
+            );
+            await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set({'status': 'completed', 'completedAt': data['completedAt'] ?? DateTime.now().toUtc().toIso8601String()}, SetOptions(merge: true));
+            if (rawSerial != serial) {
+              try {
+                await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(rawSerial.toLowerCase()).delete();
+              } catch (_) {}
+            }
           }
           else if (type == 'update_serial_status') {
             final serial = action['serial'] as String?;
@@ -367,11 +417,16 @@ class SyncService {
             final delta = (action['delta'] ?? (action['data'] as Map?)?['delta'] as num?)?.toDouble() ?? 0.0;
             final txId = action['txId'] as String? ?? key;
             if (medicineId != null && delta != 0) {
-              final docRef = _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId);
+              final invCol = CampSessionService.getCampInventoryPath(
+                branchId: branchId,
+                campId: action['campId']?.toString(),
+                serial: action['serial']?.toString(),
+              );
+              final docRef = _db.collection('branches').doc(branchId).collection(invCol).doc(medicineId);
               await _db.runTransaction((transaction) async {
                 final snapshot = await transaction.get(docRef);
                 if (!snapshot.exists) {
-                  throw Exception('Inventory doc $medicineId not found yet — will retry');
+                  throw Exception('Inventory doc $medicineId not found yet in $invCol — will retry');
                 }
                 final data = snapshot.data() ?? {};
                 final processedTx = Map<String, dynamic>.from(data['processedTx'] ?? {});
@@ -399,7 +454,12 @@ class SyncService {
             final qty = (action['quantity'] as num?)?.toInt() ?? 0;
             final txId = action['txId'] as String? ?? key;
             if (medicineId != null && qty > 0) {
-              final docRef = _db.collection('branches').doc(branchId).collection('inventory').doc(medicineId);
+              final invCol = CampSessionService.getCampInventoryPath(
+                branchId: branchId,
+                campId: action['campId']?.toString(),
+                serial: action['serial']?.toString(),
+              );
+              final docRef = _db.collection('branches').doc(branchId).collection(invCol).doc(medicineId);
               await _db.runTransaction((transaction) async {
                 final snapshot = await transaction.get(docRef);
                 if (!snapshot.exists) {
@@ -442,22 +502,44 @@ class SyncService {
               }, SetOptions(merge: true));
             }
           }
-          else if (type == 'register_medicine') {
+          else if (type == 'register_medicine' || type == 'add_stock' || type == 'add_proforma_stock') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final docId = data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final docId = data['id']?.toString() ?? data['docId']?.toString() ?? action['docId']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4();
             final fsData = Map<String, dynamic>.from(data)..remove('id')..remove('syncStatus');
-            await _db.collection('branches').doc(branchId).collection('inventory').doc(docId).set(fsData, SetOptions(merge: true));
-            await _db.collection('branches').doc(branchId).collection('inventory_log').add({
-              'action': 'medicine_registered_directly',
-              'medicineName': data['name'],
-              'docId': docId,
-              'quantityAdded': (data['quantity'] as num?)?.toInt() ?? 0,
+            final targetBranch = action['branchId']?.toString() ?? branchId;
+            final invCol = CampSessionService.getCampInventoryPath(
+              branchId: targetBranch,
+              campId: data['dispensaryId']?.toString() ?? data['campId']?.toString(),
+            );
+            await _db.collection('branches').doc(targetBranch).collection(invCol).doc(docId).set(fsData, SetOptions(merge: true));
+
+            final logData = action['logData'] != null ? Map<String, dynamic>.from(action['logData']) : null;
+            if (logData != null) {
+              await _db.collection('branches').doc(targetBranch).collection('inventory_log').add({
+                ...logData,
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+            } else if (type == 'register_medicine') {
+              await _db.collection('branches').doc(targetBranch).collection('inventory_log').add({
+                'action': 'medicine_registered_directly',
+                'medicineName': data['name'],
+                'docId': docId,
+                'quantityAdded': (data['quantity'] as num?)?.toInt() ?? 0,
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+            }
+          }
+          else if (type == 'save_inventory_log') {
+            final logData = Map<String, dynamic>.from(action['data'] ?? action['logData'] ?? {});
+            final targetBranch = action['branchId']?.toString() ?? branchId;
+            await _db.collection('branches').doc(targetBranch).collection('inventory_log').add({
+              ...logData,
               'timestamp': FieldValue.serverTimestamp(),
             });
           }
           else if (type == 'save_token_exception_request') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final requestId = action['requestId']?.toString() ?? action['docId']?.toString() ?? data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final requestId = action['requestId']?.toString() ?? action['docId']?.toString() ?? data['id']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4();
             final bId = action['branchId']?.toString() ?? branchId;
             
             for (final f in ['requestedAt', 'reviewedAt']) {
@@ -479,6 +561,18 @@ class SyncService {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
             final requestId = action['requestId']?.toString() ?? action['docId']?.toString();
             final bId = action['branchId']?.toString() ?? branchId;
+            final patientId = action['patientId']?.toString() ?? data['patientId']?.toString();
+
+            if (patientId != null && patientId.isNotEmpty) {
+              await LocalStorageService.grantTokenException(
+                bId,
+                patientId,
+                reason: data['doctorReason']?.toString() ?? 'Approved by Doctor',
+                approvedBy: data['approvedBy']?.toString() ?? 'Doctor',
+                requestId: requestId,
+              );
+            }
+
             if (requestId != null) {
               for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
                 if (data[f] is String) {
@@ -498,7 +592,7 @@ class SyncService {
           else if (type == 'save_donation') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
             final hiveKey = action['hiveKey'] as String?;
-            final stableId = (data['firestoreId'] as String?)?.isNotEmpty == true ? data['firestoreId'] as String : (action['localId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString());
+            final stableId = (data['firestoreId'] as String?)?.isNotEmpty == true ? data['firestoreId'] as String : (action['localId']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4());
             final docRef = _db.collection('branches').doc(branchId).collection('donations').doc(stableId);
 
             final remoteDoc = await docRef.get();
@@ -517,7 +611,7 @@ class SyncService {
           }
           else if (type == 'save_audit_log') {
             final data      = Map<String, dynamic>.from(action['data'] ?? {});
-            final logId     = data['id']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString();
+            final logId     = data['id']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4();
             final logBranch = action['branchId'] as String? ?? branchId;
             data['branchId'] ??= logBranch;
             final batch = _db.batch();

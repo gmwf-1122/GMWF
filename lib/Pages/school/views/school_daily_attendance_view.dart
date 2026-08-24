@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import '../../../services/image_upload_service.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
 import '../constants/school_constants.dart';
@@ -427,37 +428,78 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
       ),
       child: Row(
         children: [
-          // Student Info Avatar & Name
-          CircleAvatar(
-            backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
-            child: Text(
-              (student['rollNo'] ?? '0').toString(),
-              style: const TextStyle(
-                color: Color(0xFF6366F1),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-
+          // Student Info Avatar & Name (Clickable Profile)
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  student['name'] ?? 'Unknown Student',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                    color: Color(0xFF1E293B),
-                  ),
+            child: InkWell(
+              onTap: () => _showStudentProfileDialog(student),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Builder(
+                      builder: (context) {
+                        final photoUrl = (student['photoUrl'] ?? '').toString();
+                        final bytes = ImageUploadService.decodeBase64ToBytes(photoUrl);
+                        if (bytes != null && bytes.isNotEmpty) {
+                          return CircleAvatar(
+                            radius: 20,
+                            backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                            backgroundImage: MemoryImage(bytes),
+                          );
+                        } else if (photoUrl.startsWith('http')) {
+                          return CircleAvatar(
+                            radius: 20,
+                            backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                            backgroundImage: NetworkImage(photoUrl),
+                          );
+                        }
+                        return CircleAvatar(
+                          radius: 20,
+                          backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                          child: Text(
+                            (student['rollNo'] ?? '0').toString(),
+                            style: const TextStyle(
+                              color: Color(0xFF6366F1),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  student['name'] ?? 'Unknown Student',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                    color: Color(0xFF1E293B),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.info_outline_rounded, size: 14, color: Color(0xFF94A3B8)),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${student['grade']} - Sec ${student['section']} • Roll: ${student['rollNo'] ?? '—'}',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  '${student['grade']} - Sec ${student['section']}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
-                ),
-              ],
+              ),
             ),
           ),
 
@@ -594,5 +636,84 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
         ),
       );
     }
+  }
+
+  void _showStudentProfileDialog(Map<String, dynamic> student) {
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final photoUrl = (student['photoUrl'] ?? '').toString();
+        final bytes = ImageUploadService.decodeBase64ToBytes(photoUrl);
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: 420,
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: bytes != null && bytes.isNotEmpty
+                      ? CircleAvatar(radius: 40, backgroundImage: MemoryImage(bytes))
+                      : (photoUrl.startsWith('http')
+                          ? CircleAvatar(radius: 40, backgroundImage: NetworkImage(photoUrl))
+                          : CircleAvatar(
+                              radius: 40,
+                              backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                              child: const Icon(Icons.person_rounded, size: 44, color: Color(0xFF6366F1)),
+                            )),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  student['name'] ?? 'Student',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                ),
+                Text(
+                  'Class: ${student['grade']} - Sec ${student['section']} • Roll: ${student['rollNo'] ?? '—'}',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600),
+                ),
+                const Divider(height: 24),
+                _buildProfileRow('Father / Guardian:', student['guardianName']?.toString() ?? '—'),
+                _buildProfileRow('Contact Phone:', student['guardianPhone']?.toString() ?? '—'),
+                if ((student['bformNo'] ?? '').toString().isNotEmpty)
+                  _buildProfileRow('B-Form Number:', student['bformNo'].toString()),
+                if ((student['guardianCnic'] ?? '').toString().isNotEmpty)
+                  _buildProfileRow('Father CNIC:', student['guardianCnic'].toString()),
+                if ((student['biometricPin'] ?? '').toString().isNotEmpty)
+                  _buildProfileRow('Biometric PIN:', student['biometricPin'].toString()),
+                if ((student['address'] ?? '').toString().isNotEmpty)
+                  _buildProfileRow('Residential Address:', student['address'].toString()),
+                const SizedBox(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Close', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF64748B))),
+          ),
+          Expanded(
+            child: Text(value, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
+          ),
+        ],
+      ),
+    );
   }
 }

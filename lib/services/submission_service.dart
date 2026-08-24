@@ -3,6 +3,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
 
 import '../models/donation_models.dart';
 import 'donations_local_storage.dart';
@@ -158,7 +159,7 @@ class SubmissionService {
   }) async {
     if (pool.isEmpty) return null;
 
-    final id      = 'sub_${DateTime.now().millisecondsSinceEpoch}';
+    final id      = 'sub_${const Uuid().v4()}';
     final donKeys = pool
         .map((d) => d.hiveKey)
         .where((k) => k.isNotEmpty)

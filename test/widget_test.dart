@@ -17,6 +17,6 @@ void main() {
   testWidgets('App builds smoke test', (WidgetTester tester) async {
     // Build the app.
     await tester.pumpWidget(const MyApp());
-    await tester.pump(); // advance a frame
+    await tester.pump();
   });
 }

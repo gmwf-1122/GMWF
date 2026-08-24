@@ -29,6 +29,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
     {'id': 'finance', 'label': 'Finance & Donations', 'icon': '💰'},
     {'id': 'dasterkhwaan', 'label': 'Dasterkhwaan & Welfare', 'icon': '🍲'},
     {'id': 'system', 'label': 'System & Sync Logs', 'icon': '⚙️'},
+    {'id': 'failed_outbox', 'label': 'Failed Outbox (Errors)', 'icon': '🚨'},
   ];
 
   @override
@@ -171,7 +172,18 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
       body: ValueListenableBuilder(
         valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
         builder: (context, Box box, _) {
-          final allEntries = LocalStorageService.getLocalEntries(widget.branchId);
+          List<Map<String, dynamic>> allEntries = LocalStorageService.getLocalEntries(widget.branchId);
+          if (_selectedCategory == 'failed_outbox') {
+            try {
+              if (Hive.isBoxOpen('realtime_failed_outbox')) {
+                final failedBox = Hive.box('realtime_failed_outbox');
+                allEntries = failedBox.values
+                    .whereType<Map>()
+                    .map((m) => Map<String, dynamic>.from(m))
+                    .toList();
+              }
+            } catch (_) {}
+          }
 
           // Group by dateKey
           final Map<String, List<Map<String, dynamic>>> grouped = {};
@@ -367,8 +379,17 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                 final category = _detectCategory(entry);
                                 final serial = entry['serial']?.toString() ?? 'N/A';
                                 final name = entry['patientName'] ?? entry['name'] ?? entry['title'] ?? 'Record Payload';
+                                final byRaw = entry['performedBy'] ??
+                                              entry['createdByName'] ??
+                                              entry['createdBy'] ??
+                                              entry['doctorName'] ??
+                                              entry['receptionistName'] ??
+                                              entry['_senderUsername'] ??
+                                              entry['userId'];
+                                final by = (byRaw != null && byRaw.toString().trim().isNotEmpty)
+                                    ? byRaw.toString().trim()
+                                    : 'Unknown Staff';
                                 final status = (entry['status'] ?? 'waiting').toString();
-                                final by = entry['performedBy'] ?? 'Unknown Staff';
                                 final timeStr = entry['createdAt']?.toString() ?? '';
 
                                 String displayTime = '';

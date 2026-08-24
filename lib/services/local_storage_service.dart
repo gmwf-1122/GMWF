@@ -1,15 +1,21 @@
 // lib/services/local_storage_service.dart
 
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:crypto/crypto.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import 'package:gmwf/services/sync_service.dart';
 import 'camp_session_service.dart';
-import '../realtime/realtime_manager.dart';
+import 'master_proforma_service.dart';
+import 'serials_service.dart';
+import '../tools/legacy_data_migration_adapter.dart';
 
 class LocalStorageService {
   // ── Box names ──────────────────────────────────────────────────────────────
@@ -56,6 +62,8 @@ class LocalStorageService {
   static const String biometricDevicesBox = 'local_biometric_devices';
   static const String biometricCredentialsBox = 'local_biometric_credentials';
   static const String unmappedPunchesBox = 'local_unmapped_punches';
+  static const String crossBranchPunchesBox = 'local_cross_branch_punches';
+  static const String tokenExceptionsBox = 'local_token_exceptions';
 
   // ── ERP Double-Entry Ledger Boxes ───────────────────────────────────────────
   static const String chartOfAccountsBox  = 'org_chart_of_accounts';
@@ -87,7 +95,7 @@ class LocalStorageService {
     } else if (b.contains('karachi')) {
       return {
         'dispensaries': [
-          {'id': 'kapayya', 'name': 'Kapayya Dispensary'},
+          {'id': 'saddar', 'name': 'Saddar Dispensary'},
           {'id': 'haji_camp', 'name': 'Haji Camp Dispensary'},
         ],
         'dasterkhwaans': [{'id': 'main_dasterkhwaan', 'name': 'Dasterkhwaan'}],
@@ -110,7 +118,7 @@ class LocalStorageService {
 
     if (Hive.isBoxOpen(branchesBox)) {
       final box = Hive.box(branchesBox);
-      final raw = box.get('branch:$branchId');
+      final raw = box.get('branch:$b');
       if (raw is Map) {
         final facs = raw['facilities'];
         if (facs is Map) {
@@ -138,33 +146,268 @@ class LocalStorageService {
   static const String journalIndexBox     = 'local_finance_journal_index';
   static const String departmentMapBox    = 'local_finance_department_map';
 
+  static String? _hiveDirPath;
 
+  static void setHiveDirectoryPath(String path) {
+    _hiveDirPath = path;
+  }
 
-  // ── Init ──────────────────────────────────────────────────────────────────
-
-  /// Safely opens a Hive box, deleting it from disk and recreating it if
-  /// an "unknown typeId" error occurs (legacy/corrupted data).
   static Future<Box<T>> openBoxSafe<T>(String name) async {
     try {
-      return await Hive.openBox<T>(name).timeout(const Duration(seconds: 10),
-          onTimeout: () {
-        throw Exception("Timeout opening Hive box: $name");
-      });
-    } catch (e) {
-      debugPrint('[LocalStorageService] openBoxSafe error for "$name": $e. Attempting box reset...');
+      return await Hive.openBox<T>(name).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException("Timeout (30s) opening Hive box: $name");
+        },
+      );
+    } on TimeoutException catch (tex, st) {
+      debugPrint('[LocalStorageService] ⚠️ Timeout opening "$name" (30s). Retrying once (15s)...');
+      await _logStorageError(name, 'Initial open timed out: $tex', st);
+
+      if (Hive.isBoxOpen(name)) {
+        debugPrint('[LocalStorageService] ✅ Box "$name" completed opening in background during timeout window.');
+        return Hive.box<T>(name);
+      }
+
       try {
-        await Hive.deleteBoxFromDisk(name);
-        return await Hive.openBox<T>(name);
-      } catch (err) {
-        debugPrint('[LocalStorageService] Failed to reset box "$name": $err');
-        rethrow;
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (Hive.isBoxOpen(name)) {
+          debugPrint('[LocalStorageService] ✅ Box "$name" completed opening in background after 500ms delay.');
+          return Hive.box<T>(name);
+        }
+        return await Hive.openBox<T>(name).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw TimeoutException("Retry timeout (15s) opening Hive box: $name");
+          },
+        );
+      } catch (retryEx, retrySt) {
+        if (Hive.isBoxOpen(name)) {
+          debugPrint('[LocalStorageService] ✅ Box "$name" is open despite retry exception.');
+          return Hive.box<T>(name);
+        }
+        final errStr = retryEx.toString().toLowerCase();
+        final isLockError = errStr.contains('lock') || errStr.contains('already open');
+        if (isLockError) {
+          debugPrint('[LocalStorageService] ⚠️ Lock contention for "$name". Preserving box file on disk without deletion.');
+          await _logStorageError(name, 'Lock contention error: $retryEx', retrySt);
+          await _surfaceRecoveryNeededEvent(name, 'Lock Contention: $retryEx', false, isTimeout: true);
+          rethrow;
+        }
+        debugPrint('[LocalStorageService] ❌ Retry open timed out for "$name". Preserving box file on disk without deletion.');
+        await _logStorageError(name, 'Retry open timed out: $retryEx', retrySt);
+        await _surfaceRecoveryNeededEvent(name, 'Timeout: Box file preserved on disk without deletion', false, isTimeout: true);
+        rethrow; // DO NOT DELETE BOX ON TIMEOUT
+      }
+    } catch (e, st) {
+      debugPrint('[LocalStorageService] ⚠️ Open attempt failed for "$name": $e. Retrying once before backup...');
+      await _logStorageError(name, 'Initial open failed: $e', st);
+
+      if (Hive.isBoxOpen(name)) {
+        return Hive.box<T>(name);
+      }
+
+      try {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (Hive.isBoxOpen(name)) {
+          return Hive.box<T>(name);
+        }
+        return await Hive.openBox<T>(name).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw TimeoutException("Retry timeout (15s) opening Hive box: $name");
+          },
+        );
+      } catch (retryEx, retrySt) {
+        if (Hive.isBoxOpen(name)) {
+          return Hive.box<T>(name);
+        }
+        debugPrint('[LocalStorageService] ❌ Retry failed for "$name": $retryEx. Proceeding to backup + single-box recovery.');
+        await _logStorageError(name, 'Retry open failed: $retryEx', retrySt);
+
+        final backupCreated = await _backupCorruptedBoxFiles(name);
+
+        await _surfaceRecoveryNeededEvent(name, retryEx.toString(), backupCreated, isTimeout: false);
+
+        try {
+          debugPrint('[LocalStorageService] Resetting single box "$name" after securing backup (backupCreated: $backupCreated)...');
+          await Hive.deleteBoxFromDisk(name);
+          return await Hive.openBox<T>(name);
+        } catch (err, errSt) {
+          debugPrint('[LocalStorageService] ❌ Failed to recreate box "$name": $err');
+          await _logStorageError(name, 'Recreation failed: $err', errSt);
+          rethrow;
+        }
       }
     }
   }
 
+  static Future<void> _logStorageError(String boxName, String error, StackTrace? st) async {
+    try {
+      final appDir = await getApplicationSupportDirectory();
+      final logFile = File(p.join(appDir.path, 'gmwf_storage_errors.log'));
+      
+      if (await logFile.exists()) {
+        final length = await logFile.length();
+        if (length > 512000) {
+          final oldFile = File(p.join(appDir.path, 'gmwf_storage_errors.log.old'));
+          if (await oldFile.exists()) {
+            await oldFile.delete();
+          }
+          await logFile.rename(oldFile.path);
+        }
+      }
+
+      final logEntry = '${DateTime.now().toIso8601String()} [STORAGE_ERROR] Box: $boxName | $error\nStack: ${st ?? "N/A"}\n---\n';
+      await logFile.writeAsString(logEntry, mode: FileMode.append);
+    } catch (e) {
+      debugPrint('[LocalStorageService] Failed to write storage error log: $e');
+    }
+  }
+
+  static Future<String?> _getHiveDirectoryPath() async {
+    try {
+      final sampleBoxes = ['app_settings', usersBox, entriesBox, patientsBox, syncBox];
+      for (final name in sampleBoxes) {
+        if (Hive.isBoxOpen(name)) {
+          final boxPath = Hive.box(name).path;
+          if (boxPath != null && boxPath.isNotEmpty) {
+            return p.dirname(boxPath);
+          }
+        }
+      }
+      final appSupportDir = await getApplicationSupportDirectory();
+      if (!kIsWeb && Platform.isWindows) {
+        final winHiveDir = p.join(appSupportDir.path, 'gmwf_hive');
+        if (await Directory(winHiveDir).exists()) {
+          return winHiveDir;
+        }
+      }
+      return appSupportDir.path;
+    } catch (e) {
+      debugPrint('[LocalStorageService] Error getting Hive directory path: $e');
+      return null;
+    }
+  }
+
+  static Future<bool> _backupCorruptedBoxFiles(String boxName) async {
+    try {
+      final hivePath = await _getHiveDirectoryPath();
+      if (hivePath == null || hivePath.isEmpty) return false;
+      final hiveDir = Directory(hivePath);
+      if (!await hiveDir.exists()) return false;
+
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      bool backedUp = false;
+
+      await for (final entity in hiveDir.list()) {
+        if (entity is File) {
+          final fileName = p.basename(entity.path);
+          if (fileName == '$boxName.hive' ||
+              fileName == '$boxName.lock' ||
+              fileName.startsWith('$boxName.')) {
+            final backupPath = p.join(hiveDir.path, '${boxName}_corrupted_${nowMs}_$fileName.bak');
+            await entity.copy(backupPath);
+            debugPrint('[LocalStorageService] 🛡️ Corrupted box file backed up: $fileName -> ${p.basename(backupPath)}');
+            backedUp = true;
+          }
+        }
+      }
+      return backedUp;
+    } catch (e) {
+      debugPrint('[LocalStorageService] Failed to backup box files for $boxName: $e');
+      return false;
+    }
+  }
+
+  static Future<void> _surfaceRecoveryNeededEvent(String boxName, String error, bool backupCreated, {bool isTimeout = false}) async {
+    try {
+      final appDir = await getApplicationSupportDirectory();
+      final recoveryFile = File(p.join(appDir.path, 'gmwf_data_recovery_needed.json'));
+      List<dynamic> existing = [];
+      if (await recoveryFile.exists()) {
+        try {
+          final content = await recoveryFile.readAsString();
+          existing = jsonDecode(content) as List<dynamic>;
+        } catch (parseErr) {
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          final corruptedJsonBackup = File(p.join(appDir.path, 'gmwf_data_recovery_needed_corrupted_$nowMs.json.bak'));
+          await recoveryFile.copy(corruptedJsonBackup.path);
+          debugPrint('[LocalStorageService] ⚠️ Recovery JSON corrupted. Backed up to ${p.basename(corruptedJsonBackup.path)}: $parseErr');
+        }
+      }
+      existing.add({
+        'boxName': boxName,
+        'timestamp': DateTime.now().toIso8601String(),
+        'error': error,
+        'backupCreated': backupCreated,
+        'isTimeout': isTimeout,
+      });
+      await recoveryFile.writeAsString(jsonEncode(existing));
+    } catch (e) {
+      debugPrint('[LocalStorageService] Failed to record recovery event: $e');
+    }
+  }
+
+  static Future<List<File>> getUnrecoveredBackups() async {
+    final List<File> backups = [];
+    try {
+      final hivePath = await _getHiveDirectoryPath();
+      if (hivePath == null || hivePath.isEmpty) return backups;
+      final hiveDir = Directory(hivePath);
+      if (!await hiveDir.exists()) return backups;
+
+      await for (final entity in hiveDir.list()) {
+        if (entity is File && entity.path.contains('_corrupted_') && entity.path.endsWith('.bak')) {
+          backups.add(entity);
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocalStorageService] Error scanning for backup files: $e');
+    }
+    return backups;
+  }
+
+  static Future<void> checkForUnrecoveredBackups() async {
+    final backups = await getUnrecoveredBackups();
+    if (backups.isNotEmpty) {
+      debugPrint('[LocalStorageService] ⚠️ WARNING: Found ${backups.length} unrecovered corrupted box backup (.bak) files on disk:');
+      for (final f in backups) {
+        debugPrint('  -> ${p.basename(f.path)} (${await f.length()} bytes)');
+      }
+    }
+  }
+
+  static Future<bool> restoreBoxFromBackup(String boxName, String backupFilePath) async {
+    try {
+      final backupFile = File(backupFilePath);
+      if (!await backupFile.exists()) {
+        debugPrint('[LocalStorageService] Restore failed: Backup file does not exist at $backupFilePath');
+        return false;
+      }
+
+      final hivePath = await _getHiveDirectoryPath();
+      if (hivePath == null || hivePath.isEmpty) return false;
+
+      if (Hive.isBoxOpen(boxName)) {
+        await Hive.box(boxName).close();
+      }
+
+      final targetHivePath = p.join(hivePath, '$boxName.hive');
+      await backupFile.copy(targetHivePath);
+      debugPrint('[LocalStorageService] ✅ Box "$boxName" restored from ${p.basename(backupFilePath)} -> $targetHivePath');
+
+      await Hive.openBox(boxName);
+      return true;
+    } catch (e) {
+      debugPrint('[LocalStorageService] ❌ Failed to restore box "$boxName" from backup: $e');
+      return false;
+    }
+  }
 
   static Future<void> init() async {
     debugPrint('[LocalStorageService.init] Opening all Hive boxes...');
+    await checkForUnrecoveredBackups();
     final boxNames = [
       usersBox,
       patientsBox,
@@ -205,13 +448,20 @@ class LocalStorageService {
       biometricDevicesBox,
       biometricCredentialsBox,
       unmappedPunchesBox,
+      crossBranchPunchesBox,
+      tokenExceptionsBox,
       chartOfAccountsBox,
       orgBankAccountsBox,
       journalEntriesBox,
       journalIndexBox,
       departmentMapBox,
       masterProformaBox,
+      schoolFeesBox,
+      schoolHomeroomBox,
       'local_user_module_access',
+      'issued_token_keys',
+      'server_record_versions',
+      'realtime_entity_versions',
     ];
 
 
@@ -219,17 +469,48 @@ class LocalStorageService {
       await openBoxSafe(name);
     }
 
-    // ── Generate Terminal ID (for collision-free receipting)
+    await LegacyDataMigrationAdapter.runOnce();
+
     final settings = Hive.box('app_settings');
     if (settings.get('terminal_id') == null) {
       final now = DateTime.now().millisecondsSinceEpoch.toString();
-      final tid = now.substring(now.length - 2); // Last 2 digits of timestamp as simple terminal ID
+      final tid = now.substring(now.length - 2);
       await settings.put('terminal_id', tid);
     }
 
     debugPrint('[LocalStorageService.init] All Hive boxes opened safely.');
     
-    // Asynchronously compact local storage boxes to free disk space
+    try {
+      await MasterProformaService.seedDefaultProformaIfEmpty();
+      await MasterProformaService.sanitizeAllSavedStockItems();
+    } catch (e) {
+      debugPrint('[LocalStorageService.init] Error seeding proforma: $e');
+    }
+
+    try {
+      await sanitizeLocalEntriesCasingAndUnknowns('default');
+    } catch (_) {}
+
+    try {
+      await purgeDuplicateSyncQueue();
+    } catch (_) {}
+
+    try {
+      if (Hive.isBoxOpen(prescriptionsBox)) {
+        final pBox = Hive.box(prescriptionsBox);
+        final toDelete = <dynamic>[];
+        for (final k in pBox.keys) {
+          final kStr = k.toString().toLowerCase();
+          if (kStr.startsWith('disp_') || kStr.startsWith('legacy_') || kStr.startsWith('hist_')) {
+            toDelete.add(k);
+          }
+        }
+        for (final k in toDelete) {
+          await pBox.delete(k);
+        }
+      }
+    } catch (_) {}
+
     compactAllBoxes();
   }
 
@@ -253,6 +534,39 @@ class LocalStorageService {
       } catch (_) {}
     }
     debugPrint('[LocalStorageService] All Hive boxes compacted.');
+  }
+
+  static Future<void> clearAllInventory(String branchId, {String? dispensaryId}) async {
+    try {
+      if (!Hive.isBoxOpen(stockBox)) {
+        await Hive.openBox(stockBox);
+      }
+      final box = Hive.box(stockBox);
+      final activeCamp = dispensaryId?.trim().toLowerCase() ?? '';
+      final keysToRemove = <dynamic>[];
+
+      for (final k in box.keys) {
+        final val = box.get(k);
+        if (val is Map) {
+          final itemBranch = (val['branchId'] ?? '').toString().trim().toLowerCase();
+          final itemCamp = (val['dispensaryId'] ?? val['campId'] ?? '').toString().trim().toLowerCase();
+
+          bool matchBranch = branchId.isEmpty || branchId == 'default' || itemBranch.isEmpty || itemBranch == 'default' || itemBranch == branchId.toLowerCase();
+          bool matchCamp = activeCamp.isEmpty || activeCamp == 'all' || itemCamp.isEmpty || itemCamp == 'all' || itemCamp == activeCamp;
+
+          if (matchBranch && matchCamp) {
+            keysToRemove.add(k);
+          }
+        } else {
+          keysToRemove.add(k);
+        }
+      }
+
+      await box.deleteAll(keysToRemove);
+      debugPrint('[LocalStorageService] 🗑️ Cleared ${keysToRemove.length} inventory items locally.');
+    } catch (e) {
+      debugPrint('[LocalStorageService] Error clearing inventory: $e');
+    }
   }
 
 
@@ -286,7 +600,6 @@ class LocalStorageService {
   static String hashPassword(String password) =>
       sha256.convert(utf8.encode(password)).toString();
 
-  // ── Sync Timestamp Tracking ────────────────────────────────────────────────
   static String? getLastSyncTimestamp(String collectionKey) {
     if (!Hive.isBoxOpen(syncMetaBox)) return null;
     final box = Hive.box(syncMetaBox);
@@ -306,7 +619,6 @@ class LocalStorageService {
 
   static const String _cacheVersion = 'v1';
 
-  /// Uses '|' as separator since branchId/date/type may contain '_' or '-'.
   static String branchCacheKey(String branchId, String dateKey, String type) =>
       '$_cacheVersion|$branchId|$dateKey|$type';
 
@@ -429,17 +741,100 @@ class LocalStorageService {
 
   static String _nowIso() => DateTime.now().toUtc().toIso8601String();
 
-  static String _newLocalId() =>
-      DateTime.now().millisecondsSinceEpoch.toString();
+  static String _newLocalId() => const Uuid().v4();
 
   // ════════════════════════════════════════════════════════════════════════════
   // SYNC QUEUE
   // ════════════════════════════════════════════════════════════════════════════
 
+  static Future<int> purgeDuplicateSyncQueue() async {
+    try {
+      if (!Hive.isBoxOpen(syncBox)) return 0;
+      final box = Hive.box(syncBox);
+      final initialCount = box.length;
+      if (initialCount <= 1) return 0;
+
+      final Map<String, dynamic> uniqueLatest = {};
+      final List<dynamic> keysToDelete = [];
+
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw == null || raw is! Map) {
+          keysToDelete.add(key);
+          continue;
+        }
+        final item = Map<String, dynamic>.from(raw);
+        final type = (item['type'] ?? '').toString();
+        final entityId = (item['entityId'] ?? item['syncId'] ?? item['localId'] ?? item['id'] ?? '').toString();
+
+        if (entityId.isEmpty) continue;
+        final uniqueKey = '${type}_$entityId';
+
+        if (uniqueLatest.containsKey(uniqueKey)) {
+          final existingKey = uniqueLatest[uniqueKey]['_boxKey'];
+          keysToDelete.add(existingKey);
+        }
+        uniqueLatest[uniqueKey] = {...item, '_boxKey': key};
+      }
+
+      for (final key in keysToDelete) {
+        await box.delete(key);
+      }
+      final purged = initialCount - box.length;
+      if (purged > 0) {
+        debugPrint('[SyncQueue] 🧹 Purged $purged redundant duplicate items. Remaining: ${box.length}');
+      }
+      return purged;
+    } catch (e) {
+      debugPrint('[SyncQueue] Error purging duplicate sync queue: $e');
+      return 0;
+    }
+  }
+
   static Future<void> enqueueSync(Map<String, dynamic> action) async {
+    if (!Hive.isBoxOpen(syncBox)) {
+      await openBoxSafe(syncBox);
+    }
     final box = Hive.box(syncBox);
-    final key = 'sync_${DateTime.now().millisecondsSinceEpoch}_${action['type'] ?? 'unknown'}';
     final actionCopy = Map<String, dynamic>.from(action);
+    final type = (actionCopy['type'] ?? 'unknown').toString();
+
+    // FIX 1: For token/prescription actions, derive a stable entityId from
+    // branchId+serial BEFORE falling back to a freshly generated syncId, so
+    // retries or re-broadcasts of the same token are recognized as duplicates
+    // by the existing type+entityId dedup logic below (instead of each retry
+    // silently generating a brand-new syncId and being enqueued as "new").
+    if (['save_entry', 'save_prescription', 'update_serial_status'].contains(type)) {
+      final branchIdRaw = (actionCopy['branchId'] ?? actionCopy['data']?['branchId'])?.toString();
+      final serialRaw   = (actionCopy['serial']   ?? actionCopy['data']?['serial'])?.toString();
+      if (branchIdRaw != null && branchIdRaw.trim().isNotEmpty &&
+          serialRaw   != null && serialRaw.trim().isNotEmpty) {
+        actionCopy['entityId'] ??= '${branchIdRaw.toLowerCase().trim()}-${serialRaw.trim()}';
+      }
+    }
+
+    // Ensure stable syncId and entityId (UUID v4)
+    actionCopy['syncId'] ??= const Uuid().v4();
+    actionCopy['entityId'] ??= actionCopy['localId'] ?? actionCopy['data']?['localId'] ?? actionCopy['data']?['id'] ?? actionCopy['id'] ?? actionCopy['syncId'];
+    final entityId = actionCopy['entityId'].toString();
+
+    String key = actionCopy['syncId'].toString();
+
+    // Deduplicate: check if an existing item matches the same type + entityId
+    if (entityId.isNotEmpty) {
+      for (final existingBoxKey in box.keys) {
+        final raw = box.get(existingBoxKey);
+        if (raw is Map) {
+          final eType = (raw['type'] ?? '').toString();
+          final eEntityId = (raw['entityId'] ?? raw['localId'] ?? raw['data']?['localId'] ?? raw['data']?['id'] ?? raw['id'] ?? '').toString();
+          if (eType == type && eEntityId == entityId) {
+            key = existingBoxKey.toString();
+            break;
+          }
+        }
+      }
+    }
+
     if (['update_inventory', 'add_inventory_stock', 'register_medicine', 'save_token_exception_request', 'approve_token_exception'].contains(actionCopy['type'])) {
       actionCopy['txId'] ??= const Uuid().v4();
     }
@@ -452,24 +847,10 @@ class LocalStorageService {
       'status':      'pending',
     };
     await box.put(key, sanitize(enriched));
-    debugPrint('[SyncQueue] Enqueued: ${actionCopy['type']} | key: $key | txId: ${actionCopy['txId']} | total: ${box.length}');
+    debugPrint('[SyncQueue] Enqueued: $type | key: $key | entityId: $entityId | total: ${box.length}');
     
-    // Trigger sync upload immediately in background
+    // Trigger sync upload immediately in background (Hive -> Firestore)
     SyncService().triggerUpload();
-
-    // Dispatch to Branch Server over LAN WebSocket (Tier 2)
-    try {
-      final evtType = actionCopy['type']?.toString();
-      if (evtType != null && evtType.isNotEmpty) {
-        RealtimeManager().sendMessage({
-          'event_type': evtType,
-          'data': actionCopy['data'] ?? actionCopy,
-          'branchId': actionCopy['branchId'],
-        });
-      }
-    } catch (e) {
-      debugPrint('[SyncQueue] LAN dispatch notice: $e');
-    }
   }
 
   static Map<String, Map<String, dynamic>> getAllSync() {
@@ -592,6 +973,11 @@ class LocalStorageService {
   }
 
   static Future<void> downloadDonations(String branchId) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key
+    // (_donationKey) below — saveDonation() always lowercases, so a
+    // differently-cased caller here would otherwise create a parallel,
+    // never-reconciled set of Hive entries.
+    branchId = branchId.toLowerCase().trim();
     try {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final snap  = await FirebaseFirestore.instance
@@ -634,9 +1020,6 @@ class LocalStorageService {
   }
 
 
-  // ── Sync Queue ─────────────────────────────────────────────────────────────
-
-
   // ════════════════════════════════════════════════════════════════════════════
   // FULL DOWNLOAD HELPERS
   // ════════════════════════════════════════════════════════════════════════════
@@ -647,7 +1030,7 @@ class LocalStorageService {
     await refreshPrescriptions(branchId);
     await downloadTodayTokens(branchId);
     await downloadDonations(branchId);
-    await downloadMedicineRestrictions(branchId); // ← ADDED: Firestore restriction sync
+    await downloadMedicineRestrictions(branchId);
     debugPrint('[LS] fullDownloadOnce completed for branch: $branchId');
   }
 
@@ -659,11 +1042,15 @@ class LocalStorageService {
       name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
   static String getPatientKey(Map<String, dynamic> patient) {
+    final patientId = (patient['patientId'] ?? patient['id'])?.toString().trim();
+    if (patientId != null && patientId.isNotEmpty) {
+      return patientId;
+    }
+
     final isAdult      = patient['isAdult'] as bool? ?? true;
-    final cnic         = (patient['cnic'] as String?)?.replaceAll('-', '').trim();
-    final guardianCnic =
-        (patient['guardianCnic'] as String?)?.replaceAll('-', '').trim();
-    final name         = (patient['name'] as String?)?.trim() ?? '';
+    final cnic         = (patient['cnic'] ?? patient['patientCnic'])?.toString().replaceAll('-', '').trim();
+    final guardianCnic = (patient['guardianCnic'] ?? patient['guardian_cnic'])?.toString().replaceAll('-', '').trim();
+    final name         = (patient['name'] ?? patient['patientName'] ?? patient['fullName'])?.toString().trim() ?? '';
 
     if (isAdult && cnic != null && cnic.isNotEmpty) return cnic;
     if (!isAdult &&
@@ -672,9 +1059,12 @@ class LocalStorageService {
         name.isNotEmpty) {
       return '${guardianCnic}_child_${_normalizeName(name)}';
     }
-    final fallback = patient['patientId']?.toString() ??
-        DateTime.now().millisecondsSinceEpoch.toString();
-    return 'fallback_$fallback';
+    if (cnic != null && cnic.isNotEmpty) return cnic;
+    if (guardianCnic != null && guardianCnic.isNotEmpty) return guardianCnic;
+
+    final newId = const Uuid().v4();
+    patient['patientId'] = newId;
+    return newId;
   }
 
   static Future<void> seedLocalAdmins() async {
@@ -733,7 +1123,6 @@ class LocalStorageService {
     }
 
     final eBox = Hive.box(entriesBox);
-    // Optimization: Build a map of patientId -> tokenKeys so we don't loop entries for every patient
     final Map<String, List<String>> patientToTokenKeys = {};
     for (final tokenKey in eBox.keys.toList()) {
       final tokenVal = eBox.get(tokenKey);
@@ -753,7 +1142,6 @@ class LocalStorageService {
       for (final oldKey in oldKeys) {
         if (oldKey == newKey) continue;
         
-        // Update all tokens that were using this old key
         final tokenKeysToUpdate = patientToTokenKeys[oldKey] ?? [];
         for (final tKey in tokenKeysToUpdate) {
           final tokenVal = eBox.get(tKey);
@@ -764,7 +1152,6 @@ class LocalStorageService {
           }
         }
         
-        // Delete the old patient record
         await box.delete(oldKey);
       }
     }
@@ -861,6 +1248,54 @@ class LocalStorageService {
     final box = Hive.box(patientsBox);
     await box.put(key, sanitized);
     await box.flush();
+    await updateActiveEntriesForPatient(sanitized['branchId']?.toString() ?? '', key, sanitized);
+  }
+
+  static Future<void> updateActiveEntriesForPatient(String branchId, String patientId, Map<String, dynamic> changes) async {
+    try {
+      if (!Hive.isBoxOpen(entriesBox)) return;
+      final box = Hive.box(entriesBox);
+      final sanitizedChanges = sanitize(changes);
+      final keysToUpdate = <dynamic, Map<String, dynamic>>{};
+
+      final targetCnic = (sanitizedChanges['patientCnic'] ?? sanitizedChanges['cnic'] ?? sanitizedChanges['guardianCnic'] ?? patientId).toString().replaceAll('-', '').trim();
+      final targetName = (sanitizedChanges['patientName'] ?? sanitizedChanges['name'] ?? '').toString().trim();
+
+      for (final key in box.keys) {
+        final val = box.get(key);
+        if (val is Map) {
+          final entry = Map<String, dynamic>.from(val);
+          final ePid = (entry['patientId'] ?? entry['id'])?.toString();
+          final eCnic = (entry['patientCnic'] ?? entry['cnic'] ?? entry['guardianCnic'])?.toString().replaceAll('-', '').trim();
+
+          if (ePid == patientId || (targetCnic.isNotEmpty && eCnic == targetCnic)) {
+            final updatedEntry = Map<String, dynamic>.from(entry)..addAll(sanitizedChanges);
+
+            if (targetName.isNotEmpty) {
+              updatedEntry['patientName'] = targetName;
+              updatedEntry['name'] = targetName;
+            }
+
+            if (sanitizedChanges.containsKey('vitals')) {
+              final newVitals = Map<String, dynamic>.from(entry['vitals'] is Map ? entry['vitals'] : {});
+              if (sanitizedChanges['vitals'] is Map) {
+                newVitals.addAll(Map<String, dynamic>.from(sanitizedChanges['vitals']));
+              }
+              updatedEntry['vitals'] = newVitals;
+            }
+
+            keysToUpdate[key] = updatedEntry;
+          }
+        }
+      }
+
+      for (final e in keysToUpdate.entries) {
+        await box.put(e.key, e.value);
+      }
+      await box.flush();
+    } catch (e) {
+      debugPrint('[LocalStorage] Error updating active entries for patient $patientId: $e');
+    }
   }
 
   static Future<void> saveAllLocalPatients(
@@ -952,7 +1387,6 @@ class LocalStorageService {
 
       if (match) {
         final p = Map<String, dynamic>.from(raw);
-        // Ensure patientId is present — critical for medicine restrictions
         if (p['patientId'] == null) {
           p['patientId'] = getPatientKey(p);
         }
@@ -972,56 +1406,174 @@ class LocalStorageService {
 
   static Future<void> saveEntryLocal(
       String branchId, String serial, Map<String, dynamic> entryData) async {
-    final key      = '$branchId-$serial';
-    var sanitized  = sanitize(entryData);
-    final todayKey = getTodayDateKey();
+    final normBranch = branchId.toLowerCase().trim();
+    final normSerial = serial.trim();
+    final key        = '$normBranch-$normSerial';
+    var sanitized    = sanitize(entryData);
+    final todayKey   = getTodayDateKey();
     sanitized['dateKey']  = sanitized['dateKey'] ?? todayKey;
-    sanitized['branchId'] = branchId;
-    sanitized['serial']   = serial;
+    sanitized['branchId'] = normBranch;
+    sanitized['serial']   = normSerial;
 
-    // Attach active camp attribution
-    final activeCamp = CampSessionService.getActiveCamp();
-    if (activeCamp != null && activeCamp.isNotEmpty) {
-      sanitized['dispensaryId'] = sanitized['dispensaryId'] ?? activeCamp;
-      sanitized['campId']       = sanitized['campId']       ?? activeCamp;
+    final normSerialUpper = normSerial.toUpperCase();
+    if (normSerialUpper.contains('-SADD-') || normSerialUpper.contains('-KAP-') || normSerialUpper.contains('-KAPAYYA-')) {
+      sanitized['dispensaryId'] = 'saddar';
+      sanitized['campId']       = 'saddar';
+      sanitized['dispensaryTag'] = sanitized['dispensaryTag'] ?? 'SADD';
+    } else if (normSerialUpper.contains('-HAJI-') || normSerialUpper.contains('-HAJ-') || normSerialUpper.contains('-HC-')) {
+      sanitized['dispensaryId'] = 'haji_camp';
+      sanitized['campId']       = 'haji_camp';
+      sanitized['dispensaryTag'] = sanitized['dispensaryTag'] ?? 'HAJI';
+    } else {
+      final activeCamp = CampSessionService.getActiveCamp();
+      if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
+        sanitized['dispensaryId'] = sanitized['dispensaryId'] ?? activeCamp;
+        sanitized['campId']       = sanitized['campId']       ?? activeCamp;
+      }
     }
 
-    // Attach active session attribution (morning / evening)
     final rawTime = sanitized['timestamp'] ?? sanitized['createdAt'] ?? sanitized['date'];
     final dt = rawTime != null ? _toDateTime(rawTime) : DateTime.now();
     sanitized['session'] = sanitized['session'] ?? CampSessionService.getCurrentSession(dt);
 
-    if (sanitized['timestamp'] != null) {
-      sanitized['timestamp'] =
-          _toDateTime(sanitized['timestamp']).toIso8601String();
+    const terminalStatuses = ['completed', 'dispensed'];
+
+    void preservePatientFields(Map existing) {
+      for (final field in [
+        'patientName', 'name', 'fullName', 'patientCnic', 'cnic', 'guardianName',
+        'guardianCnic', 'patientAge', 'age', 'patientGender', 'gender',
+        'queueType', 'session', 'visitReason', 'isVitalsOnly', 'vitalsOnly',
+        'suggestedDays', 'doctorName', 'doctorId', 'performedBy', 'createdByName', 'createdBy'
+      ]) {
+        final curVal = sanitized[field];
+        final oldVal = existing[field];
+        final isCurEmpty = curVal == null || curVal.toString().trim().isEmpty || curVal.toString().trim().toLowerCase() == 'unknown' || curVal.toString().trim().toLowerCase() == 'unknown patient';
+        final isOldValid = oldVal != null && oldVal.toString().trim().isNotEmpty && oldVal.toString().trim().toLowerCase() != 'unknown' && oldVal.toString().trim().toLowerCase() != 'unknown patient';
+        if (isCurEmpty && isOldValid) {
+          sanitized[field] = oldVal;
+        }
+      }
     }
-    if (sanitized['createdAt'] != null) {
-      sanitized['createdAt'] =
-          _toDateTime(sanitized['createdAt']).toIso8601String();
-    }
+
+    // 1. Clean up duplicate case keys and preserve terminal status & patient info
+    try {
+      if (Hive.isBoxOpen(entriesBox)) {
+        final box = Hive.box(entriesBox);
+        final targetUpper = normSerial.toUpperCase();
+        for (final k in box.keys.toList()) {
+          final kStr = k.toString();
+          if (kStr.toLowerCase().startsWith('$normBranch-') &&
+              kStr.substring(normBranch.length + 1).toUpperCase() == targetUpper &&
+              kStr != key) {
+            final existing = box.get(k);
+            if (existing is Map) {
+              preservePatientFields(existing);
+              final localStatus    = (existing['status'] ?? '').toString().toLowerCase();
+              final incomingStatus = (sanitized['status'] ?? '').toString().toLowerCase();
+              if (terminalStatuses.contains(localStatus) && !terminalStatuses.contains(incomingStatus)) {
+                sanitized['status']         = existing['status'] ?? 'completed';
+                sanitized['completedAt']    = existing['completedAt'] ?? sanitized['completedAt'];
+                sanitized['prescription']   = existing['prescription'] ?? sanitized['prescription'];
+                sanitized['prescriptionId'] = existing['prescriptionId'] ?? sanitized['prescriptionId'];
+                sanitized['dispenseStatus'] = existing['dispenseStatus'] ?? sanitized['dispenseStatus'];
+                sanitized['vitals']         = existing['vitals'] ?? sanitized['vitals'];
+                sanitized['daysOfMedicine'] = existing['daysOfMedicine'] ?? sanitized['daysOfMedicine'];
+                sanitized['doctorName']     = existing['doctorName'] ?? sanitized['doctorName'];
+                sanitized['doctorId']       = existing['doctorId'] ?? sanitized['doctorId'];
+              }
+            }
+            await box.delete(k);
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Check exact key in entriesBox and preserve terminal status & patient info
+    try {
+      if (Hive.isBoxOpen(entriesBox)) {
+        final box = Hive.box(entriesBox);
+        final existingExact = box.get(key);
+        if (existingExact is Map) {
+          preservePatientFields(existingExact);
+          final localStatus    = (existingExact['status'] ?? '').toString().toLowerCase();
+          final incomingStatus = (sanitized['status'] ?? '').toString().toLowerCase();
+          if (terminalStatuses.contains(localStatus) && !terminalStatuses.contains(incomingStatus)) {
+            sanitized['status']         = existingExact['status'] ?? 'completed';
+            sanitized['completedAt']    = existingExact['completedAt'] ?? sanitized['completedAt'];
+            sanitized['prescription']   = existingExact['prescription'] ?? sanitized['prescription'];
+            sanitized['prescriptionId'] = existingExact['prescriptionId'] ?? sanitized['prescriptionId'];
+            sanitized['dispenseStatus'] = existingExact['dispenseStatus'] ?? sanitized['dispenseStatus'];
+            sanitized['vitals']         = existingExact['vitals'] ?? sanitized['vitals'];
+            sanitized['daysOfMedicine'] = existingExact['daysOfMedicine'] ?? sanitized['daysOfMedicine'];
+            sanitized['doctorName']     = existingExact['doctorName'] ?? sanitized['doctorName'];
+            sanitized['doctorId']       = existingExact['doctorId'] ?? sanitized['doctorId'];
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 3. Check if a local prescription already exists in prescriptionsBox for this exact token in this branch
+    try {
+      final incomingStatus = (sanitized['status'] ?? '').toString().toLowerCase();
+      if (incomingStatus != 'waiting' || sanitized['prescription'] != null) {
+        final existingPrescription = getLocalPrescription(
+          normSerial,
+          branchId: branchId,
+          cnic: sanitized['patientCnic'] ?? sanitized['cnic'],
+          patientId: sanitized['patientId'] ?? sanitized['id'],
+          patientName: sanitized['patientName'] ?? sanitized['name'],
+          dateKey: sanitized['dateKey']?.toString(),
+        );
+        if (existingPrescription != null) {
+          final pSerial = (existingPrescription['serial'] ?? existingPrescription['id'] ?? '').toString().toLowerCase().trim();
+          if (pSerial == normSerial) {
+            preservePatientFields(existingPrescription);
+            sanitized['status']         = 'completed';
+            sanitized['prescription']   = existingPrescription;
+            sanitized['prescriptionId'] = existingPrescription['id'] ?? normSerial;
+            if (existingPrescription['completedAt'] != null && sanitized['completedAt'] == null) {
+              sanitized['completedAt'] = existingPrescription['completedAt'];
+            }
+            if (existingPrescription['doctorName'] != null && sanitized['doctorName'] == null) {
+              sanitized['doctorName'] = existingPrescription['doctorName'];
+            }
+            if (existingPrescription['doctorId'] != null && sanitized['doctorId'] == null) {
+              sanitized['doctorId'] = existingPrescription['doctorId'];
+            }
+            if (existingPrescription['daysOfMedicine'] != null && sanitized['daysOfMedicine'] == null) {
+              sanitized['daysOfMedicine'] = existingPrescription['daysOfMedicine'];
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
     await Hive.box(entriesBox).put(key, sanitized);
   }
 
   static List<Map<String, dynamic>> getLocalEntries(String branchId,
       {String? dispensaryId, bool filterByCamp = false, String? session, bool filterBySession = false}) {
     final box = Hive.box(entriesBox);
+    final normBranch = branchId.toLowerCase().trim();
     var list = box.keys
-        .where((k) => k.toString().startsWith('$branchId-'))
+        .where((k) => k.toString().toLowerCase().startsWith('$normBranch-'))
         .map((k) => Map<String, dynamic>.from(box.get(k) as Map))
         .toList();
 
     if (filterByCamp) {
       final activeCamp = (dispensaryId != null && dispensaryId.trim().isNotEmpty)
           ? dispensaryId.trim().toLowerCase()
-          : CampSessionService.getActiveCamp();
+          : CampSessionService.getActiveCamp(branchId);
 
       if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
-        final normCamp = activeCamp.replaceAll(RegExp(r'[^a-z0-9]'), '');
         list = list.where((entry) {
-          final rawD = (entry['dispensaryId'] ?? entry['campId'])?.toString().toLowerCase().trim();
-          if (rawD == null || rawD.isEmpty || rawD == 'all') return true;
-          final normD = rawD.replaceAll(RegExp(r'[^a-z0-9]'), '');
-          return normD == normCamp || normD.contains(normCamp) || normCamp.contains(normD);
+          return CampSessionService.matchesCamp(
+            selectedCamp: activeCamp,
+            dispensaryId: entry['dispensaryId']?.toString(),
+            campId: entry['campId']?.toString(),
+            dispensaryTag: entry['dispensaryTag']?.toString(),
+            serial: (entry['serial'] ?? entry['id'])?.toString(),
+          );
         }).toList();
       }
     }
@@ -1052,16 +1604,42 @@ class LocalStorageService {
 
   static Map<String, dynamic>? getLocalEntry(
       String branchId, String serial) {
-    final val = Hive.box(entriesBox).get('$branchId-$serial');
-    if (val == null) return null;
-    return Map<String, dynamic>.from(val as Map);
+    final normBranch = branchId.toLowerCase().trim();
+    final normSerial = serial.trim();
+    final val = Hive.box(entriesBox).get('$normBranch-$normSerial');
+    if (val != null) return Map<String, dynamic>.from(val as Map);
+
+    final box = Hive.box(entriesBox);
+    final targetUpper = normSerial.toUpperCase();
+    for (final k in box.keys) {
+      final kStr = k.toString();
+      if (kStr.toLowerCase().startsWith('$normBranch-') &&
+          kStr.substring(normBranch.length + 1).toUpperCase() == targetUpper) {
+        final item = box.get(k);
+        if (item is Map) return Map<String, dynamic>.from(item);
+      }
+    }
+    return null;
   }
 
   static Future<void> updateLocalEntryField(
       String branchId, String serial, Map<String, dynamic> fields) async {
-    final key = '$branchId-$serial';
+    final normBranch = branchId.toLowerCase().trim();
+    final normSerial = serial.trim();
+    final key = '$normBranch-$normSerial';
     final box = Hive.box(entriesBox);
-    final raw = box.get(key);
+    var raw = box.get(key);
+    if (raw == null) {
+      final targetUpper = normSerial.toUpperCase();
+      for (final k in box.keys) {
+        final kStr = k.toString();
+        if (kStr.toLowerCase().startsWith('$normBranch-') &&
+            kStr.substring(normBranch.length + 1).toUpperCase() == targetUpper) {
+          raw = box.get(k);
+          break;
+        }
+      }
+    }
     if (raw == null) return;
     final updated = Map<String, dynamic>.from(raw as Map)
       ..addAll(sanitize(fields));
@@ -1072,18 +1650,21 @@ class LocalStorageService {
     try {
       final box = Hive.box(entriesBox);
       if (!box.isOpen) return false;
+      final normBranch = branchId.toLowerCase().trim();
+      final targetUpper = tokenSerial.trim().toUpperCase();
       final keys = box.keys.toList();
       bool deleted = false;
       for (final key in keys) {
+        final kStr = key.toString();
         final entry = box.get(key);
         if (entry == null) continue;
-        final serial = entry['serial'] as String?;
-        final entryBranch = entry['branchId'] as String?;
-        if (serial == tokenSerial && entryBranch == branchId) {
+        final serial = (entry['serial'] ?? '').toString().trim().toUpperCase();
+        final entryBranch = (entry['branchId'] ?? '').toString().trim().toLowerCase();
+        if ((serial == targetUpper || kStr.substring(kStr.indexOf('-') + 1).toUpperCase() == targetUpper) &&
+            (entryBranch.isEmpty || entryBranch == normBranch)) {
           await box.delete(key);
           debugPrint('[LocalStorage] ✅ Deleted $tokenSerial (key: $key)');
           deleted = true;
-          break;
         }
       }
       await box.flush();
@@ -1101,10 +1682,18 @@ class LocalStorageService {
     Map<String, dynamic> canonicalData,
   ) async {
     final box = Hive.box(entriesBox);
-    final oldKey = '$branchId-$oldTempSerial';
-    final newKey = '$branchId-$canonicalSerial';
-    await box.delete(oldKey);
+    final normBranch = branchId.toLowerCase().trim();
+    final oldTempUpper = oldTempSerial.trim().toUpperCase();
 
+    for (final k in box.keys.toList()) {
+      final kStr = k.toString();
+      if (kStr.toLowerCase().startsWith('$normBranch-') &&
+          kStr.toUpperCase().contains(oldTempUpper)) {
+        await box.delete(k);
+      }
+    }
+
+    final newKey = '$normBranch-${canonicalSerial.trim()}';
     final merged = Map<String, dynamic>.from(canonicalData);
     merged['serial'] = canonicalSerial;
     merged['originalTempSerial'] = oldTempSerial;
@@ -1116,13 +1705,73 @@ class LocalStorageService {
     debugPrint('[LocalStorage] Remapped temp serial $oldTempSerial → canonical $canonicalSerial');
   }
 
+  static Future<void> sanitizeLocalEntriesCasingAndUnknowns(String branchId) async {
+    try {
+      if (!Hive.isBoxOpen(entriesBox)) return;
+      final box = Hive.box(entriesBox);
+      final normBranch = branchId.toLowerCase().trim();
+      final keys = box.keys.where((k) => k.toString().toLowerCase().startsWith('$normBranch-')).toList();
+
+      final Map<String, List<dynamic>> serialToKeys = {};
+      for (final key in keys) {
+        final val = box.get(key);
+        if (val is! Map) continue;
+        final serial = (val['serial'] ?? key.toString().replaceFirst(RegExp('^$normBranch-', caseSensitive: false), '')).toString().trim().toUpperCase();
+        if (serial.isEmpty) continue;
+        serialToKeys.putIfAbsent(serial, () => []).add(key);
+      }
+
+      for (final entry in serialToKeys.entries) {
+        final keyList = entry.value;
+        if (keyList.length > 1) {
+          dynamic bestKey = keyList.first;
+          Map<String, dynamic>? bestData;
+
+          for (final k in keyList) {
+            final data = Map<String, dynamic>.from(box.get(k) as Map);
+            final name = (data['patientName'] ?? data['name'] ?? '').toString().trim().toLowerCase();
+            final isUnknown = name.isEmpty || name == 'unknown patient' || name == 'unknown';
+
+            if (bestData == null) {
+              bestData = data;
+              bestKey = k;
+            } else {
+              final bestName = (bestData['patientName'] ?? bestData['name'] ?? '').toString().trim().toLowerCase();
+              final bestIsUnknown = bestName.isEmpty || bestName == 'unknown patient' || bestName == 'unknown';
+
+              if (bestIsUnknown && !isUnknown) {
+                bestData = data;
+                bestKey = k;
+              }
+            }
+          }
+
+          for (final k in keyList) {
+            if (k != bestKey) {
+              await box.delete(k);
+              debugPrint('[LocalStorage] Cleaned up duplicate casing/unknown key: $k');
+            }
+          }
+        }
+      }
+      await box.flush();
+    } catch (e) {
+      debugPrint('[LocalStorage] Error in sanitizeLocalEntriesCasingAndUnknowns: $e');
+    }
+  }
+
   static List<Map<String, dynamic>> getUnservedPreviousDaysTokens(
     String branchId, {
     int daysBack = 3,
     String? dispensaryId,
   }) {
+    // FIX 2: normalize branchId before it's used to build the Hive key
+    // prefix below — this method previously used the raw, possibly
+    // differently-cased parameter, which could miss real local entries.
+    branchId = branchId.toLowerCase().trim();
     final box = Hive.box(entriesBox);
-    final today = DateFormat('ddMMyy').format(DateTime.now());
+    final shiftInfo = CampSessionService.resolveShiftAndDateKey();
+    final today = shiftInfo.dateKey;
 
     final now = DateTime.now();
     final validDates = <String>{};
@@ -1137,7 +1786,7 @@ class LocalStorageService {
           final dk = e['dateKey']?.toString() ?? '';
           if (dk == today || !validDates.contains(dk)) return false;
           final status = (e['status'] ?? '').toString().toLowerCase();
-          final isUnserved = status != 'served' && status != 'dispensed' && status != 'cancelled' && status != 'expired';
+          final isUnserved = status != 'completed' && status != 'served' && status != 'dispensed' && status != 'cancelled' && status != 'expired';
           if (!isUnserved) return false;
 
           if (dispensaryId != null && dispensaryId.isNotEmpty && dispensaryId != 'all') {
@@ -1155,6 +1804,9 @@ class LocalStorageService {
   }
 
   static Future<int> expireUnservedTokensForDate(String branchId, String dateKey) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key
+    // prefix below.
+    branchId = branchId.toLowerCase().trim();
     final box = Hive.box(entriesBox);
     int count = 0;
     for (final key in box.keys.toList()) {
@@ -1204,9 +1856,7 @@ class LocalStorageService {
     cnicRaw ??= 'unknown_cnic_${DateTime.now().millisecondsSinceEpoch}';
 
     final cleanCnic  = cnicRaw.trim().replaceAll('-', '').replaceAll(' ', '');
-    final normSerial = serial.toLowerCase();
-    final parts      = normSerial.split('-');
-    final numSerial  = parts.length > 1 ? parts.last : normSerial;
+    final normSerial = serial.toLowerCase().trim();
 
     final key       = '${cleanCnic}_$serial';
     var sanitized   = sanitize(prescription);
@@ -1214,7 +1864,6 @@ class LocalStorageService {
     sanitized['cnic']        = cleanCnic;
     sanitized['serial']      = serial;
 
-    // Attach active camp attribution
     final activeCamp = CampSessionService.getActiveCamp();
     if (activeCamp != null && activeCamp.isNotEmpty) {
       sanitized['dispensaryId'] = sanitized['dispensaryId'] ?? activeCamp;
@@ -1227,12 +1876,7 @@ class LocalStorageService {
     await box.put(serial, sanitized);
     await box.put('${cleanCnic}_$normSerial', sanitized);
     await box.put(normSerial, sanitized);
-    if (numSerial.isNotEmpty) {
-      await box.put('${cleanCnic}_$numSerial', sanitized);
-      await box.put(numSerial, sanitized);
-    }
 
-    // Also update embedded prescription in entriesBox for immediate dispenser access
     final entriesBoxRef = Hive.box(entriesBox);
     for (final entryKey in entriesBoxRef.keys) {
       if (entryKey is String) {
@@ -1240,13 +1884,10 @@ class LocalStorageService {
         if (entry is Map) {
           final eSerial = (entry['serial'] ?? entry['id'] ?? entry['tokenSerial'] ?? '')
               .toString().trim().toLowerCase();
-          final eParts     = eSerial.split('-');
-          final eNumSerial = eParts.length > 1 ? eParts.last : eSerial;
 
           final isMatch = eSerial == normSerial ||
-              entryKey.toLowerCase().endsWith('-$normSerial') ||
-              entryKey.toLowerCase().endsWith('-$numSerial') ||
-              (numSerial.isNotEmpty && eNumSerial == numSerial);
+              entryKey.toLowerCase() == normSerial ||
+              entryKey.toLowerCase().endsWith('-$normSerial');
 
           if (isMatch) {
             final updatedEntry = Map<String, dynamic>.from(entry);
@@ -1261,6 +1902,8 @@ class LocalStorageService {
 
   static Future<void> updateDispenseStatus(
       String branchId, String serial, String status) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key below.
+    branchId = branchId.toLowerCase().trim();
     final key = '$branchId-$serial';
     final box = Hive.box(entriesBox);
     final entry = box.get(key);
@@ -1272,30 +1915,142 @@ class LocalStorageService {
     }
   }
 
-  static Map<String, dynamic>? getLocalPrescription(String serial) {
-    final box         = Hive.box(prescriptionsBox);
+  static Map<String, dynamic>? getLocalPrescription(
+    String serial, {
+    String? cnic,
+    String? patientName,
+    String? patientId,
+    String? branchId,
+    String? dateKey,
+  }) {
+    if (serial.trim().isEmpty) return null;
     final cleanSerial = serial.trim();
-    final direct      = box.get(cleanSerial);
-    if (direct != null && direct is Map) {
-      return Map<String, dynamic>.from(direct);
-    }
-    for (final key in box.keys) {
-      if (key is String && key.endsWith('_$cleanSerial')) {
-        final data = box.get(key);
-        if (data != null && data is Map) {
-          return Map<String, dynamic>.from(data);
+    final lowerSerial = cleanSerial.toLowerCase();
+    final normBranch  = (branchId ?? '').trim().toLowerCase();
+    final cleanCnic   = (cnic ?? '').trim().replaceAll(RegExp(r'[-\s]'), '');
+    final cleanPId    = (patientId ?? '').trim();
+
+    // Helper: validate candidate prescription against branch and patient identity
+    bool matchesPatient(Map data) {
+      // 1. Branch verification
+      if (normBranch.isNotEmpty && normBranch != 'all' && normBranch != 'global') {
+        final pBranch = (data['branchId'] ?? '').toString().trim().toLowerCase();
+        if (pBranch.isNotEmpty && pBranch != normBranch && !pBranch.contains(normBranch) && !normBranch.contains(pBranch)) {
+          return false;
         }
       }
-    }
-    for (final key in box.keys) {
-      final data = box.get(key);
-      if (data != null && data is Map) {
-        if (data['serial']?.toString().trim() == cleanSerial) {
-          return Map<String, dynamic>.from(data);
+
+      // 2. DateKey verification
+      if (dateKey != null && dateKey.trim().isNotEmpty) {
+        final pDateKey = (data['dateKey'] ?? '').toString().trim();
+        if (pDateKey.isNotEmpty && pDateKey != dateKey.trim()) {
+          return false;
         }
       }
+
+      // 3. Patient ID verification
+      if (cleanPId.isNotEmpty) {
+        final pId = (data['patientId'] ?? data['id'] ?? '').toString().trim();
+        if (pId.isNotEmpty && pId != cleanPId) {
+          return false;
+        }
+      }
+
+      // 4. CNIC verification
+      if (cleanCnic.isNotEmpty) {
+        final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '')
+            .toString()
+            .trim()
+            .replaceAll(RegExp(r'[-\s]'), '');
+        if (pCnic.isNotEmpty &&
+            pCnic != cleanCnic &&
+            !pCnic.contains(cleanCnic) &&
+            !cleanCnic.contains(pCnic)) {
+          return false;
+        }
+      }
+
+      // 5. Patient Name verification (ignore vague names like '0', '02', 'unknown')
+      if (patientName != null && patientName.trim().isNotEmpty) {
+        final pName = (data['patientName'] ?? data['name'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final qName = patientName.trim().toLowerCase();
+        if (pName.isNotEmpty &&
+            qName.isNotEmpty &&
+            pName != 'unknown' &&
+            qName != 'unknown' &&
+            pName.length > 2 &&
+            qName.length > 2) {
+          if (pName != qName && !pName.contains(qName) && !qName.contains(pName)) {
+            return false;
+          }
+        }
+      }
+      return true;
     }
+
+    // 1. Check entriesBox strictly for this branch
+    try {
+      if (Hive.isBoxOpen(entriesBox)) {
+        final eBox = Hive.box(entriesBox);
+        if (normBranch.isNotEmpty) {
+          final exactEntry = eBox.get('$normBranch-$cleanSerial') ??
+              eBox.get('$normBranch-$lowerSerial') ??
+              eBox.get('$normBranch-${cleanSerial.toUpperCase()}');
+          if (exactEntry is Map && exactEntry['prescription'] is Map) {
+            final presc = exactEntry['prescription'] as Map;
+            if (presc.isNotEmpty && matchesPatient(presc)) {
+              return Map<String, dynamic>.from(presc);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Direct key lookups in prescriptionsBox with strict branch/patient validation
+    final box = Hive.box(prescriptionsBox);
+    final keyCandidates = [
+      if (normBranch.isNotEmpty) '$normBranch-$cleanSerial',
+      if (normBranch.isNotEmpty) '$normBranch-${cleanSerial.toUpperCase()}',
+      cleanSerial,
+      cleanSerial.toUpperCase(),
+      lowerSerial,
+    ];
+
+    for (final k in keyCandidates) {
+      final direct = box.get(k);
+      if (direct != null && direct is Map && matchesPatient(direct)) {
+        return Map<String, dynamic>.from(direct);
+      }
+    }
+
     return null;
+  }
+
+  static Future<void> deleteLocalPrescription(String serial) async {
+    if (serial.trim().isEmpty) return;
+    try {
+      if (Hive.isBoxOpen(prescriptionsBox)) {
+        final box = Hive.box(prescriptionsBox);
+        final lowerSerial = serial.trim().toLowerCase();
+        final upperSerial = serial.trim().toUpperCase();
+        await box.delete(serial);
+        await box.delete(lowerSerial);
+        await box.delete(upperSerial);
+        final keysToDelete = <dynamic>[];
+        for (final k in box.keys) {
+          final kStr = k.toString().toLowerCase();
+          if (kStr == lowerSerial || kStr.endsWith('_$lowerSerial') || kStr.endsWith('-$lowerSerial')) {
+            keysToDelete.add(k);
+          }
+        }
+        for (final k in keysToDelete) {
+          await box.delete(k);
+        }
+      }
+    } catch (_) {}
   }
 
   static Map<String, dynamic>? getLocalPrescriptionByCnic(String cnic) {
@@ -1327,13 +2082,6 @@ class LocalStorageService {
           .where((p) => p['branchId'] == branchId)
           .toList();
 
-  static Future<void> deleteLocalPrescription(String serial) async {
-    final box = Hive.box(prescriptionsBox);
-    for (final key in box.keys.toList()) {
-      if (key is String && key.contains(serial)) await box.delete(key);
-    }
-  }
-
   // ════════════════════════════════════════════════════════════════════════════
   // STOCK
   // ════════════════════════════════════════════════════════════════════════════
@@ -1343,7 +2091,6 @@ class LocalStorageService {
     final box = Hive.box(stockBox);
     final sBox = Hive.box(syncBox);
 
-    // Sum up pending deltas from the sync queue for each medicineId
     final pendingDeltas = <String, double>{};
     for (final key in sBox.keys) {
       final val = sBox.get(key);
@@ -1365,7 +2112,6 @@ class LocalStorageService {
       }
     }
 
-    // Get all pending register_medicine actions to protect them
     final pendingRegistrations = sBox.values
         .whereType<Map>()
         .where((v) => v['type'] == 'register_medicine')
@@ -1376,7 +2122,6 @@ class LocalStorageService {
         .whereType<String>()
         .toSet();
 
-    // Map downloaded items
     final Map<String, dynamic> updatedMap = {};
     final downloadedIds = <String>{};
     for (final item in items) {
@@ -1396,7 +2141,6 @@ class LocalStorageService {
       updatedMap[key] = item;
     }
 
-    // Capture currently stored stock items in Hive
     final currentLocalItems = <String, dynamic>{};
     for (final key in box.keys) {
       final val = box.get(key);
@@ -1409,7 +2153,6 @@ class LocalStorageService {
       }
     }
 
-    // Preserve pending registrations that haven't been downloaded yet
     for (final regId in pendingRegistrations) {
       if (!downloadedIds.contains(regId) && currentLocalItems.containsKey(regId)) {
         final key = 'stock:$regId';
@@ -1427,6 +2170,8 @@ class LocalStorageService {
     final id = stockItem['id']?.toString();
     if (id == null) return;
     final item = Map<String, dynamic>.from(stockItem);
+    if (item['name'] != null) item['name'] = MasterProformaService.cleanBrandToFormula(item['name'].toString());
+    if (item['formula'] != null) item['formula'] = MasterProformaService.cleanBrandToFormula(item['formula'].toString());
     final rawQty = (item['quantity'] as num?)?.toDouble() ?? 0.0;
     item['quantity'] = rawQty.clamp(0.0, double.infinity);
     final activeCamp = CampSessionService.getActiveCamp();
@@ -1443,6 +2188,8 @@ class LocalStorageService {
     final normalised = Map<String, dynamic>.from(item);
     normalised['id']         = rawId;
     normalised['medicineId'] = rawId;
+    if (normalised['name'] != null) normalised['name'] = MasterProformaService.cleanBrandToFormula(normalised['name'].toString());
+    if (normalised['formula'] != null) normalised['formula'] = MasterProformaService.cleanBrandToFormula(normalised['formula'].toString());
     final rawQty = (normalised['quantity'] as num?)?.toDouble() ?? 0.0;
     normalised['quantity']   = rawQty.clamp(0.0, double.infinity);
     final activeCamp = CampSessionService.getActiveCamp();
@@ -1470,7 +2217,6 @@ class LocalStorageService {
     if (activeCamp != null && activeCamp.isNotEmpty) {
       final itemCamp = (item['campId'] ?? item['dispensaryId'] ?? '').toString();
       if (itemCamp.isNotEmpty && itemCamp != activeCamp) {
-        // Reject modifying stock for a different camp
         return;
       }
       item['dispensaryId'] = activeCamp;
@@ -1516,29 +2262,107 @@ class LocalStorageService {
 
   static List<Map<String, dynamic>> getAllLocalStockItems(
       {String? branchId, String? dispensaryId, bool filterByCamp = true}) {
+    if (!Hive.isBoxOpen(stockBox)) return [];
     var items = Hive.box(stockBox)
         .values
         .whereType<Map>()
         .map((v) => Map<String, dynamic>.from(v))
         .toList();
-    if (branchId != null) {
+    if (branchId != null && branchId.isNotEmpty) {
       final norm = branchId.toLowerCase().trim();
-      items = items.where((i) => i['branchId']?.toString().toLowerCase().trim() == norm).toList();
+      items = items.where((i) {
+        final b = i['branchId']?.toString().toLowerCase().trim();
+        if (b == null || b.isEmpty) return true; // Branch stock fallback
+        return b == norm ||
+            b == 'branch_$norm' ||
+            'branch_$b' == norm ||
+            (norm.isNotEmpty && b.contains(norm)) ||
+            (b.isNotEmpty && norm.contains(b));
+      }).toList();
     }
-    if (filterByCamp) {
-      final activeCamp = (dispensaryId != null && dispensaryId.isNotEmpty)
+    if (filterByCamp && CampSessionService.hasCampsForBranch(branchId)) {
+      final activeCamp = (dispensaryId != null && dispensaryId.isNotEmpty && dispensaryId.toLowerCase() != 'all')
           ? dispensaryId.toLowerCase().trim()
-          : CampSessionService.getActiveCamp();
+          : CampSessionService.getActiveCamp(branchId);
 
       if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
-        items = items.where((i) {
-          final d = (i['dispensaryId'] ?? i['campId'])?.toString().toLowerCase().trim();
-          if (d == null || d.isEmpty || d == 'all') return true;
-          return d == activeCamp;
+        final campFiltered = items.where((i) {
+          return CampSessionService.matchesCamp(
+            selectedCamp: activeCamp,
+            dispensaryId: i['dispensaryId']?.toString(),
+            campId: i['campId']?.toString(),
+            dispensaryTag: i['dispensaryTag']?.toString(),
+            serial: (i['barcode'] ?? i['code'] ?? i['id'])?.toString(),
+          );
         }).toList();
+        if (campFiltered.isNotEmpty) {
+          items = campFiltered;
+        }
       }
     }
-    return items;
+    return items.map((i) {
+      final name = i['name']?.toString() ?? '';
+      final formula = i['formula']?.toString() ?? '';
+      final cleanN = MasterProformaService.cleanBrandToFormula(name);
+      final cleanF = MasterProformaService.cleanBrandToFormula(formula);
+      if (cleanN != name || cleanF != formula) {
+        final copy = Map<String, dynamic>.from(i);
+        copy['name'] = cleanN;
+        copy['formula'] = cleanF;
+        return copy;
+      }
+      return i;
+    }).toList();
+  }
+
+  // ─── Inventory Audit Logs ───────────────────────────────────────────────────
+
+  static Future<void> saveLocalInventoryLog(Map<String, dynamic> logData) async {
+    try {
+      if (!Hive.isBoxOpen(auditLogsBox)) {
+        await Hive.openBox(auditLogsBox);
+      }
+      final box = Hive.box(auditLogsBox);
+      final id = logData['id'] ?? logData['docId'] ?? const Uuid().v4();
+      final key = 'inv_log_$id';
+      await box.put(key, sanitize({
+        ...logData,
+        'id': id,
+        'savedAt': DateTime.now().toIso8601String(),
+      }));
+      debugPrint('[LocalStorageService] 📝 Saved local inventory audit log: $key (${logData['action']})');
+    } catch (e) {
+      debugPrint('[LocalStorageService] Error saving local inventory log: $e');
+    }
+  }
+
+  static List<Map<String, dynamic>> getLocalInventoryLogs({String? branchId, String? medicineId}) {
+    try {
+      if (!Hive.isBoxOpen(auditLogsBox)) return [];
+      final box = Hive.box(auditLogsBox);
+      final logs = <Map<String, dynamic>>[];
+      for (final k in box.keys) {
+        if (k.toString().startsWith('inv_log_')) {
+          final val = box.get(k);
+          if (val is Map) {
+            final map = Map<String, dynamic>.from(val);
+            if (branchId != null && branchId.isNotEmpty && branchId != 'default') {
+              final b = (map['branchId'] ?? '').toString().trim().toLowerCase();
+              if (b.isNotEmpty && b != 'default' && b != branchId.toLowerCase()) continue;
+            }
+            if (medicineId != null && medicineId.isNotEmpty) {
+              final mId = (map['medicineId'] ?? map['docId'] ?? '').toString().trim();
+              if (mId != medicineId) continue;
+            }
+            logs.add(map);
+          }
+        }
+      }
+      logs.sort((a, b) => (b['createdAt'] ?? b['timestamp'] ?? '').toString().compareTo((a['createdAt'] ?? a['timestamp'] ?? '').toString()));
+      return logs;
+    } catch (_) {
+      return [];
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1557,6 +2381,8 @@ class LocalStorageService {
 
   static Map<String, dynamic>? getLocalDispensaryRecord(
       String branchId, String serial, {String? dateKey}) {
+    // FIX 2: normalize branchId before it's used to build the Hive key below.
+    branchId = branchId.toLowerCase().trim();
     final dk  = dateKey ?? getTodayDateKey();
     final val = Hive.box(dispensaryBox).get('${branchId}_${dk}_$serial');
     if (val == null) return null;
@@ -1565,6 +2391,8 @@ class LocalStorageService {
 
   static List<Map<String, dynamic>> getLocalDispensaryRecords(
       String branchId, {String? dateKey}) {
+    // FIX 2: normalize branchId before it's used to build the Hive key prefix.
+    branchId = branchId.toLowerCase().trim();
     final dk     = dateKey ?? getTodayDateKey();
     final prefix = '${branchId}_${dk}_';
     return Hive.box(dispensaryBox)
@@ -1593,6 +2421,7 @@ class LocalStorageService {
   // ════════════════════════════════════════════════════════════════════════════
 
   static Future<void> downloadAllPatients(String branchId) async {
+    branchId = branchId.toLowerCase().trim();
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('branches')
@@ -1617,51 +2446,96 @@ class LocalStorageService {
   }
 
   static Future<void> downloadTodayTokens(String branchId) async {
+    // FIX 2: normalize branchId FIRST — this is the primary method Fix 2
+    // targets. Every Hive key built below ('$branchId-...') previously used
+    // whatever casing the caller passed, while saveEntryLocal() always
+    // lowercases, so a differently-cased caller here would miss the real
+    // local record and let stale server data silently overwrite a
+    // completed/dispensed token's protected status.
+    branchId = branchId.toLowerCase().trim();
     final today = getTodayDateKey();
     final box   = Hive.box(entriesBox);
 
     try {
-      final serialsRef = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('serials')
-          .doc(today);
-
-      final dateDoc = await serialsRef.get();
-      if (!dateDoc.exists) {
-        final todayKeys = box.keys
-            .where((k) {
-              final key = k.toString();
-              if (!key.startsWith('$branchId-')) return false;
-              final parts = key.substring('$branchId-'.length).split('-');
-              final datePart = (parts.isNotEmpty && (parts[0].toUpperCase() == 'X'))
-                  ? (parts.length > 1 ? parts[1] : '')
-                  : (parts.isNotEmpty ? parts[0] : '');
-              return datePart == today;
-            })
-            .toList();
-        for (final k in todayKeys) {
-          await box.delete(k);
-        }
-        await box.flush();
-        return;
-      }
+      final dateDocs = CampSessionService.getAllCampDateDocIds(
+        branchId: branchId,
+        dateKey: today,
+      );
 
       final Map<String, Map<String, dynamic>> freshEntries = {};
-      for (final type in ['zakat', 'non-zakat', 'gmwf']) {
-        final snap = await serialsRef.collection(type).get();
-        for (final doc in snap.docs) {
-          final d = Map<String, dynamic>.from(doc.data());
-          d['serial']    = doc.id;
-          d['dateKey']   = today;
-          d['branchId']  = branchId;
-          d['queueType'] = type;
-          freshEntries['$branchId-${doc.id}'] = d;
-        }
-      }
+      final List<DocumentReference> duplicateDocsToDelete = [];
 
-      // FIX: Do NOT destructively delete local Hive tokens that haven't synced to Firestore yet or were created locally!
-      // Local entries are preserved so tokens never vanish during cloud re-syncs.
+      for (final docDateKey in dateDocs) {
+        final serialsRef = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchId)
+            .collection('serials')
+            .doc(docDateKey);
+
+        for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+          try {
+            final snap = await serialsRef.collection(type).get();
+          for (final doc in snap.docs) {
+            final rawId = doc.id.trim();
+            final upperId = rawId.toUpperCase();
+            final isLowercase = (rawId != upperId);
+
+            final d = Map<String, dynamic>.from(doc.data());
+            d['serial']    = upperId;
+            d['dateKey']   = today;
+            d['branchId']  = branchId;
+            d['queueType'] = type;
+            if (upperId.contains('-SADD-') || upperId.contains('-KAP-') || upperId.contains('-KAPAYYA-')) {
+              d['dispensaryId'] = 'saddar';
+              d['campId']       = 'saddar';
+              d['dispensaryTag'] = 'SADD';
+            } else if (upperId.contains('-HAJI-') || upperId.contains('-HAJ-') || upperId.contains('-HC-')) {
+              d['dispensaryId'] = 'haji_camp';
+              d['campId']       = 'haji_camp';
+              d['dispensaryTag'] = 'HAJI';
+            } else if (d['dispensaryTag'] == null || d['dispensaryTag'].toString().trim().isEmpty) {
+              final parts = upperId.split('-');
+              if (parts.length >= 3) {
+                d['dispensaryTag'] = parts[1].toUpperCase();
+              }
+            }
+
+            final hiveKey = '$branchId-$upperId';
+
+            if (freshEntries.containsKey(hiveKey)) {
+              // Merge data into canonical uppercase entry
+              final existingData = freshEntries[hiveKey]!;
+              if (d['prescription'] != null && existingData['prescription'] == null) {
+                existingData['prescription'] = d['prescription'];
+                existingData['prescriptionId'] = d['prescriptionId'];
+              }
+              if (d['prescriptions'] != null && existingData['prescriptions'] == null) {
+                existingData['prescriptions'] = d['prescriptions'];
+              }
+              if (d['status'] == 'completed' || d['status'] == 'dispensed') {
+                existingData['status'] = d['status'];
+              }
+              if (isLowercase) {
+                duplicateDocsToDelete.add(doc.reference);
+              }
+            } else {
+              freshEntries[hiveKey] = d;
+              if (isLowercase) {
+                duplicateDocsToDelete.add(doc.reference);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+      // Cleanup duplicate lowercase docs from Firestore to save cloud space & quota
+      for (final docRef in duplicateDocsToDelete) {
+        try {
+          await docRef.delete();
+          debugPrint('[LocalStorage] 🧹 Cleaned duplicate lowercase doc from Firestore: ${docRef.path}');
+        } catch (_) {}
+      }
 
       const terminalStatuses = ['completed', 'dispensed'];
       final Map<String, dynamic> tokensToPut = {};
@@ -1696,15 +2570,36 @@ class LocalStorageService {
             if (ex[field] != null && merged[field] == null) merged[field] = ex[field];
           }
         }
+
+        // Cross-check local prescription in prescriptionsBox to ensure completed status is never reverted
+        final serial = (merged['serial'] ?? fresh['serial'])?.toString() ?? '';
+        if (serial.isNotEmpty) {
+          final localPresc = getLocalPrescription(serial);
+          if (localPresc != null) {
+            merged['status'] = 'completed';
+            merged['prescription'] = localPresc;
+            merged['prescriptionId'] = localPresc['id'] ?? serial;
+            if (localPresc['completedAt'] != null && merged['completedAt'] == null) {
+              merged['completedAt'] = localPresc['completedAt'];
+            }
+            if (localPresc['doctorName'] != null && merged['doctorName'] == null) {
+              merged['doctorName'] = localPresc['doctorName'];
+            }
+            if (localPresc['doctorId'] != null && merged['doctorId'] == null) {
+              merged['doctorId'] = localPresc['doctorId'];
+            }
+            if (localPresc['daysOfMedicine'] != null && merged['daysOfMedicine'] == null) {
+              merged['daysOfMedicine'] = localPresc['daysOfMedicine'];
+            }
+          }
+        }
+
         tokensToPut[hiveKey] = merged;
       }
       if (tokensToPut.isNotEmpty) {
         await box.putAll(tokensToPut);
       }
 
-      // Safe Server Deletion Reconciliation:
-      // If a synced token (not pendingSync) for today exists in Hive but is missing from Firestore's snapshot,
-      // and was created more than 5 minutes ago, mark it as 'cancelled' so it doesn't linger as a ghost entry.
       final now = DateTime.now();
       for (final key in box.keys.toList()) {
         final keyStr = key.toString();
@@ -1716,7 +2611,6 @@ class LocalStorageService {
         final dk = entry['dateKey']?.toString();
         if (dk != today) continue;
 
-        // Skip temp/offline pending tokens
         if (entry['pendingSync'] == true || entry['isTempSerial'] == true) continue;
 
         final serial = entry['serial']?.toString();
@@ -1745,52 +2639,74 @@ class LocalStorageService {
     }
   }
 
-  static Future<void> downloadInventory(String branchId, {bool forceFull = false}) async {
+  static Future<void> downloadInventory(String branchId, {bool forceFull = false, String? campId}) async {
+    branchId = branchId.toLowerCase().trim();
     try {
-      final syncKey = 'inventory_$branchId';
-      final lastSyncedStr = getLastSyncedServerTimestamp(syncKey);
-      final currentCount = Hive.box(stockBox).length;
+      final invPaths = CampSessionService.getAllCampInventoryPaths(
+        branchId: branchId,
+        selectedCamp: campId ?? CampSessionService.getActiveCamp(),
+      );
 
-      Query query = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('inventory');
+      for (final invCol in invPaths) {
+        final syncKey = 'inventory_${branchId}_$invCol';
+        final lastSyncedStr = getLastSyncedServerTimestamp(syncKey);
+        final currentCount = Hive.box(stockBox).length;
 
-      if (!forceFull && currentCount >= 15 && lastSyncedStr != null && lastSyncedStr.isNotEmpty) {
-        final dt = DateTime.tryParse(lastSyncedStr);
-        if (dt != null) {
-          query = query.where('updatedAt', isGreaterThan: Timestamp.fromDate(dt));
-        }
-      }
+        Query query = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchId)
+            .collection(invCol);
 
-      final snapshot = await query.get();
-      if (snapshot.docs.isNotEmpty) {
-        final items = snapshot.docs.map((doc) {
-          final d = doc.data() as Map<String, dynamic>;
-          d['id'] = doc.id;
-          d['branchId'] = branchId;
-          return d;
-        }).toList();
-        await saveAllLocalStockItems(items);
-
-        Timestamp? maxTs;
-        for (final doc in snapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>?;
-          final ts = data?['updatedAt'];
-          if (ts is Timestamp) {
-            if (maxTs == null || ts.compareTo(maxTs) > 0) {
-              maxTs = ts;
-            }
+        if (!forceFull && currentCount >= 15 && lastSyncedStr != null && lastSyncedStr.isNotEmpty) {
+          final dt = DateTime.tryParse(lastSyncedStr);
+          if (dt != null) {
+            query = query.where('updatedAt', isGreaterThan: Timestamp.fromDate(dt));
           }
         }
-        if (maxTs != null) {
-          await setLastSyncedServerTimestamp(
-            syncKey,
-            maxTs.toDate().toUtc().toIso8601String(),
-          );
+
+        var snapshot = await query.get();
+        // Fallback: If incremental returned nothing but cache is unexpectedly low, fetch all
+        if (snapshot.docs.isEmpty && currentCount < 10) {
+          snapshot = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchId)
+              .collection(invCol)
+              .get();
         }
-      } else if (currentCount < 15 && !forceFull) {
-        await downloadInventory(branchId, forceFull: true);
+
+        if (snapshot.docs.isNotEmpty) {
+          final items = snapshot.docs.map((doc) {
+            final d = doc.data() as Map<String, dynamic>;
+            d['id'] = doc.id;
+            d['branchId'] = branchId;
+            if (invCol == 'inventory_saddar') {
+              d['campId'] = 'saddar';
+              d['dispensaryId'] = 'saddar';
+            } else if (invCol == 'inventory_haji') {
+              d['campId'] = 'haji_camp';
+              d['dispensaryId'] = 'haji_camp';
+            }
+            return d;
+          }).toList();
+          await saveAllLocalStockItems(items);
+
+          Timestamp? maxTs;
+          for (final doc in snapshot.docs) {
+            final data = doc.data() as Map<String, dynamic>?;
+            final ts = data?['updatedAt'] ?? data?['addedAt'] ?? data?['timestamp'];
+            if (ts is Timestamp) {
+              if (maxTs == null || ts.compareTo(maxTs) > 0) {
+                maxTs = ts;
+              }
+            }
+          }
+          if (maxTs != null) {
+            await setLastSyncedServerTimestamp(
+              syncKey,
+              maxTs.toDate().toUtc().toIso8601String(),
+            );
+          }
+        }
       }
     } catch (e) {
       debugPrint('[LocalStorage] downloadInventory error: $e');
@@ -1798,6 +2714,7 @@ class LocalStorageService {
   }
 
   static Future<void> refreshPrescriptions(String branchId) async {
+    branchId = branchId.toLowerCase().trim();
     try {
       final cnicDocs = await FirebaseFirestore.instance
           .collection('branches')
@@ -1831,15 +2748,13 @@ class LocalStorageService {
 
   static String _cleanId(String id) => id.trim().replaceAll(RegExp(r'[-\s]'), '');
 
-  /// Saves a medicine restriction locally AND enqueues it for Firestore sync.
-  /// This ensures the restriction reaches internet-only terminals (not just
-  /// LAN-connected ones). The Firestore collection is:
-  ///   branches/{branchId}/medicine_restrictions/{cleanPatientId}
   static Future<void> saveMedicineRestriction({
     required String branchId,
     required String patientId,
     required int daysCovered,
   }) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key below.
+    branchId = branchId.toLowerCase().trim();
     final cleanId = _cleanId(patientId);
     if (cleanId.isEmpty) return;
 
@@ -1847,9 +2762,6 @@ class LocalStorageService {
     final key  = '${branchId}_$cleanId';
     final now  = DateTime.now();
 
-    // Day 1 = today (already issued). Block starts TOMORROW.
-    // lastBlockedDay = issuedDate + (daysCovered - 1)
-    // e.g. 3-day rx on Mon: lastBlockedDay = Wed. Thu is free.
     final issuedDate     = DateTime(now.year, now.month, now.day);
     final lastBlockedDay = issuedDate.add(Duration(days: daysCovered - 1));
 
@@ -1865,7 +2777,6 @@ class LocalStorageService {
     await box.put(key, record);
     await box.flush();
 
-    // ── FIRESTORE FIX: enqueue so internet-only terminals get the restriction
     await enqueueSync({
       'type':      'save_medicine_restriction',
       'branchId':  branchId,
@@ -1877,10 +2788,10 @@ class LocalStorageService {
         'blocked until $lastBlockedDay ($daysCovered-day rx)');
   }
 
-  /// Downloads active medicine restrictions from Firestore into local Hive.
-  /// Called on startup, after every upload cycle, and by the receptionist
-  /// right before the block check so internet-only devices are always current.
   static Future<void> downloadMedicineRestrictions(String branchId) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key prefix
+    // (and cleared-stale-key logic) below.
+    branchId = branchId.toLowerCase().trim();
     try {
       final snap = await FirebaseFirestore.instance
           .collection('branches')
@@ -1892,7 +2803,6 @@ class LocalStorageService {
       final today = DateTime(
           DateTime.now().year, DateTime.now().month, DateTime.now().day);
       
-      // ── FIRESTORE FIX: Keep track of IDs downloaded to clear stale ones ──
       final downloadedIds = <String>{};
       int loaded = 0;
 
@@ -1900,7 +2810,6 @@ class LocalStorageService {
         final d              = Map<String, dynamic>.from(doc.data());
         final lastBlockedStr = d['lastBlockedDay'] as String?;
 
-        // Skip already-expired restrictions — no point storing them
         if (lastBlockedStr != null) {
           final lb             = DateTime.parse(lastBlockedStr);
           final lastBlockedDay = DateTime(lb.year, lb.month, lb.day);
@@ -1914,8 +2823,6 @@ class LocalStorageService {
         loaded++;
       }
 
-      // Clear local entries for this branch that weren't in the Firestore set
-      // This handles cases where an exception was approved and Firestore was cleared
       final prefix = '${branchId}_';
       final localKeysToClear = box.keys
           .where((k) => k.toString().startsWith(prefix))
@@ -1939,6 +2846,8 @@ class LocalStorageService {
 
   static Map<String, dynamic>? getMedicineRestriction(String branchId, String patientId) {
     if (!Hive.isBoxOpen(medicineRestrictionsBox)) return null;
+    // FIX 2: normalize branchId before it's used to build the Hive key below.
+    branchId = branchId.toLowerCase().trim();
     final cleanId = _cleanId(patientId);
     final box = Hive.box(medicineRestrictionsBox);
     final key = '${branchId}_$cleanId';
@@ -1948,12 +2857,114 @@ class LocalStorageService {
   }
 
   static Future<void> clearMedicineRestriction(String branchId, String patientId) async {
+    // FIX 2: normalize branchId before it's used to build the Hive key below.
+    branchId = branchId.toLowerCase().trim();
     final cleanId = _cleanId(patientId);
     final box = Hive.box(medicineRestrictionsBox);
     final key = '${branchId}_$cleanId';
     await box.delete(key);
     await box.flush();
     debugPrint('[LocalStorage] 🗑️ Medicine restriction cleared for $cleanId');
+  }
+
+  // ── TOKEN EXCEPTIONS ────────────────────────────────────────────────────────
+  /// Grants a token exception for a patient on a specific dateKey.
+  static Future<void> grantTokenException(
+    String branchId,
+    String patientId, {
+    String? dateKey,
+    String? reason,
+    String? approvedBy,
+    String? requestId,
+  }) async {
+    final normBranch = branchId.toLowerCase().trim();
+    final normPid = _cleanId(patientId);
+    final today = dateKey ?? getTodayDateKey();
+    final key = '${normBranch}_${normPid}_$today';
+
+    try {
+      if (Hive.isBoxOpen(tokenExceptionsBox)) {
+        await Hive.box(tokenExceptionsBox).put(key, {
+          'branchId': normBranch,
+          'patientId': normPid,
+          'dateKey': today,
+          'reason': reason ?? 'Approved by Doctor',
+          'approvedBy': approvedBy ?? 'Doctor',
+          'approvedAt': DateTime.now().toIso8601String(),
+          'used': false,
+          'requestId': requestId,
+        });
+      }
+    } catch (_) {}
+
+    // Also clear from issued_token_keys so idempotency check does not block
+    try {
+      final idempotencyKey = '${normBranch}_${normPid}_$today';
+      if (Hive.isBoxOpen('issued_token_keys')) {
+        await Hive.box('issued_token_keys').delete(idempotencyKey);
+        await Hive.box('issued_token_keys').delete('${branchId}_${patientId}_$today');
+      }
+    } catch (_) {}
+
+    // Clear medicine restriction as well
+    await clearMedicineRestriction(normBranch, patientId);
+    debugPrint('[LocalStorage] 🎟️ Token exception granted for $normPid on $today ($reason)');
+  }
+
+  /// Checks if an approved and unused token exception exists for this patient today
+  static bool hasApprovedTokenException(String branchId, String patientId, {String? dateKey}) {
+    final normBranch = branchId.toLowerCase().trim();
+    final normPid = _cleanId(patientId);
+    final today = dateKey ?? getTodayDateKey();
+    final key = '${normBranch}_${normPid}_$today';
+
+    try {
+      if (Hive.isBoxOpen(tokenExceptionsBox)) {
+        final val = Hive.box(tokenExceptionsBox).get(key);
+        if (val is Map) {
+          final used = val['used'] == true;
+          return !used;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// Consumes the token exception once a new token is successfully generated
+  static Future<void> consumeTokenException(String branchId, String patientId, {String? dateKey}) async {
+    final normBranch = branchId.toLowerCase().trim();
+    final normPid = _cleanId(patientId);
+    final today = dateKey ?? getTodayDateKey();
+    final key = '${normBranch}_${normPid}_$today';
+
+    try {
+      if (Hive.isBoxOpen(tokenExceptionsBox)) {
+        final val = Hive.box(tokenExceptionsBox).get(key);
+        if (val is Map) {
+          final updated = Map<String, dynamic>.from(val);
+          updated['used'] = true;
+          updated['usedAt'] = DateTime.now().toIso8601String();
+          await Hive.box(tokenExceptionsBox).put(key, updated);
+          debugPrint('[LocalStorage] 🎟️ Token exception consumed for $normPid on $today');
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Gets the token exception details for a patient
+  static Map<String, dynamic>? getTokenException(String branchId, String patientId, {String? dateKey}) {
+    final normBranch = branchId.toLowerCase().trim();
+    final normPid = _cleanId(patientId);
+    final today = dateKey ?? getTodayDateKey();
+    final key = '${normBranch}_${normPid}_$today';
+
+    try {
+      if (Hive.isBoxOpen(tokenExceptionsBox)) {
+        final val = Hive.box(tokenExceptionsBox).get(key);
+        if (val is Map) return Map<String, dynamic>.from(val);
+      }
+    } catch (_) {}
+    return null;
   }
 
   static Map<String, dynamic>? isPatientBlockedByMedicine(
@@ -1964,7 +2975,6 @@ class LocalStorageService {
     final today = DateTime(
       DateTime.now().year, DateTime.now().month, DateTime.now().day);
 
-    // ── NEW field path ──────────────────────────────────────────────
     final lastBlockedStr =
         restriction['lastBlockedDay'] as String?;
 
@@ -1974,7 +2984,6 @@ class LocalStorageService {
           DateTime(lastBlocked.year, lastBlocked.month, lastBlocked.day);
 
       if (today.isAfter(lastBlockedDay)) {
-        // Restriction expired — auto-clean
         clearMedicineRestriction(branchId, patientId);
         return null;
       }
@@ -1988,7 +2997,6 @@ class LocalStorageService {
       };
     }
 
-    // ── LEGACY fallback: old entries stored 'expiresAt' ────────────
     final expiresStr = restriction['expiresAt'] as String?;
     if (expiresStr == null) {
       clearMedicineRestriction(branchId, patientId);
@@ -2031,18 +3039,51 @@ class LocalStorageService {
     final box = Hive.box('app_settings');
     final code = getBranchCode(branchId);
     
-    // Branch-specific counter
     final key = 'receipt_seq_$code';
     final current = box.get(key, defaultValue: 0) as int;
     final next = current + 1;
     await box.put(key, next);
     
-    // Also update global for backward compatibility or cross-branch tracking if needed
     final globalKey = 'receipt_seq_global';
     final globalCurrent = box.get(globalKey, defaultValue: 0) as int;
     if (next > globalCurrent) await box.put(globalKey, next);
 
     return formatReceiptNumber(next, code);
+  }
+
+  static Future<int> getNextLocalSerialSequence(
+    String branchId,
+    String dateKey, {
+    String? dispensaryId,
+    bool increment = false,
+  }) async {
+    // FIX 2: normalize branchId before it's used (via getLocalEntries and
+    // the counter key below) to build/read Hive keys.
+    branchId = branchId.toLowerCase().trim();
+    final counterBox = Hive.box('app_settings');
+    final activeCamp = dispensaryId ?? CampSessionService.getActiveCamp();
+    final dispTag = CampSessionService.getDispensaryKeyword(activeCamp);
+    final counterKey = 'counter_${branchId}_${dateKey}_$dispTag';
+    final savedSeq = (counterBox.get(counterKey) as num?)?.toInt() ?? 0;
+
+    final entries = getLocalEntries(branchId, dispensaryId: activeCamp, filterByCamp: true)
+        .where((m) => (m['dateKey'] as String?) == dateKey);
+
+    int maxSeq = savedSeq;
+    for (final m in entries) {
+      final s = (m['serial'] ?? '').toString().trim();
+      if (s.isEmpty) continue;
+      final seq = parseSequenceFromSerial(s);
+      if (seq < 9999 && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+
+    final nextSeq = maxSeq + 1;
+    if (increment) {
+      await counterBox.put(counterKey, nextSeq);
+    }
+    return nextSeq;
   }
 
   static String formatReceiptNumber(int seq, [String branchCode = '']) {
@@ -2428,7 +3469,6 @@ class LocalStorageService {
         'cloudData': cloudData,
       });
 
-      // Keep last 100 conflict entries
       if (logs.length > 100) {
         logs.removeRange(0, logs.length - 100);
       }
@@ -2445,4 +3485,3 @@ class LocalStorageService {
     return record['isDeleted'] == true;
   }
 }
-

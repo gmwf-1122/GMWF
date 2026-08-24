@@ -297,6 +297,35 @@ _changeNotifier.value++;
     _changeNotifier.value++;
   }
 
+  void _updateSabakLines(String sId, int newSabak) {
+    final dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final logData = ref.read(madrassaDailyLogProvider((branchId: widget.branchId, dateKey: dateKey))).value ?? {};
+    final dbLog = _safeMap(logData[sId]);
+    final currentLocal = _localChanges[sId] ?? dbLog;
+
+    final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, sId);
+    final initialCurrentLines = (studentCache?['currentLines'] as num?)?.toInt() ?? 0;
+
+    int existingCurrent = (currentLocal['currentLines'] as num?)?.toInt() ?? initialCurrentLines;
+    int existingSabak = (currentLocal['sabakLines'] as num?)?.toInt() ?? 0;
+    int baseLines = existingCurrent - existingSabak;
+    if (baseLines < 0) baseLines = 0;
+
+    int sabakLines;
+    int currentLines;
+
+    if (newSabak <= 50) {
+      sabakLines = newSabak;
+      currentLines = (baseLines + sabakLines).clamp(0, 8640);
+    } else {
+      currentLines = newSabak.clamp(0, 8640);
+      sabakLines = (currentLines - baseLines).clamp(0, 8640);
+    }
+
+    _updateLocalSilent(sId, 'sabakLines', sabakLines);
+    _updateLocalSilent(sId, 'currentLines', currentLines);
+  }
+
   void _updateAttendanceSilent(String sId, String value) {
     _updateLocalSilent(sId, 'attendance', value);
     if (value == 'leave') {
@@ -815,6 +844,7 @@ _changeNotifier.value++;
                                   editorRole: widget.editorRole,
                                   uploadStatus: _uploadStates[sId],
                                   onUpdateLocal: _updateLocalSilent,
+                                  onUpdateSabak: _updateSabakLines,
                                   onPickPhoto: _pickAndUploadPhoto,
                                   onSendWhatsApp: _sendDailyWhatsApp,
                                   onShowCustomLines: _showCustomLinesDialog,
@@ -1762,7 +1792,7 @@ _changeNotifier.value++;
                     SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
                   );
                 }
-                _updateLocalSilent(studentId, 'currentLines', clamped);
+                _updateSabakLines(studentId, clamped);
                 Navigator.of(dContext).pop();
               }
             },
@@ -1790,7 +1820,7 @@ _changeNotifier.value++;
                       SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
                     );
                   }
-                  _updateLocalSilent(studentId, 'currentLines', clamped);
+                  _updateSabakLines(studentId, clamped);
                   Navigator.of(dContext).pop();
                 }
               },
@@ -1953,7 +1983,11 @@ _changeNotifier.value++;
 
       var details = '';
       if (att == 'present') {
-        final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
+        final int lines = (log.containsKey('sabakLines') && log['sabakLines'] != null)
+            ? ((log['sabakLines'] as num?)?.toInt() ?? 0)
+            : ((log.containsKey('currentLines') && log['currentLines'] != null)
+                ? ((log['currentLines'] as num?)?.toInt() ?? 0)
+                : 0);
         final int sabkiParaVal = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
         final String? sabkiRatioVal = log['sabkiRatio']?.toString();
         final int manzilParaVal = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);
@@ -2319,6 +2353,7 @@ class _StudentLogCard extends StatelessWidget {
   final String editorRole;
   final PhotoUploadStatus? uploadStatus;
   final Function(String sId, String key, dynamic value) onUpdateLocal;
+  final Function(String sId, int newSabak)? onUpdateSabak;
   final Function(String sId) onPickPhoto;
   final Function(Map<String, dynamic> s, Map<String, dynamic> log) onSendWhatsApp;
   final Function(BuildContext context, String sId, int currentLines) onShowCustomLines;
@@ -2336,6 +2371,7 @@ class _StudentLogCard extends StatelessWidget {
     this.editorRole = 'Madrassa Teacher',
     this.uploadStatus,
     required this.onUpdateLocal,
+    this.onUpdateSabak,
     required this.onPickPhoto,
     required this.onSendWhatsApp,
     required this.onShowCustomLines,
@@ -2420,7 +2456,11 @@ class _StudentLogCard extends StatelessWidget {
               onPressed: (isReadOnly || lines == 0)
                   ? null
                   : () {
-                      onUpdateLocal(sId, 'currentLines', lines - 1);
+                      if (onUpdateSabak != null) {
+                        onUpdateSabak!(sId, lines - 1);
+                      } else {
+                        onUpdateLocal(sId, 'currentLines', lines - 1);
+                      }
                     },
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -2450,7 +2490,11 @@ class _StudentLogCard extends StatelessWidget {
               onPressed: (isReadOnly || lines >= 8640)
                   ? null
                   : () {
-                      onUpdateLocal(sId, 'currentLines', (lines + 1).clamp(0, 8640));
+                      if (onUpdateSabak != null) {
+                        onUpdateSabak!(sId, (lines + 1).clamp(0, 8640));
+                      } else {
+                        onUpdateLocal(sId, 'currentLines', (lines + 1).clamp(0, 8640));
+                      }
                     },
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -2563,10 +2607,11 @@ class _StudentLogCard extends StatelessWidget {
         final bool hasPendingReply = parentRepliedRequested ||
             (msg != true && (parentMsgText != null && parentMsgText.trim().isNotEmpty));
 
-        final int studentCurrentLines = (studentData['currentLines'] as num?)?.toInt() ?? (int.tryParse(studentData['currentLines']?.toString() ?? '') ?? 0);
-        final int lines = (log.containsKey('currentLines') && log['currentLines'] != null)
-            ? ((log['currentLines'] as num?)?.toInt() ?? (int.tryParse(log['currentLines']?.toString() ?? '') ?? studentCurrentLines))
-            : studentCurrentLines;
+        final int lines = (log.containsKey('sabakLines') && log['sabakLines'] != null)
+            ? ((log['sabakLines'] as num?)?.toInt() ?? 0)
+            : ((log.containsKey('currentLines') && log['currentLines'] != null)
+                ? ((log['currentLines'] as num?)?.toInt() ?? 0)
+                : 0);
         final int sabkiPara = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);
         final String? sabkiRatio = log['sabkiRatio']?.toString();
         final int manzilPara = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);

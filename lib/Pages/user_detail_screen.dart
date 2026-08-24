@@ -13,8 +13,10 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/local_storage_service.dart';
+import '../services/offline_auth_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/image_upload_service.dart';
+import '../services/zkteco_network_service.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/device_badge_widget.dart';
@@ -52,11 +54,23 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           (currentUser.email?.toLowerCase() == email.toLowerCase() || currentUser.uid == widget.userId);
 
       if (isSelf) {
+        if (password.isNotEmpty) {
+          try {
+            final cred = EmailAuthProvider.credential(
+              email: currentUser.email ?? email,
+              password: password,
+            );
+            await currentUser.reauthenticateWithCredential(cred);
+          } catch (reauthErr) {
+            debugPrint('[UserDetailScreen] Reauthentication skipped/failed: $reauthErr');
+          }
+        }
         if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != email.toLowerCase()) {
           await currentUser.verifyBeforeUpdateEmail(newEmail);
         }
         if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
           await currentUser.updatePassword(newPassword);
+          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: currentUser.email ?? email);
         }
         if (newDisplayName != null && newDisplayName.isNotEmpty) {
           await currentUser.updateDisplayName(newDisplayName);
@@ -78,6 +92,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
         if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
           await user.updatePassword(newPassword);
+          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: email);
         }
         if (newDisplayName != null && newDisplayName.isNotEmpty) {
           await user.updateDisplayName(newDisplayName);
@@ -417,6 +432,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     _addressController.text = data['address'] ?? '';
     _bankNameController.text = data['bankName'] ?? '';
     _bankAccountController.text = data['bankAccount'] ?? '';
+    final initialUserPin = ZkTecoNetworkService.getCredentialByEntityId(widget.userId)?.biometricPin ?? data['biometricPin']?.toString() ?? '';
+    final pinController = TextEditingController(text: initialUserPin);
     bool editedCanRegisterMed = data['canRegisterMedicine'] == true;
 
     List<String> editedDispensaryIds = [];
@@ -507,11 +524,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                 v?.trim().isEmpty ?? true
                                     ? 'Required'
                                     : null),
-                        _editField(t, _phoneController, 'Phone',
+                        _editField(t, _phoneController, 'Phone (11 digits)',
                             Icons.phone_outlined,
                             type: TextInputType.phone,
                             formatters: [
-                              FilteringTextInputFormatter.digitsOnly
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(11),
                             ],
                             maxLen: 11),
                         _editField(t, passCtrl,
@@ -534,6 +552,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                             _bankAccountController,
                             'Account Number',
                             Icons.numbers_outlined,
+                            type: TextInputType.number),
+                        _editField(
+                            t,
+                            pinController,
+                            'Biometric Scanner PIN',
+                            Icons.fingerprint_rounded,
                             type: TextInputType.number),
                         const SizedBox(height: 4),
                         _editRoleDropdown(
@@ -600,7 +624,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                         setS(() => editedDispensaryIds.clear());
                                       },
                                     ),
-                                    ...['kapayya', 'haji_camp'].map((campId) {
+                                    ...['saddar', 'haji_camp'].map((campId) {
                                       final label = CampSessionService.getCampLabel(campId);
                                       final isSelected = editedDispensaryIds.contains(campId);
                                       return FilterChip(
@@ -657,7 +681,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                       icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
                                       label: const Text('Add Slot', style: TextStyle(fontSize: 12)),
                                       onPressed: () async {
-                                        String selectedCamp = editedDispensaryIds.isNotEmpty ? editedDispensaryIds.first : 'kapayya';
+                                        String selectedCamp = editedDispensaryIds.isNotEmpty ? editedDispensaryIds.first : 'saddar';
                                         String selectedSession = 'morning';
 
                                         final added = await showDialog<Map<String, String>>(
@@ -672,11 +696,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                                     DropdownButtonFormField<String>(
                                                       value: selectedCamp,
                                                       decoration: const InputDecoration(labelText: 'Camp Facility'),
-                                                      items: ['kapayya', 'haji_camp'].map((id) => DropdownMenuItem(
+                                                      items: ['saddar', 'haji_camp'].map((id) => DropdownMenuItem(
                                                         value: id,
                                                         child: Text(CampSessionService.getCampLabel(id)),
                                                       )).toList(),
-                                                      onChanged: (v) => setD(() => selectedCamp = v ?? 'kapayya'),
+                                                      onChanged: (v) => setD(() => selectedCamp = v ?? 'saddar'),
                                                     ),
                                                     const SizedBox(height: 12),
                                                     DropdownButtonFormField<String>(
@@ -841,6 +865,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                 fontWeight: FontWeight.w700)),
                         onPressed: () async => _saveUser(ctx,
                             editKey, data, passCtrl, isDoctor,
+                            pinController: pinController,
                             dispensaryIds: editedDispensaryIds,
                             campSchedule: editedSchedule,
                             canRegisterMedicine: editedCanRegisterMed),
@@ -872,6 +897,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       Map<String, dynamic> old,
       TextEditingController passCtrl,
       bool isDoctor, {
+      TextEditingController? pinController,
       List<String> dispensaryIds = const [],
       List<Map<String, String>> campSchedule = const [],
       bool? canRegisterMedicine,
@@ -887,11 +913,29 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       _snack('Access Denied: You do not have permission to modify user account details, roles, or access status!', error: true);
       return;
     }
+
+    final enteredPin = pinController?.text.trim() ?? '';
+    if (enteredPin.isNotEmpty) {
+      final conflict = ZkTecoNetworkService.findPinConflict(enteredPin, excludeEntityId: widget.userId);
+      if (conflict != null) {
+        _snack('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please enter a unique PIN.', error: true);
+        return;
+      }
+    }
+
+    final allowedSessionsSet = <String>{};
+    for (final item in campSchedule) {
+      final s = item['session']?.toString().toLowerCase().trim();
+      if (s != null && s.isNotEmpty) allowedSessionsSet.add(s);
+    }
+    final allowedSessionsList = allowedSessionsSet.isEmpty ? ['all'] : allowedSessionsSet.toList();
+
     final updates = <String, dynamic>{
       'username': _usernameController.text.trim(),                              // original casing
       'usernameLower': _usernameController.text.trim().toLowerCase(),            // for lookup
       'email': _emailController.text.trim().toLowerCase(),
       if (canRegisterMedicine != null) 'canRegisterMedicine': canRegisterMedicine,
+      'biometricPin': enteredPin.isNotEmpty ? enteredPin : null,
       'phone': _phoneController.text.trim().isNotEmpty
           ? _phoneController.text.trim()
           : null,
@@ -918,8 +962,19 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       'dispensaryIds': dispensaryIds,
       'dispensaryId': dispensaryIds.isNotEmpty ? dispensaryIds.first : null,
       'campSchedule': campSchedule,
+      'allowedSessions': allowedSessionsList,
     };
     if (isDoctor) updates['degree'] = _degreeController.text.trim();
+
+    if (enteredPin.isNotEmpty) {
+      await ZkTecoNetworkService.assignPinToEntity(
+        entityId: widget.userId,
+        entityName: _usernameController.text.trim(),
+        entityType: 'user',
+        branchId: widget.branchId,
+        customPin: enteredPin,
+      );
+    }
 
     Future<String> upload(XFile f, String name) async {
       final path =
@@ -1500,8 +1555,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           Icons.local_hospital_outlined,
         )
       else if (data['dispensaryId'] != null && data['dispensaryId'].toString().isNotEmpty)
-        _infoRow(t, 'Dispensary', data['dispensaryId'] == 'kapayya'
-            ? 'Kapayya Dispensary'
+        _infoRow(t, 'Dispensary', (data['dispensaryId'] == 'kapayya' || data['dispensaryId'] == 'saddar')
+            ? 'Saddar Dispensary'
             : (data['dispensaryId'] == 'haji_camp' ? 'Haji Camp Dispensary' : data['dispensaryId'].toString().toUpperCase()),
             Icons.local_hospital_outlined),
       if (data['campSchedule'] is List && (data['campSchedule'] as List).isNotEmpty)
@@ -1663,10 +1718,24 @@ class _UserDetailScreenState extends State<UserDetailScreen>
 
   Widget _buildMetaSection(
       Map<String, dynamic> data, RoleThemeData t) {
-    final joined = data['createdAt'] is Timestamp
-        ? DateFormat('dd MMM yyyy')
-            .format((data['createdAt'] as Timestamp).toDate())
-        : 'N/A';
+    String joined = 'N/A';
+    final rawCreated = data['createdAt'] ?? data['createdAtLocal'];
+    if (rawCreated is Timestamp) {
+      joined = DateFormat('dd MMM yyyy, hh:mm a').format(rawCreated.toDate());
+    } else if (rawCreated is String && rawCreated.isNotEmpty) {
+      final dt = DateTime.tryParse(rawCreated);
+      if (dt != null) {
+        joined = DateFormat('dd MMM yyyy, hh:mm a').format(dt);
+      } else {
+        joined = rawCreated;
+      }
+    }
+
+    final createdByName = (data['createdByName'] ?? data['createdBy'] ?? '').toString().trim();
+    final createdByRole = (data['createdByRole'] ?? '').toString().trim();
+    final creatorDisplay = createdByName.isNotEmpty
+        ? (createdByRole.isNotEmpty ? '$createdByName ($createdByRole)' : createdByName)
+        : 'System / Pre-configured';
 
     final lastLoginRaw = data['lastLoginAt'] ?? data['lastOnlineAt'] ?? data['updatedAt'];
     String lastLoginText = 'Never / Not Available';
@@ -1681,13 +1750,17 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       }
     }
 
-    return _card(t, 'Account Details', Icons.info_outline_rounded,
+    final uid = (data['uid'] ?? data['id'] ?? widget.userId).toString();
+
+    return _card(t, 'Account & Audit Trail', Icons.admin_panel_settings_outlined,
         t.textTertiary, [
-      _infoRow(t, 'Joined On', joined,
-          Icons.calendar_today_outlined),
+      _infoRow(t, 'Account Created', joined, Icons.calendar_today_outlined),
       const SizedBox(height: 10),
-      _infoRow(t, 'Last Sign-In / Online', lastLoginText,
-          Icons.access_time_rounded),
+      _infoRow(t, 'Created By', creatorDisplay, Icons.person_add_alt_1_outlined),
+      const SizedBox(height: 10),
+      _infoRow(t, 'User ID', uid, Icons.fingerprint_rounded),
+      const SizedBox(height: 10),
+      _infoRow(t, 'Last Activity', lastLoginText, Icons.access_time_rounded),
     ]);
   }
 

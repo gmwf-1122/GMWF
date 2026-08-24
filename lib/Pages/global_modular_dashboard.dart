@@ -8,7 +8,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
+import 'dart:ui';
 
 import '../models/module_registry.dart';
 import '../theme/app_theme.dart';
@@ -217,14 +217,14 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   bool get _userDarkMode {
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) as bool;
+        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
       }
     } catch (_) {}
     return false;
   }
 
   /// True when the dashboard should render in dark canvas mode.
-  bool get _isDark => _isGlobalExecutive || _userDarkMode;
+  bool get _isDark => _userDarkMode;
 
   bool get _isFullExecutive {
     const execRoles = [
@@ -530,10 +530,13 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
           }
         }
 
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+
         return RoleThemeScope(
           role: roleTheme,
           child: Builder(builder: (ctx) {
-            final t = RoleThemeData.of(roleTheme, customColor);
+            RoleThemeData t = RoleThemeData.of(roleTheme, customColor);
+            t = isDark ? t.toDarkMode() : t.toLightMode();
             final isDesktop = MediaQuery.of(ctx).size.width >= 900;
 
             return FadeTransition(
@@ -567,9 +570,8 @@ class _Sidebar extends StatelessWidget {
   const _Sidebar({required this.state, required this.t});
 
   bool get _dark => state._isDark;
-  Color get _bg => _dark ? const Color(0xFF0D1117) : t.bgCard;
-  Color get _divider => _dark ? const Color(0xFF30363D) : t.bgRule;
-  Color get _muted => _dark ? const Color(0xFFC9D1D9) : t.textTertiary;
+  Color get _divider => _dark ? Colors.white.withValues(alpha: 0.10) : t.accent.withValues(alpha: 0.15);
+  Color get _muted => _dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
 
   @override
   Widget build(BuildContext context) {
@@ -584,28 +586,119 @@ class _Sidebar extends StatelessWidget {
                   parent: state._sidebarCtrl,
                   curve: Curves.easeOutCubic)),
           child: Container(
-            width: 240,
+            width: 260,
             decoration: BoxDecoration(
-              color: _bg,
-              border: Border(right: BorderSide(color: _divider)),
+              border: Border(
+                right: BorderSide(
+                  color: _dark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.65),
+                  width: 1.2,
+                ),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: _dark ? 0.10 : 0.05),
+                  blurRadius: 28,
+                  offset: const Offset(6, 0),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: _dark ? 0.35 : 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(2, 0),
+                ),
+              ],
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _SidebarBrand(state: state, t: t, dark: _dark),
-                Divider(color: _divider, height: 1),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: _dark
+                          ? [
+                              const Color(0xFF1E293B).withValues(alpha: 0.90),
+                              const Color(0xFF0F172A).withValues(alpha: 0.84),
+                            ]
+                          : [
+                              const Color(0xFFF8FAFC).withValues(alpha: 0.98),
+                              const Color(0xFFF1F5F9).withValues(alpha: 0.94),
+                            ],
+                    ),
+                  ),
+                  child: Stack(
                     children: [
-                      const SizedBox(height: 8),
-                      _buildNav(context),
+                      // Top-Left Ambient Theme Glow
+                      Positioned(
+                        top: -50,
+                        left: -50,
+                        width: 200,
+                        height: 200,
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  t.accent.withValues(alpha: _dark ? 0.28 : 0.14),
+                                  t.accent.withValues(alpha: 0.0),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Bottom-Right Cyan Glow
+                      Positioned(
+                        bottom: -40,
+                        right: -40,
+                        width: 180,
+                        height: 180,
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  const Color(0xFF0EA5E9).withValues(alpha: _dark ? 0.16 : 0.08),
+                                  const Color(0xFF0EA5E9).withValues(alpha: 0.0),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+
+                      // Sidebar Layout
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _SidebarBrand(state: state, t: t, dark: _dark),
+                          const SizedBox(height: 6),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              physics: const BouncingScrollPhysics(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  _buildNav(context),
+                                  const SizedBox(height: 12),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            child: Divider(color: _divider, height: 1),
+                          ),
+                          _SidebarActions(state: state, t: t, dark: _dark),
+                        ],
+                      ),
                     ],
                   ),
                 ),
-                Divider(color: _divider, height: 1, indent: 16, endIndent: 16),
-                _SidebarActions(state: state, t: t, dark: _dark),
-              ],
+              ),
             ),
           ),
         ),
@@ -620,7 +713,7 @@ class _Sidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 8),
             child: _NavLabel(label: 'MY MODULES', muted: _muted),
           ),
           ...state._availableModules.asMap().entries.map((e) => _AnimatedEntry(
@@ -643,8 +736,8 @@ class _Sidebar extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
-            child: _NavLabel(label: 'NAVIGATE', muted: _muted),
+            padding: const EdgeInsets.fromLTRB(18, 6, 18, 8),
+            child: _NavLabel(label: 'NAVIGATION', muted: _muted),
           ),
           ...state._visibleCategories.asMap().entries.map((e) =>
               _AnimatedEntry(
@@ -666,7 +759,7 @@ class _Sidebar extends StatelessWidget {
   }
 }
 
-// ── Sidebar brand section ─────────────────────────────────────────────────────
+// ── Unified Executive Profile Glass Card at top of Sidebar ───────────────────
 
 class _SidebarBrand extends StatelessWidget {
   final _GlobalModularDashboardState state;
@@ -677,73 +770,162 @@ class _SidebarBrand extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          _LogoPulse(accent: t.accent, pulseAnim: state._logoPulseAnim, size: 50),
-          const SizedBox(width: 10),
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('GMWF',
-                style: TextStyle(
-                    color: dark ? Colors.white : t.textPrimary,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 16,
-                    letterSpacing: 1)),
-            Row(
-              children: [
-                Text('System',
-                    style: TextStyle(
-                        color: dark
-                            ? const Color(0xFF8B949E)
-                            : t.textTertiary,
-                        fontSize: 10)),
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: t.accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text('v${AutoUpdateService.currentVersion}',
+    final isChairman = state._role == 'chairman';
+    final isCeo = state._role == 'ceo';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 14, 12, 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: dark
+            ? const Color(0xFF1E293B).withValues(alpha: 0.65)
+            : Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: dark ? Colors.white.withValues(alpha: 0.12) : const Color(0xFFE2E8F0).withValues(alpha: 0.90),
+          width: 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Logo + Organization Header
+          Row(
+            children: [
+              _LogoPulse(accent: t.accent, pulseAnim: state._logoPulseAnim, size: 40),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'GMWF',
                       style: TextStyle(
-                          color: t.accent,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold)),
+                        color: dark ? Colors.white : const Color(0xFF0F172A),
+                        fontWeight: FontWeight.w900,
+                        fontSize: 15,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Text(
+                          'Enterprise ERP',
+                          style: TextStyle(
+                            color: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: dark ? 0.20 : 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35), width: 0.8),
+                          ),
+                          child: const Text(
+                            'Online',
+                            style: TextStyle(
+                              color: Color(0xFF10B981),
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ]),
-        ]),
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: t.accent.withValues(alpha: dark ? 0.15 : 0.08),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+              ),
+            ],
           ),
-          child: Text(
-            state._role.toUpperCase(),
+          const SizedBox(height: 10),
+          // Divider rule inside card
+          Container(
+            height: 1,
+            color: dark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+          ),
+          const SizedBox(height: 10),
+          // User Role Pill & Full Name
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: (isChairman || isCeo)
+                        ? [
+                            const Color(0xFFF59E0B).withValues(alpha: dark ? 0.30 : 0.20),
+                            const Color(0xFFD97706).withValues(alpha: dark ? 0.20 : 0.12),
+                          ]
+                        : [
+                            t.accent.withValues(alpha: dark ? 0.30 : 0.18),
+                            t.accent.withValues(alpha: dark ? 0.15 : 0.08),
+                          ],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: (isChairman || isCeo)
+                        ? const Color(0xFFF59E0B).withValues(alpha: dark ? 0.40 : 0.45)
+                        : t.accent.withValues(alpha: dark ? 0.35 : 0.40),
+                    width: 0.8,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      (isChairman || isCeo) ? Icons.workspace_premium_rounded : Icons.verified_user_rounded,
+                      size: 10,
+                      color: (isChairman || isCeo) ? (dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)) : t.accent,
+                    ),
+                    const SizedBox(width: 3.5),
+                    Text(
+                      state._role.toUpperCase(),
+                      style: TextStyle(
+                        color: (isChairman || isCeo) ? (dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)) : t.accent,
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'v${AutoUpdateService.currentVersion}',
+                style: TextStyle(
+                  color: dark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 5),
+          Text(
+            state._userName,
             style: TextStyle(
-                color: t.accent,
-                fontSize: 9,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.5),
+              color: dark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              height: 1.2,
+            ),
+            softWrap: true,
+            maxLines: 2,
           ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          state._userName,
-          style: TextStyle(
-              color: dark ? Colors.white : t.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-              height: 1.25),
-          softWrap: true,
-          maxLines: 3,
-        ),
-      ]),
+        ],
+      ),
     );
   }
 }
@@ -760,23 +942,23 @@ class _SidebarActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 16),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 14),
       child: Column(children: [
         if (RoleSimulatorService.canAccessSimulator(state.widget.userData['role']?.toString()))
           _ActionTile(
             icon: Icons.preview_rounded,
             label: 'Role Simulator',
+            accentColor: const Color(0xFF8B5CF6),
             t: t,
             dark: dark,
             onTap: () => RoleSimulatorService.showRoleSelectorModal(context),
           ),
         _ActionTile(
-
           icon: Icons.settings_outlined,
           label: 'Settings',
+          accentColor: const Color(0xFF38BDF8),
           t: t,
           dark: dark,
-
           onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
@@ -789,6 +971,7 @@ class _SidebarActions extends StatelessWidget {
           _ActionTile(
             icon: Icons.cleaning_services_outlined,
             label: 'Data Integrity',
+            accentColor: const Color(0xFF10B981),
             t: t,
             dark: dark,
             onTap: () => Navigator.push(
@@ -799,6 +982,7 @@ class _SidebarActions extends StatelessWidget {
         _ActionTile(
           icon: Icons.help_outline_rounded,
           label: 'Support',
+          accentColor: const Color(0xFFF59E0B),
           t: t,
           dark: dark,
           onTap: () => Navigator.push(context,
@@ -807,6 +991,7 @@ class _SidebarActions extends StatelessWidget {
         _ActionTile(
           icon: Icons.logout_rounded,
           label: 'Sign Out',
+          accentColor: const Color(0xFFEF4444),
           t: t,
           dark: dark,
           danger: true,
@@ -827,12 +1012,15 @@ class _NavLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Align(
         alignment: Alignment.centerLeft,
-        child: Text(label,
-            style: TextStyle(
-                color: muted,
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 1.5)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: muted,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.5,
+          ),
+        ),
       );
 }
 
@@ -884,13 +1072,22 @@ class _LogoPulse extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(size * 0.2),
+          borderRadius: BorderRadius.circular(12),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Colors.white,
+              Color(0xFFF1F5F9),
+            ],
+          ),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.0),
           boxShadow: [
             BoxShadow(
-                color: accent.withValues(alpha: 0.2),
-                blurRadius: 8,
-                offset: const Offset(0, 2)),
+              color: accent.withValues(alpha: 0.35),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
           ],
         ),
         padding: const EdgeInsets.all(4),
@@ -901,6 +1098,25 @@ class _LogoPulse extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ── Category colors map for vibrant distinct badges ──────────────────────────
+
+Color _getCatColor(DashboardCategoryFilter cat) {
+  switch (cat) {
+    case DashboardCategoryFilter.overall:
+      return const Color(0xFF0EA5E9); // Sky Blue
+    case DashboardCategoryFilter.office:
+      return const Color(0xFF6366F1); // Royal Indigo / Purple
+    case DashboardCategoryFilter.dispensary:
+      return const Color(0xFF0D9488); // Teal / Emerald
+    case DashboardCategoryFilter.dasterkhwaan:
+      return const Color(0xFFF97316); // Warm Amber / Orange
+    case DashboardCategoryFilter.madrassa:
+      return const Color(0xFFE11D48); // Berry Rose
+    case DashboardCategoryFilter.school:
+      return const Color(0xFF10B981); // Emerald Green
   }
 }
 
@@ -928,19 +1144,19 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
   bool _hov = false;
 
   static const _icons = {
-    DashboardCategoryFilter.overall: Icons.home_outlined,
-    DashboardCategoryFilter.office: Icons.business_center_outlined,
-    DashboardCategoryFilter.dispensary: Icons.local_pharmacy_outlined,
-    DashboardCategoryFilter.dasterkhwaan: Icons.restaurant_outlined,
-    DashboardCategoryFilter.madrassa: Icons.menu_book_outlined,
-    DashboardCategoryFilter.school: Icons.school_outlined,
+    DashboardCategoryFilter.overall: Icons.home_rounded,
+    DashboardCategoryFilter.office: Icons.business_center_rounded,
+    DashboardCategoryFilter.dispensary: Icons.local_hospital_rounded,
+    DashboardCategoryFilter.dasterkhwaan: Icons.volunteer_activism_rounded,
+    DashboardCategoryFilter.madrassa: Icons.auto_stories_rounded,
+    DashboardCategoryFilter.school: Icons.school_rounded,
   };
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.t;
     final sel = widget.selected;
     final dark = widget.dark;
+    final catColor = _getCatColor(widget.cat);
     final label = widget.cat == DashboardCategoryFilter.overall
         ? 'Dashboard'
         : widget.cat.name[0].toUpperCase() + widget.cat.name.substring(1);
@@ -951,58 +1167,127 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 170),
-          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(_hov ? 3.5 : 0.0, 0.0, 0.0),
+          margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2.5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7.5),
           decoration: BoxDecoration(
             color: sel
-                ? (dark ? t.accent.withValues(alpha: 0.18) : t.glassTint)
-                : (_hov ? (dark ? Colors.white.withValues(alpha: 0.04) : t.accent.withValues(alpha: 0.05)) : Colors.transparent),
-            borderRadius: BorderRadius.circular(12),
+                ? (dark ? catColor.withValues(alpha: 0.22) : catColor.withValues(alpha: 0.16))
+                : (_hov
+                    ? (dark ? Colors.white.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.08))
+                    : Colors.transparent),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: sel ? t.accent.withValues(alpha: 0.4) : Colors.transparent,
+              color: sel
+                  ? catColor.withValues(alpha: dark ? 0.50 : 0.45)
+                  : (_hov
+                      ? (dark ? Colors.white.withValues(alpha: 0.10) : catColor.withValues(alpha: 0.20))
+                      : Colors.transparent),
+              width: 1.0,
             ),
+            boxShadow: sel
+                ? [
+                    BoxShadow(
+                      color: catColor.withValues(alpha: dark ? 0.25 : 0.16),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : [],
           ),
           child: Row(children: [
+            // Left active indicator pill
+            if (sel)
+              Container(
+                width: 3.5,
+                height: 16,
+                margin: const EdgeInsets.only(right: 7),
+                decoration: BoxDecoration(
+                  color: catColor,
+                  borderRadius: BorderRadius.circular(3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: catColor.withValues(alpha: 0.6),
+                      blurRadius: 6,
+                    ),
+                  ],
+                ),
+              ),
+
+            // Squircle Micro Badge
             AnimatedContainer(
-              duration: const Duration(milliseconds: 170),
-              padding: const EdgeInsets.all(5),
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                gradient: sel ? t.accentGradient : null,
+                gradient: sel
+                    ? LinearGradient(
+                        colors: [catColor, catColor.withValues(alpha: 0.85)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
                 color: !sel
                     ? (dark
-                        ? const Color(0xFF21262D)
-                        : t.accent.withValues(alpha: 0.08))
+                        ? const Color(0xFF1E293B)
+                        : catColor.withValues(alpha: 0.10))
                     : null,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: sel
+                      ? Colors.white.withValues(alpha: 0.35)
+                      : (dark ? Colors.white.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.20)),
+                  width: 0.8,
+                ),
+                boxShadow: sel
+                    ? [
+                        BoxShadow(
+                          color: catColor.withValues(alpha: 0.35),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : [],
               ),
               child: Icon(
                 _icons[widget.cat] ?? Icons.circle_outlined,
                 color: sel
                     ? Colors.white
-                    : (dark ? const Color(0xFFC9D1D9) : t.textTertiary),
-                size: 14,
+                    : (dark ? const Color(0xFFCBD5E1) : catColor),
+                size: 15,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      color: sel
-                          ? (dark ? Colors.white : t.textPrimary)
-                          : (dark ? const Color(0xFFC9D1D9) : t.textSecondary),
-                      fontWeight:
-                          sel ? FontWeight.w800 : FontWeight.w600,
-                      fontSize: 12.5)),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: sel
+                      ? (dark ? Colors.white : catColor)
+                      : (_hov
+                          ? (dark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A))
+                          : (dark ? const Color(0xFFCBD5E1) : const Color(0xFF334155))),
+                  fontWeight: sel ? FontWeight.w900 : FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
             ),
             if (sel)
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 170),
-                width: 5,
-                height: 5,
+              Container(
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
-                    color: t.accent, shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.5), blurRadius: 4)]),
+                  color: catColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: catColor.withValues(alpha: 0.6),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
               ),
           ]),
         ),
@@ -1043,44 +1328,64 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 170),
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(_hov ? 3.5 : 0.0, 0.0, 0.0),
           margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: _hov
-                ? (dark ? t.accent.withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.06))
+                ? (dark ? t.accent.withValues(alpha: 0.16) : t.accent.withValues(alpha: 0.08))
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(
-                color: _hov ? t.accent.withValues(alpha: 0.3) : Colors.transparent),
+              color: _hov
+                  ? t.accent.withValues(alpha: dark ? 0.40 : 0.25)
+                  : Colors.transparent,
+              width: 1.0,
+            ),
           ),
           child: Row(children: [
+            // Squircle Micro-Badge
             AnimatedContainer(
-              duration: const Duration(milliseconds: 170),
-              padding: const EdgeInsets.all(8),
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
                 gradient: _hov ? t.accentGradient : null,
                 color: !_hov
-                    ? (dark ? const Color(0xFF21262D) : t.accent.withValues(alpha: 0.08))
+                    ? (dark ? const Color(0xFF1E293B) : t.accent.withValues(alpha: 0.08))
                     : null,
                 borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: _hov ? Colors.white.withValues(alpha: 0.3) : Colors.transparent,
+                  width: 0.8,
+                ),
+                boxShadow: _hov
+                    ? [
+                        BoxShadow(
+                          color: t.accent.withValues(alpha: 0.35),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : [],
               ),
               child: Icon(
                 widget.module.icon,
                 color: _hov
                     ? Colors.white
-                    : (dark ? const Color(0xFF8B949E) : t.textTertiary),
+                    : (dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                 size: 15,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 11),
             Expanded(
               child: Text(
                 widget.module.title,
                 style: TextStyle(
                   color: _hov
-                      ? (dark ? Colors.white : t.textPrimary)
-                      : (dark ? const Color(0xFFB1BAC4) : t.textSecondary),
+                      ? (dark ? Colors.white : const Color(0xFF0F172A))
+                      : (dark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
                   fontWeight: _hov ? FontWeight.w800 : FontWeight.w600,
                   fontSize: 13,
                 ),
@@ -1090,8 +1395,18 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
             AnimatedOpacity(
               opacity: _hov ? 1.0 : 0.0,
               duration: const Duration(milliseconds: 150),
-              child: Icon(Icons.arrow_forward_ios_rounded,
-                  color: t.accent, size: 12),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: t.accent.withValues(alpha: 0.15),
+                ),
+                child: Icon(
+                  Icons.arrow_forward_rounded,
+                  color: t.accent,
+                  size: 12,
+                ),
+              ),
             ),
           ]),
         ),
@@ -1105,6 +1420,7 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
 class _ActionTile extends StatefulWidget {
   final IconData icon;
   final String label;
+  final Color? accentColor;
   final RoleThemeData t;
   final bool dark;
   final bool danger;
@@ -1112,6 +1428,7 @@ class _ActionTile extends StatefulWidget {
   const _ActionTile({
     required this.icon,
     required this.label,
+    this.accentColor,
     required this.t,
     required this.dark,
     required this.onTap,
@@ -1127,9 +1444,13 @@ class _ActionTileState extends State<_ActionTile> {
 
   @override
   Widget build(BuildContext context) {
+    final effectiveAccent = widget.danger
+        ? const Color(0xFFEF4444)
+        : (widget.accentColor ?? widget.t.accent);
+
     final col = widget.danger
-        ? Colors.redAccent
-        : (widget.dark ? const Color(0xFF8B949E) : widget.t.textSecondary);
+        ? const Color(0xFFEF4444)
+        : (widget.dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B));
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hov = true),
@@ -1138,24 +1459,37 @@ class _ActionTileState extends State<_ActionTile> {
         onTap: widget.onTap,
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          curve: Curves.easeOutCubic,
+          transform: Matrix4.translationValues(_hov ? 2.5 : 0.0, 0.0, 0.0),
+          margin: const EdgeInsets.symmetric(vertical: 1.5),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7.5),
           decoration: BoxDecoration(
             color: _hov
-                ? (widget.danger
-                    ? Colors.redAccent.withValues(alpha: 0.08)
-                    : widget.t.accent.withValues(alpha: 0.07))
+                ? effectiveAccent.withValues(alpha: widget.dark ? 0.16 : 0.08)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: _hov
+                  ? effectiveAccent.withValues(alpha: widget.dark ? 0.35 : 0.25)
+                  : Colors.transparent,
+              width: 1.0,
+            ),
           ),
           child: Row(children: [
-            Icon(widget.icon, color: col, size: 16),
+            Icon(widget.icon, color: _hov ? effectiveAccent : col, size: 16),
             const SizedBox(width: 10),
-            Text(widget.label,
-                style: TextStyle(
-                    color: col,
-                    fontSize: 13,
-                    fontWeight:
-                        widget.danger ? FontWeight.w700 : FontWeight.w500)),
+            Text(
+              widget.label,
+              style: TextStyle(
+                color: _hov
+                    ? (widget.danger
+                        ? const Color(0xFFEF4444)
+                        : (widget.dark ? Colors.white : const Color(0xFF0F172A)))
+                    : col,
+                fontSize: 13,
+                fontWeight: widget.danger || _hov ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
           ]),
         ),
       ),
@@ -1618,314 +1952,6 @@ class _LightHero extends StatelessWidget {
   }
 }
 
-class _TypewriterUserNameText extends StatefulWidget {
-  final String text;
-  final TextStyle style;
-
-  const _TypewriterUserNameText({
-    required this.text,
-    required this.style,
-  });
-
-  @override
-  State<_TypewriterUserNameText> createState() => _TypewriterUserNameTextState();
-}
-
-class _TypewriterUserNameTextState extends State<_TypewriterUserNameText> with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<int> _charCount;
-  bool _showCursor = true;
-  Timer? _cursorTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    final textLen = widget.text.length.clamp(1, 100);
-    // Slower pacing (min 1.2s to 3.0s) so short 3-letter names like "Ans" type out distinctly
-    final animMs = (textLen * 350).clamp(1200, 3000);
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: Duration(milliseconds: animMs),
-    );
-    _charCount = StepTween(begin: 0, end: textLen).animate(
-      CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
-    );
-
-    _ctrl.addStatusListener((status) {
-      if (status == AnimationStatus.completed) {
-        _cursorTimer?.cancel();
-        if (mounted) setState(() => _showCursor = false);
-      }
-    });
-
-    _ctrl.forward();
-
-    _cursorTimer = Timer.periodic(const Duration(milliseconds: 450), (_) {
-      if (mounted && _ctrl.isAnimating) {
-        setState(() => _showCursor = !_showCursor);
-      }
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant _TypewriterUserNameText oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.text != widget.text) {
-      _ctrl.stop();
-      final textLen = widget.text.length.clamp(1, 100);
-      final animMs = (textLen * 350).clamp(1200, 3000);
-      _ctrl.duration = Duration(milliseconds: animMs);
-      _charCount = StepTween(begin: 0, end: textLen).animate(
-        CurvedAnimation(parent: _ctrl, curve: Curves.easeOut),
-      );
-      setState(() => _showCursor = true);
-      _ctrl.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _cursorTimer?.cancel();
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _charCount,
-      builder: (context, _) {
-        final currentLen = _charCount.value.clamp(0, widget.text.length);
-        final displayedText = widget.text.substring(0, currentLen);
-        final isFinished = currentLen >= widget.text.length;
-
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.baseline,
-          textBaseline: TextBaseline.alphabetic,
-          children: [
-            Flexible(
-              child: Text(
-                displayedText,
-                style: widget.style,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (!isFinished)
-              Opacity(
-                opacity: _showCursor ? 1.0 : 0.0,
-                child: Container(
-                  margin: const EdgeInsets.only(left: 3),
-                  width: 3.5,
-                  height: (widget.style.fontSize ?? 20) * 0.85,
-                  decoration: BoxDecoration(
-                    color: widget.style.color ?? Colors.white,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _RotatingGlowBorderContainer extends StatefulWidget {
-  final Widget child;
-  final Color accentColor;
-  final double borderRadius;
-  final EdgeInsets margin;
-
-  const _RotatingGlowBorderContainer({
-    required this.child,
-    required this.accentColor,
-    this.borderRadius = 22.0,
-    required this.margin,
-  });
-
-  @override
-  State<_RotatingGlowBorderContainer> createState() => _RotatingGlowBorderContainerState();
-}
-
-class _RotatingGlowBorderContainerState extends State<_RotatingGlowBorderContainer> with SingleTickerProviderStateMixin {
-  late AnimationController _rotationCtrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _rotationCtrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 9),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _rotationCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = widget.accentColor;
-    return Container(
-      margin: widget.margin,
-      child: AnimatedBuilder(
-        animation: _rotationCtrl,
-        builder: (context, child) {
-          return CustomPaint(
-            foregroundPainter: _HeroBorderFlarePainter(
-              progress: _rotationCtrl.value,
-              accentColor: accent,
-              borderRadius: widget.borderRadius,
-            ),
-            child: Container(
-              padding: const EdgeInsets.all(2.0),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(widget.borderRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFE8B84A).withValues(alpha: 0.20),
-                    blurRadius: 40,
-                    offset: const Offset(0, 8),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.10),
-                    blurRadius: 80,
-                    offset: const Offset(0, 16),
-                  ),
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 120,
-                    offset: const Offset(0, 24),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(widget.borderRadius - 2.0),
-                child: widget.child,
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _HeroBorderFlarePainter extends CustomPainter {
-  final double progress;
-  final Color accentColor;
-  final double borderRadius;
-
-  _HeroBorderFlarePainter({
-    required this.progress,
-    required this.accentColor,
-    required this.borderRadius,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(rect, Radius.circular(borderRadius));
-
-    // 1. Base 2px Border (Gold #E8B84A -> Warm Amber #FFCC66 -> Gold)
-    final baseBorderPaint = Paint()
-      ..shader = const LinearGradient(
-        colors: [
-          Color(0xFFE8B84A),
-          Color(0xFFFFCC66),
-          Color(0xFFE8B84A),
-        ],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
-    canvas.drawRRect(rrect, baseBorderPaint);
-
-    // 2. Compute Reflection Position Along Perimeter (top -> right -> bottom -> left)
-    final path = Path()..addRRect(rrect);
-    final metrics = path.computeMetrics().toList();
-    if (metrics.isEmpty) return;
-
-    final pathMetric = metrics.first;
-    final totalLength = pathMetric.length;
-    final distance = (progress * totalLength) % totalLength;
-
-    // Moving reflection highlight: ~60px width
-    const highlightLength = 60.0;
-    final startDist = distance - (highlightLength / 2);
-    final endDist = distance + (highlightLength / 2);
-
-    Path highlightPath;
-    if (startDist >= 0 && endDist <= totalLength) {
-      highlightPath = pathMetric.extractPath(startDist, endDist);
-    } else if (startDist < 0) {
-      highlightPath = pathMetric.extractPath(startDist + totalLength, totalLength);
-      highlightPath.addPath(pathMetric.extractPath(0, endDist), Offset.zero);
-    } else {
-      highlightPath = pathMetric.extractPath(startDist, totalLength);
-      highlightPath.addPath(pathMetric.extractPath(0, endDist - totalLength), Offset.zero);
-    }
-
-    final tangent = pathMetric.getTangentForOffset(distance);
-    if (tangent == null) return;
-    final reflPos = tangent.position;
-
-    // 3. Single Metallic Moving Light Reflection (Soft Bloom, Feathered Edges)
-    final reflPaint = Paint()
-      ..shader = RadialGradient(
-        center: Alignment(
-          (reflPos.dx / (size.width == 0 ? 1 : size.width)) * 2 - 1,
-          (reflPos.dy / (size.height == 0 ? 1 : size.height)) * 2 - 1,
-        ),
-        radius: 0.15,
-        colors: [
-          Colors.white,
-          const Color(0xFFFFF3D1).withValues(alpha: 0.85),
-          const Color(0xFFFFCC66).withValues(alpha: 0.4),
-          Colors.transparent,
-        ],
-        stops: const [0.0, 0.35, 0.7, 1.0],
-      ).createShader(rect)
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeWidth = 2.4;
-
-    canvas.drawPath(highlightPath, reflPaint);
-
-    // Soft bloom glow over reflection (barely extends outside card)
-    final softBloomPaint = Paint()
-      ..color = const Color(0xFFFFF3D1).withValues(alpha: 0.12)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
-
-    canvas.drawCircle(reflPos, 14, softBloomPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _HeroBorderFlarePainter oldDelegate) =>
-      oldDelegate.progress != progress || oldDelegate.accentColor != accentColor;
-}
-
-class _HeroBackgroundPainter extends CustomPainter {
-  final Color accentColor;
-
-  _HeroBackgroundPainter({required this.accentColor});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rect = Offset.zero & size;
-    final bgPaint = Paint()..color = Color.lerp(accentColor, const Color(0xFF0F172A), 0.70)!;
-    canvas.drawRect(rect, bgPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
 Widget _buildProfileHeroCard({
   required _GlobalModularDashboardState state,
   required RoleThemeData t,
@@ -1954,186 +1980,427 @@ Widget _buildProfileHeroCard({
   final String userRole = state._role.toUpperCase();
 
   final avatarSize = isDesktop ? 76.0 : 64.0;
-
   final primaryThemeColor = t.accent;
 
-  return _RotatingGlowBorderContainer(
-    accentColor: primaryThemeColor,
-    margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 24 : 16, hPad, 0),
-    child: Stack(
-      children: [
-        // Layered Surface Background with Ambient Lighting & Abstract Mesh
-        Positioned.fill(
-          child: CustomPaint(
-            painter: _HeroBackgroundPainter(accentColor: primaryThemeColor),
-          ),
+  return Container(
+    margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 22 : 16, hPad, 0),
+    decoration: BoxDecoration(
+      borderRadius: BorderRadius.circular(28.0),
+      boxShadow: [
+        BoxShadow(
+          color: primaryThemeColor.withValues(alpha: isDark ? 0.25 : 0.12),
+          blurRadius: 36,
+          spreadRadius: 1,
+          offset: const Offset(0, 8),
         ),
-
-        Padding(
-          padding: EdgeInsets.all(isDesktop ? 24 : 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        BoxShadow(
+          color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.05),
+          blurRadius: 14,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(28.0),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28.0),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isDark
+                  ? [
+                      const Color(0xFF1E293B).withValues(alpha: 0.90),
+                      const Color(0xFF0F172A).withValues(alpha: 0.82),
+                    ]
+                  : [
+                      const Color(0xFFFFFBEB).withValues(alpha: 0.98),
+                      const Color(0xFFF8FAFC).withValues(alpha: 0.94),
+                      Colors.white.withValues(alpha: 0.98),
+                    ],
+            ),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.16)
+                  : const Color(0xFFF59E0B).withValues(alpha: 0.25),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.25 : 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 6),
+              ),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Stack(
             children: [
-              // Top Greeting Badge Pill
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Color.lerp(primaryThemeColor, Colors.black, 0.6)!.withValues(alpha: 0.85),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.16),
-                  ),
-                ),
-                child: Text(
-                  greetingBadgeText,
-                  style: const TextStyle(
-                    color: Color(0xFFFBBF24),
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1.4,
+              // Ambient Radial Glow Spot (Top-Left behind greeting/avatar)
+              Positioned(
+                top: -50,
+                left: -50,
+                width: 240,
+                height: 240,
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.18),
+                          primaryThemeColor.withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
 
-              // Profile Avatar, User Name & Date Row
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Interactive Avatar with Brighter Gold Solid Ring & 1px White Online Indicator
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => _showEnlargedAvatarDialog(state.context, state, t),
-                      child: Tooltip(
-                        message: 'Tap to view, change or remove profile picture',
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: const Color(0xFFE8B84A),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFFE8B84A).withValues(alpha: 0.3),
-                                    blurRadius: 10,
-                                    spreadRadius: 1,
-                                  ),
-                                ],
+              // Ambient Radial Glow Spot (Top-Right sky-blue accent glow)
+              Positioned(
+                top: -40,
+                right: 40,
+                width: 220,
+                height: 220,
+                child: IgnorePointer(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          const Color(0xFF0EA5E9).withValues(alpha: isDark ? 0.22 : 0.12),
+                          const Color(0xFF0EA5E9).withValues(alpha: 0.0),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Seamlessly Dissolved Islamic Pattern Watermark on Right
+              Positioned(
+                right: -20,
+                top: -20,
+                bottom: -20,
+                width: isDesktop ? 340 : 220,
+                child: IgnorePointer(
+                  child: ShaderMask(
+                    shaderCallback: (rect) {
+                      return RadialGradient(
+                        center: Alignment.centerRight,
+                        radius: 0.85,
+                        colors: [
+                          Colors.black.withValues(alpha: isDark ? 0.35 : 0.18),
+                          Colors.transparent,
+                        ],
+                        stops: const [0.2, 1.0],
+                      ).createShader(rect);
+                    },
+                    blendMode: BlendMode.dstIn,
+                    child: Opacity(
+                      opacity: isDark ? 0.30 : 0.15,
+                      child: Image.asset(
+                        'assets/images/1.webp',
+                        color: isDark ? Colors.white : primaryThemeColor,
+                        colorBlendMode: BlendMode.srcIn,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerRight,
+                        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // Hero Content
+              Padding(
+                padding: EdgeInsets.all(isDesktop ? 24 : 18),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Main Left Column: Greeting, Avatar, User Info & Metadata Badges
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Top Greeting Badge Pill
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.18 : 0.10),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.45 : 0.35),
+                                width: 1.0,
                               ),
-                              padding: const EdgeInsets.all(2.5),
-                              child: ClipOval(
-                                child: _buildUserHeroAvatar(userPhotoUrl, userName, t, size: avatarSize),
-                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.20 : 0.08),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
-                            Positioned(
-                              right: 1,
-                              bottom: 1,
-                              child: Container(
-                                width: 15,
-                                height: 15,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 1.0,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  greetingBadgeText,
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.3,
                                   ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.6),
-                                      blurRadius: 6,
-                                      spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Profile Avatar, User Name & Date Row
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              // Interactive Avatar with Luxury Gold Halo & Online Indicator
+                              MouseRegion(
+                                cursor: SystemMouseCursors.click,
+                                child: GestureDetector(
+                                  onTap: () => _showEnlargedAvatarDialog(state.context, state, t),
+                                  child: Tooltip(
+                                    message: 'Tap to view, change or remove profile picture',
+                                    child: Stack(
+                                      clipBehavior: Clip.none,
+                                      children: [
+                                        Container(
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: const LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: [
+                                                Color(0xFFFBBF24),
+                                                Color(0xFFD97706),
+                                              ],
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: const Color(0xFFF59E0B).withValues(alpha: 0.40),
+                                                blurRadius: 12,
+                                                spreadRadius: 1,
+                                              ),
+                                            ],
+                                          ),
+                                          padding: const EdgeInsets.all(2.5),
+                                          child: ClipOval(
+                                            child: _buildUserHeroAvatar(userPhotoUrl, userName, t, size: avatarSize),
+                                          ),
+                                        ),
+                                        Positioned(
+                                          right: 2,
+                                          bottom: 2,
+                                          child: Container(
+                                            width: 15,
+                                            height: 15,
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF10B981),
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                                width: 2.0,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                                                  blurRadius: 6,
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 18),
+                              // User Display Name & Date Subtitle
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      userName,
+                                      style: TextStyle(
+                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                        fontSize: isDesktop ? 24 : 19,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: -0.3,
+                                        height: 1.15,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                      maxLines: 1,
+                                    ),
+                                    const SizedBox(height: 5),
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.calendar_today_outlined,
+                                          size: 13,
+                                          color: isDark
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF64748B),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          dateStr,
+                                          style: TextStyle(
+                                            color: isDark
+                                                ? const Color(0xFF94A3B8)
+                                                : const Color(0xFF64748B),
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
                               ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+
+                          // Bottom Metadata Badges Row
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              _ExecutiveGlassPill(
+                                label: userRole,
+                                icon: (isChairman || isCeo)
+                                    ? Icons.workspace_premium_rounded
+                                    : Icons.shield_outlined,
+                                accentColor: const Color(0xFFF59E0B),
+                                isDark: isDark,
+                              ),
+                              _ExecutiveGlassPill(
+                                label: '${state._availableModules.length} Modules',
+                                icon: Icons.grid_view_rounded,
+                                accentColor: const Color(0xFF6366F1),
+                                isDark: isDark,
+                              ),
+                              _ExecutiveGlassPill(
+                                label: 'Global Access',
+                                icon: Icons.public_rounded,
+                                accentColor: const Color(0xFF0EA5E9),
+                                isDark: isDark,
+                              ),
+                              _ExecutiveGlassPill(
+                                label: 'Live Network',
+                                icon: Icons.sensors_rounded,
+                                accentColor: const Color(0xFF10B981),
+                                isDark: isDark,
+                                isPulse: true,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Right Column on Desktop: Live Operations Snapshot Card
+                    if (isDesktop)
+                      Container(
+                        margin: const EdgeInsets.only(left: 20),
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF1E293B).withValues(alpha: 0.55)
+                              : Colors.white.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.12)
+                                : const Color(0xFF10B981).withValues(alpha: 0.35),
+                            width: 1.0,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.20 : 0.08),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 18),
-                  // User Display Name (Weight 700) & Date Subtitle (Opacity 0.65)
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _TypewriterUserNameText(
-                          text: userName,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: isDesktop ? 25 : 20,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            height: 1.15,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
-                              Icons.calendar_today_outlined,
-                              size: 13,
-                              color: Colors.white.withValues(alpha: 0.65),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFF10B981).withValues(alpha: 0.7),
+                                        blurRadius: 6,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 7),
+                                Text(
+                                  'SYSTEM OPERATIONAL',
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 6),
+                            const SizedBox(height: 8),
                             Text(
-                              dateStr,
+                              'Gujrat Central HQ',
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.65),
-                                fontSize: 12.5,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Cloud Sync Active • Biometrics Online',
+                              style: TextStyle(
+                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                fontSize: 10.5,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
                           ],
                         ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Bottom Metadata Badges Row
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  _ExecutiveGlassPill(
-                    label: userRole,
-                    icon: (isChairman || isCeo)
-                        ? Icons.workspace_premium_rounded
-                        : Icons.shield_outlined,
-                    accentColor: const Color(0xFFF59E0B),
-                    isGreenTheme: true,
-                  ),
-                  _ExecutiveGlassPill(
-                    label: '${state._availableModules.length} Modules',
-                    icon: Icons.grid_view_rounded,
-                    accentColor: primaryThemeColor,
-                    isGreenTheme: true,
-                  ),
-                  _ExecutiveGlassPill(
-                    label: 'Global Access',
-                    icon: Icons.public_rounded,
-                    accentColor: const Color(0xFF38BDF8),
-                    isGreenTheme: true,
-                  ),
-                  _ExecutiveGlassPill(
-                    label: 'Live System',
-                    icon: Icons.bolt_rounded,
-                    accentColor: const Color(0xFFF59E0B),
-                    isGreenTheme: true,
-                  ),
-                ],
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
-      ],
+      ),
     ),
   );
 }
@@ -2142,13 +2409,15 @@ class _ExecutiveGlassPill extends StatefulWidget {
   final String label;
   final IconData icon;
   final Color accentColor;
-  final bool isGreenTheme;
+  final bool isDark;
+  final bool isPulse;
 
   const _ExecutiveGlassPill({
     required this.label,
     required this.icon,
     required this.accentColor,
-    required this.isGreenTheme,
+    required this.isDark,
+    this.isPulse = false,
   });
 
   @override
@@ -2164,63 +2433,86 @@ class _ExecutiveGlassPillState extends State<_ExecutiveGlassPill> {
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        curve: Curves.easeOut,
-        transform: Matrix4.translationValues(0.0, _isHovered ? -2.0 : 0.0, 0.0),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        transform: Matrix4.translationValues(0.0, _isHovered ? -2.5 : 0.0, 0.0),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
         decoration: BoxDecoration(
-          color: const Color.fromRGBO(30, 35, 45, 0.8),
+          color: widget.isDark
+              ? (_isHovered
+                  ? widget.accentColor.withValues(alpha: 0.22)
+                  : const Color(0xFF1E293B).withValues(alpha: 0.70))
+              : (_isHovered
+                  ? widget.accentColor.withValues(alpha: 0.14)
+                  : Colors.white.withValues(alpha: 0.92)),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: _isHovered
-                ? widget.accentColor.withValues(alpha: 0.3)
-                : const Color.fromRGBO(255, 255, 255, 0.08),
+                ? widget.accentColor.withValues(alpha: widget.isDark ? 0.65 : 0.55)
+                : (widget.isDark
+                    ? Colors.white.withValues(alpha: 0.12)
+                    : widget.accentColor.withValues(alpha: 0.25)),
             width: 1.0,
           ),
           boxShadow: _isHovered
               ? [
                   BoxShadow(
-                    color: widget.accentColor.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 3),
+                    color: widget.accentColor.withValues(alpha: widget.isDark ? 0.35 : 0.20),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
                   ),
                 ]
               : [
-                  const BoxShadow(
-                    color: Color.fromRGBO(0, 0, 0, 0.2),
-                    blurRadius: 4,
-                    offset: Offset(0, 2),
+                  BoxShadow(
+                    color: widget.accentColor.withValues(alpha: widget.isDark ? 0.15 : 0.06),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
                   ),
                 ],
         ),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            gradient: const LinearGradient(
-              colors: [
-                Color.fromRGBO(255, 255, 255, 0.04),
-                Colors.transparent,
-              ],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Squircle Micro Icon Container
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: widget.accentColor.withValues(alpha: widget.isDark ? 0.20 : 0.12),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: Icon(widget.icon, size: 13, color: widget.accentColor),
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(widget.icon, size: 14, color: widget.accentColor),
-              const SizedBox(width: 7),
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.2,
+            const SizedBox(width: 7.5),
+            Text(
+              widget.label,
+              style: TextStyle(
+                color: widget.isDark
+                    ? (_isHovered ? Colors.white : const Color(0xFFE2E8F0))
+                    : (_isHovered ? const Color(0xFF0F172A) : const Color(0xFF334155)),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+            if (widget.isPulse) ...[
+              const SizedBox(width: 6),
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: widget.accentColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: widget.accentColor.withValues(alpha: 0.8),
+                      blurRadius: 6,
+                      spreadRadius: 1,
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -3123,42 +3415,42 @@ class _ModuleCardState extends State<_ModuleCard>
 
   @override
   Widget build(BuildContext context) {
-    final t = widget.t;
     final dark = widget.dark;
     final w = MediaQuery.of(context).size.width;
     final tiny = w < 480;
 
-    // Get color & label for category
+    // Get color & label for category with individual rich palette & ambient glow themes
     final Color categoryColor;
+    final Color ambientGlowColor;
     final String categoryLabel;
+
     switch (widget.module.category) {
       case ModuleCategory.office:
-        categoryColor = const Color(0xFF6366F1); // Indigo
-        categoryLabel = widget.module.id == 'finance' ? 'HR' : 'OFFICE';
+        categoryColor = widget.module.id == 'finance' ? const Color(0xFF8B5CF6) : const Color(0xFF6366F1); // Soft Purple / Indigo
+        ambientGlowColor = const Color(0xFF818CF8);
+        categoryLabel = widget.module.id == 'finance' ? 'HR / FINANCE' : 'OFFICE';
         break;
       case ModuleCategory.dispensary:
-        categoryColor = const Color(0xFF0D9488); // Teal
+        categoryColor = const Color(0xFF0EA5E9); // Sky Blue / Teal
+        ambientGlowColor = const Color(0xFF38BDF8);
         categoryLabel = 'MEDICAL';
         break;
       case ModuleCategory.dasterkhwaan:
-        categoryColor = const Color(0xFFF97316); // Orange
+        categoryColor = const Color(0xFFF97316); // Warm Orange
+        ambientGlowColor = const Color(0xFFFB923C);
         categoryLabel = 'WELFARE';
         break;
       case ModuleCategory.madrassa:
-        categoryColor = const Color(0xFF8B5CF6); // Purple
+        categoryColor = const Color(0xFFE11D48); // Deep Rose / Berry
+        ambientGlowColor = const Color(0xFFF43F5E);
         categoryLabel = 'MADRASSA';
         break;
       case ModuleCategory.school:
-        categoryColor = const Color(0xFF2563EB); // Blue
+        categoryColor = const Color(0xFF10B981); // Emerald / Sage Green
+        ambientGlowColor = const Color(0xFF34D399);
         categoryLabel = 'SCHOOL';
         break;
     }
-
-    final categoryGradient = LinearGradient(
-      colors: [categoryColor.withValues(alpha: 0.85), categoryColor],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hov = true),
@@ -3174,193 +3466,270 @@ class _ModuleCardState extends State<_ModuleCard>
         child: ScaleTransition(
           scale: _pressScale,
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeOutQuart,
-            transform: Matrix4.translationValues(0.0, _hov ? -4.0 : 0.0, 0.0),
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(0.0, _hov ? -5.0 : 0.0, 0.0),
             decoration: BoxDecoration(
-              color: dark 
-                  ? (_hov ? const Color(0xFF1E293B) : const Color(0xFF0F172A))
-                  : (_hov ? Colors.white : t.bgCard),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: _hov
-                    ? categoryColor.withValues(alpha: 0.7)
-                    : (dark ? const Color(0xFF1E293B) : t.bgRule),
-                width: _hov ? 1.8 : 1.0,
-              ),
-              boxShadow: _hov
-                  ? [
-                      BoxShadow(
-                          color: categoryColor.withValues(alpha: 0.25),
-                          blurRadius: 18,
-                          offset: const Offset(0, 8)),
-                      BoxShadow(
-                          color: categoryColor.withValues(alpha: 0.08),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2)),
-                    ]
-                  : [
-                      BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2)),
-                    ],
+              borderRadius: BorderRadius.circular(26),
+              // Ambient outer radial glow shadow
+              boxShadow: [
+                BoxShadow(
+                  color: ambientGlowColor.withValues(alpha: _hov ? (dark ? 0.35 : 0.25) : (dark ? 0.14 : 0.08)),
+                  blurRadius: _hov ? 28 : 16,
+                  spreadRadius: _hov ? 2 : 0,
+                  offset: Offset(0, _hov ? 10 : 4),
+                ),
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: dark ? 0.40 : 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(17),
-              child: Stack(
-                children: [
-                  // Left colored accent border line
-                  Positioned(
-                    left: 0, top: 0, bottom: 0,
-                    width: 4,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: _hov
-                              ? [categoryColor, categoryColor.withValues(alpha: 0.5)]
-                              : [categoryColor.withValues(alpha: 0.7), categoryColor.withValues(alpha: 0.2)],
-                        ),
-                      ),
+              borderRadius: BorderRadius.circular(26),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(26),
+                    // High-blur translucent frosted glass background with gradient tint
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: dark
+                          ? [
+                              const Color(0xFF1E293B).withValues(alpha: _hov ? 0.85 : 0.65),
+                              const Color(0xFF0F172A).withValues(alpha: _hov ? 0.80 : 0.60),
+                            ]
+                          : [
+                              Colors.white.withValues(alpha: _hov ? 0.90 : 0.78),
+                              Colors.white.withValues(alpha: _hov ? 0.75 : 0.60),
+                            ],
+                    ),
+                    // Subtle top/left inner white border stroke (1px at 30% opacity)
+                    border: Border.all(
+                      color: _hov
+                          ? categoryColor.withValues(alpha: dark ? 0.65 : 0.50)
+                          : (dark
+                              ? Colors.white.withValues(alpha: 0.16)
+                              : Colors.white.withValues(alpha: 0.60)),
+                      width: _hov ? 1.5 : 1.0,
                     ),
                   ),
-
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(
-                      tiny ? 14 : 18,
-                      tiny ? 12 : 14,
-                      tiny ? 14 : 16,
-                      tiny ? 12 : 14,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // Top row: Icon + Category Badge + Arrow
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            // Icon container
-                            AnimatedRotation(
-                              turns: _hov ? 0.02 : 0,
-                              duration: const Duration(milliseconds: 250),
-                              curve: Curves.easeOutBack,
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                padding: EdgeInsets.all(tiny ? 8 : 10),
-                                decoration: BoxDecoration(
-                                  gradient: _hov ? categoryGradient : null,
-                                  color: !_hov 
-                                      ? (dark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.1)) 
-                                      : null,
-                                  borderRadius: BorderRadius.circular(12),
-                                  boxShadow: _hov ? [
-                                    BoxShadow(
-                                      color: categoryColor.withValues(alpha: 0.35),
-                                      blurRadius: 8,
-                                      offset: const Offset(0, 3),
-                                    )
-                                  ] : [],
-                                ),
-                                child: Icon(
-                                  widget.module.icon,
-                                  color: _hov ? Colors.white : categoryColor,
-                                  size: tiny ? 18 : 22,
-                                ),
-                              ),
-                            ),
-                            
-                            const SizedBox(width: 12),
-
-                            // Category badge pill & Title block
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: categoryColor.withValues(alpha: _hov ? 0.25 : 0.12),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      categoryLabel,
-                                      style: TextStyle(
-                                        color: categoryColor,
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 0.6,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    widget.module.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: dark ? const Color(0xFFF3F4F6) : t.textPrimary,
-                                      fontSize: tiny ? 13.5 : 15.0,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.2,
-                                    ),
-                                  ),
+                  child: Stack(
+                    children: [
+                      // Ambient Radial Glow Spot (Top-Left behind icon)
+                      Positioned(
+                        top: -30,
+                        left: -30,
+                        width: 140,
+                        height: 140,
+                        child: IgnorePointer(
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: RadialGradient(
+                                colors: [
+                                  ambientGlowColor.withValues(alpha: _hov ? (dark ? 0.35 : 0.25) : (dark ? 0.18 : 0.12)),
+                                  ambientGlowColor.withValues(alpha: 0.0),
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                      ),
 
-                            const SizedBox(width: 8),
+                      // Watermark: Faded, low-opacity large line-art icon anchored subtly in bottom-right corner
+                      Positioned(
+                        right: -14,
+                        bottom: -14,
+                        child: IgnorePointer(
+                          child: AnimatedOpacity(
+                            opacity: dark ? (_hov ? 0.14 : 0.06) : (_hov ? 0.12 : 0.05),
+                            duration: const Duration(milliseconds: 250),
+                            child: Icon(
+                              widget.module.icon,
+                              size: tiny ? 76 : 94,
+                              color: categoryColor,
+                            ),
+                          ),
+                        ),
+                      ),
 
-                            // Arrow Indicator
-                            AnimatedOpacity(
-                              opacity: _hov ? 1.0 : 0.4,
-                              duration: const Duration(milliseconds: 200),
-                              child: AnimatedContainer(
-                                duration: const Duration(milliseconds: 200),
-                                padding: const EdgeInsets.all(7),
-                                decoration: BoxDecoration(
-                                  color: _hov 
-                                      ? categoryColor 
-                                      : (dark ? const Color(0xFF1E293B) : categoryColor.withValues(alpha: 0.08)),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Transform.translate(
-                                  offset: Offset(_hov ? 2.0 : 0.0, 0.0),
-                                  child: Icon(
-                                    Icons.arrow_forward_rounded,
-                                    color: _hov ? Colors.white : categoryColor,
-                                    size: 13,
+                      // Content Body
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          tiny ? 16 : 20,
+                          tiny ? 14 : 18,
+                          tiny ? 16 : 18,
+                          tiny ? 14 : 16,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            // ── Top Row: Floating Squircle Badge + Tags + Action Arrow Button ──
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Floating Squircle Micro-Badge with inner bevel & soft drop shadow
+                                AnimatedRotation(
+                                  turns: _hov ? 0.015 : 0,
+                                  duration: const Duration(milliseconds: 250),
+                                  curve: Curves.easeOutBack,
+                                  child: Container(
+                                    padding: EdgeInsets.all(tiny ? 9 : 11),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: [
+                                          categoryColor,
+                                          categoryColor.withValues(alpha: 0.82),
+                                        ],
+                                      ),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.35),
+                                        width: 1.0,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: categoryColor.withValues(alpha: _hov ? 0.45 : 0.30),
+                                          blurRadius: _hov ? 12 : 8,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                        BoxShadow(
+                                          color: Colors.white.withValues(alpha: 0.25),
+                                          blurRadius: 1,
+                                          offset: const Offset(-1, -1),
+                                        ),
+                                      ],
+                                    ),
+                                    child: Icon(
+                                      widget.module.icon,
+                                      color: Colors.white,
+                                      size: tiny ? 19 : 22,
+                                    ),
                                   ),
                                 ),
+
+                                const SizedBox(width: 12),
+
+                                // Category Pill Badge & Title Block
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      // Pill-shaped Category Badge
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                        decoration: BoxDecoration(
+                                          color: categoryColor.withValues(alpha: dark ? (_hov ? 0.30 : 0.18) : (_hov ? 0.20 : 0.10)),
+                                          borderRadius: BorderRadius.circular(20),
+                                          border: Border.all(
+                                            color: categoryColor.withValues(alpha: dark ? 0.35 : 0.25),
+                                            width: 0.8,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          categoryLabel,
+                                          style: TextStyle(
+                                            color: categoryColor,
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.7,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 5),
+                                      Text(
+                                        widget.module.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color: dark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                          fontSize: tiny ? 14.0 : 15.5,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.2,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                const SizedBox(width: 8),
+
+                                // Action Button: Crisp circular pill button with directional arrow (→) & glass hover glow
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 220),
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: _hov
+                                        ? categoryColor
+                                        : (dark
+                                            ? Colors.white.withValues(alpha: 0.08)
+                                            : categoryColor.withValues(alpha: 0.10)),
+                                    border: Border.all(
+                                      color: _hov
+                                          ? Colors.transparent
+                                          : (dark
+                                              ? Colors.white.withValues(alpha: 0.20)
+                                              : categoryColor.withValues(alpha: 0.22)),
+                                      width: 1.0,
+                                    ),
+                                    boxShadow: _hov
+                                        ? [
+                                            BoxShadow(
+                                              color: categoryColor.withValues(alpha: 0.45),
+                                              blurRadius: 10,
+                                              offset: const Offset(0, 3),
+                                            )
+                                          ]
+                                        : [],
+                                  ),
+                                  child: Center(
+                                    child: AnimatedSlide(
+                                      duration: const Duration(milliseconds: 200),
+                                      offset: Offset(_hov ? 0.1 : 0.0, 0.0),
+                                      child: Icon(
+                                        Icons.arrow_forward_rounded,
+                                        color: _hov ? Colors.white : categoryColor,
+                                        size: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 10),
+
+                            // Muted secondary descriptive text
+                            Text(
+                              widget.module.description,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: dark
+                                    ? (_hov ? const Color(0xFFCBD5E1) : const Color(0xFF94A3B8))
+                                    : (_hov ? const Color(0xFF475569) : const Color(0xFF64748B)),
+                                fontSize: tiny ? 11.0 : 12.0,
+                                fontWeight: FontWeight.w400,
+                                height: 1.35,
                               ),
                             ),
                           ],
                         ),
-
-                        const SizedBox(height: 8),
-
-                        // Description
-                        Text(
-                          widget.module.description,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: dark 
-                                ? (_hov ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280))
-                                : (_hov ? t.textSecondary : t.textTertiary),
-                            fontSize: tiny ? 10.5 : 11.5,
-                            fontWeight: FontWeight.w400,
-                            height: 1.3,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
           ),

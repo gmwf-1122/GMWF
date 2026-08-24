@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import '../../services/offline_auth_service.dart';
 
 class DispensaryUserSettingsDialog {
   static Future<void> show(
@@ -244,6 +245,7 @@ class DispensaryUserSettingsDialog {
                                             );
                                             await user.reauthenticateWithCredential(cred);
                                             await user.updatePassword(newPass);
+                                            await OfflineAuthService.updateCachedPassword(newPass, usernameOrEmail: user.email!);
                                           }
                                         }
 

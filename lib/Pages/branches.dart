@@ -1,24 +1,21 @@
 // lib/pages/branches.dart
 
 import 'dart:async';
-import 'dart:io' as io;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import '../widgets/dashboard_widgets.dart';
-import '../services/serials_service.dart';
 import '../services/local_storage_service.dart';
 import '../providers/branches_providers.dart';
 
+import '../services/camp_session_service.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import 'dispensary/dispensar/inventory.dart';
 import 'office/finance_page.dart';
 import 'branches_register.dart';
 import 'dispensary/patient_detail_screen.dart';
-import 'admin/branch_facility_editor.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -44,6 +41,23 @@ DateTime _parseDispensedAt(dynamic raw, String dateKeyFallback) {
   catch (_) { return DateTime.now(); }
 }
 
+String _resolvePatientCampLabel(Map<String, dynamic> p, String branchId) {
+  if (!CampSessionService.hasCampsForBranch(branchId)) return '';
+  final cId = (p['dispensaryId'] ?? p['campId'] ?? p['subDispensaryId'])?.toString().trim();
+  if (cId != null && cId.isNotEmpty && cId != 'all') {
+    return CampSessionService.getCampLabel(cId);
+  }
+  final serial = (p['serial'] ?? p['id'] ?? '').toString();
+  final parts = serial.split('-');
+  if (parts.length > 2) {
+    final tag = parts[1].toUpperCase();
+    if (tag == 'SADD' || tag == 'SAD' || tag == 'SADDAR' || tag == 'KAP' || tag == 'KAPAYYA') return 'Saddar Dispensary';
+    if (tag == 'HC' || tag == 'HAJI' || tag == 'HAJICAMP') return 'Haji Camp Dispensary';
+    return tag;
+  }
+  return '';
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PatientSummaryCard
 // ─────────────────────────────────────────────────────────────────────────────
@@ -52,7 +66,9 @@ enum SummaryCardVariant { tokens, prescriptions, dispensary }
 
 class PatientSummaryCard extends StatelessWidget {
   final String title;
-  final Stream<Map<String, int>> dataStream;
+  final Stream<Map<String, int>>? dataStream;
+  final Map<String, int>? data;
+  final Map<String, int>? initialData;
   final IconData titleIcon;
   final SummaryCardVariant variant;
   final bool showRevenue;
@@ -63,7 +79,9 @@ class PatientSummaryCard extends StatelessWidget {
   const PatientSummaryCard({
     super.key,
     required this.title,
-    required this.dataStream,
+    this.dataStream,
+    this.data,
+    this.initialData,
     required this.titleIcon,
     required this.variant,
     this.showRevenue = false,
@@ -91,94 +109,128 @@ class PatientSummaryCard extends StatelessWidget {
     final t    = RoleThemeScope.dataOf(context);
     final fill = _fillColor(t);
 
+    if (data != null) {
+      return _buildContent(context, data!, fill, t);
+    }
+
+    if (dataStream == null) {
+      final d = initialData ?? const {};
+      if (d.isEmpty) {
+        return _emptyShell(fill, t);
+      }
+      return _buildContent(context, d, fill, t);
+    }
+
     return StreamBuilder<Map<String, int>>(
       stream: dataStream,
+      initialData: initialData,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _shell(
-            fill: fill, t: t,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _header(),
-              const SizedBox(height: 16),
-              const Center(
-                child: SizedBox(width: 22, height: 22,
-                    child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
-              ),
-              const SizedBox(height: 12),
-              const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
-            ]),
-          );
+        final d = snapshot.data ?? initialData;
+
+        if (d == null || d.isEmpty) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return _shell(
+              fill: fill, t: t,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _header(),
+                const SizedBox(height: 16),
+                const Center(
+                  child: SizedBox(width: 22, height: 22,
+                      child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
+                ),
+                const SizedBox(height: 12),
+                const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
+              ]),
+            );
+          }
+
+          return _emptyShell(fill, t);
         }
 
-        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.isEmpty) {
-          return _shell(
-            fill: fill, t: t,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _header(),
-              const SizedBox(height: 12),
-              const Text("No data", style: TextStyle(color: Colors.white54, fontSize: 13)),
-              const SizedBox(height: 12),
-              const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
-            ]),
-          );
-        }
+        return _buildContent(context, d, fill, t);
+      },
+    );
+  }
 
-        final d       = snapshot.data!;
-        final revenue = d['revenue'] ?? 0;
-        final minis   = <Widget>[];
-        for (final key in valueLabels.keys.where((k) => k.startsWith('v'))) {
-          minis.add(_mini(
-            valueLabels[key]!, 
-            d[key] ?? 0, 
-            valueIcons[key] ?? Icons.help_outline,
-            subValue: d['${key}_sub'],
-          ));
-        }
-        minis.add(_mini(
-          valueLabels['total'] ?? "Total", 
-          d['total'] ?? 0, 
-          valueIcons['total'] ?? Icons.people,
-          subValue: showRevenue ? revenue : null,
-        ));
+  Widget _emptyShell(Color fill, RoleThemeData t) {
+    return _shell(
+      fill: fill, t: t,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _header(),
+        const SizedBox(height: 12),
+        const Text("No data", style: TextStyle(color: Colors.white54, fontSize: 13)),
+        const SizedBox(height: 12),
+        const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
+      ]),
+    );
+  }
 
-        return _shell(
-          fill: fill, t: t,
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _header(),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: minis,
-            ),
-            if (showRevenue && revenue > 0) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                height: 1,
-                color: Colors.white.withValues(alpha: 0.15),
-              ),
-              const SizedBox(height: 10),
+  Widget _buildContent(BuildContext context, Map<String, int> d, Color fill, RoleThemeData t) {
+    final revenue = d['revenue'] ?? 0;
+    final minis   = <Widget>[];
+    for (final key in valueLabels.keys.where((k) => k.startsWith('v'))) {
+      minis.add(_mini(
+        valueLabels[key]!, 
+        d[key] ?? 0, 
+        valueIcons[key] ?? Icons.help_outline,
+        subValue: d['${key}_sub'],
+      ));
+    }
+    minis.add(_mini(
+      valueLabels['total'] ?? "Total", 
+      d['total'] ?? 0, 
+      valueIcons['total'] ?? Icons.people,
+      subValue: showRevenue ? revenue : null,
+    ));
+
+    return _shell(
+      fill: fill, t: t,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _header(),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: minis,
+        ),
+        if (showRevenue && revenue > 0) ...[
+          const SizedBox(height: 14),
+          Container(
+            width: double.infinity,
+            height: 1,
+            color: Colors.white.withValues(alpha: 0.15),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.payments_rounded, size: 13, color: Colors.white60),
-                    const SizedBox(width: 6),
-                    Text(isFiltered ? "Total Revenue" : "Today's Revenue",
-                        style: const TextStyle(fontSize: 11, color: Colors.white60, fontWeight: FontWeight.w600)),
-                  ]),
+                  const Icon(Icons.payments_rounded, color: Colors.white70, size: 14),
+                  const SizedBox(width: 6),
                   Text(
-                    "PKR ${NumberFormat('#,##0').format(revenue)}",
+                    isFiltered ? "Filtered Revenue" : "Today's Revenue",
                     style: const TextStyle(
-                        fontSize: 14, fontWeight: FontWeight.w800, color: Colors.white),
+                      color: Colors.white70, 
+                      fontSize: 11, 
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ),
+              Text(
+                "PKR ${NumberFormat('#,###').format(revenue)}",
+                style: const TextStyle(
+                  color: Colors.white, 
+                  fontSize: 13, 
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
+                ),
+              ),
             ],
-          ]),
-        );
-      },
+          ),
+        ],
+      ]),
     );
   }
 
@@ -318,42 +370,34 @@ class _BranchesState extends ConsumerState<Branches>
     return DateTime(now.year, now.month, now.day + 1);
   }
 
-  // ── Data fetchers ─────────────────────────────────────────────────────────
-
-  /// Tokens summary — revenue = base price × daysOfMedicine per token.
-  /// Zakat: PKR 20/day, Non-zakat: PKR 100/day, GMWF: PKR 0.
-  Stream<Map<String, int>> _tokensStream(String branchId) {
-    return ref.watch(serialsSummaryProvider(branchId).stream);
-  }
-
-  DashboardFilter _resolveFilter() {
-    final range = ref.read(branchDateRangeProvider);
-    if (range.start == null) {
-      return const DashboardFilter(timeRange: TimeRange.today);
-    }
-    return DashboardFilter(
-      timeRange: TimeRange.custom,
-      customRange: DateTimeRange(
-        start: range.start!,
-        end: range.end ?? range.start!,
-      ),
-    );
-  }
-
-  Stream<Map<String, int>> _prescriptionsStream(String branchId) {
-    return ref.watch(serialsSummaryProvider(branchId).stream).map((d) => {
-      'v1': d['presc_waiting'] ?? 0,
-      'v2': d['presc_prescribed'] ?? 0,
-      'total': d['total'] ?? 0,
-    });
-  }
-
-  Stream<Map<String, int>> _dispensaryCountStream(String branchId) {
-    return ref.watch(serialsSummaryProvider(branchId).stream).map((d) => {
-      'v1': d['disp_pending'] ?? 0,
-      'v2': d['disp_dispensed'] ?? 0,
-      'total': (d['disp_pending'] ?? 0) + (d['disp_dispensed'] ?? 0),
-    });
+  Map<String, int>? _initialSummary(String branchId) {
+    try {
+      if (Hive.isBoxOpen('branch_data_cache')) {
+        final box = Hive.box('branch_data_cache');
+        final normBranchId = branchId.toLowerCase().trim();
+        final subFilter = ref.read(branchSubDispensaryFilterProvider);
+        final shiftFilter = ref.read(branchShiftFilterProvider);
+        final subKey = (subFilter != null && subFilter.isNotEmpty && subFilter != 'all') ? subFilter.toLowerCase().trim() : 'all';
+        final shiftKey = (shiftFilter != null && shiftFilter.isNotEmpty && shiftFilter != 'all') ? shiftFilter.toLowerCase().trim() : 'all';
+        final days = _dateStrings(effectiveStart, effectiveEnd);
+        final merged = <String, int>{};
+        bool hasData = false;
+        for (final ds in days) {
+          final cacheKey = 'v1|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
+          final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v1|$normBranchId|$subKey|$ds|serials_summary') : null) ?? (shiftKey == 'all' && subKey == 'all' ? box.get('v1|$normBranchId|$ds|serials_summary') : null);
+          if (cached is Map) {
+            hasData = true;
+            cached.forEach((key, val) {
+              if (val is num) {
+                merged[key.toString()] = (merged[key.toString()] ?? 0) + val.toInt();
+              }
+            });
+          }
+        }
+        if (hasData) return merged;
+      }
+    } catch (_) {}
+    return null;
   }
 
 
@@ -1304,6 +1348,388 @@ class _BranchesState extends ConsumerState<Branches>
     );
   }
 
+  Widget _shiftFilter(RoleThemeData t) {
+    final currentShift = ref.watch(branchShiftFilterProvider);
+    final items = [
+      {'label': 'All Shifts', 'value': null, 'icon': Icons.access_time_filled_rounded},
+      {'label': 'Day Shift', 'value': 'day', 'icon': Icons.wb_sunny_rounded},
+      {'label': 'Night Shift', 'value': 'night', 'icon': Icons.nightlight_round},
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: items.map((item) {
+          final val = item['value'] as String?;
+          final label = item['label'] as String;
+          final icon = item['icon'] as IconData;
+          final selected = currentShift == val;
+          return Padding(
+            padding: const EdgeInsets.only(right: 6.0),
+            child: GestureDetector(
+              onTap: () => ref.read(branchShiftFilterProvider.notifier).state = val,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected ? (val == 'night' ? const Color(0xFF6366F1).withValues(alpha: 0.2) : (val == 'day' ? const Color(0xFFF59E0B).withValues(alpha: 0.2) : t.accent.withValues(alpha: 0.2))) : t.bgCardAlt,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.bgRule,
+                    width: selected ? 1.5 : 1.0,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      icon,
+                      size: 14,
+                      color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.textSecondary,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _facilityShiftBreakdownCard(RoleThemeData t, String branchId, bool isMobile) {
+    final isKarachi = branchId.toLowerCase().trim() == 'karachi';
+    if (!isKarachi) return const SizedBox.shrink();
+
+    final breakdownAsync = ref.watch(facilityShiftBreakdownProvider(branchId));
+    final activeSub = ref.watch(branchSubDispensaryFilterProvider);
+    final activeShift = ref.watch(branchShiftFilterProvider);
+
+    return breakdownAsync.when(
+      data: (matrix) {
+        final saddar = matrix['saddar'] ?? {};
+        final haji = matrix['haji_camp'] ?? {};
+        final all = matrix['all'] ?? {};
+
+        final saddarMorning = saddar['morning'] ?? 0;
+        final saddarEvening = saddar['evening'] ?? 0;
+        final saddarNight = saddar['night'] ?? 0;
+        final saddarTotal = saddar['total'] ?? (saddarMorning + saddarEvening + saddarNight);
+
+        final hajiMorning = haji['morning'] ?? 0;
+        final hajiEvening = haji['evening'] ?? 0;
+        final hajiNight = haji['night'] ?? 0;
+        final hajiTotal = haji['total'] ?? (hajiMorning + hajiEvening + hajiNight);
+
+        final allMorning = all['morning'] ?? 0;
+        final allEvening = all['evening'] ?? 0;
+        final allNight = all['night'] ?? 0;
+        final allTotal = all['total'] ?? (allMorning + allEvening + allNight);
+
+        return Container(
+          margin: const EdgeInsets.only(top: 14),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: t.bgCard,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: t.bgRule),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: t.accent.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(Icons.grid_view_rounded, size: 16, color: t.accent),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Facility & Shift Breakdown',
+                        style: TextStyle(
+                          fontSize: isMobile ? 13 : 15,
+                          fontWeight: FontWeight.w800,
+                          color: t.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (activeSub != null || activeShift != null)
+                    TextButton.icon(
+                      onPressed: () {
+                        ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
+                        ref.read(branchShiftFilterProvider.notifier).state = null;
+                      },
+                      icon: const Icon(Icons.clear_all_rounded, size: 14),
+                      label: const Text('Reset Breakdown Filter', style: TextStyle(fontSize: 11)),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: t.accent,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              LayoutBuilder(builder: (context, boxConstraints) {
+                return Table(
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  columnWidths: const {
+                    0: FlexColumnWidth(2.0),
+                    1: FlexColumnWidth(1.3),
+                    2: FlexColumnWidth(1.3),
+                    3: FlexColumnWidth(1.3),
+                    4: FlexColumnWidth(1.3),
+                  },
+                  children: [
+                    TableRow(
+                      decoration: BoxDecoration(
+                        border: Border(bottom: BorderSide(color: t.bgRule, width: 1.5)),
+                      ),
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text('Facility', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            const Icon(Icons.wb_sunny_rounded, size: 12, color: Color(0xFFF59E0B)),
+                            const SizedBox(width: 4),
+                            Text('Morning', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                          ]),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            const Icon(Icons.wb_twilight_rounded, size: 12, color: Color(0xFFFB923C)),
+                            const SizedBox(width: 4),
+                            Text('Evening', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                          ]),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                            const Icon(Icons.nightlight_round, size: 12, color: Color(0xFF6366F1)),
+                            const SizedBox(width: 4),
+                            Text('Night', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                          ]),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text('Total', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                        ),
+                      ],
+                    ),
+                    _matrixRow(
+                      t,
+                      label: '🏥 Saddar Dispensary',
+                      morningCount: saddarMorning,
+                      eveningCount: saddarEvening,
+                      nightCount: saddarNight,
+                      totalCount: saddarTotal,
+                      subId: 'saddar',
+                      activeSub: activeSub,
+                      activeShift: activeShift,
+                    ),
+                    _matrixRow(
+                      t,
+                      label: '🏥 Haji Camp Dispensary',
+                      morningCount: hajiMorning,
+                      eveningCount: hajiEvening,
+                      nightCount: hajiNight,
+                      totalCount: hajiTotal,
+                      subId: 'haji_camp',
+                      activeSub: activeSub,
+                      activeShift: activeShift,
+                    ),
+                    _matrixRow(
+                      t,
+                      label: '🌟 Collective Karachi',
+                      morningCount: allMorning,
+                      eveningCount: allEvening,
+                      nightCount: allNight,
+                      totalCount: allTotal,
+                      subId: null,
+                      activeSub: activeSub,
+                      activeShift: activeShift,
+                      isTotalRow: true,
+                    ),
+                  ],
+                );
+              }),
+            ],
+          ),
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  TableRow _matrixRow(
+    RoleThemeData t, {
+    required String label,
+    required int morningCount,
+    required int eveningCount,
+    required int nightCount,
+    required int totalCount,
+    required String? subId,
+    required String? activeSub,
+    required String? activeShift,
+    bool isTotalRow = false,
+  }) {
+    final isSubSelected = activeSub == subId;
+    final isMorningSelected = isSubSelected && activeShift == 'morning';
+    final isEveningSelected = isSubSelected && activeShift == 'evening';
+    final isNightSelected = isSubSelected && activeShift == 'night';
+    final isTotalSelected = isSubSelected && activeShift == null;
+
+    return TableRow(
+      decoration: BoxDecoration(
+        color: isTotalRow ? t.bgCardAlt.withValues(alpha: 0.5) : Colors.transparent,
+        border: Border(bottom: BorderSide(color: t.bgRule.withValues(alpha: 0.5))),
+      ),
+      children: [
+        InkWell(
+          onTap: () {
+            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
+            ref.read(branchShiftFilterProvider.notifier).state = null;
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isTotalRow || isSubSelected ? FontWeight.bold : FontWeight.w600,
+                color: isSubSelected ? t.accent : t.textPrimary,
+              ),
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () {
+            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
+            ref.read(branchShiftFilterProvider.notifier).state = 'morning';
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isMorningSelected ? const Color(0xFFF59E0B).withValues(alpha: 0.2) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: isMorningSelected ? Border.all(color: const Color(0xFFF59E0B), width: 1.2) : null,
+            ),
+            child: Text(
+              '$morningCount',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isMorningSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
+                color: isMorningSelected ? const Color(0xFFF59E0B) : (morningCount > 0 ? t.textPrimary : t.textTertiary),
+              ),
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () {
+            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
+            ref.read(branchShiftFilterProvider.notifier).state = 'evening';
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isEveningSelected ? const Color(0xFFFB923C).withValues(alpha: 0.2) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: isEveningSelected ? Border.all(color: const Color(0xFFFB923C), width: 1.2) : null,
+            ),
+            child: Text(
+              '$eveningCount',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isEveningSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
+                color: isEveningSelected ? const Color(0xFFFB923C) : (eveningCount > 0 ? t.textPrimary : t.textTertiary),
+              ),
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () {
+            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
+            ref.read(branchShiftFilterProvider.notifier).state = 'night';
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isNightSelected ? const Color(0xFF6366F1).withValues(alpha: 0.2) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: isNightSelected ? Border.all(color: const Color(0xFF6366F1), width: 1.2) : null,
+            ),
+            child: Text(
+              '$nightCount',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isNightSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
+                color: isNightSelected ? const Color(0xFF6366F1) : (nightCount > 0 ? t.textPrimary : t.textTertiary),
+              ),
+            ),
+          ),
+        ),
+        InkWell(
+          onTap: () {
+            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
+            ref.read(branchShiftFilterProvider.notifier).state = null;
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: isTotalSelected ? t.accent.withValues(alpha: 0.15) : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: isTotalSelected ? Border.all(color: t.accent, width: 1.2) : null,
+            ),
+            child: Text(
+              '$totalCount',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: isTotalSelected ? t.accent : (isTotalRow ? t.accent : t.textPrimary),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _filterChip(RoleThemeData t, String label, String? type) {
     final currentFilter = ref.watch(branchTypeFilterProvider);
     final selected = currentFilter == type;
@@ -1517,65 +1943,6 @@ class _BranchesState extends ConsumerState<Branches>
   Widget _buildBranchDetails(String branchName, String originalBranchId) {
     final branchId = originalBranchId.toLowerCase().trim();
     
-    () async {
-      try {
-        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
-        final buffer = StringBuffer();
-        buffer.writeln('=== DIAGNOSTICS FOR BRANCHES ===');
-        buffer.writeln('Selected branchId: $branchId');
-        buffer.writeln('Original branchId: $originalBranchId');
-        buffer.writeln('All Firestore Branch IDs: ${branchesSnap.docs.map((d) => d.id).toList()}');
-        
-        print('=== DIAGNOSTICS FOR BRANCHES ===');
-        print('Selected branchId: $branchId');
-        print('Original branchId: $originalBranchId');
-        print('All Firestore Branch IDs: ${branchesSnap.docs.map((d) => d.id).toList()}');
-
-        final days = ['010726', '020726', '030726', '040726', '050726', '060726', '070726'];
-        for (final d in days) {
-          final sL = await FirebaseFirestore.instance.collection('branches/sialkot/dispensary/$d/$d').get();
-          final sU = await FirebaseFirestore.instance.collection('branches/Sialkot/dispensary/$d/$d').get();
-          final sSkt = await FirebaseFirestore.instance.collection('branches/skt/dispensary/$d/$d').get();
-          final sSktU = await FirebaseFirestore.instance.collection('branches/SKT/dispensary/$d/$d').get();
-          
-          buffer.writeln('Date $d: Lowercase = ${sL.docs.length}, Uppercase = ${sU.docs.length}, skt = ${sSkt.docs.length}, SKT = ${sSktU.docs.length}');
-          print('Date $d: Lowercase = ${sL.docs.length}, Uppercase = ${sU.docs.length}, skt = ${sSkt.docs.length}, SKT = ${sSktU.docs.length}');
-          
-          final cached = LocalStorageService.getBranchDayCache('sialkot', d, 'dispensary');
-          buffer.writeln('  Cache status: ${cached != null ? "${cached.length} items" : "NULL"}');
-          print('  Cache status: ${cached != null ? "${cached.length} items" : "NULL"}');
-          
-          if (cached != null && cached.isEmpty) {
-            final box = Hive.box(LocalStorageService.branchCacheBox);
-            final key = LocalStorageService.branchCacheKey('sialkot', d, 'dispensary');
-            await box.delete(key);
-            print('DELETED empty cache for sialkot $d to force reload');
-            buffer.writeln('  -> Deleted empty cache key to force reload');
-          }
-
-          if (sL.docs.isNotEmpty) {
-            buffer.writeln('  Lower sample data: ${sL.docs.first.data()}');
-          }
-          if (sU.docs.isNotEmpty) {
-            buffer.writeln('  Upper sample data: ${sU.docs.first.data()}');
-          }
-          if (sSkt.docs.isNotEmpty) {
-            buffer.writeln('  skt sample data: ${sSkt.docs.first.data()}');
-          }
-          if (sSktU.docs.isNotEmpty) {
-            buffer.writeln('  SKT sample data: ${sSktU.docs.first.data()}');
-          }
-        }
-
-        final file = io.File('e:/GMWF/gmwf/debug_branches.txt');
-        await file.writeAsString(buffer.toString());
-      } catch (e, stack) {
-        print('Error running diagnostics: $e');
-        final file = io.File('e:/GMWF/gmwf/debug_branches.txt');
-        await file.writeAsString('Error running diagnostics: $e\n$stack');
-      }
-    }();
-
     final dateKey = '$branchId|${effectiveStart.toIso8601String()}|${effectiveEnd.toIso8601String()}';
     if (!_loadedKeys.contains(dateKey)) {
       _loadedKeys.removeWhere((k) => k.startsWith('$branchId|'));
@@ -1586,7 +1953,6 @@ class _BranchesState extends ConsumerState<Branches>
             .load(effectiveStart, effectiveEnd);
       });
     }
-
 
     final t = RoleThemeScope.dataOf(context);
 
@@ -1605,9 +1971,20 @@ class _BranchesState extends ConsumerState<Branches>
       final double horizontalPadding = isMobile ? 28.0 : 56.0;
       final double availableWidth = width - horizontalPadding;
 
-      final tokStream  = _tokensStream(branchId);
-      final presStream = _prescriptionsStream(branchId);
-      final dispStream = _dispensaryCountStream(branchId);
+      final summaryAsync = ref.watch(serialsSummaryProvider(branchId));
+      final initSumm = _initialSummary(branchId);
+      final rawData = summaryAsync.valueOrNull ?? initSumm;
+      final tokData = rawData;
+      final presData = rawData != null ? {
+        'v1': rawData['presc_waiting'] ?? 0,
+        'v2': rawData['presc_prescribed'] ?? 0,
+        'total': rawData['total'] ?? 0,
+      } : null;
+      final dispData = rawData != null ? {
+        'v1': rawData['disp_pending'] ?? 0,
+        'v2': rawData['disp_dispensed'] ?? 0,
+        'total': (rawData['disp_pending'] ?? 0) + (rawData['disp_dispensed'] ?? 0),
+      } : null;
 
       return Container(
         color: t.bg,
@@ -1717,7 +2094,9 @@ class _BranchesState extends ConsumerState<Branches>
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       Expanded(child: PatientSummaryCard(
-                        title: "Tokens", dataStream: tokStream,
+                        title: "Tokens",
+                        data: tokData,
+                        initialData: initSumm,
                         variant: SummaryCardVariant.tokens,
                         titleIcon: Icons.people_alt_rounded, showRevenue: true,
                         valueIcons: {
@@ -1729,7 +2108,9 @@ class _BranchesState extends ConsumerState<Branches>
                       )),
                       const SizedBox(width: 14),
                       Expanded(child: PatientSummaryCard(
-                        title: "Prescriptions", dataStream: presStream,
+                        title: "Prescriptions",
+                        data: presData,
+                        initialData: presData,
                         variant: SummaryCardVariant.prescriptions,
                         titleIcon: Icons.medical_information_rounded,
                         valueIcons: {
@@ -1741,7 +2122,8 @@ class _BranchesState extends ConsumerState<Branches>
                       const SizedBox(width: 14),
                       Expanded(child: PatientSummaryCard(
                         title: "Dispensary",
-                        dataStream: dispStream,
+                        data: dispData,
+                        initialData: dispData,
                         variant: SummaryCardVariant.dispensary,
                         titleIcon: Icons.local_pharmacy_rounded,
                         valueIcons: {
@@ -1760,7 +2142,9 @@ class _BranchesState extends ConsumerState<Branches>
               else
                 Column(children: [
                 PatientSummaryCard(
-                  title: "Tokens", dataStream: tokStream,
+                  title: "Tokens",
+                  data: tokData,
+                  initialData: initSumm,
                   variant: SummaryCardVariant.tokens,
                   titleIcon: Icons.people_alt_rounded, showRevenue: true,
                   valueIcons: {
@@ -1772,7 +2156,9 @@ class _BranchesState extends ConsumerState<Branches>
                 ),
                 const SizedBox(height: 12),
                 PatientSummaryCard(
-                  title: "Prescriptions", dataStream: presStream,
+                  title: "Prescriptions",
+                  data: presData,
+                  initialData: presData,
                   variant: SummaryCardVariant.prescriptions,
                   titleIcon: Icons.medical_information_rounded,
                   valueIcons: {
@@ -1784,7 +2170,8 @@ class _BranchesState extends ConsumerState<Branches>
                 const SizedBox(height: 12),
                 PatientSummaryCard(
                   title: "Dispensary",
-                  dataStream: dispStream,
+                  data: dispData,
+                  initialData: dispData,
                   variant: SummaryCardVariant.dispensary,
                   titleIcon: Icons.local_pharmacy_rounded,
                   valueIcons: {
@@ -1794,6 +2181,8 @@ class _BranchesState extends ConsumerState<Branches>
                   valueLabels: {'v1': 'Pending', 'v2': 'Dispensed'},
                 ),
               ]),
+
+              _facilityShiftBreakdownCard(t, branchId, isMobile),
 
               const SizedBox(height: 28),
 
@@ -1882,6 +2271,7 @@ class _BranchesState extends ConsumerState<Branches>
                           final time = p['createdAt'] != null
                               ? DateFormat('hh:mm a').format(DateTime.parse(p['createdAt']))
                               : 'N/A';
+                          final campLabel = _resolvePatientCampLabel(p, branchId);
                           Color typeColor = type == 'zakat' ? t.zakat : (type == 'non-zakat' ? t.nonZakat : t.gmwf);
 
                           return SizedBox(
@@ -1892,22 +2282,58 @@ class _BranchesState extends ConsumerState<Branches>
                                 color: t.bgCard,
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(color: t.bgRule),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.04),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Row(children: [
-                                    Icon(p['guardianCnic'] != null ? Icons.child_care_rounded : Icons.person_rounded, color: typeColor, size: 20),
-                                    const SizedBox(width: 8),
-                                    Expanded(child: Text(name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary))),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                      decoration: BoxDecoration(color: typeColor.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
-                                      child: Text(type.toUpperCase(), style: TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: typeColor)),
-                                    ),
-                                  ]),
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: typeColor.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Text(
+                                          type.toUpperCase(),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            color: typeColor,
+                                          ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Text(
+                                        serial,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: t.textPrimary,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                   const SizedBox(height: 10),
-                                  _infoRow(context, Icons.tag_rounded, 'Serial', serial),
+                                  Text(
+                                    name,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: t.textPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (campLabel.isNotEmpty) ...[
+                                    _infoRow(context, Icons.location_on_rounded, 'Camp', campLabel),
+                                  ],
                                   _infoRow(context, Icons.badge_rounded, p['guardianCnic'] != null ? 'Guardian' : 'CNIC', cnic),
                                   _infoRow(context, Icons.access_time_rounded, 'Check-in Time', time),
                                 ],
@@ -1930,6 +2356,8 @@ class _BranchesState extends ConsumerState<Branches>
               _typeFilter(t),
               const SizedBox(height: 10),
               _subDispensaryFilter(t, branchId),
+              const SizedBox(height: 10),
+              _shiftFilter(t),
               const SizedBox(height: 16),
 
               Consumer(builder: (context, ref, _) {
@@ -1938,30 +2366,73 @@ class _BranchesState extends ConsumerState<Branches>
                 final syncing  = dispState.isSyncing;
                 final error    = dispState.error;
                 
-                () async {
-                  try {
-                    final file = io.File('e:/GMWF/gmwf/debug_branches.txt');
-                    await file.writeAsString(
-                      '\n=== UI BUILD LOG ===\nbranchId: $branchId\nallList.length: ${allList.length}\nsyncing: $syncing\nerror: $error\n',
-                      mode: io.FileMode.append,
-                    );
-                  } catch (_) {}
-                }();
-                {
-                  {
-                    {
-                          final typeFilter  = ref.watch(branchTypeFilterProvider);
-                          final subFilter   = ref.watch(branchSubDispensaryFilterProvider);
-                  final multiDay2  = ref.watch(branchMultiDayFilterProvider);
-                  final multiVisit2 = ref.watch(branchMultiVisitFilterProvider);
-                  final filtered = allList.where((p) {
+                final typeFilter  = ref.watch(branchTypeFilterProvider);
+                final subFilter   = ref.watch(branchSubDispensaryFilterProvider);
+                final shiftFilter = ref.watch(branchShiftFilterProvider);
+                final multiDay2  = ref.watch(branchMultiDayFilterProvider);
+                final multiVisit2 = ref.watch(branchMultiVisitFilterProvider);
+                final filtered = allList.where((p) {
                             if (typeFilter != null &&
                                 p['type']?.toString().toLowerCase() != typeFilter) {
                               return false;
                             }
                             if (subFilter != null && subFilter.isNotEmpty) {
-                              final itemDisp = (p['dispensaryId'] ?? '').toString().trim().toLowerCase();
-                              if (itemDisp.isNotEmpty && itemDisp != subFilter) return false;
+                              final normSub = subFilter.toLowerCase().trim();
+                              final itemDisp = (p['dispensaryId'] ?? p['campId'] ?? p['subDispensaryId'] ?? '').toString().trim().toLowerCase();
+                              final serial = (p['serial'] ?? p['id'] ?? '').toString().toLowerCase();
+
+                              bool matches = false;
+                              if (itemDisp == normSub) {
+                                matches = true;
+                              } else if ((normSub == 'saddar' || normSub == 'kapayya' || normSub == 'kapaya') &&
+                                         (itemDisp == 'saddar' || itemDisp == 'kapayya' || itemDisp == 'kapaya' || serial.contains('-sadd-') || serial.contains('-sad-') || serial.contains('-kap-'))) {
+                                matches = true;
+                              } else if ((normSub == 'haji_camp' || normSub == 'haji' || normSub == 'hajicamp') &&
+                                         (itemDisp == 'haji_camp' || itemDisp == 'haji' || itemDisp == 'hajicamp' || serial.contains('-hc-') || serial.contains('-haji-'))) {
+                                matches = true;
+                              }
+                              if (!matches) return false;
+                            }
+                            if (shiftFilter != null && shiftFilter.isNotEmpty && shiftFilter != 'all') {
+                              final normShift = shiftFilter.toLowerCase().trim();
+                              final sess = (p['session'] ?? p['shift'] ?? p['campSession'] ?? '').toString().toLowerCase().trim();
+                              if (normShift == 'night') {
+                                if (sess == 'morning' || sess == 'evening' || sess == 'day') return false;
+                                if (sess != 'night') {
+                                  final dispAt = p['dispensedAt'] ?? p['createdAt'] ?? p['time'];
+                                  DateTime? dt;
+                                  if (dispAt is Timestamp) {
+                                    dt = dispAt.toDate();
+                                  } else if (dispAt is DateTime) {
+                                    dt = dispAt;
+                                  } else if (dispAt is String) {
+                                    dt = DateTime.tryParse(dispAt);
+                                  }
+                                  if (dt != null) {
+                                    final hour = dt.hour;
+                                    if (hour >= 6 && hour < 22) return false;
+                                  } else {
+                                    return false;
+                                  }
+                                }
+                              } else if (normShift == 'day') {
+                                if (sess == 'night') return false;
+                                if (sess != 'morning' && sess != 'evening' && sess != 'day') {
+                                  final dispAt = p['dispensedAt'] ?? p['createdAt'] ?? p['time'];
+                                  DateTime? dt;
+                                  if (dispAt is Timestamp) {
+                                    dt = dispAt.toDate();
+                                  } else if (dispAt is DateTime) {
+                                    dt = dispAt;
+                                  } else if (dispAt is String) {
+                                    dt = DateTime.tryParse(dispAt);
+                                  }
+                                  if (dt != null) {
+                                    final hour = dt.hour;
+                                    if (hour >= 22 || hour < 6) return false;
+                                  }
+                                }
+                              }
                             }
                             if (multiDay2) {
                               final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
@@ -2136,6 +2607,9 @@ class _BranchesState extends ConsumerState<Branches>
                                                 _infoRow(context, Icons.tag_rounded,
                                                     'Serial', p['serial'] ?? 'N/A',
                                                     copy: p['serial']?.toString()),
+                                                if (_resolvePatientCampLabel(p, branchId).isNotEmpty)
+                                                  _infoRow(context, Icons.location_on_rounded,
+                                                      'Facility', _resolvePatientCampLabel(p, branchId)),
                                                 _infoRow(context, Icons.badge_rounded,
                                                     isChild ? "Guardian" : "CNIC", p['displayCnic'] ?? 'N/A',
                                                     copy: p['displayCnic']?.toString()),
@@ -2193,17 +2667,15 @@ class _BranchesState extends ConsumerState<Branches>
                                     );
                                   }).toList(),
                                 ),
-                            ],
-                          );
-                        }
-                      }
-                    }
-              }),
-            ],
-          ),
-        ),
-      ),
-    );
+                              ],
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
     });
   }
 
@@ -2303,8 +2775,28 @@ class _BranchesState extends ConsumerState<Branches>
               .map((m) => MapEntry(m['name'] as String, m['id'] as String))
               .toList();
 
+          final activeTabBranchId = ref.watch(selectedBranchTabIdProvider) ?? widget.initialBranchId;
+          int initialIndex = 0;
+          if (activeTabBranchId != null && activeTabBranchId.isNotEmpty) {
+            final targetNorm = activeTabBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+            final foundIdx = branches.indexWhere((e) {
+              final bIdNorm = e.value.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+              final bNameNorm = e.key.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+              return bIdNorm == targetNorm || bIdNorm.contains(targetNorm) || targetNorm.contains(bIdNorm) ||
+                     bNameNorm.contains(targetNorm) || targetNorm.contains(bNameNorm);
+            });
+            if (foundIdx != -1) {
+              initialIndex = foundIdx;
+            }
+          }
+
+          final safeLength = branches.isNotEmpty ? branches.length : 1;
+          final safeInitialIndex = initialIndex.clamp(0, branches.isNotEmpty ? branches.length - 1 : 0);
+
           return DefaultTabController(
-            length: branches.length,
+            key: ValueKey('branches_tab_${safeInitialIndex}_${activeTabBranchId ?? "none"}'),
+            length: safeLength,
+            initialIndex: safeInitialIndex,
             child: Column(children: [
               if (branches.length > 1)
                 Container(

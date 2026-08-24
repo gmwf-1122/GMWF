@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
 import '../utils/cnic_parser_util.dart';
 import 'local_storage_service.dart';
 
@@ -78,7 +79,7 @@ class RamadanWelfareService {
     final normCnic = CnicParserUtil.normalizeCnic(cnic);
     final formattedCnic = CnicParserUtil.formatCnic(normCnic);
     final timestamp = DateTime.now();
-    final id = 'ram_${timestamp.millisecondsSinceEpoch}_${Random().nextInt(9999)}';
+    final id = 'ram_${const Uuid().v4()}';
     final serialNo = 'RMD-${timestamp.year}-${(_box.length + 1).toString().padLeft(5, '0')}';
 
     final data = <String, dynamic>{

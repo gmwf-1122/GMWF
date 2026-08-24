@@ -72,17 +72,34 @@ class _FinancePageState extends State<FinancePage> {
   DateTime _attendanceDate = DateTime.now();
   String _payrollMonthKey = DateFormat('yyyy-MM').format(DateTime.now());
 
+  String _getEffectiveUserBranch() {
+    if (!Hive.isBoxOpen('local_users')) {
+      final raw = widget.branchId;
+      return (raw == 'global' || raw.isEmpty) ? 'all' : raw;
+    }
+    final curUser = Hive.box('local_users').values.firstOrNull;
+    if (curUser is Map) {
+      final role = (curUser['role']?.toString() ?? '').toLowerCase().trim();
+      final isBranchScoped = role == 'branch manager' || role == 'supervisor';
+      if (isBranchScoped) {
+        final bId = (curUser['branchId']?.toString() ?? '').trim();
+        if (bId.isNotEmpty && bId != 'all' && bId != 'global') return bId;
+      }
+    }
+    final raw = widget.branchId;
+    return (raw == 'global' || raw.isEmpty) ? 'all' : raw;
+  }
+
   @override
   void initState() {
     super.initState();
-    _activeBranchId = widget.branchId;
-    _selectedIndex = widget.initialTabIndex.clamp(0, 6);
+    _activeBranchId = _getEffectiveUserBranch();
+    _selectedIndex = widget.initialTabIndex.clamp(0, 7);
     _syncBox = Hive.box(LocalStorageService.syncBox);
     _updateSyncCount();
     _syncBox.listenable().addListener(_updateSyncCount);
     FinanceLedgerStorage.initEngine();
     _loadBranches();
-
   }
 
   @override
@@ -114,8 +131,8 @@ class _FinancePageState extends State<FinancePage> {
 
   Future<void> _loadBranches() async {
     setState(() => _isLoadingBranches = true);
-    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase();
-    final isBranchManager = userRole == 'branch manager';
+    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase().trim();
+    final isBranchScoped = userRole == 'branch manager' || userRole == 'supervisor';
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
       if (!mounted) return;
@@ -124,9 +141,9 @@ class _FinancePageState extends State<FinancePage> {
           final data = d.data();
           return {'id': d.id, 'name': data['name'] as String? ?? d.id};
         }).toList();
-        if (isBranchManager) {
-          _activeBranchId = widget.branchId;
-          _branches = _branches.where((b) => b['id'] == _activeBranchId).toList();
+        if (isBranchScoped) {
+          _activeBranchId = _getEffectiveUserBranch();
+          _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
         }
         _isLoadingBranches = false;
       });
@@ -136,9 +153,9 @@ class _FinancePageState extends State<FinancePage> {
       if (!mounted) return;
       setState(() {
         _branches = box.values.map((v) => Map<String, dynamic>.from(v as Map)).toList();
-        if (isBranchManager) {
-          _activeBranchId = widget.branchId;
-          _branches = _branches.where((b) => b['id'] == _activeBranchId).toList();
+        if (isBranchScoped) {
+          _activeBranchId = _getEffectiveUserBranch();
+          _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
         }
         _isLoadingBranches = false;
       });
@@ -222,47 +239,42 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
-  // ── Desktop layout ──────────────────────────────────────────────────────────
+  // ── Desktop & Mobile Layouts (Sidebar Removed) ──────────────────────────────
   Widget _buildDesktop(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
     return Scaffold(
       backgroundColor: _kBg,
-      body: Row(children: [
-        _FinanceSidebar(
-          selectedIndex: _selectedIndex,
-          onSelect: (i) => setState(() => _selectedIndex = i),
-          canViewAudits: canViewAudits,
-          branches: _branches,
-          activeBranchId: _activeBranchId,
-          onBranchChanged: (id) { setState(() => _activeBranchId = id); _triggerDownloadForActiveBranch(); },
-          pendingSyncCount: _pendingSyncCount,
-          isDownloading: _isDownloadingData,
-          onRefresh: () => _triggerDownloadForActiveBranch(force: true),
-          onExport: () => _openExportDialog(ctx),
-          onHolidays: () => _openHolidaysManager(ctx),
-        ),
-        Expanded(
-          child: Column(children: [
-            _buildDesktopHeader(ctx, canViewAudits),
-            _buildFilterBar(userRole),
-            Expanded(child: content),
-          ]),
-        ),
+      body: Column(children: [
+        _buildHeader(ctx, canViewAudits),
+        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(),
+        _buildFilterBar(userRole),
+        Expanded(child: content),
+      ]),
+    );
+  }
+
+  Widget _buildMobile(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
+    return Scaffold(
+      backgroundColor: _kBg,
+      body: Column(children: [
+        _buildHeader(ctx, canViewAudits),
+        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(),
+        _buildFilterBar(userRole),
+        Expanded(child: content),
       ]),
     );
   }
 
   static const _sectionTitles = [
-    'Overview & Treasury', 'Employees', 'Attendance', 'Payroll',
-    'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'
+    'Treasury & Accounts', 'Employees', 'Employee Attendance', 'Payroll',
+    'Loans & Advances', 'Expenses', 'Audit Trail & Security Logs', 'Reports & Reconcile'
   ];
   static const _sectionIcons = [
-    Icons.dashboard_outlined, Icons.people_outline, Icons.today_outlined,
+    Icons.account_balance_wallet_outlined, Icons.people_outline, Icons.today_outlined,
     Icons.receipt_long_outlined, Icons.credit_card_outlined, Icons.payments_outlined,
     Icons.history_edu_outlined, Icons.account_balance_outlined
   ];
 
-
-  Widget _buildDesktopHeader(BuildContext ctx, bool canViewAudits) {
+  Widget _buildHeader(BuildContext ctx, bool canViewAudits) {
     return Container(
       height: 58,
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -271,21 +283,81 @@ class _FinancePageState extends State<FinancePage> {
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
       child: Row(children: [
-        Icon(_sectionIcons[_selectedIndex], color: _kAccent, size: 20),
+        Icon(_sectionIcons[_selectedIndex], color: _kAccent, size: 22),
         const SizedBox(width: 10),
-        Text(_sectionTitles[_selectedIndex],
-            style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3)),
+        Text(
+          _sectionTitles[_selectedIndex],
+          style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
+        ),
         const Spacer(),
         _buildSyncChip(),
-        const SizedBox(width: 4),
+        const SizedBox(width: 12),
+        IconButton(
+          tooltip: 'Force Refresh Data',
+          icon: Icon(_isDownloadingData ? Icons.sync_rounded : Icons.refresh_rounded, color: _kTextSecondary, size: 20),
+          onPressed: () => _triggerDownloadForActiveBranch(force: true),
+        ),
+        IconButton(
+          tooltip: 'Export Reports',
+          icon: const Icon(Icons.download_outlined, color: _kTextSecondary, size: 20),
+          onPressed: () => _openExportDialog(ctx),
+        ),
+        IconButton(
+          tooltip: 'Manage Holidays',
+          icon: const Icon(Icons.calendar_month_outlined, color: _kTextSecondary, size: 20),
+          onPressed: () => _openHolidaysManager(ctx),
+        ),
       ]),
     );
   }
 
+  Widget _buildCashFlowSubTabs() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      decoration: const BoxDecoration(
+        color: _kBgCard,
+        border: Border(bottom: BorderSide(color: _kBorder)),
+      ),
+      child: Row(
+        children: [
+          ChoiceChip(
+            avatar: const Icon(Icons.account_balance_wallet_rounded, size: 16),
+            label: const Text('Treasury Overview'),
+            selected: _selectedIndex == 0,
+            selectedColor: _kAccent.withValues(alpha: 0.15),
+            labelStyle: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: _selectedIndex == 0 ? _kAccent : _kTextSecondary,
+              fontSize: 12,
+            ),
+            onSelected: (_) => setState(() => _selectedIndex = 0),
+          ),
+          const SizedBox(width: 10),
+          ChoiceChip(
+            avatar: const Icon(Icons.history_edu_rounded, size: 16),
+            label: const Text('Audit Trail & Security Logs'),
+            selected: _selectedIndex == 6,
+            selectedColor: _kAccent.withValues(alpha: 0.15),
+            labelStyle: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: _selectedIndex == 6 ? _kAccent : _kTextSecondary,
+              fontSize: 12,
+            ),
+            onSelected: (_) => setState(() => _selectedIndex = 6),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFilterBar(String userRole) {
-    final bool isBranchManager = userRole == 'branch manager';
+    final cleanRole = userRole.toLowerCase().trim();
+    final bool isBranchScoped = cleanRole == 'branch manager' || cleanRole == 'supervisor';
+    final effectiveUserBranch = _getEffectiveUserBranch();
     final depts = ['all', 'Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School']
       ..addAll(FinanceLocalStorage.getCustomDepartments());
+
+    final branchName = FinanceLocalStorage.getBranchName(effectiveUserBranch);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
@@ -299,7 +371,32 @@ class _FinancePageState extends State<FinancePage> {
           const SizedBox(width: 8),
           const Text('Filters:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kTextSecondary)),
           const SizedBox(width: 16),
-          if (!isBranchManager && _branches.isNotEmpty) ...[
+          if (isBranchScoped) ...[
+            const Text('Branch', style: TextStyle(fontSize: 11, color: _kTextSecondary)),
+            const SizedBox(width: 8),
+            Container(
+              height: 30,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _kBg,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: _kBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.lock_outline_rounded, size: 12, color: _kAccent),
+                  const SizedBox(width: 6),
+                  Text(
+                    branchName.isNotEmpty ? branchName : effectiveUserBranch,
+                    style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+          ] else if (_branches.isNotEmpty) ...[
             const Text('Branch', style: TextStyle(fontSize: 11, color: _kTextSecondary)),
             const SizedBox(width: 8),
             Container(
@@ -365,7 +462,7 @@ class _FinancePageState extends State<FinancePage> {
             ),
           ),
           const Spacer(),
-          if (_activeBranchId != 'all' || _selectedDeptFilter != 'all')
+          if ((!isBranchScoped && _activeBranchId != 'all') || _selectedDeptFilter != 'all')
             TextButton.icon(
               style: TextButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -377,117 +474,13 @@ class _FinancePageState extends State<FinancePage> {
               label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               onPressed: () {
                 setState(() {
-                  _activeBranchId = 'all';
+                  _activeBranchId = isBranchScoped ? effectiveUserBranch : 'all';
                   _selectedDeptFilter = 'all';
                 });
                 _triggerDownloadForActiveBranch();
               },
             ),
         ],
-      ),
-    );
-  }
-
-
-
-  int _getMobileNavIndex(int selectedIndex) {
-    switch (selectedIndex) {
-      case 2: return 0; // Attendance
-      case 3: return 1; // Payroll
-      case 4: return 2; // Loans
-      case 1: return 3; // Employees
-      default: return 0;
-    }
-  }
-
-  int _getTabFromMobileNavIndex(int mobileNavIndex) {
-    switch (mobileNavIndex) {
-      case 0: return 2; // Attendance
-      case 1: return 3; // Payroll
-      case 2: return 4; // Loans
-      case 3: return 1; // Employees
-      default: return 2;
-    }
-  }
-
-  // ── Mobile layout ──────────────────────────────────────────────────────────
-  Widget _buildMobile(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
-    final titleText = _sectionTitles.elementAtOrNull(_selectedIndex) ?? 'Finance & HR';
-
-    return Scaffold(
-      backgroundColor: _kBg,
-      appBar: AppBar(
-        leading: Builder(
-          builder: (drawerCtx) => IconButton(
-            icon: const Icon(Icons.menu_rounded, color: _kTextSecondary),
-            onPressed: () => Scaffold.of(drawerCtx).openDrawer(),
-          ),
-        ),
-        backgroundColor: _kBgCard,
-        elevation: 0,
-        titleSpacing: 0,
-        title: Row(children: [
-          Image.asset(
-            'assets/logo/gmwf-1.webp',
-            width: 32,
-            height: 32,
-            fit: BoxFit.contain,
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: Text(titleText,
-              style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 16), overflow: TextOverflow.ellipsis)),
-          if (_branches.isNotEmpty) _buildBranchDropdown(),
-          const SizedBox(width: 8),
-        ]),
-        bottom: PreferredSize(preferredSize: const Size.fromHeight(1), child: Container(height: 1, color: _kBorder)),
-      ),
-      drawer: Drawer(
-        child: _FinanceSidebar(
-          selectedIndex: _selectedIndex,
-          onSelect: (i) {
-            Navigator.pop(ctx);
-            setState(() => _selectedIndex = i);
-          },
-          canViewAudits: canViewAudits,
-          branches: _branches,
-          activeBranchId: _activeBranchId,
-          onBranchChanged: (id) {
-            setState(() => _activeBranchId = id);
-            _triggerDownloadForActiveBranch();
-          },
-          pendingSyncCount: _pendingSyncCount,
-          isDownloading: _isDownloadingData,
-          onRefresh: () => _triggerDownloadForActiveBranch(force: true),
-          onExport: () => _openExportDialog(ctx),
-          onHolidays: () => _openHolidaysManager(ctx),
-          isMobile: true,
-        ),
-      ),
-      body: Column(
-        children: [
-          _buildFilterBar(userRole),
-          Expanded(child: content),
-        ],
-      ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(color: _kBgCard, border: Border(top: BorderSide(color: _kBorder))),
-        child: BottomNavigationBar(
-          currentIndex: _getMobileNavIndex(_selectedIndex),
-          onTap: (i) => setState(() => _selectedIndex = _getTabFromMobileNavIndex(i)),
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: _kBgCard,
-          selectedItemColor: _kAccent,
-          unselectedItemColor: _kTextTertiary,
-          selectedFontSize: 10,
-          unselectedFontSize: 10,
-          elevation: 0,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.today_outlined), activeIcon: Icon(Icons.today_rounded), label: 'Attendance'),
-            BottomNavigationBarItem(icon: Icon(Icons.receipt_long_outlined), activeIcon: Icon(Icons.receipt_long_rounded), label: 'Payroll'),
-            BottomNavigationBarItem(icon: Icon(Icons.credit_card_outlined), activeIcon: Icon(Icons.credit_card_rounded), label: 'Loans'),
-            BottomNavigationBarItem(icon: Icon(Icons.people_outline), activeIcon: Icon(Icons.people_rounded), label: 'Employees'),
-          ],
-        ),
       ),
     );
   }
@@ -609,6 +602,7 @@ class _FinancePageState extends State<FinancePage> {
           date: _attendanceDate,
           onDateChanged: (d) => setState(() => _attendanceDate = d),
           onAddEmployee: () => _openEmployeeForm(context, null),
+          onEditEmployee: (ctx, empId) => _openEmployeeForm(ctx, empId),
           departmentFilter: _selectedDeptFilter,
         );
       case 3:
@@ -1034,5 +1028,87 @@ class _FinanceSidebar extends StatelessWidget {
         Text('✓ Synced', style: TextStyle(color: _kAccent, fontSize: 10, fontWeight: FontWeight.bold)),
       ]),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Standalone Finance Module Wrappers (Without Sidebar)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class CashFlowPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  final int initialSubTab;
+  const CashFlowPage({super.key, required this.branchId, this.isAdmin = false, this.initialSubTab = 0});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: initialSubTab == 1 ? 6 : 0);
+  }
+}
+
+class EmployeesPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const EmployeesPage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 1);
+  }
+}
+
+class EmployeeAttendancePage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const EmployeeAttendancePage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 2);
+  }
+}
+
+class PayrollPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const PayrollPage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 3);
+  }
+}
+
+class LoansPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const LoansPage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 4);
+  }
+}
+
+class ExpensesPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const ExpensesPage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 5);
+  }
+}
+
+class FinanceReportsPage extends StatelessWidget {
+  final String branchId;
+  final bool isAdmin;
+  const FinanceReportsPage({super.key, required this.branchId, this.isAdmin = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return FinancePage(branchId: branchId, isAdmin: isAdmin, initialTabIndex: 7);
   }
 }

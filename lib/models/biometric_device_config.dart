@@ -4,6 +4,7 @@ class BiometricDeviceConfig {
   final String deviceId;
   final String deviceName;
   final String buildingLocation; // 'Office/Dasterkhwaan', 'Dispensary', 'Madrassa'
+  final String branchId;         // Assigned branch e.g. 'gujrat', 'sialkot', 'branch_a', 'main'
   final String ipAddress;
   final int port;
   final String serialNumber;
@@ -16,6 +17,7 @@ class BiometricDeviceConfig {
     required this.deviceId,
     required this.deviceName,
     required this.buildingLocation,
+    this.branchId = '',
     required this.ipAddress,
     this.port = 4370,
     this.serialNumber = '',
@@ -30,6 +32,7 @@ class BiometricDeviceConfig {
       deviceId: map['deviceId']?.toString() ?? '',
       deviceName: map['deviceName']?.toString() ?? 'Biometric Device',
       buildingLocation: map['buildingLocation']?.toString() ?? 'Office',
+      branchId: map['branchId']?.toString() ?? '',
       ipAddress: map['ipAddress']?.toString() ?? '192.168.1.100',
       port: int.tryParse(map['port']?.toString() ?? '') ?? 4370,
       serialNumber: map['serialNumber']?.toString() ?? '',
@@ -45,6 +48,7 @@ class BiometricDeviceConfig {
       'deviceId': deviceId,
       'deviceName': deviceName,
       'buildingLocation': buildingLocation,
+      'branchId': branchId,
       'ipAddress': ipAddress,
       'port': port,
       'serialNumber': serialNumber,
@@ -59,6 +63,7 @@ class BiometricDeviceConfig {
     String? deviceId,
     String? deviceName,
     String? buildingLocation,
+    String? branchId,
     String? ipAddress,
     int? port,
     String? serialNumber,
@@ -71,6 +76,7 @@ class BiometricDeviceConfig {
       deviceId: deviceId ?? this.deviceId,
       deviceName: deviceName ?? this.deviceName,
       buildingLocation: buildingLocation ?? this.buildingLocation,
+      branchId: branchId ?? this.branchId,
       ipAddress: ipAddress ?? this.ipAddress,
       port: port ?? this.port,
       serialNumber: serialNumber ?? this.serialNumber,

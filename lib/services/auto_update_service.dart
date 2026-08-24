@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:open_filex/open_filex.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 class UpdateInfo {
   final String latestVersion;
@@ -31,15 +32,34 @@ class UpdateInfo {
 }
 
 class AutoUpdateService {
-  /// Current installed version of the GMWF application.
-  static const String currentVersion = '1.3.5';
+  /// Default fallback version of the GMWF application if PackageInfo is unavailable.
+  static const String currentVersion = '1.4.0';
+  static const int protocolVersion = 2;
+  static const String minSupportedVersion = '1.4.0';
 
   /// Default GitHub repository configuration for auto-updates.
   static const String defaultRepoOwner = 'gmwf-1122';
   static const String defaultRepoName = 'GMWF';
 
+  static String _cachedVersion = '';
+
+  /// Dynamically retrieves current installed application version from package_info_plus.
+  static Future<String> getAppVersion() async {
+    if (_cachedVersion.isNotEmpty) return _cachedVersion;
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (info.version.isNotEmpty) {
+        _cachedVersion = info.version;
+        return _cachedVersion;
+      }
+    } catch (e) {
+      debugPrint('[AutoUpdateService] Error fetching PackageInfo: $e');
+    }
+    return currentVersion;
+  }
+
   /// Compares two semver strings (e.g. "1.2.4" vs "1.2.5").
-  /// Returns 1 if v2 > v1, -1 if v1 > v2, 0 if equal.
+  /// Returns 1 if v2 > v1 (update available), -1 if v1 > v2, 0 if equal.
   static int compareVersions(String v1, String v2) {
     try {
       final parts1 = v1.replaceAll(RegExp(r'[^\d.]'), '').split('.').map(int.parse).toList();
@@ -96,9 +116,10 @@ class AutoUpdateService {
         return null;
       }
 
+      final installedVer = await getAppVersion();
       final data = doc.data()!;
-      final latestVersion = (data['latestVersion'] ?? currentVersion).toString();
-      final minRequiredVersion = (data['minRequiredVersion'] ?? currentVersion).toString();
+      final latestVersion = (data['latestVersion'] ?? installedVer).toString();
+      final minRequiredVersion = (data['minRequiredVersion'] ?? installedVer).toString();
       final releaseNotes = (data['releaseNotes'] ?? 'Bug fixes and performance improvements.').toString();
       final forceUpdateFlag = data['forceUpdate'] as bool? ?? false;
 
@@ -118,13 +139,13 @@ class AutoUpdateService {
       String downloadUrl = rawUrl;
       final cleanTag = latestVersion.startsWith('v') ? latestVersion : 'v$latestVersion';
       if (defaultTargetPlatform == TargetPlatform.windows && downloadUrl.toLowerCase().endsWith('.apk')) {
-        downloadUrl = 'https://github.com/$defaultRepoOwner/$defaultRepoName/releases/download/$cleanTag/GMWF-v$latestVersion.exe';
+        downloadUrl = 'https://github.com/$defaultRepoOwner/$defaultRepoName/releases/download/$cleanTag/GMWF-$cleanTag-x64.exe';
       } else if (defaultTargetPlatform == TargetPlatform.android && downloadUrl.toLowerCase().endsWith('.exe')) {
-        downloadUrl = 'https://github.com/$defaultRepoOwner/$defaultRepoName/releases/download/$cleanTag/GMWF-v$latestVersion.apk';
+        downloadUrl = 'https://github.com/$defaultRepoOwner/$defaultRepoName/releases/download/$cleanTag/GMWF-$cleanTag.apk';
       }
 
-      final isHigher = compareVersions(currentVersion, latestVersion) > 0;
-      final isMinRequiredHigher = compareVersions(currentVersion, minRequiredVersion) > 0;
+      final isHigher = compareVersions(installedVer, latestVersion) > 0;
+      final isMinRequiredHigher = compareVersions(installedVer, minRequiredVersion) > 0;
       final forceUpdate = forceUpdateFlag || isMinRequiredHigher;
 
       return UpdateInfo(
@@ -148,6 +169,7 @@ class AutoUpdateService {
     String? personalAccessToken,
   }) async {
     try {
+      final installedVer = await getAppVersion();
       final url = Uri.parse('https://api.github.com/repos/$repoOwner/$repoName/releases/latest');
       final headers = <String, String>{
         'Accept': 'application/vnd.github.v3+json',
@@ -188,8 +210,8 @@ class AutoUpdateService {
                     (a) {
                       final name = (a['name'] ?? '').toString().toLowerCase();
                       return name.contains(abiClean) ||
-                          (abiClean.contains('arm64') && name.contains('arm64')) ||
-                          (abiClean.contains('v7a') && (name.contains('v7a') || name.contains('armv7'))) ||
+                          (abiClean.contains('arm64') && (name.contains('arm64') || name.contains('arm64-v8a'))) ||
+                          (abiClean.contains('v7a') && (name.contains('v7a') || name.contains('armv7') || name.contains('armeabi'))) ||
                           (abiClean.contains('x86_64') && name.contains('x86_64'));
                     },
                     orElse: () => null,
@@ -219,29 +241,14 @@ class AutoUpdateService {
             ).toList();
 
             if (exeAssets.isNotEmpty) {
-              bool is64Bit = true;
+              Map<String, dynamic>? selectedExe = exeAssets.firstWhere(
+                (a) {
+                  final name = (a['name'] ?? '').toString().toLowerCase();
+                  return name.contains('x64') || name.contains('win64') || name.contains('64bit') || name.contains('setup');
+                },
+                orElse: () => exeAssets.first,
+              );
 
-              Map<String, dynamic>? selectedExe;
-
-              if (is64Bit) {
-                selectedExe = exeAssets.firstWhere(
-                  (a) {
-                    final name = (a['name'] ?? '').toString().toLowerCase();
-                    return name.contains('x64') || name.contains('win64') || name.contains('64bit');
-                  },
-                  orElse: () => null,
-                );
-              } else {
-                selectedExe = exeAssets.firstWhere(
-                  (a) {
-                    final name = (a['name'] ?? '').toString().toLowerCase();
-                    return name.contains('x86') || name.contains('win32') || name.contains('32bit');
-                  },
-                  orElse: () => null,
-                );
-              }
-
-              selectedExe ??= exeAssets.first;
               downloadUrl = (selectedExe?['browser_download_url'] ?? selectedExe?['url'] ?? '').toString();
             }
           } else if (defaultTargetPlatform == TargetPlatform.macOS) {
@@ -262,20 +269,18 @@ class AutoUpdateService {
           if (defaultTargetPlatform == TargetPlatform.android) {
             downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag.apk';
           } else if (defaultTargetPlatform == TargetPlatform.windows) {
-            bool is64Bit = true;
-            final archSuffix = is64Bit ? '-x64' : '-x86';
-            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag$archSuffix.exe';
+            downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag-x64.exe';
           } else {
             downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag.dmg';
           }
         }
 
-        final isHigher = compareVersions(currentVersion, tag) > 0;
+        final isHigher = compareVersions(installedVer, tag) > 0;
         final hasUpdate = isHigher;
 
         return UpdateInfo(
           latestVersion: tag,
-          minRequiredVersion: currentVersion,
+          minRequiredVersion: installedVer,
           downloadUrl: downloadUrl,
           releaseNotes: notes,
           forceUpdate: false,

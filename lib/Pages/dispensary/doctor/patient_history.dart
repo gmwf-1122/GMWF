@@ -317,7 +317,7 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
           if (entry != null && seen.add(entry.serial)) {
             found.add(entry);
             try {
-              Hive.box(LocalStorageService.prescriptionsBox)
+              Hive.box(LocalStorageService.reportsCacheBox)
                   .put('legacy_${id}_${entry.serial}', data);
             } catch (_) {}
           }
@@ -406,7 +406,7 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
       if (entry != null && seen.add(entry.serial)) {
         found.add(entry);
         try {
-          Hive.box(LocalStorageService.prescriptionsBox)
+          Hive.box(LocalStorageService.reportsCacheBox)
               .put('disp_${entry.serial}', data);
         } catch (_) {}
       }
@@ -666,7 +666,7 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
           final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
           if (entry != null && seen.add(entry.serial)) {
             found.add(entry);
-            try { Hive.box(LocalStorageService.prescriptionsBox).put('legacy_${id}_${entry.serial}', data); } catch (_) {}
+            try { Hive.box(LocalStorageService.reportsCacheBox).put('legacy_${id}_${entry.serial}', data); } catch (_) {}
           }
         }
       } catch (e) { debugPrint('[PatientHistoryPage] $id error: $e'); }
@@ -727,7 +727,7 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
       final entry = _HistoryEntry.fromMap(data, source: 'Dispensary');
       if (entry != null && seen.add(entry.serial)) {
         found.add(entry);
-        try { Hive.box(LocalStorageService.prescriptionsBox).put('disp_${entry.serial}', data); } catch (_) {}
+        try { Hive.box(LocalStorageService.reportsCacheBox).put('disp_${entry.serial}', data); } catch (_) {}
       }
     }
   }
@@ -795,8 +795,19 @@ class _CompactLatestCard extends StatelessWidget {
 
   const _CompactLatestCard({required this.entry, this.onRepeat});
 
+  bool _getIsDark(BuildContext context) {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
+      }
+    } catch (_) {}
+    return Theme.of(context).brightness == Brightness.dark;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isDark = _getIsDark(context);
     final e       = entry;
     final dateStr = DateFormat('d MMM yyyy  •  hh:mm a').format(e.date);
     final oralMeds     = e.medicines.where((m) => !m.isInjectable).toList();
@@ -804,17 +815,17 @@ class _CompactLatestCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _teal.withValues(alpha: 0.25), width: 1.2),
-        boxShadow: [BoxShadow(color: _teal.withValues(alpha: 0.07), blurRadius: 10, offset: const Offset(0, 3))],
+        border: Border.all(color: isDark ? const Color(0xFF334155) : _teal.withValues(alpha: 0.25), width: 1.2),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.07), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: _teal,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(13)),
           ),
           child: Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -856,6 +867,14 @@ class _CompactLatestCard extends StatelessWidget {
                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(4)),
                 child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
+              if (e.isVitalsOnly) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(color: Colors.amber.shade800, borderRadius: BorderRadius.circular(4)),
+                  child: const Text('🩺 Vitals Only', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                ),
+              ],
             ],
           ),
         ),
@@ -863,42 +882,42 @@ class _CompactLatestCard extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (e.complaint.isNotEmpty) ...[
-              _label('Condition'), const SizedBox(height: 3),
+              _label('Condition', isDark), const SizedBox(height: 3),
               Text(e.complaint,
-                  style: const TextStyle(fontSize: 12.5, color: Colors.black87),
+                  style: TextStyle(fontSize: 12.5, color: isDark ? const Color(0xFFE2E8F0) : Colors.black87),
                   maxLines: 2, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 8),
             ],
             if (e.diagnosis.isNotEmpty) ...[
-              _label('Diagnosis'), const SizedBox(height: 3),
+              _label('Diagnosis', isDark), const SizedBox(height: 3),
               Text(e.diagnosis,
-                  style: const TextStyle(fontSize: 12.5, color: Colors.black87),
+                  style: TextStyle(fontSize: 12.5, color: isDark ? const Color(0xFFE2E8F0) : Colors.black87),
                   maxLines: 2, overflow: TextOverflow.ellipsis),
               const SizedBox(height: 8),
             ],
             if (e.vitals.isNotEmpty) ...[
-              _label('Vitals'), const SizedBox(height: 4),
-              _buildCompactVitalsDisplay(e.vitals),
+              _label('Vitals', isDark), const SizedBox(height: 4),
+              _buildCompactVitalsDisplay(e.vitals, isDark),
               const SizedBox(height: 8),
             ],
             if (oralMeds.isNotEmpty) ...[
-              _label('Medicines'), const SizedBox(height: 4),
-              ...oralMeds.map((m) => _medTile(m, isInj: false)),
+              _label('Medicines', isDark), const SizedBox(height: 4),
+              ...oralMeds.map((m) => _medTile(m, isInj: false, isDark: isDark)),
               const SizedBox(height: 4),
             ],
             if (injectables.isNotEmpty) ...[
-              _label('Injectables'), const SizedBox(height: 4),
-              ...injectables.map((m) => _medTile(m, isInj: true)),
+              _label('Injectables', isDark), const SizedBox(height: 4),
+              ...injectables.map((m) => _medTile(m, isInj: true, isDark: isDark)),
               const SizedBox(height: 4),
             ],
             if (e.labTests.isNotEmpty) ...[
-              _label(e.raw['isPhysiotherapist'] == true ? 'Physiotherapies' : 'Lab Tests'), const SizedBox(height: 4),
+              _label(e.raw['isPhysiotherapist'] == true ? 'Physiotherapies' : 'Lab Tests', isDark), const SizedBox(height: 4),
               Wrap(spacing: 5, runSpacing: 5,
-                  children: e.labTests.map((t) => _labChip(t)).toList()),
+                  children: e.labTests.map((t) => _labChip(t, isDark)).toList()),
               const SizedBox(height: 4),
             ],
             if (onRepeat != null) ...[
-              const SizedBox(height: 6), const Divider(height: 1), const SizedBox(height: 8),
+              const SizedBox(height: 6), Divider(height: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200), const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -920,7 +939,7 @@ class _CompactLatestCard extends StatelessWidget {
     );
   }
 
-  Widget _buildCompactVitalsDisplay(Map<String, dynamic> vitals) {
+  Widget _buildCompactVitalsDisplay(Map<String, dynamic> vitals, bool isDark) {
     final recVitals = (vitals['receptionistVitals'] is Map)
         ? Map<String, dynamic>.from(vitals['receptionistVitals'])
         : <String, dynamic>{};
@@ -937,7 +956,7 @@ class _CompactLatestCard extends StatelessWidget {
           Row(
             children: [
               Text('REC VITALS (${recVitals['addedBy'] ?? 'Receptionist'}):',
-                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.blue.shade800, letterSpacing: 0.5)),
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: isDark ? Colors.blue.shade300 : Colors.blue.shade800, letterSpacing: 0.5)),
             ],
           ),
           const SizedBox(height: 3),
@@ -951,7 +970,7 @@ class _CompactLatestCard extends StatelessWidget {
           Row(
             children: [
               Text('DOC VITALS EDITED (${docVitals['updatedBy'] ?? 'Doctor'}):',
-                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: Colors.amber.shade900, letterSpacing: 0.5)),
+                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w800, color: isDark ? Colors.amber.shade300 : Colors.amber.shade900, letterSpacing: 0.5)),
             ],
           ),
           const SizedBox(height: 3),
@@ -973,29 +992,29 @@ class _CompactLatestCard extends StatelessWidget {
     ]);
   }
 
-  Widget _label(String text) => Text(text.toUpperCase(),
-      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: _teal, letterSpacing: 0.8));
+  Widget _label(String text, bool isDark) => Text(text.toUpperCase(),
+      style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: isDark ? const Color(0xFF2DD4BF) : _teal, letterSpacing: 0.8));
 
   Widget _vitalChip(String label, String value, Color color) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: RichText(text: TextSpan(children: [
-        TextSpan(text: '$label  ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color.withValues(alpha: 0.75))),
+        TextSpan(text: '$label  ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: color.withValues(alpha: 0.85))),
         TextSpan(text: value,     style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold,  color: color)),
       ])));
 
-  Widget _labChip(String text) => Container(
+  Widget _labChip(String text, bool isDark) => Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50, borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.orange.shade300),
+        color: isDark ? const Color(0xFF451A03) : Colors.orange.shade50, borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? const Color(0xFF9A3412) : Colors.orange.shade300),
       ),
-      child: Text(text, style: TextStyle(fontSize: 11, color: Colors.orange.shade800, fontWeight: FontWeight.w600)));
+      child: Text(text, style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800, fontWeight: FontWeight.w600)));
 
-  Widget _medTile(_MedEntry med, {required bool isInj}) {
+  Widget _medTile(_MedEntry med, {required bool isInj, required bool isDark}) {
     final parts     = <String>[];
     if (med.dosage.isNotEmpty)    parts.add(med.dosage);
     if (med.frequency.isNotEmpty) parts.add(med.frequency);
@@ -1011,9 +1030,14 @@ class _CompactLatestCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 5),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: isInj ? const Color(0xFFE3F2FD) : _teal.withValues(alpha: 0.04),
+        color: isInj
+            ? (isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.25) : const Color(0xFFE3F2FD))
+            : (isDark ? const Color(0xFF1E293B) : _teal.withValues(alpha: 0.04)),
         borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: isInj ? const Color(0xFF90CAF9) : _teal.withValues(alpha: 0.15)),
+        border: Border.all(
+            color: isDark
+                ? const Color(0xFF334155)
+                : (isInj ? const Color(0xFF90CAF9) : _teal.withValues(alpha: 0.15))),
       ),
       child: Row(children: [
         Container(
@@ -1024,11 +1048,11 @@ class _CompactLatestCard extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(med.name,
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.black87),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white : Colors.black87),
               maxLines: 1, overflow: TextOverflow.ellipsis),
           if (parts.isNotEmpty)
             Text(parts.join(' · '),
-                style: TextStyle(fontSize: 10.5, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 10.5, color: isDark ? const Color(0xFF94A3B8) : Colors.grey[600]),
                 maxLines: 1, overflow: TextOverflow.ellipsis),
         ])),
       ]),
@@ -1118,6 +1142,28 @@ class _HistoryCard extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.all(14),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (e.isVitalsOnly) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.monitor_heart_outlined, color: Colors.orange.shade900, size: 16),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Vitals Inspection Only Visit',
+                      style: TextStyle(color: Colors.orange.shade900, fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (e.doctorName.isNotEmpty) ...[
               Row(children: [
                 Icon(Icons.person, size: 16, color: Colors.grey[600]),
@@ -1352,6 +1398,7 @@ class _HistoryEntry {
   final List<String> labTests;
   final Map<String, dynamic> vitals, raw;
   final int days;
+  final bool isVitalsOnly;
 
   const _HistoryEntry({
     required this.serial, required this.date, required this.diagnosis,
@@ -1359,6 +1406,7 @@ class _HistoryEntry {
     required this.labTests, required this.vitals, required this.raw,
     required this.source, required this.days,
     required this.campId, required this.campName,
+    required this.isVitalsOnly,
   });
 
   static _HistoryEntry? fromMap(Map<String, dynamic> data, {required String source}) {
@@ -1426,6 +1474,50 @@ class _HistoryEntry {
       }
     }
 
+    final rawVitals = data['vitals'] ?? data['receptionistVitals'];
+    Map<String, dynamic> extractedVitals = rawVitals is Map
+        ? Map<String, dynamic>.from(rawVitals)
+        : (data['bp'] != null || data['temp'] != null || data['weight'] != null || data['sugar'] != null)
+            ? {
+                if (data['bp'] != null) 'bp': data['bp'],
+                if (data['temp'] != null) 'temp': data['temp'],
+                if (data['weight'] != null) 'weight': data['weight'],
+                if (data['sugar'] != null) 'sugar': data['sugar'],
+              }
+            : {};
+
+    if (extractedVitals.isEmpty) {
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+          final entriesBox = Hive.box(LocalStorageService.entriesBox);
+          for (final k in entriesBox.keys) {
+            if (k.toString().toLowerCase().contains(serial.toLowerCase())) {
+              final entryMap = entriesBox.get(k);
+              if (entryMap is Map) {
+                final ev = entryMap['vitals'] ?? entryMap['receptionistVitals'];
+                if (ev is Map && ev.isNotEmpty) {
+                  extractedVitals = Map<String, dynamic>.from(ev);
+                  break;
+                } else if (entryMap['bp'] != null || entryMap['temp'] != null || entryMap['sugar'] != null || entryMap['weight'] != null) {
+                  extractedVitals = {
+                    if (entryMap['bp'] != null) 'bp': entryMap['bp'],
+                    if (entryMap['temp'] != null) 'temp': entryMap['temp'],
+                    if (entryMap['weight'] != null) 'weight': entryMap['weight'],
+                    if (entryMap['sugar'] != null) 'sugar': entryMap['sugar'],
+                  };
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    final isVitalsOnly = data['isVitalsOnly'] == true ||
+        data['vitalsOnly'] == true ||
+        (data['visitReason']?.toString().toLowerCase().contains('vitals') == true);
+
     return _HistoryEntry(
       serial:    serial,
       date:      date,
@@ -1434,12 +1526,13 @@ class _HistoryEntry {
       doctorName:(data['doctorName'] ?? data['prescribedBy'] ?? '').toString(),
       medicines: meds,
       labTests:  labs,
-      vitals:    (data['vitals'] as Map?)?.cast<String, dynamic>() ?? {},
+      vitals:    extractedVitals,
       raw:       data,
       source:    source,
       days:      (data['daysOfMedicine'] is num ? (data['daysOfMedicine'] as num).toInt() : int.tryParse(data['daysOfMedicine']?.toString() ?? '') ?? 1),
       campId:    cId,
       campName:  cName,
+      isVitalsOnly: isVitalsOnly,
     );
   }
 

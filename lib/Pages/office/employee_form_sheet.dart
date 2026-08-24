@@ -14,6 +14,7 @@ import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_ledger_storage.dart';
+import '../../services/zkteco_network_service.dart';
 
 import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
@@ -99,6 +100,10 @@ void openEmployeeFormSheet(
       text: existing['joiningDate'] != null && existing['joiningDate'].toString().isNotEmpty
           ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['joiningDate']))
           : '');
+
+  final existingCred = isEdit ? ZkTecoNetworkService.getCredentialByEntityId(employeeId!) : null;
+  final initialPin = existingCred?.biometricPin ?? existing['biometricPin']?.toString() ?? '';
+  final biometricPinController = TextEditingController(text: initialPin);
 
   String selectedBranchId = existing['branchId']?.toString() ?? activeBranchId;
   String compensationType = existing['compensationType'] ?? 'monthly';
@@ -485,7 +490,7 @@ void openEmployeeFormSheet(
                                   Expanded(
                                     child: buildFormField(
                                       controller: phoneController,
-                                      label: 'Primary Phone',
+                                      label: 'Primary Phone (11 digits)',
                                       icon: Icons.phone,
                                       theme: t,
                                       keyboardType: TextInputType.phone,
@@ -498,7 +503,7 @@ void openEmployeeFormSheet(
                                   Expanded(
                                     child: buildFormField(
                                       controller: alternatePhoneController,
-                                      label: 'Alternate Phone',
+                                      label: 'Alternate Phone (11 digits)',
                                       icon: Icons.phone_android,
                                       theme: t,
                                       keyboardType: TextInputType.phone,
@@ -681,6 +686,29 @@ void openEmployeeFormSheet(
                                         if (val == 'Contract') compensationType = 'contract';
                                       }),
                                       theme: t,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              buildResponsiveFieldRow(
+                                isNarrow: isNarrow,
+                                children: [
+                                  Expanded(
+                                    child: buildFormField(
+                                      controller: biometricPinController,
+                                      label: 'Biometric Scanner PIN',
+                                      icon: Icons.fingerprint_rounded,
+                                      theme: t,
+                                      keyboardType: TextInputType.number,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(top: 14.0, left: 4.0),
+                                      child: Text(
+                                        'Numeric PIN for physical ZKTeco fingerprint/face scanners (e.g. 159). Must be unique.',
+                                        style: TextStyle(color: t.textSecondary, fontSize: 11),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -1069,6 +1097,19 @@ void openEmployeeFormSheet(
                             final validContacts =
                                 emergencyContacts.where((e) => e['name']!.isNotEmpty && e['phone']!.isNotEmpty).toList();
 
+                            final enteredPin = biometricPinController.text.trim();
+                            if (enteredPin.isNotEmpty) {
+                              final conflict = ZkTecoNetworkService.findPinConflict(enteredPin, excludeEntityId: isEdit ? employeeId : null);
+                              if (conflict != null) {
+                                showCustomSnackBar(
+                                  sheetCtx,
+                                  '❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.',
+                                  error: true,
+                                );
+                                return;
+                              }
+                            }
+
                             try {
                               setSheetState(() { isSaving = true; });
 
@@ -1163,6 +1204,7 @@ void openEmployeeFormSheet(
                                 'emergencyContacts': validContacts,
                                 'workScheduleOverride': scheduleOverride,
                                 'isActive': existing['isActive'] ?? true,
+                                'biometricPin': enteredPin.isNotEmpty ? enteredPin : null,
                                 'monthlyAdvanceInstallment': monthlyInstallmentController.text.trim().isNotEmpty
                                     ? double.tryParse(monthlyInstallmentController.text) ?? 0.0
                                     : 0.0,
@@ -1181,6 +1223,16 @@ void openEmployeeFormSheet(
                                 data: employeeData,
                                 performedBy: curUser,
                               );
+
+                              if (enteredPin.isNotEmpty) {
+                                await ZkTecoNetworkService.assignPinToEntity(
+                                  entityId: empLocalId,
+                                  entityName: nameController.text.trim(),
+                                  entityType: 'employee',
+                                  branchId: targetBranchId,
+                                  customPin: enteredPin,
+                                );
+                              }
 
                               if (!isEdit) {
                                 await FinanceLocalStorage.saveSalaryHistory(
@@ -1202,6 +1254,13 @@ void openEmployeeFormSheet(
                                   approvedBy: curUser,
                                   performedBy: curUser,
                                 );
+                              }
+
+                              // Auto-assign biometric PIN & map credentials for hardware ZKTeco scanners
+                              try {
+                                await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
+                              } catch (e) {
+                                debugPrint('[EmployeeForm] Auto-assign biometric PIN notice: $e');
                               }
 
                               if (sheetCtx.mounted) {

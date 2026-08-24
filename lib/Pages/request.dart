@@ -27,28 +27,28 @@ class RequestUtils {
     };
   }
 
-  static Color getBadgeColor(String type) => switch (type) {
-        'dispense'            => Colors.teal.shade100,
-        'add_stock'           => Colors.teal.shade100,
-        'change_prescription' => Colors.teal.shade100,
-        'token_reversal'      => Colors.red.shade100,
-        'edit_medicine'       => Colors.teal.shade100,
-        'delete_medicine'     => Colors.red.shade100,
-        'patient_edit'        => Colors.yellow.shade100,
-        'token_exception'     => Colors.orange.shade100,
-        _                     => Colors.grey.shade300,
+  static Color getBadgeColor(String type, {bool isDark = false}) => switch (type) {
+        'dispense'            => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
+        'add_stock'           => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
+        'change_prescription' => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
+        'token_reversal'      => isDark ? const Color(0xFF991B1B).withValues(alpha: 0.35) : Colors.red.shade100,
+        'edit_medicine'       => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
+        'delete_medicine'     => isDark ? const Color(0xFF991B1B).withValues(alpha: 0.35) : Colors.red.shade100,
+        'patient_edit'        => isDark ? const Color(0xFF854D0E).withValues(alpha: 0.35) : Colors.yellow.shade100,
+        'token_exception'     => isDark ? const Color(0xFF9A3412).withValues(alpha: 0.35) : Colors.orange.shade100,
+        _                     => isDark ? const Color(0xFF334155) : Colors.grey.shade300,
       };
 
-  static Color getTextColor(String type) => switch (type) {
-        'dispense'            => Colors.teal.shade800,
-        'add_stock'           => Colors.teal.shade800,
-        'change_prescription' => Colors.teal.shade800,
-        'token_reversal'      => Colors.red.shade800,
-        'edit_medicine'       => Colors.teal.shade800,
-        'delete_medicine'     => Colors.red.shade800,
-        'patient_edit'        => Colors.yellow.shade800,
-        'token_exception'     => Colors.orange.shade800,
-        _                     => Colors.grey.shade800,
+  static Color getTextColor(String type, {bool isDark = false}) => switch (type) {
+        'dispense'            => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
+        'add_stock'           => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
+        'change_prescription' => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
+        'token_reversal'      => isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
+        'edit_medicine'       => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
+        'delete_medicine'     => isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
+        'patient_edit'        => isDark ? const Color(0xFFFDE047) : Colors.yellow.shade900,
+        'token_exception'     => isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800,
+        _                     => isDark ? Colors.grey.shade300 : Colors.grey.shade800,
       };
 
   static String generateDocId(
@@ -166,18 +166,19 @@ class _RequestPageState extends State<RequestPage>
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.teal.shade800,
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.teal.shade800,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('Requests',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         bottom: TabBar(
           controller: _tabCtrl,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
+          indicatorColor: isDark ? const Color(0xFF2DD4BF) : Colors.white,
+          labelColor: isDark ? const Color(0xFF2DD4BF) : Colors.white,
           unselectedLabelColor: Colors.white70,
           tabs: const [
             Tab(text: 'Pending', icon: Icon(Icons.pending_actions)),
@@ -243,8 +244,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   late final Stream<QuerySnapshot> _editStream;
   late final Stream<QuerySnapshot> _dispenseStream;
-
   final Map<String, String> _nameCache = {};
+  bool _isApprovingAll = false;
+  bool _toastShownForPending = false;
 
   @override
   void initState() {
@@ -259,7 +261,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
     _dispenseStream = FirebaseFirestore.instance
         .collection('branches')
         .doc(widget.branchId)
-        .collection('dispense_requests')
+        .collection('dispense_edit_requests')
         .where('status', isEqualTo: widget.status)
         .snapshots();
   }
@@ -353,6 +355,58 @@ class _StableRequestTabState extends State<_StableRequestTab>
           return bTime.compareTo(aTime);
         });
 
+        final role = (widget.currentUserRole ?? '').toLowerCase().trim();
+        final isBranchManager = role.contains('branch manager') ||
+            role.contains('branch_manager') ||
+            role == 'bm' ||
+            role.contains('manager');
+        final isSupervisorRole = widget.isSupervisor ||
+            role.contains('supervisor') ||
+            isBranchManager ||
+            role.contains('admin') ||
+            role.contains('chairman') ||
+            role.contains('ceo');
+        final isDoctor = role.contains('doctor');
+        final canApproveAny = isSupervisorRole || isDoctor;
+
+        final eligibleDocs = allDocs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final requestType = data['requestType']?.toString() ??
+              data['type']?.toString() ??
+              'unknown';
+          if (isSupervisorRole && requestType != 'token_exception') return true;
+          if (isDoctor && requestType == 'token_exception') return true;
+          return false;
+        }).toList();
+
+        if (widget.status == 'pending' && eligibleDocs.isNotEmpty && !_toastShownForPending) {
+          _toastShownForPending = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  behavior: SnackBarBehavior.floating,
+                  backgroundColor: const Color(0xFF0F766E),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  content: Row(
+                    children: [
+                      const Icon(Icons.notifications_active_rounded, color: Color(0xFF2DD4BF), size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'You have ${eligibleDocs.length} pending request${eligibleDocs.length > 1 ? "s" : ""} awaiting your approval',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
+          });
+        }
+
         if (allDocs.isEmpty) {
           return Center(
             child: Column(
@@ -387,16 +441,82 @@ class _StableRequestTabState extends State<_StableRequestTab>
         return RefreshIndicator(
           onRefresh: () async {
             _nameCache.clear();
+            _toastShownForPending = false;
             await Future.delayed(const Duration(milliseconds: 300));
             if (mounted) setState(() {});
           },
           color: Colors.teal,
-          child: ListView.separated(
-            padding: const EdgeInsets.all(12),
-            itemCount: allDocs.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, i) =>
-                _buildRequestCard(context, allDocs[i]),
+          child: Column(
+            children: [
+              if (widget.status == 'pending' && canApproveAny) ...[
+                Builder(builder: (context) {
+                  final isDark = Theme.of(context).brightness == Brightness.dark;
+                  final hasEligible = eligibleDocs.isNotEmpty;
+                  return Container(
+                    margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.4) : Colors.teal.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark ? const Color(0xFF0D9488) : Colors.teal.shade200,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.pending_actions_rounded,
+                            color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            hasEligible
+                                ? '${eligibleDocs.length} Pending Request${eligibleDocs.length > 1 ? 's' : ''} to Approve'
+                                : '${allDocs.length} Pending Request${allDocs.length > 1 ? 's' : ''} (Other Roles)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.teal.shade900,
+                            ),
+                          ),
+                        ),
+                        if (hasEligible)
+                          ElevatedButton.icon(
+                            icon: _isApprovingAll
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Icon(Icons.done_all_rounded, size: 16),
+                            label: Text(
+                              _isApprovingAll ? 'Approving…' : 'Approve All (${eligibleDocs.length})',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              elevation: 2,
+                            ),
+                            onPressed: _isApprovingAll ? null : () => _confirmApproveAll(context, allDocs),
+                          ),
+                      ],
+                    ),
+                  );
+                }),
+              ],
+              Expanded(
+                child: ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: allDocs.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  itemBuilder: (context, i) =>
+                      _buildRequestCard(context, allDocs[i]),
+                ),
+              ),
+            ],
           ),
         );
       },
@@ -405,6 +525,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   Widget _buildRequestCard(
       BuildContext context, QueryDocumentSnapshot doc) {
+    final isDark      = Theme.of(context).brightness == Brightness.dark;
     final data        = doc.data() as Map<String, dynamic>;
     final requestType = data['requestType']?.toString() ??
         data['type']?.toString() ??
@@ -439,9 +560,15 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final canApproveAsDoctor = isDoctor && requestType == 'token_exception';
 
     return Card(
-      color: Colors.teal.shade50,
-      elevation: widget.status == 'pending' ? 6 : 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      elevation: widget.status == 'pending' ? (isDark ? 3 : 5) : 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFCCFBF1),
+          width: 1,
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -452,9 +579,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 child: Text(
                   RequestUtils.getTitle(requestType, patientName),
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 17,
                     fontWeight: FontWeight.bold,
-                    color: Colors.teal.shade800,
+                    color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
                   ),
                 ),
               ),
@@ -462,79 +589,99 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: RequestUtils.getBadgeColor(requestType),
+                  color: RequestUtils.getBadgeColor(requestType, isDark: isDark),
                   borderRadius: BorderRadius.circular(20),
+                  border: isDark
+                      ? Border.all(
+                          color: RequestUtils.getTextColor(requestType, isDark: isDark).withValues(alpha: 0.4),
+                          width: 1,
+                        )
+                      : null,
                 ),
                 child: Text(
                   requestType.replaceAll('_', ' ').toUpperCase(),
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: RequestUtils.getTextColor(requestType),
+                    color: RequestUtils.getTextColor(requestType, isDark: isDark),
                   ),
                 ),
               ),
             ]),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             Row(children: [
-              Icon(Icons.person, size: 16, color: Colors.teal.shade800),
+              Icon(Icons.person_rounded, size: 16, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
               const SizedBox(width: 8),
-              Text('By: $name', style: const TextStyle(fontSize: 14)),
+              Text(
+                'By: $name',
+                style: TextStyle(fontSize: 13.5, color: isDark ? Colors.white70 : Colors.black87),
+              ),
             ]),
             const SizedBox(height: 4),
             Row(children: [
-              Icon(Icons.location_on, size: 16, color: Colors.teal.shade800),
+              Icon(Icons.location_on_rounded, size: 16, color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade800),
               const SizedBox(width: 8),
-              Text(
-                'Facility: ${CampSessionService.getBranchAndCampDisplayName(branchName: (data['branchId'] ?? widget.branchId).toString().toUpperCase(), branchId: (data['branchId'] ?? widget.branchId).toString(), campId: data['dispensaryId']?.toString() ?? data['campId']?.toString())}',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.teal.shade900),
+              Expanded(
+                child: Text(
+                  'Facility: ${CampSessionService.getBranchAndCampDisplayName(branchName: (data['branchId'] ?? widget.branchId).toString().toUpperCase(), branchId: (data['branchId'] ?? widget.branchId).toString(), campId: data['dispensaryId']?.toString() ?? data['campId']?.toString())}',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade900,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ]),
             if (ts != null) ...[
               const SizedBox(height: 4),
-              Text(
-                'Requested: ${DateFormat('dd MMM yyyy, hh:mm a').format(ts.toDate())}',
-                style: const TextStyle(fontSize: 12, color: Colors.black54),
-              ),
+              Row(children: [
+                Icon(Icons.schedule_rounded, size: 14, color: isDark ? Colors.white38 : Colors.black38),
+                const SizedBox(width: 6),
+                Text(
+                  'Requested: ${DateFormat('dd MMM yyyy, hh:mm a').format(ts.toDate())}',
+                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
+                ),
+              ]),
             ],
             if (widget.status == 'approved') ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Row(children: [
-                Icon(Icons.verified_user, size: 14, color: Colors.teal.shade700),
+                Icon(Icons.verified_user_rounded, size: 14, color: isDark ? const Color(0xFF34D399) : Colors.teal.shade700),
                 const SizedBox(width: 6),
                 Text(
                   'Approved by: ${approverName ?? 'Doctor'}',
                   style: TextStyle(
                     fontSize: 12, 
-                    color: Colors.teal.shade700, 
+                    color: isDark ? const Color(0xFF34D399) : Colors.teal.shade700, 
                     fontWeight: FontWeight.bold
                   ),
                 ),
               ]),
             ],
             if (widget.status == 'rejected') ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Row(children: [
-                Icon(Icons.remove_circle, size: 14, color: Colors.red.shade700),
+                Icon(Icons.remove_circle_rounded, size: 14, color: isDark ? const Color(0xFFF87171) : Colors.red.shade700),
                 const SizedBox(width: 6),
                 Text(
                   'Rejected by: ${approverName ?? 'Doctor'}',
                   style: TextStyle(
                     fontSize: 12, 
-                    color: Colors.red.shade700, 
+                    color: isDark ? const Color(0xFFF87171) : Colors.red.shade700, 
                     fontWeight: FontWeight.bold
                   ),
                 ),
               ]),
             ],
             if (amountText.isNotEmpty) ...[
-              const SizedBox(height: 4),
+              const SizedBox(height: 6),
               Text(
                 'Amount: $amountText',
                 style: TextStyle(
-                  fontSize: 14,
+                  fontSize: 13.5,
                   fontWeight: FontWeight.bold,
-                  color: Colors.teal.shade800,
+                  color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800,
                 ),
               ),
             ],
@@ -551,40 +698,101 @@ class _StableRequestTabState extends State<_StableRequestTab>
               _buildItemsView(data, doc.id, requestType),
 
             if (reason.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('Requester Reason: $reason',
-                  style: const TextStyle(fontSize: 14)),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Requester Reason:',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white60 : Colors.black54,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      reason,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
             if (docReason.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text('Approval Reason: $docReason',
-                  style: TextStyle(
-                    fontSize: 14, 
-                    fontWeight: FontWeight.bold,
-                    color: Colors.teal.shade900,
-                  )),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.3) : Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isDark ? const Color(0xFF0D9488) : Colors.teal.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Approval Reason:',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      docReason,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.teal.shade800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
             if (widget.status == 'pending')
               if (canApproveAsSupervisor || canApproveAsDoctor)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    TextButton(
+                    OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red.shade400,
+                        side: BorderSide(color: Colors.red.shade400),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      ),
                       onPressed: () => _updateStatus(context, doc.id,
                           'rejected', requestType, collection),
-                      child: const Text('Reject',
-                          style: TextStyle(color: Colors.red)),
+                      child: const Text('Reject', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade700,
+                        backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
                         foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                        elevation: 1,
                       ),
                       onPressed: () => _updateStatus(context, doc.id,
                           'approved', requestType, collection),
-                      child: const Text('Approve'),
+                      child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ],
                 )
@@ -595,9 +803,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   alignment: Alignment.centerRight,
                   child: Chip(
                     label: const Text('PENDING APPROVAL'),
-                    backgroundColor: Colors.orange.withValues(alpha: 0.1),
+                    backgroundColor: isDark ? const Color(0xFF78350F).withValues(alpha: 0.4) : Colors.orange.withValues(alpha: 0.1),
                     labelStyle: TextStyle(
-                        color: Colors.orange.shade800,
+                        color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800,
                         fontWeight: FontWeight.bold,
                         fontSize: 10),
                   ),
@@ -608,12 +816,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 child: Chip(
                   label: Text(widget.status.toUpperCase()),
                   backgroundColor: widget.status == 'approved' 
-                      ? Colors.teal.withValues(alpha: 0.15) 
-                      : Colors.red.withValues(alpha: 0.1),
+                      ? (isDark ? const Color(0xFF064E3B) : Colors.teal.withValues(alpha: 0.15))
+                      : (isDark ? const Color(0xFF7F1D1D) : Colors.red.withValues(alpha: 0.1)),
                   labelStyle: TextStyle(
                       color: widget.status == 'approved' 
-                          ? Colors.teal.shade800 
-                          : Colors.red.shade800,
+                          ? (isDark ? const Color(0xFF6EE7B7) : Colors.teal.shade800)
+                          : (isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800),
                       fontWeight: FontWeight.bold),
                 ),
               ),
@@ -639,64 +847,59 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   Widget _buildTable(List<Map<String, dynamic>> items, String requestId,
       String requestType) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final canEdit = widget.status == 'pending';
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(
-              label: Text('Formula',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Type',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Dose',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Qty',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Price',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Expiry',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(
-              label: Text('Edit',
-                  style: TextStyle(fontWeight: FontWeight.bold))),
-        ],
-        rows: List<DataRow>.generate(items.length, (index) {
-          final m       = items[index];
-          final formula = (m['formula'] ?? '').toString();
-          return DataRow(cells: [
-            DataCell(Text(m['name']?.toString() ?? '')),
-            DataCell(Row(children: [
-              _typeIcon(m['type']),
-              const SizedBox(width: 6),
-              Text(m['type'] ?? '')
-            ])),
-            DataCell(Text(m['dose']?.toString() ?? '')),
-            DataCell(Text('${m['quantity'] ?? 0}')),
-            DataCell(Text('PKR ${m['price'] ?? 0}')),
-            DataCell(Text(_formatDate(m['expiryDate']))),
-            DataCell(
-              canEdit
-                  ? IconButton(
-                      icon: const Icon(Icons.edit_outlined, size: 18),
-                      onPressed: () =>
-                          _showEditItemDialog(requestId, index, m),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          ]);
-        }),
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF1E293B) : Colors.teal.shade50),
+          columns: const [
+            DataColumn(label: Text('Formula', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Type', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Dose', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Qty', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Price', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Expiry', style: TextStyle(fontWeight: FontWeight.bold))),
+            DataColumn(label: Text('Edit', style: TextStyle(fontWeight: FontWeight.bold))),
+          ],
+          rows: List<DataRow>.generate(items.length, (index) {
+            final m = items[index];
+            return DataRow(cells: [
+              DataCell(Text(m['name']?.toString() ?? '', style: TextStyle(color: isDark ? Colors.white : Colors.black87))),
+              DataCell(Row(children: [
+                _typeIcon(m['type']),
+                const SizedBox(width: 6),
+                Text(m['type'] ?? '', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))
+              ])),
+              DataCell(Text(m['dose']?.toString() ?? '', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
+              DataCell(Text('${m['quantity'] ?? 0}', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
+              DataCell(Text('PKR ${m['price'] ?? 0}', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
+              DataCell(Text(_formatDate(m['expiryDate']), style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
+              DataCell(
+                canEdit
+                    ? IconButton(
+                        icon: Icon(Icons.edit_outlined, size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                        onPressed: () =>
+                            _showEditItemDialog(requestId, index, m),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ]);
+          }),
+        ),
       ),
     );
   }
 
   Widget _buildCompactItems(List<Map<String, dynamic>> items,
       String requestId, String requestType) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final canEdit = widget.status == 'pending';
     return Column(
       children: List<Widget>.generate(items.length, (index) {
@@ -709,29 +912,34 @@ class _StableRequestTabState extends State<_StableRequestTab>
         final qty    = m['quantity'] ?? 0;
         final price  = m['price'] ?? 0;
         final expiry = _formatDate(m['expiryDate']);
-        final formula = (m['formula'] ?? '').toString();
         return InkWell(
           onTap: canEdit
               ? () => _showEditItemDialog(requestId, index, m)
               : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 3),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+            ),
             child: Row(children: [
               _typeIcon(type),
               const SizedBox(width: 8),
               Expanded(
                 child: RichText(
                   text: TextSpan(
-                    style: const TextStyle(color: Colors.black87),
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                     children: [
                       TextSpan(
                           text: '$name ($type$dose) × $qty',
                           style: const TextStyle(
-                              fontWeight: FontWeight.w500)),
+                              fontWeight: FontWeight.w600)),
                       TextSpan(
                           text: '\nPKR $price | $expiry',
-                          style: const TextStyle(
-                              fontSize: 12, color: Colors.black54)),
+                          style: TextStyle(
+                              fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
                     ],
                   ),
                 ),
@@ -739,7 +947,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
               canEdit
                   ? IconButton(
                       icon: Icon(Icons.edit_outlined,
-                          size: 18, color: Colors.teal.shade800),
+                          size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                       onPressed: () =>
                           _showEditItemDialog(requestId, index, m),
                     )
@@ -752,6 +960,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
   }
 
   Widget _typeIcon(String? type) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final t    = type ?? 'Others';
     final icon = switch (t) {
       'Tablet'      => FontAwesomeIcons.tablets,
@@ -762,113 +971,320 @@ class _StableRequestTabState extends State<_StableRequestTab>
       'Nebulization' => FontAwesomeIcons.cloud,
       _             => FontAwesomeIcons.pills,
     };
-    return Icon(icon, size: 16, color: Colors.teal.shade800);
+    return Icon(icon, size: 16, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800);
   }
 
   Widget _buildPatientChanges(
       Map<String, dynamic> data, String requestId, String collection) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final originalData = data['originalData'] as Map<String, dynamic>? ?? {};
     final proposedRaw  = widget.status == 'pending'
         ? (data['draftData'] ?? data['proposedData'])
         : data['proposedData'];
     final proposedData = proposedRaw as Map<String, dynamic>? ?? {};
 
-    final fields = [
-      'name', 'phone', 'status', 'bloodGroup', 'gender', 'dob'
+    // Standard human labels for patient fields
+    final fieldLabels = <String, String>{
+      'name': 'Full Name',
+      'patientName': 'Patient Name',
+      'cnic': 'CNIC',
+      'guardianCnic': 'Guardian CNIC',
+      'isAdult': 'Patient Type',
+      'dob': 'Date of Birth',
+      'age': 'Age',
+      'phone': 'Phone Number',
+      'bloodGroup': 'Blood Group',
+      'status': 'Status / Category',
+      'gender': 'Gender',
+      'address': 'Address',
+      'city': 'City',
+      'guardianName': 'Guardian Name',
+      'relation': 'Relation',
+    };
+
+    // Build the ordered list of keys to display
+    final standardKeys = [
+      'name',
+      'cnic',
+      'guardianCnic',
+      'isAdult',
+      'dob',
+      'age',
+      'phone',
+      'bloodGroup',
+      'gender',
+      'status',
+      'address',
+      'city',
+      'guardianName',
+      'relation',
     ];
+
+    final ignoredKeys = {
+      '_id', 'id', 'updatedAt', 'createdAt', 'branchId', 'createdBy',
+      'createdByName', 'lastEditedAt', 'lastEditedBy', 'draftData',
+      'proposedData', 'originalData', 'dispensaryId', 'campId', 'facility',
+      'requestedAt', 'requestedBy', 'requestedByName', 'reviewedAt',
+      'reviewedBy', 'reviewedByName', 'requestType', 'type', 'reason',
+      'doctorReason', 'status_request', 'vitals',
+    };
+
+    final allKeysSet = <String>{};
+    for (final k in standardKeys) {
+      if (originalData.containsKey(k) || proposedData.containsKey(k)) {
+        allKeysSet.add(k);
+      }
+    }
+    // Also include other keys in proposedData or originalData
+    for (final k in proposedData.keys) {
+      if (!ignoredKeys.contains(k)) allKeysSet.add(k);
+    }
+    for (final k in originalData.keys) {
+      if (!ignoredKeys.contains(k)) allKeysSet.add(k);
+    }
+
+    // Default fallback to core fields if nothing matched
+    final fields = allKeysSet.isEmpty
+        ? ['name', 'cnic', 'guardianCnic', 'isAdult', 'dob', 'age', 'phone', 'bloodGroup', 'gender', 'status']
+        : allKeysSet.toList();
 
     String getValue(Map<String, dynamic> m, String key) {
       final v = m[key];
-      if (key == 'dob' && v is Timestamp?) {
-        return v == null
-            ? '—'
-            : DateFormat('dd-MM-yyyy').format(v.toDate());
+      if (v == null || v.toString().trim().isEmpty || v.toString().trim() == 'null') {
+        return '—';
       }
-      return v?.toString() ?? '—';
+      if (key == 'dob') {
+        return _formatDate(v);
+      }
+      if (key == 'isAdult') {
+        if (v == true || v.toString().toLowerCase() == 'true') return 'Adult';
+        if (v == false || v.toString().toLowerCase() == 'false') return 'Child';
+      }
+      return v.toString().trim();
     }
 
-    String capitalize(String s) =>
-        s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+    String getLabel(String key) {
+      if (fieldLabels.containsKey(key)) return fieldLabels[key]!;
+      if (key.isEmpty) return key;
+      // Convert camelCase to Title Case
+      final result = key.replaceAllMapped(RegExp(r'([A-Z])'), (m) => ' ${m.group(1)}');
+      return result[0].toUpperCase() + result.substring(1).trim();
+    }
 
     final isWide = MediaQuery.of(context).size.width > 600;
 
-    if (isWide) {
-      return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(
-                      label: Text('Field',
-                          style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(
-                      label: Text('Original',
-                          style: TextStyle(fontWeight: FontWeight.bold))),
-                  DataColumn(
-                      label: Text('Proposed',
-                          style: TextStyle(fontWeight: FontWeight.bold))),
-                ],
-                rows: fields
-                    .map((f) => DataRow(cells: [
-                          DataCell(Text(capitalize(f))),
-                          DataCell(Text(getValue(originalData, f))),
-                          DataCell(Text(getValue(proposedData, f))),
-                        ]))
-                    .toList(),
-              ),
-            ),
-            if (widget.status == 'pending') ...[
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: ElevatedButton.icon(
-                  onPressed: () => _showEditPatientDialog(
-                      requestId, proposedData, originalData),
-                  icon: const Icon(Icons.edit, color: Colors.white),
-                  label: const Text('Edit Proposed'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal.shade700,
-                    foregroundColor: Colors.white,
-                  ),
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          width: 1,
+        ),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.compare_arrows_rounded,
+                  size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+              const SizedBox(width: 6),
+              Text(
+                'Patient Data Comparison',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13.5,
+                  color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
                 ),
               ),
             ],
-          ]);
-    } else {
-      return Column(children: [
-        ...fields.map((f) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(children: [
-                Expanded(child: Text('${capitalize(f)}:')),
-                Text(getValue(originalData, f)),
-                const Icon(Icons.arrow_forward, size: 16),
-                const SizedBox(width: 8),
-                Text(getValue(proposedData, f)),
-              ]),
-            )),
-        if (widget.status == 'pending') ...[
-          const SizedBox(height: 16),
-          Align(
-            alignment: Alignment.centerRight,
-            child: ElevatedButton.icon(
-              onPressed: () => _showEditPatientDialog(
-                  requestId, proposedData, originalData),
-              icon: const Icon(Icons.edit, color: Colors.white),
-              label: const Text('Edit Proposed'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal.shade700,
-                foregroundColor: Colors.white,
+          ),
+          const SizedBox(height: 8),
+          if (isWide)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowHeight: 36,
+                dataRowMinHeight: 32,
+                dataRowMaxHeight: 48,
+                headingRowColor: WidgetStateProperty.all(
+                  isDark ? const Color(0xFF1E293B) : Colors.teal.shade50,
+                ),
+                columns: [
+                  DataColumn(
+                    label: Text(
+                      'Field',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                        color: isDark ? Colors.white : Colors.teal.shade900,
+                      ),
+                    ),
+                  ),
+                  DataColumn(
+                    label: Text(
+                      'Original',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                        color: isDark ? Colors.white : Colors.teal.shade900,
+                      ),
+                    ),
+                  ),
+                  DataColumn(
+                    label: Text(
+                      'Proposed',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5,
+                        color: isDark ? Colors.white : Colors.teal.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+                rows: fields.map((f) {
+                  final oldVal = getValue(originalData, f);
+                  final newVal = getValue(proposedData, f);
+                  final isChanged = oldVal != newVal && newVal != '—';
+
+                  return DataRow(
+                    cells: [
+                      DataCell(Text(
+                        getLabel(f),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      )),
+                      DataCell(Text(
+                        oldVal,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: isDark ? Colors.white60 : Colors.black87,
+                          decoration: isChanged ? TextDecoration.lineThrough : null,
+                          decorationColor: Colors.red.shade400,
+                        ),
+                      )),
+                      DataCell(
+                        isChanged
+                            ? Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF0369A1).withValues(alpha: 0.3) : Colors.blue.shade50,
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF38BDF8) : Colors.blue.shade300,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  newVal,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900,
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                newVal,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: isDark ? Colors.white60 : Colors.black87,
+                                ),
+                              ),
+                      ),
+                    ],
+                  );
+                }).toList(),
+              ),
+            )
+          else
+            Column(
+              children: fields.map((f) {
+                final oldVal = getValue(originalData, f);
+                final newVal = getValue(proposedData, f);
+                final isChanged = oldVal != newVal && newVal != '—';
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          '${getLabel(f)}:',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white70 : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          oldVal,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isChanged ? Colors.red.shade400 : (isDark ? Colors.white60 : Colors.black87),
+                            decoration: isChanged ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(Icons.arrow_forward_rounded,
+                            size: 14, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal),
+                      ),
+                      Expanded(
+                        flex: 4,
+                        child: Text(
+                          newVal,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: isChanged ? FontWeight.bold : FontWeight.normal,
+                            color: isChanged
+                                ? (isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900)
+                                : (isDark ? Colors.white70 : Colors.black87),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          if (widget.status == 'pending') ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: ElevatedButton.icon(
+                onPressed: () => _showEditPatientDialog(
+                    requestId, proposedData, originalData),
+                icon: const Icon(Icons.edit_note_rounded, size: 16, color: Colors.white),
+                label: const Text('Edit Proposed', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  elevation: 1,
+                ),
               ),
             ),
-          ),
+          ],
         ],
-      ]);
-    }
+      ),
+    );
   }
 
   Widget _buildMedicineEditChanges(Map<String, dynamic> data) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final originalData = data['originalData'] as Map<String, dynamic>? ?? {};
     final items = widget.status == 'pending'
         ? (_safeItemList(data['draftItems']).isNotEmpty
@@ -893,101 +1309,127 @@ class _StableRequestTabState extends State<_StableRequestTab>
       if (key == 'price' && v != null && v.toString().isNotEmpty) {
         return 'PKR ${v.toString()}';
       }
+      if (key == 'expiryDate') {
+        return _formatDate(v);
+      }
       return v?.toString() ?? '—';
     }
 
     final isWide = MediaQuery.of(context).size.width > 600;
 
-    if (isWide) {
-      return Column(
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Medicine Comparison', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.teal.shade900)),
+            style: TextStyle(
+              fontWeight: FontWeight.bold, 
+              fontSize: 13.5, 
+              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+            )),
           const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowHeight: 36,
-              dataRowMinHeight: 32,
-              dataRowMaxHeight: 48,
-              columns: const [
-                DataColumn(label: Text('Field', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Original', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('Proposed', style: TextStyle(fontWeight: FontWeight.bold))),
-              ],
-              rows: fields.map((f) {
+          if (isWide)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                headingRowHeight: 36,
+                dataRowMinHeight: 32,
+                dataRowMaxHeight: 48,
+                headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF1E293B) : Colors.teal.shade50),
+                columns: const [
+                  DataColumn(label: Text('Field', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Original', style: TextStyle(fontWeight: FontWeight.bold))),
+                  DataColumn(label: Text('Proposed', style: TextStyle(fontWeight: FontWeight.bold))),
+                ],
+                rows: fields.map((f) {
+                  final key = f['key']!;
+                  final label = f['label']!;
+                  final oldVal = getValue(originalData, key);
+                  final newVal = getValue(proposedData, key);
+                  final isChanged = oldVal != newVal && newVal != '—';
+                  
+                  return DataRow(cells: [
+                    DataCell(Text(label, style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87))),
+                    DataCell(Text(oldVal, style: TextStyle(
+                      fontSize: 12.5,
+                      color: isDark ? Colors.white60 : Colors.black87,
+                      decoration: isChanged ? TextDecoration.lineThrough : null,
+                      decorationColor: Colors.red.shade400,
+                    ))),
+                    DataCell(Text(newVal, style: TextStyle(
+                      fontSize: 12.5,
+                      color: isChanged ? (isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900) : (isDark ? Colors.white70 : Colors.black87),
+                      fontWeight: isChanged ? FontWeight.bold : FontWeight.normal,
+                    ))),
+                  ]);
+                }).toList(),
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: fields.map((f) {
                 final key = f['key']!;
                 final label = f['label']!;
                 final oldVal = getValue(originalData, key);
                 final newVal = getValue(proposedData, key);
-                final isChanged = oldVal != newVal && newVal != '—';
-                
-                return DataRow(cells: [
-                  DataCell(Text(label, style: const TextStyle(fontSize: 13))),
-                  DataCell(Text(oldVal, style: const TextStyle(fontSize: 13))),
-                  DataCell(Text(newVal, style: TextStyle(
-                    fontSize: 13,
-                    color: isChanged ? Colors.blue.shade900 : null,
-                    fontWeight: isChanged ? FontWeight.bold : null,
-                  ))),
-                ]);
+                if (oldVal == newVal || newVal == '—') return const SizedBox.shrink();
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      Expanded(flex: 3, child: Text('$label:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? Colors.white70 : Colors.black87))),
+                      Expanded(flex: 3, child: Text(oldVal, style: const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.red, fontSize: 12))),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(Icons.arrow_forward_rounded, size: 12, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal),
+                      ),
+                      Expanded(flex: 4, child: Text(newVal, style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900, fontSize: 12))),
+                    ],
+                  ),
+                );
               }).toList(),
             ),
-          ),
         ],
-      );
-    } else {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Changes:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.teal.shade900, fontSize: 13)),
-          const SizedBox(height: 6),
-          ...fields.map((f) {
-            final key = f['key']!;
-            final label = f['label']!;
-            final oldVal = getValue(originalData, key);
-            final newVal = getValue(proposedData, key);
-            if (oldVal == newVal || newVal == '—') return const SizedBox.shrink();
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(flex: 3, child: Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12))),
-                  Expanded(flex: 3, child: Text(oldVal, style: const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.red, fontSize: 12))),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(Icons.arrow_forward, size: 12, color: Colors.teal),
-                  ),
-                  Expanded(flex: 4, child: Text(newVal, style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue.shade900, fontSize: 12))),
-                ],
-              ),
-            );
-          }),
-        ],
-      );
-    }
+      ),
+    );
   }
 
   Widget _buildTokenReversalView(Map<String, dynamic> data) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final tokenSerial = data['tokenSerial']?.toString() ??
         data['tokenId']?.toString() ??
         '—';
     final patientId = data['patientId']?.toString() ?? '—';
     final queueType = data['queueType']?.toString() ?? 'unknown';
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text("Token Details:",
-          style: TextStyle(
-              fontWeight: FontWeight.bold, color: Colors.teal.shade800)),
-      const SizedBox(height: 8),
-      Text("Token Serial: $tokenSerial"),
-      Text("Patient ID: $patientId"),
-      Text("Queue: $queueType"),
-    ]);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text("Token Details:",
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800)),
+        const SizedBox(height: 6),
+        Text("Token Serial: $tokenSerial", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+        Text("Queue: $queueType", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+      ]),
+    );
   }
 
   Widget _buildTokenExceptionView(Map<String, dynamic> data) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final restriction = data['restriction'] as Map<String, dynamic>?;
     final patientId  = data['patientId']?.toString() ?? '—';
     final remDays    = restriction?['remainingDays'] ?? '—';
@@ -996,42 +1438,44 @@ class _StableRequestTabState extends State<_StableRequestTab>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
+        color: isDark ? const Color(0xFF78350F).withValues(alpha: 0.3) : Colors.orange.shade50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.shade200),
+        border: Border.all(color: isDark ? const Color(0xFFB45309) : Colors.orange.shade200),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.orange.shade800, size: 20),
+          Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800, size: 20),
           const SizedBox(width: 8),
-          const Text("Restriction Details:", style: TextStyle(fontWeight: FontWeight.bold)),
+          Text("Restriction Details:", style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFED7AA) : Colors.orange.shade900)),
         ]),
         const SizedBox(height: 8),
-        Text("Patient ID: $patientId"),
+        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
         Text(isLastDay 
           ? "Status: Medicine expires TODAY"
-          : "Status: Medicine expires in $remDays days"),
+          : "Status: Medicine expires in $remDays days",
+          style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade900)),
       ]),
     );
   }
 
   Widget _buildDoctorOnlyNotice() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.blue.shade50,
+        color: isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.3) : Colors.blue.shade50,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.blue.shade200),
+        border: Border.all(color: isDark ? const Color(0xFF3B82F6) : Colors.blue.shade200),
       ),
       child: Row(children: [
-        Icon(Icons.info_outline, size: 16, color: Colors.blue.shade800),
+        Icon(Icons.info_outline, size: 16, color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             "This request must be reviewed by a Doctor.",
             style: TextStyle(
               fontSize: 12, 
-              color: Colors.blue.shade800, 
+              color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800, 
               fontWeight: FontWeight.bold
             ),
           ),
@@ -1042,13 +1486,23 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   String _formatDate(dynamic raw) {
     if (raw == null) return '—';
-    if (raw is String) {
-      final parsed = _tryParseDateString(raw);
-      if (parsed != null) return DateFormat('dd-MM-yyyy').format(parsed);
-      return raw;
-    }
     if (raw is Timestamp) {
       return DateFormat('dd-MM-yyyy').format(raw.toDate());
+    }
+    if (raw is DateTime) {
+      return DateFormat('dd-MM-yyyy').format(raw);
+    }
+    if (raw is String) {
+      final str = raw.trim();
+      if (str.isEmpty || str == 'null') return '—';
+      // First attempt: ISO-8601 (e.g. 2023-06-12T00:00:00.000)
+      final dt = DateTime.tryParse(str);
+      if (dt != null) {
+        return DateFormat('dd-MM-yyyy').format(dt);
+      }
+      final parsed = _tryParseDateString(str);
+      if (parsed != null) return DateFormat('dd-MM-yyyy').format(parsed);
+      return str;
     }
     return raw.toString();
   }
@@ -1071,6 +1525,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   Future<void> _showEditPatientDialog(String requestId,
       Map<String, dynamic> proposed, Map<String, dynamic> original) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     bool isChild = original['isAdult'] == false;
     final cnicCtrl = TextEditingController(
       text: isChild
@@ -1102,172 +1557,201 @@ class _StableRequestTabState extends State<_StableRequestTab>
           (original['dob'] as Timestamp?)?.toDate();
       if (date != null) {
         dobCtrl.text = DateFormat('dd-MM-yyyy').format(date);
+      } else {
+        dobCtrl.text = _formatDate(proposed['dob'] ?? original['dob']);
+        if (dobCtrl.text == '—') dobCtrl.text = '';
       }
     }
+
+    final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final fieldBg  = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
+    final borderSide = isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide(color: Colors.teal.shade200);
 
     await showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (ctx, setState) => AlertDialog(
-          backgroundColor: Colors.teal.shade50,
+          backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
+            borderRadius: BorderRadius.circular(16),
+            side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+          ),
           title: Row(children: [
-            Icon(Icons.edit_note, color: Colors.teal.shade800),
+            Icon(Icons.edit_note_rounded, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
             const SizedBox(width: 8),
             Text("Edit Proposed Changes",
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: Colors.teal.shade800)),
+                    color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900)),
           ]),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: fieldBg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.teal.shade800),
+                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.teal.shade100),
                 ),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("Patient Type",
-                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text("Patient Type",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          )),
                       Row(children: [
                         Expanded(
                             child: RadioListTile<bool>(
-                                title: const Text("Adult"),
+                                title: Text("Adult", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                                 value: false,
                                 groupValue: isChild,
-                                activeColor: Colors.teal.shade700,
+                                activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                                 onChanged: (v) =>
                                     setState(() => isChild = v!))),
                         Expanded(
                             child: RadioListTile<bool>(
-                                title: const Text("Child"),
+                                title: Text("Child", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
                                 value: true,
                                 groupValue: isChild,
-                                activeColor: Colors.teal.shade700,
+                                activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                                 onChanged: (v) =>
                                     setState(() => isChild = v!))),
                       ]),
                     ]),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 14),
               TextField(
                 controller: cnicCtrl,
                 readOnly: true,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: isChild ? "Guardian CNIC" : "CNIC",
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.badge, color: Colors.teal.shade800),
+                      Icon(Icons.badge, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: nameCtrl,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "Full Name",
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.person, color: Colors.teal.shade800),
+                      Icon(Icons.person, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: phoneCtrl,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "Phone (optional)",
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.phone, color: Colors.teal.shade800),
+                      Icon(Icons.phone, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: dobCtrl,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "DOB (dd-MM-yyyy)",
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.cake, color: Colors.teal.shade800),
+                      Icon(Icons.cake, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: bloodGroupCtrl,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: "Blood Group",
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon: Icon(Icons.bloodtype,
-                      color: Colors.teal.shade800),
+                      color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
-              const SizedBox(height: 20),
-              const Text("Status",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text("Status",
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+              ),
               Row(children: [
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("Zakat"),
+                    title: Text("Zakat", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "Zakat",
                     groupValue: selectedStatus,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("Non-Zakat"),
+                    title: Text("Non-Zakat", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "Non-Zakat",
                     groupValue: selectedStatus,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("GMWF"),
+                    title: Text("GMWF", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "GMWF",
                     groupValue: selectedStatus,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
               ]),
-              const SizedBox(height: 20),
-              const Text("Gender",
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text("Gender",
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+              ),
               Row(children: [
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("Male"),
+                    title: Text("Male", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "Male",
                     groupValue: selectedGender,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("Female"),
+                    title: Text("Female", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "Female",
                     groupValue: selectedGender,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: const Text("Other"),
+                    title: Text("Other", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
                     value: "Other",
                     groupValue: selectedGender,
+                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
               ]),
@@ -1277,11 +1761,11 @@ class _StableRequestTabState extends State<_StableRequestTab>
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: Text("Cancel",
-                  style: TextStyle(color: Colors.teal.shade800)),
+                  style: TextStyle(color: isDark ? Colors.white70 : Colors.teal.shade800)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.teal.shade700,
+                backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
                 foregroundColor: Colors.white,
               ),
               onPressed: () async {
@@ -1327,27 +1811,45 @@ class _StableRequestTabState extends State<_StableRequestTab>
   }
 
   Future<String?> _showReasonPrompt(BuildContext context, String action) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final ctrl = TextEditingController();
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${action == 'approved' ? 'Approval' : 'Rejection'} Reason'),
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+        ),
+        title: Text(
+          '${action == 'approved' ? 'Approval' : 'Rejection'} Reason',
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        ),
         content: TextField(
           controller: ctrl,
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
           decoration: InputDecoration(
             hintText: 'Enter reason for $action...',
-            border: const OutlineInputBorder(),
+            hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+            ),
           ),
           maxLines: 3,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: action == 'approved' ? Colors.teal : Colors.red,
+              backgroundColor: action == 'approved'
+                  ? (isDark ? const Color(0xFF0F766E) : Colors.teal)
+                  : Colors.red,
               foregroundColor: Colors.white,
             ),
             onPressed: () {
@@ -1364,6 +1866,424 @@ class _StableRequestTabState extends State<_StableRequestTab>
         ],
       ),
     );
+  }
+
+  Future<void> _confirmApproveAll(
+      BuildContext context, List<QueryDocumentSnapshot> allDocs) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final role = (widget.currentUserRole ?? '').toLowerCase().trim();
+    final isBranchManager = role.contains('branch manager') ||
+        role.contains('branch_manager') ||
+        role == 'bm' ||
+        role.contains('manager');
+    final isSupervisorRole = widget.isSupervisor ||
+        role.contains('supervisor') ||
+        isBranchManager ||
+        role.contains('admin') ||
+        role.contains('chairman') ||
+        role.contains('ceo');
+    final isDoctor = role.contains('doctor');
+
+    // Filter documents the current user is eligible to approve
+    final eligibleDocs = allDocs.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      final requestType = data['requestType']?.toString() ??
+          data['type']?.toString() ??
+          'unknown';
+      if (isSupervisorRole && requestType != 'token_exception') return true;
+      if (isDoctor && requestType == 'token_exception') return true;
+      return false;
+    }).toList();
+
+    if (eligibleDocs.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No requests eligible for your role to approve.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.done_all_rounded, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700, size: 26),
+            const SizedBox(width: 10),
+            Text(
+              'Approve All Requests?',
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to approve all ${eligibleDocs.length} pending request${eligibleDocs.length > 1 ? 's' : ''}?\n\n'
+          'This will execute and update inventory, tokens, and records for all pending items at once.',
+          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white60 : Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Approve All (${eligibleDocs.length})'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isApprovingAll = true);
+
+    int approvedCount = 0;
+    int errorCount = 0;
+
+    String? reviewerName = widget.username;
+    final reviewerUid = FirebaseAuth.instance.currentUser?.uid;
+    if (reviewerName == null && reviewerUid != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('users')
+            .doc(reviewerUid)
+            .get();
+        reviewerName = userDoc.data()?['username']?.toString();
+      } catch (_) {}
+    }
+
+    for (final doc in eligibleDocs) {
+      try {
+        final data = doc.data() as Map<String, dynamic>;
+        final requestType = data['requestType']?.toString() ??
+            data['type']?.toString() ??
+            'unknown';
+        final collection = doc.reference.parent.id;
+        final docId = doc.id;
+
+        await _processSingleDocApproval(
+          docId: docId,
+          data: data,
+          requestType: requestType,
+          collection: collection,
+          reviewerUid: reviewerUid,
+          reviewerName: reviewerName,
+          docReason: 'Approved in bulk',
+        );
+        approvedCount++;
+      } catch (e) {
+        debugPrint('Error bulk approving ${doc.id}: $e');
+        errorCount++;
+      }
+    }
+
+    try {
+      await SyncService().forceFullRefresh(widget.branchId);
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() => _isApprovingAll = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            errorCount == 0
+                ? '✅ Successfully approved all $approvedCount requests!'
+                : '✅ Approved $approvedCount requests ($errorCount failed).',
+          ),
+          backgroundColor: errorCount == 0 ? Colors.teal.shade700 : Colors.orange,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _processSingleDocApproval({
+    required String docId,
+    required Map<String, dynamic> data,
+    required String requestType,
+    required String collection,
+    required String? reviewerUid,
+    required String? reviewerName,
+    String? docReason,
+  }) async {
+    final ref = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(widget.branchId)
+        .collection(collection)
+        .doc(docId);
+
+    await ref.update({
+      'status':     'approved',
+      'reviewedAt': FieldValue.serverTimestamp(),
+      'reviewedBy': reviewerUid,
+      if (reviewerName != null) 'reviewedByName': reviewerName,
+      if (docReason != null) 'doctorReason': docReason,
+    });
+
+    final reqCampId = data['dispensaryId']?.toString() ??
+        data['campId']?.toString() ??
+        data['dispensaryTag']?.toString();
+
+    if (requestType == 'patient_edit') {
+      final patientId = data['patientId'] as String?;
+      final toApply   = (data['draftData']    as Map<String, dynamic>?) ??
+                        (data['proposedData'] as Map<String, dynamic>?);
+
+      if (toApply == null ||
+          toApply.isEmpty ||
+          patientId == null ||
+          patientId.isEmpty) {
+        return;
+      }
+
+      final patientsRef = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('patients');
+
+      await patientsRef.doc(patientId).update(toApply);
+
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+          final box = Hive.box(LocalStorageService.patientsBox);
+          final existing = box.get('patient:$patientId') ?? box.get(patientId);
+          if (existing is Map) {
+            final updated = Map<String, dynamic>.from(existing)..addAll(toApply);
+            LocalStorageService.saveLocalPatient(updated);
+          } else {
+            LocalStorageService.saveLocalPatient(toApply);
+          }
+        } else {
+          LocalStorageService.saveLocalPatient(toApply);
+        }
+        await LocalStorageService.updateActiveEntriesForPatient(widget.branchId, patientId, toApply);
+      } catch (e) {
+        debugPrint('Hive patient update error: $e');
+      }
+
+      try {
+        final sanitizedChanges = LocalStorageService.sanitize(toApply);
+        RealtimeManager().sendMessage({
+          'event_type': 'patient_edit_approved',
+          'data': {
+            'branchId': widget.branchId,
+            'patientId': patientId,
+            'changes': sanitizedChanges,
+          },
+        });
+      } catch (e) {
+        debugPrint('Failed to broadcast patient edit: $e');
+      }
+    }
+    else if (requestType == 'token_reversal') {
+      final tokenSerial = data['tokenSerial'] as String? ??
+          data['tokenId']     as String?;
+      if (tokenSerial == null || tokenSerial.isEmpty) return;
+
+      final queueTypeRaw    =
+          (data['queueType'] as String?)?.toLowerCase() ?? 'zakat';
+      final queueCollection = queueTypeRaw.contains('non')
+          ? 'non-zakat'
+          : (queueTypeRaw.contains('gmwf') ||
+                  queueTypeRaw.contains('gm wf'))
+              ? 'gmwf'
+              : 'zakat';
+
+      final parts = tokenSerial.split('-');
+      final dateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+          ? (parts.length > 1 ? parts[1] : '')
+          : (parts.isNotEmpty ? parts[0] : '');
+
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('serials')
+          .doc(dateKey)
+          .collection(queueCollection)
+          .doc(tokenSerial)
+          .delete();
+
+      await LocalStorageService.deleteLocalEntry(
+          widget.branchId, tokenSerial);
+
+      try {
+        RealtimeManager().sendMessage({
+          'event_type': 'token_reversal_approved',
+          'data': {
+            'branchId':    widget.branchId,
+            'tokenSerial': tokenSerial,
+            'queueType':   queueCollection,
+            'dateKey':     dateKey,
+          },
+        });
+      } catch (e) {
+        debugPrint('Failed to broadcast token reversal: $e');
+      }
+    }
+    else if (requestType == 'add_stock') {
+      final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
+          ? _safeItemList(data['draftItems'])
+          : _safeItemList(data['items']);
+
+      if (itemsToUse.isNotEmpty) {
+        await _handleAddStock(itemsToUse, campId: reqCampId);
+      }
+    }
+    else if (requestType == 'edit_medicine') {
+      final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
+          ? _safeItemList(data['draftItems'])
+          : _safeItemList(data['items']);
+      if (itemsToUse.isNotEmpty) {
+        await _handleEditMedicine(itemsToUse, reviewerUid ?? '', reviewerName, campId: reqCampId);
+      }
+    }
+    else if (requestType == 'delete_medicine') {
+      final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
+          ? _safeItemList(data['draftItems'])
+          : _safeItemList(data['items']);
+      if (itemsToUse.isNotEmpty) {
+        await _handleDeleteMedicine(itemsToUse, campId: reqCampId);
+      }
+    }
+    else if (requestType == 'change_prescription') {
+      final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
+          ? _safeItemList(data['draftItems'])
+          : _safeItemList(data['items']);
+      if (itemsToUse.isNotEmpty) {
+        await _handleChangePrescription(data, itemsToUse);
+      }
+    }
+    else if (requestType == 'token_exception') {
+      final patientId = data['patientId']?.toString();
+      final medicineName = data['medicineName']?.toString();
+      
+      if (patientId != null) {
+        final restrictionsRef = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('medicine_restrictions');
+        
+        await restrictionsRef.doc(patientId).delete().catchError((e) {
+          debugPrint('Note: Restriction doc $patientId already gone or error: $e');
+        });
+
+        await LocalStorageService.grantTokenException(
+          widget.branchId,
+          patientId,
+          reason: docReason ?? 'Approved by Doctor/Supervisor',
+          approvedBy: reviewerName ?? 'Doctor',
+          requestId: docId,
+        );
+
+        RealtimeManager().sendMessage({
+          ...RealtimeEvents.payload(
+            type: RealtimeEvents.tokenExceptionApproved,
+            branchId: widget.branchId,
+            data: {
+              'requestId': docId,
+              'patientId': patientId,
+              'reason': docReason ?? 'Approved by Doctor',
+              'approvedBy': reviewerName ?? 'Doctor',
+              'medicineName': medicineName,
+            },
+          ),
+        });
+      }
+    }
+    else if (requestType == 'register_medicine') {
+      final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
+          ? _safeItemList(data['draftItems'])
+          : _safeItemList(data['items']);
+      
+      if (itemsToUse.isNotEmpty) {
+        final inventory = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('inventory');
+        
+        for (final item in itemsToUse) {
+          final name = item['name']?.toString() ?? '';
+          final type = item['type'] ?? '';
+          final dose = item['dose'] ?? '';
+          final exp  = item['expiryDate'] ?? '';
+          
+          final id = RequestUtils.generateDocId(name, type, dose, exp, campId: reqCampId);
+          
+          final docData = <String, dynamic>{
+            ...item,
+            'addedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+            'isVerified': true,
+            'createdBy': data['requestedBy'],
+            'createdByName': data['requesterName'],
+            'approvedBy': reviewerUid,
+            'approvedByName': reviewerName ?? 'Supervisor',
+          };
+          if (reqCampId != null && reqCampId.isNotEmpty) {
+            docData['dispensaryId'] = reqCampId;
+            docData['dispensaryTag'] = CampSessionService.getDispensaryKeyword(reqCampId);
+          }
+          
+          await inventory.doc(id).set(docData);
+
+          // Save locally to Hive stockBox and broadcast immediately via LAN/WebSocket
+          final localStockData = <String, dynamic>{
+            ...item,
+            'id': id,
+            'branchId': widget.branchId,
+            'isVerified': true,
+            'addedAt': DateTime.now().toIso8601String(),
+            'updatedAt': DateTime.now().toIso8601String(),
+            if (reqCampId != null && reqCampId.isNotEmpty) 'dispensaryId': reqCampId,
+            if (reqCampId != null && reqCampId.isNotEmpty) 'dispensaryTag': CampSessionService.getDispensaryKeyword(reqCampId),
+          };
+          LocalStorageService.saveLocalInventoryItem(localStockData);
+
+          RealtimeManager().sendMessage({
+            ...RealtimeEvents.payload(
+              type: RealtimeEvents.saveStockItem,
+              branchId: widget.branchId,
+              data: localStockData,
+            ),
+          });
+          
+          await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory_log')
+              .add({
+            'action': 'medicine_registered',
+            'medicineName': name,
+            'medicineType': type,
+            'dose': dose,
+            'quantityAdded': _safeInt(item['quantity']),
+            'price': item['price'],
+            'expiryDate': exp,
+            'performedBy': reviewerUid,
+            'performedByName': reviewerName ?? 'Supervisor',
+            'timestamp': FieldValue.serverTimestamp(),
+            'docId': id,
+            'approvedRequestId': docId,
+            if (reqCampId != null) 'dispensaryId': reqCampId,
+          });
+        }
+      }
+    }
   }
 
   Future<void> _updateStatus(
@@ -1399,289 +2319,29 @@ class _StableRequestTabState extends State<_StableRequestTab>
         reviewerName = userDoc.data()?['username']?.toString();
       }
 
-      await ref.update({
-        'status':     newStatus,
-        'reviewedAt': FieldValue.serverTimestamp(),
-        'reviewedBy': reviewerUid,
-        if (reviewerName != null) 'reviewedByName': reviewerName,
-        if (docReason != null) 'doctorReason': docReason,
-      });
-
       if (newStatus == 'approved') {
         final snap = await ref.get();
-        final data = snap.data() as Map<String, dynamic>;
+        final data = (snap.data() as Map<String, dynamic>?) ?? {};
 
-        debugPrint('=== APPROVAL DEBUG ===');
-        debugPrint('Request Type: $requestType');
-        debugPrint('Collection: $collection');
-        debugPrint('Document ID: $docId');
+        await _processSingleDocApproval(
+          docId: docId,
+          data: data,
+          requestType: requestType,
+          collection: collection,
+          reviewerUid: reviewerUid,
+          reviewerName: reviewerName,
+          docReason: docReason,
+        );
 
-        final reqCampId = data['dispensaryId']?.toString() ??
-            data['campId']?.toString() ??
-            data['dispensaryTag']?.toString();
-
-        if (requestType == 'patient_edit') {
-          final patientId = data['patientId'] as String?;
-          final toApply   = (data['draftData']    as Map<String, dynamic>?) ??
-                            (data['proposedData'] as Map<String, dynamic>?);
-
-          if (toApply == null ||
-              toApply.isEmpty ||
-              patientId == null ||
-              patientId.isEmpty) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text("Invalid patient edit request data"),
-                backgroundColor: Colors.red));
-            return;
-          }
-
-          debugPrint('Patient ID to update: $patientId');
-          debugPrint('Changes to apply: $toApply');
-
-          final patientsRef = FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('patients');
-
-          await patientsRef.doc(patientId).update(toApply);
-          debugPrint('✅ Patient $patientId updated in Firestore');
-
-          try {
-            if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
-              final box = Hive.box(LocalStorageService.patientsBox);
-              final existing = box.get('patient:$patientId') ?? box.get(patientId);
-              if (existing is Map) {
-                final updated = Map<String, dynamic>.from(existing)..addAll(toApply);
-                LocalStorageService.saveLocalPatient(updated);
-                debugPrint('✅ Patient $patientId updated in local Hive');
-              }
-            }
-          } catch (e) {
-            debugPrint('Hive patient update error: $e');
-          }
-
-          await SyncService().forceFullRefresh(widget.branchId);
-
-          // ── Broadcast to receptionist screens ────────────────────────────
-          try {
-            final sanitizedChanges = LocalStorageService.sanitize(toApply);
-            RealtimeManager().sendMessage({
-              'event_type': 'patient_edit_approved',
-              'data': {
-                'branchId': widget.branchId,
-                'patientId': patientId,
-                'changes': sanitizedChanges,
-              },
-            });
-            debugPrint('✅ patient_edit_approved broadcast sent');
-          } catch (e) {
-            debugPrint('Failed to broadcast patient edit: $e');
-          }
-        }
-        else if (requestType == 'token_reversal') {
-          final tokenSerial = data['tokenSerial'] as String? ??
-              data['tokenId']     as String?;
-          if (tokenSerial == null || tokenSerial.isEmpty) {
-            debugPrint('❌ Token reversal: missing tokenSerial');
-            return;
-          }
-
-          final queueTypeRaw    =
-              (data['queueType'] as String?)?.toLowerCase() ?? 'zakat';
-          final queueCollection = queueTypeRaw.contains('non')
-              ? 'non-zakat'
-              : (queueTypeRaw.contains('gmwf') ||
-                      queueTypeRaw.contains('gm wf'))
-                  ? 'gmwf'
-                  : 'zakat';
-
-          final parts = tokenSerial.split('-');
-          final dateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
-              ? (parts.length > 1 ? parts[1] : '')
-              : (parts.isNotEmpty ? parts[0] : '');
-
-          debugPrint('Deleting token: $tokenSerial from $queueCollection');
-
-          // Delete from Firestore
-          await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('serials')
-              .doc(dateKey)
-              .collection(queueCollection)
-              .doc(tokenSerial)
-              .delete();
-
-          debugPrint('✅ Token deleted from Firestore');
-
-          // Delete from local Hive on the supervisor device
-          await LocalStorageService.deleteLocalEntry(
-              widget.branchId, tokenSerial);
-
-          debugPrint('✅ Token deleted from local storage');
-
-          await SyncService().forceFullRefresh(widget.branchId);
-
-          // ── Broadcast to receptionist screens ────────────────────────────
-          try {
-            RealtimeManager().sendMessage({
-              'event_type': 'token_reversal_approved',
-              'data': {
-                'branchId':    widget.branchId,
-                'tokenSerial': tokenSerial,
-                'queueType':   queueCollection,
-                'dateKey':     dateKey,
-              },
-            });
-            debugPrint('✅ token_reversal_approved broadcast sent');
-          } catch (e) {
-            debugPrint('Failed to broadcast token reversal: $e');
-          }
-        }
-        else if (requestType == 'add_stock') {
-          final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
-              ? _safeItemList(data['draftItems'])
-              : _safeItemList(data['items']);
-
-          if (itemsToUse.isEmpty) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('No items found in stock request'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-            return;
-          }
-
-          try {
-            await _handleAddStock(itemsToUse, campId: reqCampId);
-            await SyncService().forceFullRefresh(widget.branchId);
-            debugPrint('✅ Add stock completed successfully');
-          } catch (e, stack) {
-            debugPrint('❌ Add stock failed: $e');
-            debugPrint(stack.toString());
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Failed to update inventory: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-            return;
-          }
-        }
-        else if (requestType == 'edit_medicine') {
-          final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
-              ? _safeItemList(data['draftItems'])
-              : _safeItemList(data['items']);
-          await _handleEditMedicine(itemsToUse, reviewerUid ?? '', reviewerName, campId: reqCampId);
-          await SyncService().forceFullRefresh(widget.branchId);
-        }
-        else if (requestType == 'delete_medicine') {
-          final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
-              ? _safeItemList(data['draftItems'])
-              : _safeItemList(data['items']);
-          await _handleDeleteMedicine(itemsToUse, campId: reqCampId);
-          await SyncService().forceFullRefresh(widget.branchId);
-        }
-        else if (requestType == 'change_prescription') {
-          final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
-              ? _safeItemList(data['draftItems'])
-              : _safeItemList(data['items']);
-          await _handleChangePrescription(data, itemsToUse);
-        }
-        else if (requestType == 'token_exception') {
-          // Find the patientId/restictId from the request data
-          final patientId = data['patientId']?.toString();
-          final medicineName = data['medicineName']?.toString();
-          
-          if (patientId != null) {
-             // 1. Delete restriction from Firestore
-             final restrictionsRef = FirebaseFirestore.instance
-                 .collection('branches')
-                 .doc(widget.branchId)
-                 .collection('medicine_restrictions');
-             
-             await restrictionsRef.doc(patientId).delete().catchError((e) {
-               debugPrint('Note: Restriction doc $patientId already gone or error: $e');
-             });
-
-             // 2. Broadcast to all LAN devices so the UI updates instantly everywhere
-             RealtimeManager().sendMessage({
-               'event_type': 'restriction_removed',
-               'data': {
-                 'branchId': widget.branchId,
-                 'patientId': patientId,
-                 'medicineName': medicineName,
-               },
-             });
-             
-             debugPrint('✅ Token exception approved: Restriction removed for $patientId');
-          }
-        }
-        else if (requestType == 'register_medicine') {
-          final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
-              ? _safeItemList(data['draftItems'])
-              : _safeItemList(data['items']);
-          
-          if (itemsToUse.isEmpty) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No items found in registration request'))
-            );
-            return;
-          }
-
-          final inventory = FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('inventory');
-          
-          for (final item in itemsToUse) {
-            final name = item['name']?.toString() ?? '';
-            final type = item['type'] ?? '';
-            final dose = item['dose'] ?? '';
-            final exp  = item['expiryDate'] ?? '';
-            
-            final id = RequestUtils.generateDocId(name, type, dose, exp, campId: reqCampId);
-            
-            final docData = <String, dynamic>{
-              ...item,
-              'addedAt': FieldValue.serverTimestamp(),
-              'isVerified': true,
-              'createdBy': data['requestedBy'],
-              'createdByName': data['requesterName'],
-              'approvedBy': reviewerUid,
-              'approvedByName': reviewerName ?? 'Supervisor',
-            };
-            if (reqCampId != null && reqCampId.isNotEmpty) {
-              docData['dispensaryId'] = reqCampId;
-              docData['dispensaryTag'] = CampSessionService.getDispensaryKeyword(reqCampId);
-            }
-            
-            await inventory.doc(id).set(docData);
-            
-            // Add to log
-            await FirebaseFirestore.instance
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('inventory_log')
-                .add({
-              'action': 'medicine_registered',
-              'medicineName': name,
-              'medicineType': type,
-              'dose': dose,
-              'quantityAdded': _safeInt(item['quantity']),
-              'price': item['price'],
-              'expiryDate': exp,
-              'performedBy': reviewerUid,
-              'performedByName': reviewerName ?? 'Supervisor',
-              'timestamp': FieldValue.serverTimestamp(),
-              'docId': id,
-              'approvedRequestId': docId,
-              if (reqCampId != null) 'dispensaryId': reqCampId,
-            });
-          }
-          await SyncService().forceFullRefresh(widget.branchId);
-        }
+        await SyncService().forceFullRefresh(widget.branchId);
+      } else {
+        await ref.update({
+          'status':     newStatus,
+          'reviewedAt': FieldValue.serverTimestamp(),
+          'reviewedBy': reviewerUid,
+          if (reviewerName != null) 'reviewedByName': reviewerName,
+          if (docReason != null) 'doctorReason': docReason,
+        });
       }
 
       // ✅ FIX: Use microtask so the Firestore stream has one event-loop turn
@@ -2020,6 +2680,11 @@ class _StableRequestTabState extends State<_StableRequestTab>
         ? DateFormat('dd-MM-yyyy').format(pickedDate)
         : (item['expiryDate']?.toString() ?? '');
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final fieldBg  = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
+    final borderSide = isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide(color: Colors.teal.shade200);
+
     await showDialog(
       context: context,
       builder: (context) =>
@@ -2040,54 +2705,64 @@ class _StableRequestTabState extends State<_StableRequestTab>
         }
 
         return AlertDialog(
-          backgroundColor: Colors.teal.shade50,
+          backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16)),
-          title: Text('Edit Item',
-              style: TextStyle(color: Colors.teal.shade800)),
+            borderRadius: BorderRadius.circular(16),
+            side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+          ),
+          title: Text(
+            'Edit Item',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+            ),
+          ),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextField(
                 controller: nameCtrl,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: 'Name',
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.medication, color: Colors.teal.shade800),
+                      Icon(Icons.medication, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: qtyCtrl,
                 keyboardType: TextInputType.number,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: 'Quantity',
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon:
-                      Icon(Icons.inventory, color: Colors.teal.shade800),
+                      Icon(Icons.inventory, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: priceCtrl,
                 keyboardType: TextInputType.number,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
                   labelText: 'Price (PKR)',
+                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                   prefixIcon: Icon(Icons.attach_money,
-                      color: Colors.teal.shade800),
+                      color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                   filled: true,
-                  fillColor: Colors.white,
-                  border: const OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.all(Radius.circular(12))),
+                  fillColor: fieldBg,
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -2097,22 +2772,23 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     readOnly: true,
                     controller:
                         TextEditingController(text: expiryStr),
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                     decoration: InputDecoration(
                       labelText: 'Expiry',
+                      labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
                       prefixIcon: Icon(Icons.calendar_month,
-                          color: Colors.teal.shade800),
+                          color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
                       filled: true,
-                      fillColor: Colors.white,
-                      border: const OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.all(Radius.circular(12))),
+                      fillColor: fieldBg,
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
                     ),
                   ),
                 ),
                 IconButton(
                     onPressed: pickDate,
                     icon: Icon(Icons.calendar_today,
-                        color: Colors.teal.shade800)),
+                        color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800)),
               ]),
             ]),
           ),
@@ -2120,10 +2796,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
             TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: Text("Cancel",
-                    style: TextStyle(color: Colors.teal.shade800))),
+                    style: TextStyle(color: isDark ? Colors.white70 : Colors.teal.shade800))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal.shade700),
+                  backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700),
               onPressed: () async {
                 final newName  = nameCtrl.text.trim();
                 final newQty   = int.tryParse(qtyCtrl.text.trim()) ?? 0;

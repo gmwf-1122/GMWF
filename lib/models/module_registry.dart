@@ -6,6 +6,7 @@ import '../pages/dispensary/receptionist/receptionist_screen.dart';
 import '../pages/dispensary/doctor/doctor_screen.dart';
 import '../pages/dispensary/dispensar/dispensar_screen.dart';
 import '../pages/dispensary/dispensar/inventory.dart';
+import '../pages/dispensary/dispensar/universal_proforma_sheet.dart';
 import '../pages/dispensary/dispensar/medicine_ledger.dart';
 import '../pages/donations/donations_screen.dart';
 import '../pages/donations/donations_shared.dart';
@@ -266,6 +267,27 @@ class ModuleRegistry {
       category: ModuleCategory.dispensary,
     ),
     AppModule(
+      id: 'medicine_proforma',
+      title: 'Medicine Proforma',
+      description: 'Master medicine catalog — register, edit, and audit medicines',
+      icon: Icons.list_alt_rounded,
+      requiredPermission: AppPermission.manageInventory,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) {
+        final role = (data['role'] as String? ?? '').toLowerCase().trim();
+        final isAdminRole = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role);
+        return UniversalProformaSheetPage(
+          branchId: data['branchId'] ?? 'unknown',
+          isDispenser: false,
+          isAdmin: isAdminRole,
+          isEmbedded: true,
+        );
+      },
+      category: ModuleCategory.dispensary,
+    ),
+    AppModule(
       id: 'inventory_ledger',
       title: 'Medicine Ledger',
       description: 'Track complete history of medicine stock and dispensing',
@@ -396,15 +418,116 @@ class ModuleRegistry {
       category: ModuleCategory.office,
     ),
     AppModule(
+      id: 'cash_flow',
+      title: 'Cash Flow & Treasury',
+      description: 'Live double-entry general ledger summary, cash flow, audit logs & system history',
+      icon: Icons.account_balance_wallet_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => CashFlowPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'employee_attendance',
+      title: 'Employee Attendance',
+      description: 'Staff daily attendance, check-in/out logs & ZKTeco biometric sync',
+      icon: Icons.fingerprint_rounded,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => EmployeeAttendancePage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'employees',
+      title: 'Employees',
+      description: 'Staff directory, profile management, onboarding, salary history',
+      icon: Icons.badge_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => EmployeesPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'payroll',
+      title: 'Payroll',
+      description: 'Monthly payroll, salary breakdown, pay slips & disbursements',
+      icon: Icons.payments_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => PayrollPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'loans',
+      title: 'Loans & Advances',
+      description: 'Employee salary advances, loans, installment plans & balances',
+      icon: Icons.credit_card_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => LoansPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'expenses',
+      title: 'Expenses',
+      description: 'Organizational operational expense vouchers & category tracking',
+      icon: Icons.receipt_long_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => ExpensesPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
+      id: 'finance_reports',
+      title: 'Finance Reports & Reconcile',
+      description: 'General ledger reports, bank reconciliations & custom exports',
+      icon: Icons.assessment_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => FinanceReportsPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+    AppModule(
       id: 'finance',
-      title: 'Finance & HR Payroll',
+      title: 'Finance Overview',
       description: 'Employees, Staff Attendance, Loans & Advances, Payroll & Expenses',
       icon: Icons.monetization_on_outlined,
       requiredPermission: AppPermission.manageFinance,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      isFeatured: true,
-      builder: (context, data) => FinancePage(
+      builder: (context, data) => CashFlowPage(
         branchId: data['branchId'] ?? 'all',
         isAdmin: true,
       ),
@@ -629,6 +752,13 @@ class ModuleRegistry {
           'reports',
           'madrassa',
           'school_module',
+          'employee_attendance',
+          'employees',
+          'payroll',
+          'cash_flow',
+          'loans',
+          'expenses',
+          'finance_reports',
         ]);
       }
 
@@ -648,6 +778,13 @@ class ModuleRegistry {
         'reports': 'Downloads',
         'madrassa': 'Madrassa',
         'school_module': 'School',
+        'employee_attendance': 'Employee Attendance',
+        'employees': 'Employees',
+        'payroll': 'Payroll',
+        'cash_flow': 'Cash Flow & Treasury',
+        'loans': 'Loans & Advances',
+        'expenses': 'Expenses',
+        'finance_reports': 'Finance Reports',
       };
 
       return modules

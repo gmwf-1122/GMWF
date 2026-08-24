@@ -43,6 +43,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../services/local_storage_service.dart';
+import '../services/camp_session_service.dart';
 import 'lan_server.dart';
 import 'realtime_events.dart';
 
@@ -187,6 +188,7 @@ class ServerSyncManager {
       _prevOnDisconnected?.call(socketId);
     };
 
+    purgeDuplicateServerQueue().ignore();
     _downloadAllFromFirestore().ignore();
     _uploadQueue().ignore();
 
@@ -330,6 +332,7 @@ class ServerSyncManager {
       case 'save_prescription':
       case 'prescription_created':
         _savePrescription(data, msg, user: user);
+        _handlePrescriptionRestriction(data, msg);
         break;
 
       case 'dispense_completed':
@@ -392,10 +395,6 @@ class ServerSyncManager {
 
       case RealtimeEvents.tokenExceptionApproved:
         _saveTokenExceptionApproval(data, msg, user: user);
-        break;
-
-      case RealtimeEvents.savePrescription:
-        _handlePrescriptionRestriction(data, msg);
         break;
 
       // ── ATTENDANCE ────────────────────────────────────────────────────────
@@ -506,6 +505,10 @@ class ServerSyncManager {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
     final serial   = data['serial']?.toString().trim();
     if (serial == null || serial.isEmpty) return;
+    if (!CampSessionService.isSerialMatchingBranch(serial, branchId)) {
+      debugPrint('[SSM] 🛑 Dropping save_entry for cross-branch serial $serial on branch $branchId');
+      return;
+    }
 
     final dateKey   = data['dateKey']?.toString() ??
         _dateKeyFromSerial(serial, _todayKey());
@@ -548,6 +551,10 @@ class ServerSyncManager {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
     final serial   = (data['serial'] ?? data['id'])?.toString().trim();
     if (serial == null || serial.isEmpty) return;
+    if (!CampSessionService.isSerialMatchingBranch(serial, branchId)) {
+      debugPrint('[SSM] 🛑 Dropping save_prescription for cross-branch serial $serial on branch $branchId');
+      return;
+    }
 
     final prescWithBranch = {
       ...data,
@@ -843,15 +850,26 @@ class ServerSyncManager {
       final serial = entry['serial']?.toString() ?? '';
       if (serial.isEmpty) continue;
 
+      final entryCopy = Map<String, dynamic>.from(entry);
+      final presc = LocalStorageService.getLocalPrescription(serial) ??
+          entry['prescription'] as Map<String, dynamic>?;
+      if (presc != null && presc.isNotEmpty) {
+        entryCopy['status'] = 'completed';
+        entryCopy['prescription'] = presc;
+        entryCopy['prescriptionId'] = presc['id'] ?? serial;
+      }
+      if ((entry['dispenseStatus'] ?? '') == 'dispensed') {
+        entryCopy['status'] = 'completed';
+        entryCopy['dispenseStatus'] = 'dispensed';
+      }
+
       _sendToSocket(socketId, {
         'event_type':  'save_entry',
         'branchId':    _branchId,
-        'data':        entry,
+        'data':        entryCopy,
         '_serverPush': true,
       });
 
-      final presc = LocalStorageService.getLocalPrescription(serial) ??
-          entry['prescription'] as Map<String, dynamic>?;
       if (presc != null && presc.isNotEmpty) {
         _sendToSocket(socketId, {
           'event_type':  'save_prescription',
@@ -861,11 +879,11 @@ class ServerSyncManager {
         });
       }
 
-      if ((entry['dispenseStatus'] ?? '') == 'dispensed') {
+      if ((entryCopy['dispenseStatus'] ?? '') == 'dispensed') {
         _sendToSocket(socketId, {
           'event_type':  'dispense_completed',
           'branchId':    _branchId,
-          'data':        entry,
+          'data':        entryCopy,
           '_serverPush': true,
         });
       }
@@ -892,12 +910,83 @@ class ServerSyncManager {
   }
 
   // ── Upload Queue ───────────────────────────────────────────────────────────
+  // ── Upload Queue ───────────────────────────────────────────────────────────
+  static Future<int> purgeDuplicateServerQueue() async {
+    try {
+      if (!Hive.isBoxOpen(_serverQueueBox)) return 0;
+      final box = Hive.box(_serverQueueBox);
+      final initialCount = box.length;
+      if (initialCount <= 1) return 0;
+
+      final Map<String, dynamic> uniqueLatest = {};
+      final List<dynamic> keysToDelete = [];
+
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw == null || raw is! Map) {
+          keysToDelete.add(key);
+          continue;
+        }
+        final item = Map<String, dynamic>.from(raw);
+        final type = (item['type'] ?? '').toString();
+        final serial = (item['serial'] ?? item['data']?['serial'] ?? '').toString();
+        final patientId = (item['patientId'] ?? item['data']?['patientId'] ?? item['id'] ?? '').toString();
+        final medicineId = (item['medicineId'] ?? '').toString();
+
+        final uniqueKey = '${type}_${serial}_${patientId}_${medicineId}';
+        if (uniqueKey.replaceAll('_', '').isEmpty) continue;
+
+        if (uniqueLatest.containsKey(uniqueKey)) {
+          final existingKey = uniqueLatest[uniqueKey]['_boxKey'];
+          keysToDelete.add(existingKey);
+        }
+        uniqueLatest[uniqueKey] = {...item, '_boxKey': key};
+      }
+
+      for (final key in keysToDelete) {
+        await box.delete(key);
+      }
+      final purged = initialCount - box.length;
+      if (purged > 0) {
+        debugPrint('[SSM] 🧹 Purged $purged redundant duplicate server queue items. Remaining: ${box.length}');
+      }
+      return purged;
+    } catch (e) {
+      debugPrint('[SSM] Error purging duplicate server queue: $e');
+      return 0;
+    }
+  }
+
   void _enqueue(Map<String, dynamic> op) {
     try {
       final box = Hive.box(_serverQueueBox);
-      final key = 'ssync_${DateTime.now().microsecondsSinceEpoch}';
-      op['createdAt'] = DateTime.now().toIso8601String();
-      box.put(key, LocalStorageService.sanitize(op));
+      final opCopy = Map<String, dynamic>.from(op);
+      final type = (opCopy['type'] ?? 'unknown').toString();
+      final serial = (opCopy['serial'] ?? opCopy['data']?['serial'] ?? '').toString();
+      final patientId = (opCopy['patientId'] ?? opCopy['data']?['patientId'] ?? opCopy['id'] ?? '').toString();
+      final medicineId = (opCopy['medicineId'] ?? '').toString();
+
+      final targetUniqueKey = '${type}_${serial}_${patientId}_${medicineId}';
+      String key = 'ssync_${DateTime.now().microsecondsSinceEpoch}';
+
+      if (targetUniqueKey.replaceAll('_', '').isNotEmpty) {
+        for (final existingKey in box.keys) {
+          final raw = box.get(existingKey);
+          if (raw is Map) {
+            final eType = (raw['type'] ?? '').toString();
+            final eSerial = (raw['serial'] ?? raw['data']?['serial'] ?? '').toString();
+            final ePid = (raw['patientId'] ?? raw['data']?['patientId'] ?? raw['id'] ?? '').toString();
+            final eMed = (raw['medicineId'] ?? '').toString();
+            if ('${eType}_${eSerial}_${ePid}_${eMed}' == targetUniqueKey) {
+              key = existingKey.toString();
+              break;
+            }
+          }
+        }
+      }
+
+      opCopy['createdAt'] = DateTime.now().toIso8601String();
+      box.put(key, LocalStorageService.sanitize(opCopy));
     } catch (e) {
       debugPrint('[SSM] _enqueue failed: $e');
     }
@@ -938,9 +1027,7 @@ class ServerSyncManager {
         op['_attempts'] = attempts + 1;
         op['_err']      =
             e.toString().substring(0, e.toString().length.clamp(0, 200));
-        final retryKey = 'ssync_retry_${DateTime.now().microsecondsSinceEpoch}';
-        box.put(retryKey, op);
-        box.delete(key);
+        await box.put(key, op);
       }
 
       await Future.delayed(const Duration(milliseconds: 150));
@@ -985,17 +1072,37 @@ class ServerSyncManager {
         final queueType = resolveQueueType(
             (op['queueType'] ?? cleanData['queueType'])?.toString());
 
+        final upperSerial = serial.trim().toUpperCase();
+        cleanData['serial'] = upperSerial;
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: branchId,
+          dateKey: dateKey,
+          campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
+          dispensaryTag: cleanData['dispensaryTag']?.toString(),
+          serial: upperSerial,
+        );
+
         await _db
             .collection('branches').doc(branchId)
-            .collection('serials').doc(dateKey)
-            .collection(queueType).doc(serial)
+            .collection('serials').doc(campDocKey)
+            .collection(queueType).doc(upperSerial)
             .set(cleanData, SetOptions(merge: true));
 
-        final num = int.tryParse(serial.split('-').last);
+        if (serial != upperSerial) {
+          try {
+            await _db
+                .collection('branches').doc(branchId)
+                .collection('serials').doc(campDocKey)
+                .collection(queueType).doc(serial.toLowerCase())
+                .delete();
+          } catch (_) {}
+        }
+
+        final num = int.tryParse(upperSerial.split('-').last);
         if (num != null) {
           await _db
               .collection('branches').doc(branchId)
-              .collection('serials').doc(dateKey)
+              .collection('serials').doc(campDocKey)
               .set({'lastSerialNumber': num}, SetOptions(merge: true));
         }
         break;
@@ -1066,9 +1173,15 @@ class ServerSyncManager {
             : double.tryParse(op['delta']?.toString() ?? '') ?? 0.0;
         if (delta == 0) return;
 
+        final invCol = CampSessionService.getCampInventoryPath(
+          branchId: branchId,
+          campId: op['campId']?.toString() ?? cleanData['campId']?.toString(),
+          serial: op['serial']?.toString() ?? cleanData['serial']?.toString(),
+        );
+
         final docRef = _db
             .collection('branches').doc(branchId)
-            .collection('inventory').doc(medicineId);
+            .collection(invCol).doc(medicineId);
         await _db.runTransaction((transaction) async {
           final snapshot = await transaction.get(docRef);
           if (snapshot.exists) {
@@ -1080,13 +1193,32 @@ class ServerSyncManager {
         break;
 
       case 'approve_token_exception':
+        final pId = op['patientId']?.toString() ?? cleanData['patientId']?.toString();
+        final reqId = op['requestId']?.toString() ?? cleanData['requestId']?.toString();
+        if (pId != null && pId.isNotEmpty) {
+          await LocalStorageService.grantTokenException(
+            branchId,
+            pId,
+            reason: cleanData['doctorReason']?.toString() ?? 'Approved by Doctor',
+            approvedBy: cleanData['approvedBy']?.toString() ?? 'Doctor',
+            requestId: reqId,
+          );
+        }
+        if (reqId != null) {
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('edit_requests').doc(reqId)
+              .set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
       case 'save_token_exception_request':
         final requestId = op['requestId']?.toString() ?? cleanData['requestId']?.toString();
         if (requestId == null) return;
         await _db
-            .collection('branches').doc(branchId)
-            .collection('edit_requests').doc(requestId)
-            .set(cleanData, SetOptions(merge: true));
+              .collection('branches').doc(branchId)
+              .collection('edit_requests').doc(requestId)
+              .set(cleanData, SetOptions(merge: true));
         break;
 
       case 'add_inventory_stock':
@@ -1097,9 +1229,15 @@ class ServerSyncManager {
         final qtyVal = (qty is num) ? qty.toDouble() : double.tryParse(qty?.toString() ?? '') ?? 0.0;
         if (qtyVal == 0) return;
 
+        final addInvCol = CampSessionService.getCampInventoryPath(
+          branchId: branchId,
+          campId: op['campId']?.toString() ?? cleanData['campId']?.toString(),
+          serial: op['serial']?.toString() ?? cleanData['serial']?.toString(),
+        );
+
         await _db
             .collection('branches').doc(branchId)
-            .collection('inventory').doc(medicineId)
+            .collection(addInvCol).doc(medicineId)
             .update({'quantity': FieldValue.increment(qtyVal)});
 
         // Log the action
@@ -1116,8 +1254,10 @@ class ServerSyncManager {
         break;
 
       case 'register_medicine':
+      case 'add_stock':
+      case 'add_proforma_stock':
         final medData = Map<String, dynamic>.from(op['data'] ?? {});
-        final medicineId = op['medicineId']?.toString() ?? medData['id']?.toString() ?? '';
+        final medicineId = op['medicineId']?.toString() ?? medData['id']?.toString() ?? medData['docId']?.toString() ?? '';
         if (medicineId.isEmpty) return;
 
         // Clean local-only fields
@@ -1125,26 +1265,51 @@ class ServerSyncManager {
           ..remove('id')
           ..remove('syncStatus');
 
+        final regInvCol = CampSessionService.getCampInventoryPath(
+          branchId: branchId,
+          campId: op['campId']?.toString() ?? medData['campId']?.toString() ?? medData['dispensaryId']?.toString(),
+        );
+
         await _db
             .collection('branches').doc(branchId)
-            .collection('inventory').doc(medicineId)
+            .collection(regInvCol).doc(medicineId)
             .set(fsData, SetOptions(merge: true));
 
-        // Log the action
+        final logData = op['logData'] != null ? Map<String, dynamic>.from(op['logData']) : null;
+        if (logData != null) {
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('inventory_log').add({
+            ...logData,
+            'timestamp': FieldValue.serverTimestamp(),
+          });
+        } else {
+          // Log the action
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('inventory_log').add({
+            'action': op['action'] ?? 'medicine_registered_directly',
+            'medicineName': fsData['name'] ?? '',
+            'medicineType': fsData['type'] ?? '',
+            'dose': fsData['dose'] ?? '',
+            'expiryDate': fsData['expiryDate'] ?? '',
+            'quantityAdded': fsData['quantity'] ?? 0,
+            'price': fsData['price'] ?? '',
+            'performedBy': fsData['createdBy'] ?? op['performedBy'] ?? '',
+            'performedByName': fsData['createdByName'] ?? op['performedByName'] ?? '',
+            'timestamp': FieldValue.serverTimestamp(),
+            'docId': medicineId,
+          });
+        }
+        break;
+
+      case 'save_inventory_log':
+        final logData = Map<String, dynamic>.from(op['data'] ?? op['logData'] ?? {});
         await _db
             .collection('branches').doc(branchId)
             .collection('inventory_log').add({
-          'action': 'medicine_registered_directly',
-          'medicineName': fsData['name'] ?? '',
-          'medicineType': fsData['type'] ?? '',
-          'dose': fsData['dose'] ?? '',
-          'expiryDate': fsData['expiryDate'] ?? '',
-          'quantityAdded': fsData['quantity'] ?? 0,
-          'price': fsData['price'] ?? '',
-          'performedBy': fsData['createdBy'] ?? '',
-          'performedByName': fsData['createdByName'] ?? '',
+          ...logData,
           'timestamp': FieldValue.serverTimestamp(),
-          'docId': medicineId,
         });
         break;
 
@@ -1283,6 +1448,7 @@ class ServerSyncManager {
           d['queueType'] = queueType;
           d['dateKey']   = today;
           d['branchId']  = _branchId;
+          if (!CampSessionService.isSerialMatchingBranch(doc.id, _branchId)) continue;
           LocalStorageService.saveEntryLocal(_branchId!, doc.id, d);
         }
       }
@@ -1364,6 +1530,8 @@ class ServerSyncManager {
           final d = presDoc.data();
           d['id']          = presDoc.id;
           d['patientCnic'] = cnicDoc.id;
+          final pSerial = (d['serial'] ?? presDoc.id).toString();
+          if (!CampSessionService.isSerialMatchingBranch(pSerial, _branchId)) continue;
           d['branchId']    = _branchId;
           await LocalStorageService.saveLocalPrescription(d);
           total++;
@@ -1497,17 +1665,25 @@ class ServerSyncManager {
   Future<void> _downloadAttendance() async {
     if (_branchId == null || !_running) return;
     try {
-      final today = _todayKey();
-      final snap = await _db
+      final box = await LocalStorageService.openBoxSafe(LocalStorageService.attendanceBox);
+      final dateDocsSnap = await _db
           .collection('branches').doc(_branchId)
-          .collection('attendance').doc(today)
-          .collection('records').get();
+          .collection('employee_attendance')
+          .limit(7)
+          .get();
 
-      final box = await LocalStorageService.openBoxSafe('attendance_box');
-      for (final doc in snap.docs) {
-        box.put(doc.id, LocalStorageService.sanitize(doc.data()));
+      int count = 0;
+      for (final dateDoc in dateDocsSnap.docs) {
+        final dStr = dateDoc.id;
+        final recSnap = await dateDoc.reference.collection('records').get();
+        for (final doc in recSnap.docs) {
+          final employeeId = doc.id;
+          final key = '${employeeId}_$dStr';
+          box.put(key, LocalStorageService.sanitize(doc.data()));
+          count++;
+        }
       }
-      debugPrint('[SSM] Downloaded ${snap.docs.length} attendance records for $_branchId');
+      debugPrint('[SSM] Downloaded $count attendance records for $_branchId');
     } catch (e) {
       debugPrint('[SSM] _downloadAttendance error: $e');
     }

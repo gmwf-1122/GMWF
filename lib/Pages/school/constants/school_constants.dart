@@ -46,11 +46,98 @@ class SchoolConstants {
       return const [
         'Science (Computer Science)',
         'Science (Biology)',
+        'Computer Arts',
         'Arts & Humanities',
         'General',
       ];
     }
     return const ['General'];
+  }
+
+  /// Four core compulsory subjects + General Science
+  static const List<String> coreCompulsorySubjects = [
+    'English',
+    'Urdu',
+    'Islamiyat',
+    'Pakistan Studies',
+    'General Science',
+  ];
+
+  /// Returns subject list tailored by Class / Grade and Academic Group
+  static List<String> getSubjectsForGradeAndGroup(String grade, String academicGroup) {
+    if (!isHighSchool(grade)) {
+      // Primary & Middle Classes (KG-1 to 8th)
+      return const [
+        'English',
+        'Urdu',
+        'Mathematics',
+        'General Science',
+        'Islamiyat',
+        'Social Studies',
+        'Nazra Quran',
+        'Computer Studies',
+        'Drawing & Arts',
+      ];
+    }
+
+    // High School (Pre-9th, 9th, 10th)
+    final group = academicGroup.toLowerCase().trim();
+    if (group.contains('computer') && group.contains('arts')) {
+      return const [
+        'English',
+        'Urdu',
+        'Islamiyat',
+        'Pakistan Studies',
+        'General Mathematics',
+        'Computer Studies & Graphics',
+        'Fine Arts',
+        'General Science',
+      ];
+    } else if (group.contains('biology') || group.contains('bio')) {
+      return const [
+        'English',
+        'Urdu',
+        'Islamiyat',
+        'Pakistan Studies',
+        'Mathematics',
+        'Physics',
+        'Chemistry',
+        'Biology',
+      ];
+    } else if (group.contains('computer') || group.contains('cs')) {
+      return const [
+        'English',
+        'Urdu',
+        'Islamiyat',
+        'Pakistan Studies',
+        'Mathematics',
+        'Physics',
+        'Chemistry',
+        'Computer Science',
+      ];
+    } else if (group.contains('arts') || group.contains('humanities')) {
+      return const [
+        'English',
+        'Urdu',
+        'Islamiyat',
+        'Pakistan Studies',
+        'General Mathematics',
+        'Civics & Economics',
+        'General Science',
+        'Education',
+      ];
+    }
+
+    // General stream
+    return const [
+      'English',
+      'Urdu',
+      'Islamiyat',
+      'Pakistan Studies',
+      'General Mathematics',
+      'General Science',
+      'Computer Studies',
+    ];
   }
 
   static const Map<String, double> defaultTuitionFees = {

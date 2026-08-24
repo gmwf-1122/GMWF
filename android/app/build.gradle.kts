@@ -1,8 +1,21 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+val keystoreProperties = Properties()
+val rootKeyProps = rootProject.file("key.properties")
+val appKeyProps = file("key.properties")
+val keystorePropertiesFile = if (rootKeyProps.exists()) rootKeyProps else appKeyProps
+val appKeystoreFile = file("gmwf-release.jks")
+
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -22,22 +35,40 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.gm_new"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists() && keystoreProperties.getProperty("storeFile") != null) {
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+                val storeFilePath = keystoreProperties.getProperty("storeFile")
+                storeFile = if (file(storeFilePath).exists()) file(storeFilePath) else file("gmwf-release.jks")
+                storePassword = keystoreProperties.getProperty("storePassword")
+            } else if (appKeystoreFile.exists()) {
+                keyAlias = "gmwfkey"
+                keyPassword = "gmwfappkeypassword123"
+                storeFile = appKeystoreFile
+                storePassword = "gmwfappkeypassword123"
+            } else {
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+                storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                storePassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = false
+            isShrinkResources = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
@@ -45,3 +76,4 @@ android {
 flutter {
     source = "../.."
 }
+

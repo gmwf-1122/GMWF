@@ -95,6 +95,20 @@ class _PayrollTabState extends State<PayrollTab> {
     super.dispose();
   }
 
+  double _asNumDouble(dynamic val, [double fallback = 0.0]) {
+    if (val == null) return fallback;
+    if (val is num) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? fallback;
+    return fallback;
+  }
+
+  int _asNumInt(dynamic val, [int fallback = 0]) {
+    if (val == null) return fallback;
+    if (val is num) return val.toInt();
+    if (val is String) return int.tryParse(val) ?? (_asNumDouble(val).toInt());
+    return fallback;
+  }
+
   Color _mutedColorForKey(String key) {
     const palette = [
       Color(0xFF0F172A), // Deep Slate
@@ -304,11 +318,9 @@ class _PayrollTabState extends State<PayrollTab> {
 
     final list = filteredBySearch.where((item) {
       if (_selectedBranchFilter != 'all') {
-        final empId = item['employeeId'] as String;
-        final emp = FinanceLocalStorage.getEmployee(empId);
-        final empBranch = (emp?['branchId'] ?? '').toString().trim().toLowerCase();
+        final empBranch = (item['empBranchId'] ?? '').toString().trim().toLowerCase();
         final selBranch = _selectedBranchFilter.trim().toLowerCase();
-        final empNameBranch = FinanceLocalStorage.getBranchName(emp?['branchId']?.toString() ?? '').toLowerCase();
+        final empNameBranch = FinanceLocalStorage.getBranchName(item['empBranchId']?.toString() ?? '').toLowerCase();
         final selNameBranch = FinanceLocalStorage.getBranchName(_selectedBranchFilter).toLowerCase();
 
         final matchCanonical = empNameBranch == selNameBranch;
@@ -319,9 +331,7 @@ class _PayrollTabState extends State<PayrollTab> {
       }
 
       if (_selectedDeptFilter != 'all') {
-        final empId = item['employeeId'] as String;
-        final emp = FinanceLocalStorage.getEmployee(empId);
-        final dept = emp?['department']?.toString() ?? 'Other';
+        final dept = item['empDepartment']?.toString() ?? 'Other';
         final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
         if (cleanDept.toLowerCase() != _selectedDeptFilter.toLowerCase()) return false;
       }
@@ -353,17 +363,17 @@ class _PayrollTabState extends State<PayrollTab> {
         final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
 
         for (final item in list) {
-          final empId = item['employeeId'] as String;
-          final netSalary = (item['netSalary'] as num?)?.toDouble() ?? 0.0;
+          final empId = item['employeeId']?.toString() ?? '';
+          final netSalary = _asNumDouble(item['netSalary']);
           final payouts = payoutsByEmp[empId] ?? [];
 
-          final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
+          final hasAttData = item['hasAttendanceData'] == true;
           final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
 
           if (isPaid) {
             paidCount++;
             final double amt = payouts.isNotEmpty 
-                ? (payouts.first['amount'] as num).toDouble() 
+                ? _asNumDouble(payouts.first['amount'], netSalary) 
                 : netSalary;
             disbursedTotal += amt;
           } else {
@@ -477,10 +487,8 @@ class _PayrollTabState extends State<PayrollTab> {
   Widget _buildPayrollGroupedListWidget(RoleThemeData t, List<Map<String, dynamic>> list, Map<String, List<Map<String, dynamic>>> payoutsByEmp) {
     final grouped = <String, Map<String, List<Map<String, dynamic>>>>{};
     for (final item in list) {
-      final empId = item['employeeId'] as String;
-      final emp = FinanceLocalStorage.getEmployee(empId);
-      final branchId = emp?['branchId']?.toString() ?? 'unknown';
-      final dept = emp?['department']?.toString() ?? 'Other';
+      final branchId = item['empBranchId']?.toString() ?? 'unknown';
+      final dept = item['empDepartment']?.toString() ?? 'Other';
       final cleanDept = dept.trim().isEmpty ? 'Other' : dept.trim();
 
       grouped.putIfAbsent(branchId, () => {});
@@ -584,58 +592,73 @@ class _PayrollTabState extends State<PayrollTab> {
                         final isPreviousMonth = widget.monthKey.compareTo(curMonthStr) < 0;
                         final ps = PermissionService();
 
-                        return deptItems.map((item) {
-                          final empId = item['employeeId'] as String;
-                          final emp = FinanceLocalStorage.getEmployee(empId) ?? {
-                            'name': item['employeeName'],
-                            'role': 'Employee',
-                            'department': deptName,
-                            'localId': empId,
-                            'isActive': true,
-                            'branchId': branchId,
-                          };
+                        final List<Widget> rows = [];
+                        for (final item in deptItems) {
+                          try {
+                            final empId = item['employeeId']?.toString() ?? '';
+                            if (empId.isEmpty) continue;
 
-                          final payouts = payoutsByEmp[empId] ?? [];
-                          final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(empId, widget.monthKey);
-                          final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
-                          final isExpanded = _expandedRows.contains(empId);
+                            // Use pre-computed employee metadata from payroll calculator
+                            final emp = <String, dynamic>{
+                              'name': item['empName'] ?? item['employeeName'] ?? 'Staff',
+                              'role': item['empRole'] ?? 'Employee',
+                              'department': item['empDepartment'] ?? deptName,
+                              'localId': empId,
+                              'isActive': item['empIsActive'] ?? true,
+                              'branchId': item['empBranchId'] ?? branchId,
+                            };
 
-                        final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, widget.monthKey);
-                        final double baseSalary = (item['fullMonthWeightedSalary'] as num?)?.toDouble() ?? (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
-                        final double baseSalaryEarned = (item['baseSalaryEarned'] as num?)?.toDouble() ?? (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
-                        final double absenceDeductions = (item['absenceDeductions'] as num?)?.toDouble() ?? (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
-                        final double overtimeBonusTotal = ((item['holidayBonus'] as num?)?.toDouble() ?? (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0) + ((item['sundayOvertimeBonus'] as num?)?.toDouble() ?? (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0);
-                        final double netFromItem = (item['netSalary'] as num?)?.toDouble() ?? (summary['grossSalary'] as num?)?.toDouble() ?? 0.0;
-                        final double netPayDisplay = isPaid
-                            ? (payouts.isNotEmpty ? (payouts.first['amount'] as num).toDouble() : netFromItem)
-                            : netFromItem;
+                            final payouts = payoutsByEmp[empId] ?? [];
+                            // Use pre-computed hasAttendanceData flag
+                            final hasAttData = item['hasAttendanceData'] == true;
+                            final isPaid = payouts.isNotEmpty || (isPreviousMonth && hasAttData);
+                            final isExpanded = _expandedRows.contains(empId);
 
-                        return _buildPayrollRow(
-                          t: t,
-                          ps: ps,
-                          emp: emp,
-                          empId: empId,
-                          isPaid: isPaid,
-                          isLocked: isLocked,
-                          netPayDisplay: netPayDisplay,
-                          baseSalary: baseSalary,
-                          baseSalaryEarned: baseSalaryEarned,
-                          absenceDeductions: absenceDeductions,
-                          overtimeBonusTotal: overtimeBonusTotal,
-                          totalDays: (summary['totalDays'] as num?)?.toInt() ?? 30,
-                          totalEmployedDays: (summary['totalEmployedDays'] as num?)?.toInt() ?? 30,
-                          workingDays: (summary['workingDays'] as num?)?.toDouble() ?? 0.0,
-                          absentDays: (summary['absentDays'] as num?)?.toDouble() ?? 0.0,
-                          unpaidLeaves: (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0,
-                          paidDaysStr: (((summary['totalEmployedDays'] as num? ?? 0) - (summary['absentDays'] as num? ?? 0) - (summary['unpaidLeaves'] as num? ?? 0))).toStringAsFixed(1).replaceAll('.0', ''),
-                          sundayOvertimeDays: (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0,
-                          advance: (item['advanceInstallment'] as num?)?.toDouble() ?? 0.0,
-                          isExpanded: isExpanded,
-                          payouts: payouts,
-                        );
-                      }).toList();
-                    }(),
-                  ),
+                            // Use pre-computed values from payroll calculator (no re-fetching)
+                            final double baseSalary = _asNumDouble(item['fullMonthWeightedSalary']);
+                            final double baseSalaryEarned = _asNumDouble(item['baseSalaryEarned']);
+                            final double absenceDeductions = _asNumDouble(item['absenceDeductions']);
+                            final double overtimeBonusTotal = _asNumDouble(item['holidayBonus']) + _asNumDouble(item['sundayOvertimeBonus']);
+                            final double netFromItem = _asNumDouble(item['netSalary']);
+                            final double netPayDisplay = isPaid
+                                ? (payouts.isNotEmpty ? _asNumDouble(payouts.first['amount'], netFromItem) : netFromItem)
+                                : netFromItem;
+
+                            final totalEmployed = _asNumDouble(item['totalEmployedDays'], 30);
+                            final absent = _asNumDouble(item['absentDays']);
+                            final unpaid = _asNumDouble(item['unpaidLeaves']);
+                            final paidDaysCalc = totalEmployed - absent - unpaid;
+
+                            rows.add(_buildPayrollRow(
+                              t: t,
+                              ps: ps,
+                              emp: emp,
+                              empId: empId,
+                              isPaid: isPaid,
+                              isLocked: isLocked,
+                              netPayDisplay: netPayDisplay,
+                              baseSalary: baseSalary,
+                              baseSalaryEarned: baseSalaryEarned,
+                              absenceDeductions: absenceDeductions,
+                              overtimeBonusTotal: overtimeBonusTotal,
+                              totalDays: _asNumInt(item['totalDays'], 30),
+                              totalEmployedDays: _asNumInt(item['totalEmployedDays'], 30),
+                              workingDays: _asNumDouble(item['workingDays']),
+                              absentDays: absent,
+                              unpaidLeaves: unpaid,
+                              paidDaysStr: paidDaysCalc.toStringAsFixed(1).replaceAll('.0', ''),
+                              sundayOvertimeDays: _asNumDouble(item['sundayOvertimeDays']),
+                              advance: _asNumDouble(item['advanceInstallment']),
+                              isExpanded: isExpanded,
+                              payouts: payouts,
+                            ));
+                          } catch (e, stack) {
+                            debugPrint('[PayrollTab] Error rendering employee row: $e\n$stack');
+                          }
+                        }
+                        return rows;
+                      }(),
+                    ),
 
                   ],
                 ),
@@ -715,12 +738,7 @@ class _PayrollTabState extends State<PayrollTab> {
       decoration: BoxDecoration(
         color: t.bgCard,
         borderRadius: BorderRadius.circular(12),
-        border: Border(
-          left: BorderSide(color: branchCol, width: 4),
-          top: BorderSide(color: t.bgRule, width: 0.5),
-          right: BorderSide(color: t.bgRule, width: 0.5),
-          bottom: BorderSide(color: t.bgRule, width: 0.5),
-        ),
+        border: Border.all(color: t.bgRule, width: 1.0),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -734,6 +752,15 @@ class _PayrollTabState extends State<PayrollTab> {
                       Expanded(
                         child: Row(
                           children: [
+                            Container(
+                              width: 4,
+                              height: 36,
+                              margin: const EdgeInsets.only(right: 8),
+                              decoration: BoxDecoration(
+                                color: branchCol,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
                             buildInitialsAvatar(name: name, theme: t, radius: 18),
                             const SizedBox(width: 10),
                             Expanded(

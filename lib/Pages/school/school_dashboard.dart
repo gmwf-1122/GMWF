@@ -100,7 +100,10 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
           branchId: widget.branchId,
           userName: widget.username,
         ),
-        SchoolStudentManagementView(branchId: widget.branchId),
+        SchoolStudentManagementView(
+          branchId: widget.branchId,
+          userRole: widget.role,
+        ),
         SchoolDailyAttendanceView(
           branchId: widget.branchId,
           editorName: widget.username,
@@ -128,24 +131,30 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
         SchoolAuditLogView(branchId: widget.branchId),
       ];
     } else if (_isTeacher) {
-      // Teachers see Overview, Student Attendance (Homeroom restricted), Student Directory, and Grading & Reports
+      // Teachers only see their assigned Daily Class Attendance, Class Grading & Reports, Student Directory (Roster), and School Library
       _navItems = const [
-        _NavItem(label: 'Overview', icon: Icons.analytics_rounded),
-        _NavItem(label: 'Student Attendance', icon: Icons.how_to_reg_rounded),
-        _NavItem(label: 'Students Directory', icon: Icons.groups_rounded),
+        _NavItem(label: 'Daily Attendance', icon: Icons.how_to_reg_rounded),
         _NavItem(label: 'Grading & Reports', icon: Icons.grade_rounded),
+        _NavItem(label: 'Class Students Roster', icon: Icons.groups_rounded),
+        _NavItem(label: 'School Library', icon: Icons.local_library_rounded),
       ];
       _views = [
-        SchoolOverviewView(branchId: widget.branchId),
         SchoolDailyAttendanceView(
           branchId: widget.branchId,
           editorName: widget.username,
           userRole: widget.role,
         ),
-        SchoolStudentManagementView(branchId: widget.branchId),
         SchoolGradingView(
           branchId: widget.branchId,
           userRole: widget.role,
+          userName: widget.username,
+        ),
+        SchoolStudentManagementView(
+          branchId: widget.branchId,
+          userRole: widget.role,
+        ),
+        SchoolLibraryView(
+          branchId: widget.branchId,
           userName: widget.username,
         ),
       ];
@@ -164,7 +173,10 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
       ];
       _views = [
         SchoolOverviewView(branchId: widget.branchId),
-        SchoolStudentManagementView(branchId: widget.branchId),
+        SchoolStudentManagementView(
+          branchId: widget.branchId,
+          userRole: widget.role,
+        ),
         SchoolDailyAttendanceView(
           branchId: widget.branchId,
           editorName: widget.username,

@@ -16,6 +16,7 @@ import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/widgets/camp_selection_dialog.dart';
 import '../user_settings_dialog.dart';
 import 'inventory.dart';
@@ -24,10 +25,14 @@ import 'patient_list.dart';
 
 class DispensarScreen extends StatefulWidget {
   final String branchId;
+  final String? dispenserId;
+  final String? dispenserName;
   final bool isEmbedded;
   const DispensarScreen({
     super.key,
     required this.branchId,
+    this.dispenserId,
+    this.dispenserName,
     this.isEmbedded = false,
   });
 
@@ -35,10 +40,14 @@ class DispensarScreen extends StatefulWidget {
   State<DispensarScreen> createState() => _DispensarScreenState();
 }
 
-class _DispensarScreenState extends State<DispensarScreen> {
+class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
   StreamSubscription<ConnectionStatus>? _connectionSub;
+  final List<StreamSubscription> _inventoryLiveSubs = [];
 
   bool _online = true;
   bool _isSyncing = false;
@@ -72,6 +81,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
       SyncService().start(widget.branchId);
     }
     _listenConnectivity();
+    _startLiveInventoryListener();
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // We do NOT call ConnectionManager().start() in postFrameCallback anymore
@@ -101,6 +111,44 @@ class _DispensarScreenState extends State<DispensarScreen> {
     });
 
     _realtimeSub = RealtimeManager().messageStream.listen(_handleRealtimeMessage);
+  }
+
+  void _startLiveInventoryListener() {
+    for (final s in _inventoryLiveSubs) {
+      s.cancel();
+    }
+    _inventoryLiveSubs.clear();
+
+    final invPaths = CampSessionService.getAllCampInventoryPaths(
+      branchId: widget.branchId,
+      selectedCamp: CampSessionService.getActiveCamp(widget.branchId),
+    );
+
+    for (final invCol in invPaths) {
+      final sub = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection(invCol)
+          .snapshots()
+          .listen((snap) {
+        for (final change in snap.docChanges) {
+          if (change.type == DocumentChangeType.removed) {
+            LocalStorageService.deleteLocalStockItem(change.doc.id);
+          } else {
+            final d = change.doc.data();
+            if (d != null) {
+              LocalStorageService.saveLocalInventoryItem({
+                ...d,
+                'id': change.doc.id,
+                'branchId': widget.branchId,
+              });
+            }
+          }
+        }
+        if (mounted) setState(() {});
+      }, onError: (e) => debugPrint('[Dispenser] Inventory live stream error: $e'));
+      _inventoryLiveSubs.add(sub);
+    }
   }
 
   // [FIX-USERNAME] Resolve dispenser name then start/update connection with it.
@@ -186,7 +234,8 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   void _handleRealtimeMessage(Map<String, dynamic> event) {
     final type = event['event_type'] as String?;
-    final data = event['data'] as Map<String, dynamic>? ?? event;
+    final rawData = event['data'];
+    final data = (rawData is Map) ? Map<String, dynamic>.from(rawData) : Map<String, dynamic>.from(event);
     if (type == null || data.isEmpty) return;
 
     final senderId = event['_clientId']?.toString() ?? '';
@@ -197,47 +246,88 @@ class _DispensarScreenState extends State<DispensarScreen> {
     final branch = (data['branchId'] ?? event['branchId'] ?? event['_senderBranch'] ?? '')
         .toString().toLowerCase().trim();
 
-    if (serial == null) return;
     if (branch.isNotEmpty && branch != widget.branchId.toLowerCase().trim()) return;
+
+    // ── Handle INVENTORY events (no patient serial) ───────────────────────────
+    if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered') {
+      LocalStorageService.saveLocalInventoryItem(data);
+      if (mounted) setState(() {});
+      return;
+    } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
+      final mId = (data['id'] ?? data['medicineId'])?.toString();
+      if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
+      if (mounted) setState(() {});
+      return;
+    }
+
+    if (serial == null) return;
+
+    final activeCamp = CampSessionService.getActiveCamp(widget.branchId);
+    final matchesActiveCamp = (activeCamp == null || activeCamp.isEmpty || activeCamp == 'all')
+        ? true
+        : CampSessionService.matchesCamp(
+            selectedCamp: activeCamp,
+            dispensaryId: data['dispensaryId']?.toString(),
+            campId: data['campId']?.toString(),
+            dispensaryTag: data['dispensaryTag']?.toString(),
+            serial: serial,
+          );
 
     if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
       LocalStorageService.saveLocalPrescription(data);
 
-      final entryKey = '${widget.branchId}-$serial';
+      final normBranch = widget.branchId.toLowerCase().trim();
+      final normSerial = serial.toLowerCase().trim();
       final box = Hive.box(LocalStorageService.entriesBox);
-      final entry = box.get(entryKey);
-      if (entry != null) {
-        final updated = Map<String, dynamic>.from(entry);
+      dynamic actualKey;
+      dynamic entry;
+      for (final k in ['$normBranch-$serial', '$normBranch-${serial.toUpperCase()}', '$normBranch-$normSerial', serial, serial.toUpperCase()]) {
+        if (box.containsKey(k)) {
+          actualKey = k;
+          entry = box.get(k);
+          break;
+        }
+      }
+
+      if (entry != null && actualKey != null) {
+        final updated = Map<String, dynamic>.from(entry as Map);
         updated['status'] = 'completed';
         updated['completedAt'] = data['completedAt'] ?? DateTime.now().toIso8601String();
         updated['prescription'] = data;
-        box.put(entryKey, updated);
-      }
-      if (serial == _selectedQueueEntry?['serial'] && mounted) setState(() {});
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Flushbar(
-            message: '💊 Prescription ready for #$serial',
-            backgroundColor: Colors.blue.shade700,
-            duration: const Duration(seconds: 5),
-          ).show(context);
+        box.put(actualKey, updated);
+        if (serial.toUpperCase() == (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString().toUpperCase()) {
+          _selectedQueueEntry = updated;
         }
-      });
+      }
+      if (mounted) setState(() {});
+
+      if (matchesActiveCamp) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Flushbar(
+              message: '💊 Prescription ready for #$serial',
+              backgroundColor: Colors.blue.shade700,
+              duration: const Duration(seconds: 5),
+            ).show(context);
+          }
+        });
+      }
 
     } else if (type == RealtimeEvents.saveEntry || type == 'token_created') {
       // [BUG-14] Use saveEntryLocal for proper sanitisation
       LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
       if (mounted) setState(() {});
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Flushbar(
-            message: '🎟️ New token: #$serial',
-            backgroundColor: Colors.green.shade700,
-            duration: const Duration(seconds: 4),
-          ).show(context);
-        }
-      });
+      if (matchesActiveCamp) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            Flushbar(
+              message: '🎟️ New token: #$serial',
+              backgroundColor: Colors.green.shade700,
+              duration: const Duration(seconds: 4),
+            ).show(context);
+          }
+        });
+      }
 
     } else if (type == 'dispense_completed') {
       final box = Hive.box(LocalStorageService.entriesBox);
@@ -257,14 +347,25 @@ class _DispensarScreenState extends State<DispensarScreen> {
     }
   }
 
+  static final Map<String, String> _cachedBranchNames = {};
+
   Future<void> _loadBranchName() async {
     if (widget.branchId.isEmpty) {
       if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
       return;
     }
+    if (_cachedBranchNames.containsKey(widget.branchId)) {
+      if (mounted) setState(() {
+        _branchName = _cachedBranchNames[widget.branchId];
+        _loadingBranch = false;
+      });
+      return;
+    }
     try {
-      final doc = await FirebaseFirestore.instance.collection('branches').doc(widget.branchId).get();
-      if (mounted) setState(() { _branchName = doc.data()?['name'] ?? 'Free Dispensary'; _loadingBranch = false; });
+      final doc = await FirebaseFirestore.instance.collection('branches').doc(widget.branchId).get(const GetOptions(source: Source.cache));
+      final name = doc.data()?['name'] ?? 'Free Dispensary';
+      _cachedBranchNames[widget.branchId] = name;
+      if (mounted) setState(() { _branchName = name; _loadingBranch = false; });
     } catch (_) {
       if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
     }
@@ -322,138 +423,65 @@ class _DispensarScreenState extends State<DispensarScreen> {
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
-    if (isMobile) {
-      return AppBar(
-        automaticallyImplyLeading: false,
-        backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
-        elevation: 4,
-        toolbarHeight: 60,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.webp', height: 36),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text(
-              'Dispensary',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ]),
-        actions: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
-            width: 10, height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _connectionStatus.isConnected ? Colors.greenAccent : Colors.redAccent,
-            ),
-          ),
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
-            width: 10, height: 10,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _online ? Colors.lightBlueAccent : Colors.grey,
-            ),
-          ),
-          if (_isSyncing)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 18),
-              child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-            )
-          else
-            IconButton(icon: const Icon(Icons.sync, color: Colors.white, size: 22), onPressed: _forceSync),
-          IconButton(
-            icon: const Icon(Icons.inventory_2_outlined, color: Colors.white, size: 22),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDispenser: true)),
-            ),
-          ),
-          _isLoggingOut
-              ? const Padding(padding: EdgeInsets.all(12), child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)))
-              : IconButton(icon: const Icon(Icons.logout, color: Colors.white, size: 22), onPressed: _logout),
-        ],
-      );
-    }
-
-    return AppBar(
-      automaticallyImplyLeading: false,
-      backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
-      elevation: 10,
-      shadowColor: Colors.black26,
-      toolbarHeight: 100,
-      iconTheme: const IconThemeData(color: Colors.white),
-      title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.webp', height: 60),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GestureDetector(
-                onLongPress: () => DispensaryUserSettingsDialog.show(
-                  context,
-                  branchId: widget.branchId,
-                  onUserUpdated: () {
-                    if (mounted) setState(() { _fetchDispenserName(); });
-                  },
-                ),
-                child: Tooltip(
-                  message: 'Long press for Settings',
-                  child: Text('Dispensary – ${_dispenserName ?? 'Loading...'}',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+    return GmwfAppBar(
+      title: 'Dispensary – ${_dispenserName ?? widget.dispenserName ?? 'Loading...'}',
+      subtitle: CampSessionService.getBranchAndCampDisplayName(
+        branchName: _branchName ?? 'Free Dispensary',
+        branchId: widget.branchId,
+        campId: CampSessionService.getActiveCamp(),
+      ),
+      onTitleLongPress: () => DispensaryUserSettingsDialog.show(
+        context,
+        branchId: widget.branchId,
+        onUserUpdated: () {
+          if (mounted) setState(() { _fetchDispenserName(); });
+        },
+      ),
+      titleTooltip: 'Long press for Settings',
+      connectionStatus: _connectionStatus,
+      onRetryConnection: () => ConnectionManager().reconnectNow(),
+      isOnline: _online,
+      isSyncing: _isSyncing,
+      onSync: _forceSync,
+      onLogout: _logout,
+      extraActions: [
+        Tooltip(
+          message: 'Medicine Inventory',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => InventoryPage(
+                    branchId: widget.branchId,
+                    isDispenser: true,
+                  ),
                 ),
               ),
-              if (!_loadingBranch)
-                Text(
-                  CampSessionService.getBranchAndCampDisplayName(
-                    branchName: _branchName ?? 'Free Dispensary',
-                    branchId: widget.branchId,
-                    campId: CampSessionService.getActiveCamp(),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    width: 1,
                   ),
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
                 ),
-            ],
+                child: Center(
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    size: 18,
+                    color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
-      ]),
-      centerTitle: false,
-      actions: [
-        ConnectionStatusBadge(status: _connectionStatus, onRetry: () => ConnectionManager().reconnectNow()),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: _online ? Colors.blue.shade700 : Colors.grey.shade600,
-            borderRadius: BorderRadius.circular(30),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_online ? Icons.cloud : Icons.cloud_off, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(_online ? 'Internet' : 'No Internet',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-          ]),
-        ),
-        IconButton(
-          icon: _isSyncing
-              ? const SizedBox(width: 28, height: 28, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-              : const Icon(Icons.sync, size: 32, color: Colors.white),
-          onPressed: _isSyncing ? null : _forceSync,
-        ),
-        IconButton(
-          icon: const Icon(Icons.inventory_2_outlined, size: 32, color: Colors.white),
-          onPressed: () => Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDispenser: true)),
-          ),
-        ),
-        _isLoggingOut
-            ? const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))))
-            : IconButton(icon: const Icon(Icons.logout, size: 32, color: Colors.white), onPressed: _logout),
-        const SizedBox(width: 12),
       ],
     );
   }
@@ -469,6 +497,7 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 700;
 
@@ -490,22 +519,12 @@ class _DispensarScreenState extends State<DispensarScreen> {
           child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
         );
 
-        return ValueListenableBuilder<Box>(
-          valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
-          builder: (context, entriesBox, _) {
-            return ValueListenableBuilder<Box>(
-              valueListenable: Hive.box(LocalStorageService.prescriptionsBox).listenable(),
-              builder: (context, prescriptionsBox, _) {
-                if (widget.isEmbedded) return bodyContent;
+        if (widget.isEmbedded) return bodyContent;
 
-                return Scaffold(
-                  backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
-                  appBar: _buildAppBar(isMobile),
-                  body: bodyContent,
-                );
-              },
-            );
-          },
+        return Scaffold(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          appBar: _buildAppBar(isMobile),
+          body: bodyContent,
         );
       },
     );
@@ -548,6 +567,8 @@ class _DispensarScreenState extends State<DispensarScreen> {
       padding: const EdgeInsets.all(12),
       child: PatientList(
         branchId: widget.branchId,
+        dispenserId: widget.dispenserId,
+        dispenserName: _dispenserName ?? widget.dispenserName,
         selectedPatient: _selectedQueueEntry,
         onPatientSelected: (e) {
           if (e.isEmpty) return;
@@ -562,68 +583,96 @@ class _DispensarScreenState extends State<DispensarScreen> {
 
   Widget _buildDesktopLayout() {
     return LayoutBuilder(builder: (context, constraints) {
-      final isTablet = constraints.maxWidth >= 1000;
-      return Row(children: [
-        Container(
-          width: isTablet ? 480 : constraints.maxWidth * 0.42,
-          decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1E293B).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.7),
-            borderRadius: const BorderRadius.only(
-              topRight: Radius.circular(36),
-              bottomRight: Radius.circular(36),
+      final isTablet = constraints.maxWidth >= 1100;
+      final queueWidth = isTablet ? 470.0 : constraints.maxWidth * 0.40;
+      return Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Left Queue Column
+            SizedBox(
+              width: queueWidth,
+              child: PatientList(
+                branchId: widget.branchId,
+                dispenserId: widget.dispenserId,
+                dispenserName: _dispenserName ?? widget.dispenserName,
+                selectedPatient: _selectedQueueEntry,
+                onPatientSelected: (e) {
+                  if (mounted) {
+                    setState(() => _selectedQueueEntry = e);
+                  }
+                },
+              ),
             ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: PatientList(
-              branchId: widget.branchId,
-              selectedPatient: _selectedQueueEntry,
-              onPatientSelected: (e) => setState(() => _selectedQueueEntry = e),
-            ),
-          ),
-        ),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: _selectedQueueEntry == null
-                  ? Container(
-                      color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                      child: Center(
+            const SizedBox(width: 20),
+
+            // Right Form Column
+            Expanded(
+              child: Card(
+                elevation: 10,
+                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: _selectedQueueEntry == null
+                    ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.medical_information_outlined, size: 80, color: _isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                            Icon(
+                              Icons.medication_liquid_rounded,
+                              size: 80,
+                              color: _isDark
+                                  ? const Color(0xFF475569)
+                                  : Colors.grey.shade300,
+                            ),
                             const SizedBox(height: 16),
                             Text(
                               'Select a patient to dispense medicines',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: _isDark
+                                    ? const Color(0xFF94A3B8)
+                                    : Colors.grey.shade600,
+                              ),
                               textAlign: TextAlign.center,
                             ),
                           ],
                         ),
+                      )
+                    : PatientForm(
+                        key: ValueKey(_selectedQueueEntry!['serial'] ?? _selectedQueueEntry!['id']),
+                        branchId: widget.branchId,
+                        queueEntry: _selectedQueueEntry!,
+                        onDispensed: () {
+                          if (mounted) {
+                            setState(() => _selectedQueueEntry = null);
+                          }
+                        },
+                        dispenserName: _dispenserName,
                       ),
-                    )
-                  : PatientForm(
-                      branchId: widget.branchId,
-                      queueEntry: _selectedQueueEntry!,
-                      onDispensed: () => setState(() => _selectedQueueEntry = null),
-                      dispenserName: _dispenserName,
-                    ),
+              ),
             ),
-          ),
+          ],
         ),
-      ]);
+      );
     });
   }
 
   @override
   void dispose() {
     _syncDebounce?.cancel();
+    for (final s in _inventoryLiveSubs) {
+      s.cancel();
+    }
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
-    ConnectionManager().stop();
+    if (!widget.isEmbedded) {
+      ConnectionManager().stop();
+    }
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

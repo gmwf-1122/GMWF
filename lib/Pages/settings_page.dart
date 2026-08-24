@@ -715,6 +715,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         );
                         await currentUser.reauthenticateWithCredential(cred);
                         await currentUser.updatePassword(newPw);
+                        await offline_auth.OfflineAuthService.updateCachedPassword(newPw, usernameOrEmail: currentUser.email!);
                         firebaseAuthUpdated = true;
                       } on FirebaseAuthException catch (e) {
                         setDialogState(() => isSubmitting = false);

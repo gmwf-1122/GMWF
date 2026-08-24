@@ -30,6 +30,7 @@ import 'pages/donations/donations_shared.dart';
 import 'services/local_storage_service.dart';
 import 'services/donations_local_storage.dart';
 import 'services/offline_auth_service.dart' as offline_auth;
+import 'services/zkteco_network_service.dart';
 import 'realtime/server_sync_manager.dart';
 import 'realtime/realtime_router.dart';
 import 'widgets/gmwf_loading_view.dart';
@@ -227,98 +228,113 @@ Future<void> main() async {
               return Firebase.app();
             });
 
-        if (!kIsWeb && Platform.isWindows) {
-          final appSupportDir = await getApplicationSupportDirectory();
-          final hiveDir = path.join(appSupportDir.path, 'gmwf_hive');
-          await Hive.initFlutter(hiveDir);
-        } else {
-          await Hive.initFlutter();
-        }
-        Hive.registerAdapter(TimestampAdapter());
-
-        try {
-          await Hive.openBox('app_settings');
-        } catch (hiveErr) {
-          debugPrint('[Main] Hive app_settings box error: $hiveErr');
-        }
-
-        await Future.wait<dynamic>([
-          LocalStorageService.init(),
-          DonationsLocalStorage.init(),
-          ServerSyncManager.initHive(),
-          RealtimeRouter.init(),
-        ]).timeout(const Duration(seconds: 5)).catchError((e) {
-          debugPrint('[Main] Non-critical service init warning: $e');
-          return <dynamic>[];
-        });
-
-        await LocalStorageService.seedLocalAdmins();
-      } catch (e, st) {
-        debugPrint('[Main] Pre-init error caught safely: $e');
-        _logError('Pre-init error: $e', st.toString());
-      }
-
-      runApp(const ProviderScope(child: MyApp()));
-    },
-  );
-}
-
-/// A dedicated screen that handles the async initialization of the app
-/// while showing a loading indicator.
-class InitializationScreen extends StatefulWidget {
-  const InitializationScreen({super.key});
-  @override
-  State<InitializationScreen> createState() => _InitializationScreenState();
-}
-
-class _InitializationScreenState extends State<InitializationScreen> {
-  bool _hasError = false;
-  String _errorMsg = "";
-
-  @override
-  void initState() {
-    super.initState();
-    if (kIsWeb || !Platform.environment.containsKey('FLUTTER_TEST')) {
-      _startInit();
-    }
-  }
-
-  Future<void> _startInit() async {
-    try {
-      debugPrint("[Init] Starting fast async setup...");
-      
-      // 1. Firebase (fast 5s timeout)
-      await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-          .timeout(const Duration(seconds: 5))
-          .catchError((e) {
-            debugPrint('[Init] Firebase init warning/timeout: $e');
-            return Firebase.app();
-          });
-
-      // 2. Hive
-      if (!kIsWeb && Platform.isWindows) {
+      if (kIsWeb) {
+        await Hive.initFlutter();
+      } else if (Platform.isWindows) {
         final appSupportDir = await getApplicationSupportDirectory();
         final hiveDir = path.join(appSupportDir.path, 'gmwf_hive');
+        LocalStorageService.setHiveDirectoryPath(hiveDir);
         await Hive.initFlutter(hiveDir);
       } else {
+        final appSupportDir = await getApplicationSupportDirectory();
+        LocalStorageService.setHiveDirectoryPath(appSupportDir.path);
         await Hive.initFlutter();
       }
       Hive.registerAdapter(TimestampAdapter());
 
-      // 3. Essential local services (5s timeout)
+      try {
+        await Hive.openBox('app_settings');
+      } catch (hiveErr) {
+        debugPrint('[Main] Hive app_settings box error: $hiveErr');
+      }
+
       await Future.wait<dynamic>([
         LocalStorageService.init(),
         DonationsLocalStorage.init(),
         ServerSyncManager.initHive(),
         RealtimeRouter.init(),
-        PdfAssetCache.preload(),
-      ]).timeout(const Duration(seconds: 5)).catchError((e) {
-        debugPrint('[Init] Non-critical service init warning: $e');
+      ]).catchError((e) {
+        debugPrint('[Main] Non-critical service init warning: $e');
         return <dynamic>[];
       });
 
       await LocalStorageService.seedLocalAdmins();
+    } catch (e, st) {
+      debugPrint('[Main] Pre-init error caught safely: $e');
+      _logError('Pre-init error: $e', st.toString());
+    }
+
+    runApp(const ProviderScope(child: MyApp()));
+  },
+);
+}
+
+/// A dedicated screen that handles the async initialization of the app
+/// while showing a loading indicator.
+class InitializationScreen extends StatefulWidget {
+const InitializationScreen({super.key});
+@override
+State<InitializationScreen> createState() => _InitializationScreenState();
+}
+
+class _InitializationScreenState extends State<InitializationScreen> {
+bool _hasError = false;
+String _errorMsg = "";
+
+@override
+void initState() {
+  super.initState();
+  if (kIsWeb || !Platform.environment.containsKey('FLUTTER_TEST')) {
+    _startInit();
+  }
+}
+
+Future<void> _startInit() async {
+  try {
+    debugPrint("[Init] Starting fast async setup...");
+    
+    // 1. Firebase (fast 5s timeout)
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+        .timeout(const Duration(seconds: 5))
+        .catchError((e) {
+          debugPrint('[Init] Firebase init warning/timeout: $e');
+          return Firebase.app();
+        });
+
+    // 2. Hive
+    if (kIsWeb) {
+      await Hive.initFlutter();
+    } else if (Platform.isWindows) {
+      final appSupportDir = await getApplicationSupportDirectory();
+      final hiveDir = path.join(appSupportDir.path, 'gmwf_hive');
+      await Hive.initFlutter(hiveDir);
+    } else {
+      await Hive.initFlutter();
+    }
+    Hive.registerAdapter(TimestampAdapter());
+
+    // 3. Essential local services
+    await Future.wait<dynamic>([
+      LocalStorageService.init(),
+      DonationsLocalStorage.init(),
+      ServerSyncManager.initHive(),
+      RealtimeRouter.init(),
+      PdfAssetCache.preload(),
+    ]).catchError((e) {
+      debugPrint('[Init] Non-critical service init warning: $e');
+      return <dynamic>[];
+    });
+
+      await LocalStorageService.seedLocalAdmins();
       await _clearCrashMarkerOnSuccess();
+
+      // Start embedded ZKTeco biometric listener & Firestore punch stream immediately
+      if (!kIsWeb) {
+        unawaited(ZkTecoNetworkService.startServer().catchError((e) {
+          debugPrint('[Init] ZKTeco background server start error: $e');
+          return false;
+        }));
+      }
 
       // Launch background tasks without blocking UI splash removal
       unawaited(_runBackgroundCleanups());
@@ -326,7 +342,11 @@ class _InitializationScreenState extends State<InitializationScreen> {
       debugPrint("[Init] Fast setup success. Removing splash & moving to home.");
       if (mounted) {
         FlutterNativeSplash.remove();
-        Navigator.pushReplacementNamed(context, '/');
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushReplacementNamed('/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } catch (e, st) {
       debugPrint("[Init] Fast init completed with warning: $e");
@@ -334,7 +354,11 @@ class _InitializationScreenState extends State<InitializationScreen> {
       await _logError("Init Warning: $e", st.toString());
       if (mounted) {
         FlutterNativeSplash.remove();
-        Navigator.pushReplacementNamed(context, '/');
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushReplacementNamed('/home');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     }
   }
@@ -418,7 +442,11 @@ class MyApp extends StatelessWidget {
         navigatorKey: navigatorKey,
         title: 'GM-D',
         debugShowCheckedModeBanner: false,
-        home: const InitializationScreen(),
+        routes: {
+          '/home': (context) => const AuthHomeWrapper(),
+          '/login': (context) => const LoginPage(),
+        },
+        home: const AuthHomeWrapper(),
       );
     }
     return ValueListenableBuilder(
@@ -681,6 +709,12 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
 
   Future<_SessionData> _determineSession() async {
     try {
+      if (!Hive.isBoxOpen('app_settings')) {
+        try {
+          await Hive.openBox('app_settings');
+        } catch (_) {}
+      }
+
       // 1. Check if Firebase currentUser is available immediately
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {

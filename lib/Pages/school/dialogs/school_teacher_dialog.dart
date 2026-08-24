@@ -1,6 +1,7 @@
 // lib/pages/school/dialogs/school_teacher_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../widgets/media_upload_tile.dart';
 import '../models/school_teacher.dart';
 import '../utils/school_local_storage.dart';
@@ -38,6 +39,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
   String _status = 'active';
   String? _photoUrl;
   String? _cnicUrl;
+  String? _experienceLetterUrl;
+  String? _joiningLetterUrl;
+  String? _degreesUrl;
   List<Map<String, String>> _additionalDocuments = [];
   bool _isSaving = false;
 
@@ -76,6 +80,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
       _status = t.status;
       _photoUrl = t.photoUrl;
       _cnicUrl = t.cnicUrl;
+      _experienceLetterUrl = t.experienceLetterUrl;
+      _joiningLetterUrl = t.joiningLetterUrl;
+      _degreesUrl = t.degreesUrl;
       _additionalDocuments = t.additionalDocuments.map((d) => Map<String, String>.from(d)).toList();
     }
   }
@@ -176,6 +183,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
       'status': _status,
       'photoUrl': _photoUrl ?? '',
       'cnicUrl': _cnicUrl ?? '',
+      'experienceLetterUrl': _experienceLetterUrl ?? '',
+      'joiningLetterUrl': _joiningLetterUrl ?? '',
+      'degreesUrl': _degreesUrl ?? '',
       'additionalDocuments': _additionalDocuments,
       'branchId': widget.branchId,
     };
@@ -236,11 +246,12 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
 
                   // SECTION: Faculty Documents
                   const Text(
-                    'Faculty Profile & Official Documents',
+                    'Faculty Profile & Official Credentials',
                     style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
                   ),
                   const SizedBox(height: 10),
 
+                  // Row 1: Profile Photo & CNIC
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -266,6 +277,46 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Row 2: Experience Letter & Job Joining Letter
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Experience Letter (Optional)
+                      Expanded(
+                        child: MediaUploadTile(
+                          label: 'Experience Letter (تجربہ سرٹیفکیٹ)',
+                          icon: Icons.history_edu_outlined,
+                          isDocument: true,
+                          initialValue: _experienceLetterUrl,
+                          onChanged: (val) => setState(() => _experienceLetterUrl = val),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+
+                      // Joining / Job Appointment Letter (Optional)
+                      Expanded(
+                        child: MediaUploadTile(
+                          label: 'Job Joining Letter (تقرری نامہ)',
+                          icon: Icons.assignment_turned_in_outlined,
+                          isDocument: true,
+                          initialValue: _joiningLetterUrl,
+                          onChanged: (val) => setState(() => _joiningLetterUrl = val),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  // Row 3: Degrees & Educational Transcripts (Optional)
+                  MediaUploadTile(
+                    label: 'Degrees & Certificates (تعلیمی اسناد و ڈگریاں)',
+                    icon: Icons.school_outlined,
+                    isDocument: true,
+                    initialValue: _degreesUrl,
+                    onChanged: (val) => setState(() => _degreesUrl = val),
                   ),
 
                   // Additional Custom Documents List
@@ -374,11 +425,17 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                         child: TextFormField(
                           controller: _phoneCtrl,
                           keyboardType: TextInputType.phone,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)],
                           decoration: InputDecoration(
-                            labelText: 'Phone Number *',
+                            labelText: 'Phone Number (11 digits) *',
+                            hintText: 'e.g. 03001234567',
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                           ),
-                          validator: (v) => v == null || v.trim().isEmpty ? 'Enter phone' : null,
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Enter phone';
+                            if (v.trim().length != 11) return 'Phone must be exactly 11 digits';
+                            return null;
+                          },
                         ),
                       ),
                     ],

@@ -18,7 +18,12 @@ class AccessRevokedScreen extends StatelessWidget {
     try {
       await FirebaseAuth.instance.signOut();
     } catch (_) {}
-    await OfflineAuthService.clearCredentials();
+    final userKey = (userData?['uid'] ?? userData?['email'] ?? userData?['username'] ?? '').toString();
+    if (userKey.isNotEmpty) {
+      await OfflineAuthService.clearCredentialsForUser(userKey);
+    } else {
+      await OfflineAuthService.clearCachedUserData();
+    }
 
     if (context.mounted) {
       Navigator.of(context).pushAndRemoveUntil(

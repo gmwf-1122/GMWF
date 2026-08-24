@@ -102,6 +102,12 @@ class UserModuleAccessService {
       case 'office_finance':
       case 'finance':
       case 'payroll':
+      case 'employee_attendance':
+      case 'employees':
+      case 'cash_flow':
+      case 'loans':
+      case 'expenses':
+      case 'finance_reports':
         return ['chairman', 'ceo', 'admin', 'global admin', 'hq manager', 'branch manager', 'global accounts'].contains(cleanRole);
       case 'dispensary':
       case 'med_ledger':

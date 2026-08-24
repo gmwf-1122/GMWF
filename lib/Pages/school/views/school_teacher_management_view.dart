@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_teacher_management_view.dart
 
 import 'package:flutter/material.dart';
+import '../../../services/image_upload_service.dart';
 import '../../../widgets/media_upload_tile.dart';
 import '../dialogs/school_teacher_dialog.dart';
 import '../models/school_teacher.dart';
@@ -181,6 +182,24 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                   MediaUploadTile(label: 'Faculty CNIC', icon: Icons.badge_outlined, isDocument: true, initialValue: teacher.cnicUrl, readOnly: true),
                   const SizedBox(height: 12),
                 ],
+                if (teacher.experienceLetterUrl.isNotEmpty) ...[
+                  const Text('Experience Letter (تجربہ سرٹیفکیٹ):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  const SizedBox(height: 6),
+                  MediaUploadTile(label: 'Experience Letter', icon: Icons.history_edu_outlined, isDocument: true, initialValue: teacher.experienceLetterUrl, readOnly: true),
+                  const SizedBox(height: 12),
+                ],
+                if (teacher.joiningLetterUrl.isNotEmpty) ...[
+                  const Text('Job Joining Letter (تقرری نامہ):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  const SizedBox(height: 6),
+                  MediaUploadTile(label: 'Joining Letter', icon: Icons.assignment_turned_in_outlined, isDocument: true, initialValue: teacher.joiningLetterUrl, readOnly: true),
+                  const SizedBox(height: 12),
+                ],
+                if (teacher.degreesUrl.isNotEmpty) ...[
+                  const Text('Degrees & Certificates (تعلیمی اسناد و ڈگریاں):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  const SizedBox(height: 6),
+                  MediaUploadTile(label: 'Degrees & Certificates', icon: Icons.school_outlined, isDocument: true, initialValue: teacher.degreesUrl, readOnly: true),
+                  const SizedBox(height: 12),
+                ],
                 if (teacher.additionalDocuments.isNotEmpty) ...[
                   const Text('Custom Documents:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
                   const SizedBox(height: 6),
@@ -214,7 +233,12 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
   Widget _buildTeacherCard(SchoolTeacher teacher) {
     int docCount = (teacher.photoUrl.isNotEmpty ? 1 : 0) +
         (teacher.cnicUrl.isNotEmpty ? 1 : 0) +
+        (teacher.experienceLetterUrl.isNotEmpty ? 1 : 0) +
+        (teacher.joiningLetterUrl.isNotEmpty ? 1 : 0) +
+        (teacher.degreesUrl.isNotEmpty ? 1 : 0) +
         teacher.additionalDocuments.length;
+
+    final photoBytes = ImageUploadService.decodeBase64ToBytes(teacher.photoUrl);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -232,12 +256,25 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
       ),
       child: Row(
         children: [
-          // Teacher Icon Avatar
-          CircleAvatar(
-            radius: 24,
-            backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.1),
-            child: const Icon(Icons.record_voice_over_rounded, color: Color(0xFF10B981)),
-          ),
+          // Teacher Photo Avatar
+          if (photoBytes != null && photoBytes.isNotEmpty)
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.1),
+              backgroundImage: MemoryImage(photoBytes),
+            )
+          else if (teacher.photoUrl.startsWith('http'))
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.1),
+              backgroundImage: NetworkImage(teacher.photoUrl),
+            )
+          else
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: const Color(0xFF10B981).withValues(alpha: 0.1),
+              child: const Icon(Icons.record_voice_over_rounded, color: Color(0xFF10B981)),
+            ),
           const SizedBox(width: 16),
 
           // Info

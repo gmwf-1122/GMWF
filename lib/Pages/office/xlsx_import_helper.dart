@@ -12,6 +12,8 @@ import 'package:collection/collection.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_expenses_storage.dart';
+import '../../services/local_storage_service.dart';
+import 'package:uuid/uuid.dart';
 
 class XlsxImportHelper {
   static void openImportDialog({
@@ -91,7 +93,28 @@ class XlsxImportHelper {
               final performedBy = curUserMap?['uid']?.toString() ?? curUserMap?['id']?.toString() ?? 'unknown';
 
               try {
-                if (importType == 'employees') {
+                if (importType == 'school_students') {
+                  final count = await _importSchoolStudents(sheetsMap.isNotEmpty ? sheetsMap : {'default': previewRows}, branchId);
+                  setDiagState(() {
+                    isImporting = false;
+                    statusMessage = '✓ Successfully imported $count school students.';
+                    previewRows = []; pickedFileName = null; sheetsMap = {};
+                  });
+                } else if (importType == 'madrassa_students') {
+                  final count = await _importMadrassaStudents(sheetsMap.isNotEmpty ? sheetsMap : {'default': previewRows}, branchId);
+                  setDiagState(() {
+                    isImporting = false;
+                    statusMessage = '✓ Successfully imported $count madrassa students.';
+                    previewRows = []; pickedFileName = null; sheetsMap = {};
+                  });
+                } else if (importType == 'donations') {
+                  final count = await _importDonations(sheetsMap.isNotEmpty ? sheetsMap : {'default': previewRows}, branchId);
+                  setDiagState(() {
+                    isImporting = false;
+                    statusMessage = '✓ Successfully imported $count donation records.';
+                    previewRows = []; pickedFileName = null; sheetsMap = {};
+                  });
+                } else if (importType == 'employees') {
                   final count = await _importEmployees(sheetsMap.isNotEmpty ? sheetsMap : {'default': previewRows}, branchId, curUser);
                   setDiagState(() {
                     isImporting = false;
@@ -130,7 +153,7 @@ class XlsxImportHelper {
                 ],
               ),
               content: SizedBox(
-                width: 560,
+                width: 600,
                 child: SingleChildScrollView(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,14 +162,19 @@ class XlsxImportHelper {
                       // Type selector
                       Text('Import Type:', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 8),
-                      Row(
+                      Wrap(
+                        spacing: 8, runSpacing: 8,
                         children: [
+                          _typeChip(label: 'School Students', icon: Icons.school_outlined, selected: importType == 'school_students', theme: t,
+                            onTap: () => setDiagState(() { importType = 'school_students'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
+                          _typeChip(label: 'Madrassa', icon: Icons.menu_book_outlined, selected: importType == 'madrassa_students', theme: t,
+                            onTap: () => setDiagState(() { importType = 'madrassa_students'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
                           _typeChip(label: 'Employees', icon: Icons.people_outline, selected: importType == 'employees', theme: t,
                             onTap: () => setDiagState(() { importType = 'employees'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
-                          const SizedBox(width: 10),
+                          _typeChip(label: 'Donations', icon: Icons.volunteer_activism_outlined, selected: importType == 'donations', theme: t,
+                            onTap: () => setDiagState(() { importType = 'donations'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
                           _typeChip(label: 'Attendance', icon: Icons.today_outlined, selected: importType == 'attendance', theme: t,
                             onTap: () => setDiagState(() { importType = 'attendance'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
-                          const SizedBox(width: 10),
                           _typeChip(label: 'Expenses', icon: Icons.receipt_long_outlined, selected: importType == 'expenses', theme: t,
                             onTap: () => setDiagState(() { importType = 'expenses'; previewRows = []; pickedFileName = null; statusMessage = ''; })),
                         ],
@@ -1066,6 +1094,172 @@ class XlsxImportHelper {
           performedByName: performedByName,
           date: date,
         );
+        totalCount++;
+      }
+    }
+    return totalCount;
+  }
+
+  static Future<int> _importSchoolStudents(Map<String, List<List<String>>> sheetsMap, String branchId) async {
+    int totalCount = 0;
+    if (!Hive.isBoxOpen(LocalStorageService.schoolStudentsBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.schoolStudentsBox);
+    }
+    if (!Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.biometricCredentialsBox);
+    }
+    final box = Hive.box(LocalStorageService.schoolStudentsBox);
+    final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+
+    for (final sheetName in sheetsMap.keys) {
+      final rows = sheetsMap[sheetName] ?? [];
+      if (rows.length < 2) continue;
+
+      final headers = rows.first.map((e) => e.toLowerCase().trim()).toList();
+      final nameIdx = _findColumnIndex(headers, ['name', 'student name', 'full name', 'naam']);
+      final grIdx = _findColumnIndex(headers, ['gr_no', 'gr no', 'gr', 'roll_no', 'roll no', 'id']);
+      final classIdx = _findColumnIndex(headers, ['class', 'grade', 'standard']);
+      final secIdx = _findColumnIndex(headers, ['section', 'sec']);
+      final fatherIdx = _findColumnIndex(headers, ['father name', 'father_name', 'walid ka naam']);
+      final phoneIdx = _findColumnIndex(headers, ['phone', 'mobile', 'contact']);
+
+      final dataRows = rows.sublist(1);
+      for (final row in dataRows) {
+        String get(int idx) => idx != -1 && idx < row.length ? row[idx].trim() : '';
+        final name = nameIdx != -1 ? get(nameIdx) : (row.isNotEmpty ? get(0) : '');
+        if (name.isEmpty) continue;
+
+        final grNo = grIdx != -1 && get(grIdx).isNotEmpty ? get(grIdx) : DateTime.now().millisecondsSinceEpoch.toString().substring(6);
+        final studentObj = {
+          'id': grNo,
+          'grNo': grNo,
+          'name': name,
+          'fatherName': fatherIdx != -1 && get(fatherIdx).isNotEmpty ? get(fatherIdx) : 'N/A',
+          'grade': classIdx != -1 && get(classIdx).isNotEmpty ? get(classIdx) : 'Class 1',
+          'section': secIdx != -1 && get(secIdx).isNotEmpty ? get(secIdx) : 'A',
+          'phone': phoneIdx != -1 ? get(phoneIdx) : '',
+          'branchId': branchId,
+          'status': 'Active',
+          'updatedAt': DateTime.now().toIso8601String(),
+        };
+
+        await box.put(grNo, studentObj);
+
+        // Biometric Mapping
+        await credBox.put(grNo, {
+          'pin': grNo,
+          'entityId': grNo,
+          'entityName': name,
+          'entityType': 'school_student',
+          'branchId': branchId,
+        });
+
+        totalCount++;
+      }
+    }
+    return totalCount;
+  }
+
+  static Future<int> _importMadrassaStudents(Map<String, List<List<String>>> sheetsMap, String branchId) async {
+    int totalCount = 0;
+    if (!Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.madrassaStudentsBox);
+    }
+    if (!Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.biometricCredentialsBox);
+    }
+    final box = Hive.box(LocalStorageService.madrassaStudentsBox);
+    final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+
+    for (final sheetName in sheetsMap.keys) {
+      final rows = sheetsMap[sheetName] ?? [];
+      if (rows.length < 2) continue;
+
+      final headers = rows.first.map((e) => e.toLowerCase().trim()).toList();
+      final nameIdx = _findColumnIndex(headers, ['name', 'student name', 'full name', 'naam', 'taalib ilam']);
+      final regIdx = _findColumnIndex(headers, ['reg_no', 'registration no', 'roll_no', 'roll no', 'id']);
+      final deptIdx = _findColumnIndex(headers, ['department', 'dept', 'darja', 'class']);
+      final secIdx = _findColumnIndex(headers, ['section', 'sec']);
+      final fatherIdx = _findColumnIndex(headers, ['father name', 'father_name', 'walid ka naam']);
+      final phoneIdx = _findColumnIndex(headers, ['phone', 'mobile', 'contact']);
+
+      final dataRows = rows.sublist(1);
+      for (final row in dataRows) {
+        String get(int idx) => idx != -1 && idx < row.length ? row[idx].trim() : '';
+        final name = nameIdx != -1 ? get(nameIdx) : (row.isNotEmpty ? get(0) : '');
+        if (name.isEmpty) continue;
+
+        final regNo = regIdx != -1 && get(regIdx).isNotEmpty ? get(regIdx) : DateTime.now().millisecondsSinceEpoch.toString().substring(6);
+        final studentObj = {
+          'id': regNo,
+          'registrationNo': regNo,
+          'name': name,
+          'fatherName': fatherIdx != -1 && get(fatherIdx).isNotEmpty ? get(fatherIdx) : 'N/A',
+          'department': deptIdx != -1 && get(deptIdx).isNotEmpty ? get(deptIdx) : 'Hifz',
+          'section': secIdx != -1 && get(secIdx).isNotEmpty ? get(secIdx) : 'A',
+          'phone': phoneIdx != -1 ? get(phoneIdx) : '',
+          'branchId': branchId,
+          'status': 'Active',
+          'updatedAt': DateTime.now().toIso8601String(),
+        };
+
+        await box.put(regNo, studentObj);
+
+        // Biometric Mapping
+        await credBox.put(regNo, {
+          'pin': regNo,
+          'entityId': regNo,
+          'entityName': name,
+          'entityType': 'madrassa_student',
+          'branchId': branchId,
+        });
+
+        totalCount++;
+      }
+    }
+    return totalCount;
+  }
+
+  static Future<int> _importDonations(Map<String, List<List<String>>> sheetsMap, String branchId) async {
+    int totalCount = 0;
+    if (!Hive.isBoxOpen(LocalStorageService.donationsBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.donationsBox);
+    }
+    final box = Hive.box(LocalStorageService.donationsBox);
+
+    for (final sheetName in sheetsMap.keys) {
+      final rows = sheetsMap[sheetName] ?? [];
+      if (rows.length < 2) continue;
+
+      final headers = rows.first.map((e) => e.toLowerCase().trim()).toList();
+      final nameIdx = _findColumnIndex(headers, ['donor name', 'name', 'full name', 'donor']);
+      final amountIdx = _findColumnIndex(headers, ['amount', 'rs', 'rupees', 'total', 'rakam']);
+      final typeIdx = _findColumnIndex(headers, ['type', 'category', 'zakat/sadqah', 'fund']);
+      final dateIdx = _findColumnIndex(headers, ['date', 'receipt date', 'tareekh']);
+      final rcptIdx = _findColumnIndex(headers, ['receipt no', 'receipt_no', 'rcpt no', 'slip no']);
+      final modeIdx = _findColumnIndex(headers, ['mode', 'payment mode', 'cash/bank']);
+
+      final dataRows = rows.sublist(1);
+      for (final row in dataRows) {
+        String get(int idx) => idx != -1 && idx < row.length ? row[idx].trim() : '';
+        final name = nameIdx != -1 && get(nameIdx).isNotEmpty ? get(nameIdx) : 'Anonymous Donor';
+        final amount = amountIdx != -1 ? (double.tryParse(get(amountIdx).replaceAll(',', '')) ?? 0.0) : 0.0;
+        if (amount <= 0 && name == 'Anonymous Donor') continue;
+
+        final id = const Uuid().v4();
+        final donationObj = {
+          'id': id,
+          'receiptNo': rcptIdx != -1 && get(rcptIdx).isNotEmpty ? get(rcptIdx) : 'RCP-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+          'donorName': name,
+          'amount': amount,
+          'donationType': typeIdx != -1 && get(typeIdx).isNotEmpty ? get(typeIdx) : 'General',
+          'paymentMode': modeIdx != -1 && get(modeIdx).isNotEmpty ? get(modeIdx) : 'Cash',
+          'date': dateIdx != -1 && get(dateIdx).isNotEmpty ? get(dateIdx) : DateFormat('yyyy-MM-dd').format(DateTime.now()),
+          'branchId': branchId,
+          'createdAt': DateTime.now().toIso8601String(),
+        };
+
+        await box.put(id, donationObj);
         totalCount++;
       }
     }

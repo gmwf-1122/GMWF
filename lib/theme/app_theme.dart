@@ -99,7 +99,7 @@ class RoleThemeData {
   RoleThemeData toDarkMode() {
     return RoleThemeData(
       roleLabel: roleLabel,
-      bg: const Color(0xFF0D1117),
+      bg: const Color(0xFF0B0F19),
       bgCard: const Color(0xFF161B22),
       bgCardAlt: const Color(0xFF21262D),
       bgRule: const Color(0xFF30363D),
@@ -108,9 +108,9 @@ class RoleThemeData {
       accentMuted: accentMuted,
       accentGradient: accentGradient,
       glassTint: glassTint,
-      textPrimary: const Color(0xFFFFFFFF),
-      textSecondary: const Color(0xFFC9D1D9),
-      textTertiary: const Color(0xFF8B949E),
+      textPrimary: const Color(0xFFF8FAFC),
+      textSecondary: const Color(0xFFCBD5E1),
+      textTertiary: const Color(0xFF94A3B8),
       danger: danger,
       zakat: zakat,
       nonZakat: nonZakat,
@@ -126,99 +126,121 @@ class RoleThemeData {
     );
   }
 
-  // ── Chairman – charcoal-navy canvas, soft brass-gold accent ──────────────
-  // Refined, low-saturation gold instead of a bright/neon gold — reads as
-  // understated institutional authority rather than "flashy."
+  RoleThemeData toLightMode() {
+    return RoleThemeData(
+      roleLabel: roleLabel,
+      bg: const Color(0xFFF8FAFC),
+      bgCard: const Color(0xFFFFFFFF),
+      bgCardAlt: const Color(0xFFF1F5F9),
+      bgRule: const Color(0xFFE2E8F0),
+      accent: accent,
+      accentLight: accentLight,
+      accentMuted: accentMuted,
+      accentGradient: accentGradient,
+      glassTint: glassTint,
+      textPrimary: const Color(0xFF0F172A),
+      textSecondary: const Color(0xFF475569),
+      textTertiary: const Color(0xFF94A3B8),
+      danger: danger,
+      zakat: zakat,
+      nonZakat: nonZakat,
+      gmwf: gmwf,
+      cardFillTokens: cardFillTokens,
+      cardFillPrescriptions: cardFillPrescriptions,
+      cardFillDispensary: cardFillDispensary,
+      chartBar1: chartBar1,
+      chartBar2: chartBar2,
+      chartBar3: chartBar3,
+      chartGrid: const Color(0xFFE2E8F0),
+      isDarkCanvas: false,
+    );
+  }
+
+  // ── Chairman – warm light canvas in light mode, soft brass-gold accent ─────
   static const RoleThemeData _chairman = RoleThemeData(
     roleLabel:             'CHAIRMAN',
-    isDarkCanvas:          true,
-    bg:                    Color(0xFF090C10),
-    bgCard:                Color(0xFF0D1117),
-    bgCardAlt:             Color(0xFF161B22),
-    bgRule:                Color(0xFF21262D),
+    isDarkCanvas:          false,
+    bg:                    Color(0xFFF8FAFC),
+    bgCard:                Color(0xFFFFFFFF),
+    bgCardAlt:             Color(0xFFF1F5F9),
+    bgRule:                Color(0xFFE2E8F0),
     accent:                Color(0xFFC6A15B),
     accentLight:           Color(0xFFDDC088),
-    accentMuted:           Color(0xFF2A2416),
+    accentMuted:           Color(0xFFFDF7E7),
     accentGradient:        LinearGradient(colors: [Color(0xFFC6A15B), Color(0xFF9C7C3C)]),
     glassTint:             Color(0x1AC6A15B),
-    textPrimary:           Color(0xFFE6EDF3),
-    textSecondary:         Color(0xFFB1BAC4),
-    textTertiary:          Color(0xFF8B949E),
-    danger:                Color(0xFFF85149),
-    zakat:                 Color(0xFF3FB950),
-    nonZakat:              Color(0xFF79C0FF),
+    textPrimary:           Color(0xFF0F172A),
+    textSecondary:         Color(0xFF475569),
+    textTertiary:          Color(0xFF94A3B8),
+    danger:                Color(0xFFDC2626),
+    zakat:                 Color(0xFF16A34A),
+    nonZakat:              Color(0xFF2563EB),
     gmwf:                  Color(0xFFC6A15B),
     cardFillTokens:        Color(0xFFC6A15B),
     cardFillPrescriptions: Color(0xFFA98A4A),
     cardFillDispensary:    Color(0xFF8A6E38),
     chartBar1:             Color(0xFFC6A15B),
-    chartBar2:             Color(0xFF3FB950),
-    chartBar3:             Color(0xFF79C0FF),
-    chartGrid:             Color(0xFF21262D),
+    chartBar2:             Color(0xFF16A34A),
+    chartBar3:             Color(0xFF2563EB),
+    chartGrid:             Color(0xFFE2E8F0),
   );
 
-  // ── CEO – dark navy canvas, muted steel-blue accent ───────────────────────
-  // Distinct from chairman (blue vs gold) but toned down from "electric" blue
-  // to a more corporate steel blue.
+  // ── CEO – crisp steel-blue accent ──────────────────────────────────────────
   static const RoleThemeData _ceo = RoleThemeData(
     roleLabel:             'CEO',
-    isDarkCanvas:          true,
-    bg:                    Color(0xFF090C10),
-    bgCard:                Color(0xFF0D1117),
-    bgCardAlt:             Color(0xFF161B22),
-    bgRule:                Color(0xFF21262D),
+    isDarkCanvas:          false,
+    bg:                    Color(0xFFF8FAFC),
+    bgCard:                Color(0xFFFFFFFF),
+    bgCardAlt:             Color(0xFFF1F5F9),
+    bgRule:                Color(0xFFE2E8F0),
     accent:                Color(0xFF4A7FB5),
     accentLight:           Color(0xFF6D9BC7),
-    accentMuted:           Color(0xFF0E2740),
+    accentMuted:           Color(0xFFEDF4FA),
     accentGradient:        LinearGradient(colors: [Color(0xFF4A7FB5), Color(0xFF335E8C)]),
     glassTint:             Color(0x1A4A7FB5),
-    textPrimary:           Color(0xFFE6EDF3),
-    textSecondary:         Color(0xFFB1BAC4),
-    textTertiary:          Color(0xFF8B949E),
-    danger:                Color(0xFFF85149),
-    zakat:                 Color(0xFF3FB950),
-    nonZakat:              Color(0xFF79C0FF),
+    textPrimary:           Color(0xFF0F172A),
+    textSecondary:         Color(0xFF475569),
+    textTertiary:          Color(0xFF94A3B8),
+    danger:                Color(0xFFDC2626),
+    zakat:                 Color(0xFF16A34A),
+    nonZakat:              Color(0xFF2563EB),
     gmwf:                  Color(0xFFC6A15B),
     cardFillTokens:        Color(0xFF4A7FB5),
     cardFillPrescriptions: Color(0xFF335E8C),
     cardFillDispensary:    Color(0xFF23456A),
     chartBar1:             Color(0xFF4A7FB5),
-    chartBar2:             Color(0xFF3FB950),
+    chartBar2:             Color(0xFF16A34A),
     chartBar3:             Color(0xFFC6A15B),
-    chartGrid:             Color(0xFF21262D),
+    chartGrid:             Color(0xFFE2E8F0),
   );
 
-  // ── Global User – dark canvas, muted teal-emerald accent ─────────────────
-  // Cross-branch viewer: sees everything but holds no executive command.
-  // Previously duplicated chairman's gold, which blurred the rank signal;
-  // now a distinct, professional teal-emerald sits clearly apart from CEO
-  // blue, chairman gold, and admin slate.
+  // ── Global User – distinct teal-emerald accent ────────────────────────────
   static const RoleThemeData _globalUser = RoleThemeData(
     roleLabel:             'GLOBAL USER',
-    isDarkCanvas:          true,
-    bg:                    Color(0xFF070708),
-    bgCard:                Color(0xFF0F0F11),
-    bgCardAlt:             Color(0xFF1B1B1E),
-    bgRule:                Color(0xFF2C2C30),
+    isDarkCanvas:          false,
+    bg:                    Color(0xFFF8FAFC),
+    bgCard:                Color(0xFFFFFFFF),
+    bgCardAlt:             Color(0xFFF1F5F9),
+    bgRule:                Color(0xFFE2E8F0),
     accent:                Color(0xFF3E9C8A),
     accentLight:           Color(0xFF63B8A7),
-    accentMuted:           Color(0xFF10302B),
+    accentMuted:           Color(0xFFE6F5F2),
     accentGradient:        LinearGradient(colors: [Color(0xFF3E9C8A), Color(0xFF2A7566)]),
     glassTint:             Color(0x1A3E9C8A),
-    textPrimary:           Color(0xFFF2F1EE),
-    textSecondary:         Color(0xFFCBC9C3),
-    textTertiary:          Color(0xFF9E9A90),
-    danger:                Color(0xFFEF4444),
-    zakat:                 Color(0xFF34D399),
-    nonZakat:              Color(0xFF60A5FA),
+    textPrimary:           Color(0xFF0F172A),
+    textSecondary:         Color(0xFF475569),
+    textTertiary:          Color(0xFF94A3B8),
+    danger:                Color(0xFFDC2626),
+    zakat:                 Color(0xFF16A34A),
+    nonZakat:              Color(0xFF2563EB),
     gmwf:                  Color(0xFFC6A15B),
     cardFillTokens:        Color(0xFF3E9C8A),
     cardFillPrescriptions: Color(0xFF2A7566),
     cardFillDispensary:    Color(0xFF1B4E45),
     chartBar1:             Color(0xFF3E9C8A),
-    chartBar2:             Color(0xFF34D399),
+    chartBar2:             Color(0xFF16A34A),
     chartBar3:             Color(0xFF60A5FA),
-    chartGrid:             Color(0xFF2C2C30),
+    chartGrid:             Color(0xFFE2E8F0),
   );
 
   // ── Manager / HQ Manager – slate-indigo, light surface ───────────────────
@@ -519,6 +541,7 @@ class RoleThemeData {
         ? hsv.withSaturation((hsv.saturation * 0.4).clamp(0.1, 0.4)).withValue(0.15).toColor()
         : hsv.withSaturation(0.1).withValue(0.95).toColor();
     final dark = hsv.withValue((hsv.value - 0.2).clamp(0.0, 1.0)).toColor();
+    final darker = hsv.withValue((hsv.value - 0.35).clamp(0.0, 1.0)).toColor();
 
     return RoleThemeData(
       roleLabel:             base.roleLabel,
@@ -541,7 +564,7 @@ class RoleThemeData {
       gmwf:                  base.gmwf,
       cardFillTokens:        customAccent,
       cardFillPrescriptions: dark,
-      cardFillDispensary:    base.cardFillDispensary,
+      cardFillDispensary:    darker,
       chartBar1:             customAccent,
       chartBar2:             base.chartBar2,
       chartBar3:             base.chartBar3,

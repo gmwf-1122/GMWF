@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../services/image_upload_service.dart';
 import '../models/school_fee.dart';
 import '../models/school_student.dart';
 import '../theme/school_theme.dart';
@@ -359,9 +360,28 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
-            child: Text(student.rollNo.isNotEmpty ? student.rollNo : '#', style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold)),
+          // Student Profile Avatar
+          Builder(
+            builder: (context) {
+              final bytes = ImageUploadService.decodeBase64ToBytes(student.photoUrl);
+              if (bytes != null && bytes.isNotEmpty) {
+                return CircleAvatar(
+                  radius: 20,
+                  backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                  backgroundImage: MemoryImage(bytes),
+                );
+              } else if (student.photoUrl.startsWith('http')) {
+                return CircleAvatar(
+                  radius: 20,
+                  backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                  backgroundImage: NetworkImage(student.photoUrl),
+                );
+              }
+              return CircleAvatar(
+                backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                child: Text(student.rollNo.isNotEmpty ? student.rollNo : '#', style: const TextStyle(color: Color(0xFF6366F1), fontWeight: FontWeight.bold)),
+              );
+            },
           ),
           const SizedBox(width: 14),
 

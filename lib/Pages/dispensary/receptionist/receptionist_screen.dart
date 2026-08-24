@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -16,7 +17,7 @@ import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
-import 'package:gmwf/widgets/camp_selection_dialog.dart';
+import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import '../user_settings_dialog.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
@@ -40,7 +41,9 @@ class ReceptionistScreen extends StatefulWidget {
 }
 
 class _ReceptionistScreenState extends State<ReceptionistScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   String? _username;
   String? _branchName;
   String _pendingCnic = '';
@@ -59,7 +62,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   bool _isSyncing = false;
   bool _loadingBranch = true;
   bool _sortNewestFirst = true;
-  String _selectedSessionFilter = 'auto';
+  String _selectedSessionFilter = 'all';
+  String _selectedCampFilter = 'all';
+
+  bool get _hasMultiCamps => CampSessionService.hasCampsForBranch(widget.branchId);
 
   // Listenables
   late final ValueListenable<Box> _entriesListenable;
@@ -75,10 +81,16 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   static const Color _teal = Color(0xFF00695C);
   static const int _tabToken = 0;
+  // ignore: unused_field
   static const int _tabLog = 1;
   static const int _tabRegister = 2;
 
   late TabController _mobileTabController;
+
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
 
   bool get _isDark {
     try {
@@ -89,25 +101,17 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     return false;
   }
 
-  String? get _resolvedDispensaryId {
-    final active = CampSessionService.getActiveCamp();
-    if (active != null && active.isNotEmpty) return active;
-    try {
-      if (Hive.isBoxOpen('app_settings')) {
-        final userData = Hive.box('app_settings').get('user_data');
-        if (userData is Map && userData['dispensaryId'] != null) {
-          final d = userData['dispensaryId'].toString().trim();
-          if (d.isNotEmpty && d.toLowerCase() != 'all') return d.toLowerCase();
-        }
-      }
-    } catch (_) {}
-    return null;
-  }
-
   @override
   void initState() {
     super.initState();
     _mobileTabController = TabController(length: 3, vsync: this);
+
+    if (_hasMultiCamps) {
+      final active = CampSessionService.getActiveCamp(widget.branchId);
+      if (active != null && active.isNotEmpty && active != 'all') {
+        _selectedCampFilter = active;
+      }
+    }
 
     _entriesListenable =
         Hive.box(lss.LocalStorageService.entriesBox).listenable();
@@ -134,7 +138,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) async {
       final type = event['event_type'] as String?;
-      final data = event['data'] as Map<String, dynamic>?;
+      final rawData = event['data'];
+      final data = (rawData is Map) ? Map<String, dynamic>.from(rawData) : null;
 
       debugPrint('[Receptionist] 📨 Got event: $type');
 
@@ -185,7 +190,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (eventBranch != widget.branchId) return;
 
         final patientId = data?['patientId'] as String?;
-        final changes = data?['changes'] as Map<String, dynamic>?;
+        final rawChanges = data?['changes'];
+        final changes = (rawChanges is Map) ? Map<String, dynamic>.from(rawChanges) : null;
 
         if (patientId != null && changes != null && changes.isNotEmpty) {
           final allPatients = lss.LocalStorageService.getAllLocalPatients(
@@ -201,10 +207,23 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           } else {
             await lss.LocalStorageService.downloadAllPatients(widget.branchId);
           }
+          await lss.LocalStorageService.updateActiveEntriesForPatient(widget.branchId, patientId, changes);
 
           if (mounted) setState(() {});
         }
         return;
+      }
+
+      // PRESCRIPTION SAVED BY DOCTOR -> TRIGGER RECEPTIONIST TOAST
+      if (type == RealtimeEvents.savePrescription ||
+          type == 'prescription_created' ||
+          (type == RealtimeEvents.saveEntry &&
+              (data?['status'] == 'completed' || data?['prescriptions'] != null))) {
+        final eventBranch =
+            data?['branchId'] as String? ?? event['branchId'] as String?;
+        if (eventBranch == null || eventBranch == widget.branchId) {
+          _showPrescriptionNotification(data);
+        }
       }
 
       // Other events that should trigger UI refresh
@@ -216,6 +235,117 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (mounted) setState(() {});
       }
     });
+  }
+
+  String? _lastNotifiedSerial;
+  DateTime? _lastNotificationTime;
+
+  void _showPrescriptionNotification(Map<String, dynamic>? data) {
+    if (!mounted || data == null) return;
+
+    final serial =
+        (data['serial'] ?? data['tokenNumber'] ?? '').toString().trim();
+    final now = DateTime.now();
+
+    // Prevent duplicate toast spam if doctor sends multiple events for the same prescription
+    if (serial.isNotEmpty &&
+        serial == _lastNotifiedSerial &&
+        _lastNotificationTime != null &&
+        now.difference(_lastNotificationTime!) < const Duration(seconds: 5)) {
+      return;
+    }
+
+    _lastNotifiedSerial = serial;
+    _lastNotificationTime = now;
+
+    final patientName =
+        (data['patientName'] ?? data['name'] ?? 'Patient').toString().trim();
+    final doctorName = (data['doctorName'] ?? 'Doctor').toString().trim();
+    final serialSuffix = serial.contains('-') ? serial.split('-').last : serial;
+    final tokenDisplay = serialSuffix.isNotEmpty ? '#$serialSuffix' : serial;
+
+    try {
+      HapticFeedback.mediumImpact();
+    } catch (_) {}
+
+    Flushbar(
+      titleText: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF10B981).withValues(alpha: 0.25),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.notifications_active_rounded,
+              color: Color(0xFF10B981),
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Doctor Ready – Send Next Patient',
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                fontSize: 14.5,
+                color: Colors.white,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ),
+        ],
+      ),
+      messageText: Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: RichText(
+          text: TextSpan(
+            style: const TextStyle(
+                fontSize: 13, color: Color(0xFFCBD5E1), height: 1.3),
+            children: [
+              TextSpan(
+                text: doctorName.isNotEmpty ? '$doctorName ' : 'Doctor ',
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              const TextSpan(text: 'finished consultation for '),
+              TextSpan(
+                text: '$tokenDisplay $patientName',
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  color: Color(0xFF34D399),
+                ),
+              ),
+              const TextSpan(
+                  text: '. Please call and send in the next patient.'),
+            ],
+          ),
+        ),
+      ),
+      backgroundColor: const Color(0xFF0F172A),
+      borderRadius: BorderRadius.circular(16),
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      flushbarPosition: FlushbarPosition.TOP,
+      duration: const Duration(seconds: 6),
+      animationDuration: const Duration(milliseconds: 350),
+      boxShadows: [
+        BoxShadow(
+          color: const Color(0xFF10B981).withValues(alpha: 0.35),
+          blurRadius: 18,
+          spreadRadius: 1,
+          offset: const Offset(0, 4),
+        ),
+        BoxShadow(
+          color: Colors.black.withValues(alpha: 0.5),
+          blurRadius: 12,
+          offset: const Offset(0, 4),
+        ),
+      ],
+      borderColor: const Color(0xFF10B981).withValues(alpha: 0.6),
+      borderWidth: 1.4,
+    ).show(context);
   }
 
   // [FIX-USERNAME] Resolve receptionist name then start/update connection with it.
@@ -301,7 +431,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   void _onActiveCampChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_hasMultiCamps) {
+      final active = CampSessionService.getActiveCamp(widget.branchId);
+      if (active != null && active.isNotEmpty && active != 'all') {
+        _selectedCampFilter = active;
+      }
+    }
+    setState(() {});
   }
 
   Future<void> _loadBranchName() async {
@@ -407,21 +544,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     });
   }
 
-  void _onPatientRegistered(String patientId) {
+  void _onPatientRegistered(String patientIdOrCnic) {
+    final clean = patientIdOrCnic.contains('_child_')
+        ? patientIdOrCnic.split('_child_').first
+        : patientIdOrCnic;
     setState(() {
-      _pendingCnic = patientId;
+      _pendingCnic = clean;
       _activeSection = 'token';
     });
     if (_mobileTabController.length > _tabToken) {
       _mobileTabController.animateTo(_tabToken);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tokenKey.currentState?.focusAndFillCnic(patientId);
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          _tokenKey.currentState?.focusAndFillCnic(patientId);
-        }
-      });
+      _tokenKey.currentState?.focusAndFillCnic(clean);
     });
   }
 
@@ -531,213 +666,206 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
-    final gradient = LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: _isDark
-          ? const [Color(0xFF0F172A), Color(0xFF1E293B)]
-          : const [Color(0xFF004D40), Color(0xFF00796B)],
-    );
-
-    if (isMobile) {
-      return AppBar(
-        automaticallyImplyLeading: false,
-        flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
-        elevation: 4,
-        toolbarHeight: 56,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.webp', height: 32),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Receptionist – ${_username ?? '...'}',
-              style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ]),
-        actions: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _connectionStatus.isConnected
-                  ? Colors.greenAccent
-                  : Colors.redAccent,
-            ),
-          ),
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _online ? Colors.lightBlueAccent : Colors.grey,
-            ),
-          ),
-          if (_isSyncing)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 16),
-              child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 2)),
+    return GmwfAppBar(
+      title: 'Receptionist – ${_username ?? widget.receptionistName}',
+      subtitle: CampSessionService.getBranchAndCampDisplayName(
+        branchName: _branchName ?? 'Free Dispensary',
+        branchId: widget.branchId,
+        campId: CampSessionService.getActiveCamp(),
+      ),
+      onTitleLongPress: () => DispensaryUserSettingsDialog.show(
+        context,
+        branchId: widget.branchId,
+        onUserUpdated: () {
+          if (mounted) setState(() { _fetchReceptionistName(); });
+        },
+      ),
+      titleTooltip: 'Long press for Settings',
+      connectionStatus: _connectionStatus,
+      onRetryConnection: () => ConnectionManager().reconnectNow(),
+      isOnline: _online,
+      isSyncing: _isSyncing,
+      onSync: _forceSync,
+      onLogout: _logout,
+      isLoggingOut: _isLoggingOut,
+      bottom: isMobile
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(44),
+              child: TabBar(
+                controller: _mobileTabController,
+                indicatorColor: const Color(0xFF00A86B),
+                labelColor: const Color(0xFF00A86B),
+                unselectedLabelColor: Colors.grey,
+                labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                tabs: const [
+                  Tab(icon: Icon(Icons.token, size: 18), text: 'Token'),
+                  Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Log'),
+                  Tab(icon: Icon(Icons.person_add, size: 18), text: 'Register'),
+                ],
+              ),
             )
-          else
-            IconButton(
-              icon: const Icon(Icons.sync, color: Colors.white, size: 20),
-              onPressed: _forceSync,
-            ),
-          _isLoggingOut
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2)),
-                )
-              : IconButton(
-                  icon: const Icon(Icons.logout, color: Colors.white, size: 20),
-                  onPressed: _logout,
-                ),
-        ],
-        bottom: TabBar(
-          controller: _mobileTabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle:
-              const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-          tabs: const [
-            Tab(icon: Icon(Icons.token, size: 18), text: 'Token'),
-            Tab(icon: Icon(Icons.list_alt, size: 18), text: 'Log'),
-            Tab(icon: Icon(Icons.person_add, size: 18), text: 'Register'),
-          ],
-        ),
-      );
+          : null,
+    );
+  }
+
+  Map<String, dynamic> _getUserData() {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final userData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (userData is Map) return Map<String, dynamic>.from(userData);
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  List<Map<String, dynamic>> _getFilteredTodayTokens() {
+    final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final activeShift = CampSessionService.getCurrentSession();
+    final userData = _getUserData();
+    final scheduledCamps = CampSessionService.getMatchingScheduledCamps(userData);
+    final effectiveCamp = _hasMultiCamps
+        ? (scheduledCamps.isNotEmpty
+            ? scheduledCamps.first
+            : CampSessionService.getActiveCamp(widget.branchId))
+        : null;
+
+    final rawEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+
+    final myId = widget.receptionistId.trim().toLowerCase();
+    final myName = (_username ?? widget.receptionistName).trim().toLowerCase();
+
+    final filtered = rawEntries.where((e) {
+      // 1. Date filter (strictly today)
+      final dk = (e['dateKey'] as String?);
+      if (dk != today) return false;
+
+      final serial = (e['serial'] ?? e['id'])?.toString();
+      if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) return false;
+
+      // 2. Deleted status filter
+      final st = (e['status'] as String?)?.toLowerCase().trim();
+      final syncSt = (e['syncStatus'] as String?)?.toLowerCase().trim();
+      if (st == 'deleted' || syncSt == 'deleted') return false;
+
+      // 3. Must have valid patient name or cnic
+      final name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
+      final cnic = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().trim();
+      if ((name.isEmpty || name == 'unknown patient' || name == 'unknown') && cnic.isEmpty) {
+        return false;
+      }
+
+      // 4. Strict USER ONLY filter (Only this logged-in user's issued tokens!)
+      final cb = (e['createdBy'] ?? e['receptionistId'] ?? e['addedById'] ?? '').toString().trim().toLowerCase();
+      final cbn = (e['createdByName'] ?? e['receptionistName'] ?? e['performedBy'] ?? e['by'] ?? '').toString().trim().toLowerCase();
+
+      bool matchesUser = false;
+      if (myId.isNotEmpty && cb.isNotEmpty) {
+        if (cb == myId || cb.contains(myId) || myId.contains(cb)) {
+          matchesUser = true;
+        }
+      }
+      if (myName.isNotEmpty && cbn.isNotEmpty) {
+        if (cbn == myName || cbn.contains(myName) || myName.contains(cbn)) {
+          matchesUser = true;
+        }
+      }
+      // If neither ID nor Name matched, strictly reject (e.g. Kashif's tokens when Ahad is logged in)
+      if (!matchesUser) return false;
+
+      // 5. Strict Camp Isolation
+      if (_hasMultiCamps && effectiveCamp != null && effectiveCamp.isNotEmpty && effectiveCamp != 'all') {
+        final matches = CampSessionService.matchesCamp(
+          selectedCamp: effectiveCamp,
+          dispensaryId: e['dispensaryId']?.toString(),
+          campId: e['campId']?.toString(),
+          dispensaryTag: e['dispensaryTag']?.toString(),
+          serial: serial,
+        );
+        if (!matches) return false;
+      }
+
+      // 6. Strict Shift Isolation
+      final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
+      if (eSession.isNotEmpty) {
+        if (eSession != activeShift) return false;
+      } else {
+        final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
+        if (rawTime != null) {
+          final dt = DateTime.tryParse(rawTime.toString());
+          if (dt != null && CampSessionService.getCurrentSession(dt) != activeShift) {
+            return false;
+          }
+        }
+      }
+
+      return true;
+    }).toList();
+
+    final Map<String, Map<String, dynamic>> uniqueBySerial = {};
+    for (final e in filtered) {
+      final s = (e['serial'] ?? e['id'] ?? '').toString().trim().toUpperCase();
+      if (s.isEmpty) continue;
+      if (!uniqueBySerial.containsKey(s)) {
+        uniqueBySerial[s] = e;
+      } else {
+        final existingName = (uniqueBySerial[s]!['patientName'] ?? uniqueBySerial[s]!['name'] ?? '').toString().toLowerCase();
+        final currentName = (e['patientName'] ?? e['name'] ?? '').toString().toLowerCase();
+        if (existingName.contains('unknown') && !currentName.contains('unknown')) {
+          uniqueBySerial[s] = e;
+        }
+      }
     }
 
-    // Desktop AppBar
-    return AppBar(
-      automaticallyImplyLeading: false,
-      flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
-      elevation: 10,
-      shadowColor: Colors.black26,
-      toolbarHeight: 100,
-      iconTheme: const IconThemeData(color: Colors.white),
-      title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.webp', height: 60),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GestureDetector(
-                onLongPress: () => DispensaryUserSettingsDialog.show(
-                  context,
-                  branchId: widget.branchId,
-                  onUserUpdated: () {
-                    if (mounted) setState(() { _fetchReceptionistName(); });
-                  },
-                ),
-                child: Tooltip(
-                  message: 'Long press for Settings',
-                  child: Text('Receptionist – ${_username ?? 'Loading...'}',
-                      style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                ),
-              ),
-              if (!_loadingBranch)
-                Text(
-                  CampSessionService.getBranchAndCampDisplayName(
-                    branchName: _branchName ?? 'Free Dispensary',
-                    branchId: widget.branchId,
-                    campId: CampSessionService.getActiveCamp(),
-                  ),
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
-                ),
-            ],
+    return uniqueBySerial.values.toList();
+  }
+
+  Widget _buildFilterDropdown({
+    required String value,
+    required List<Map<String, String>> items,
+    required ValueChanged<String?> onChanged,
+    required bool isDark,
+  }) {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
+        ),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.any((i) => i['id'] == value) ? value : items.first['id'],
+          isDense: true,
+          icon: Icon(Icons.arrow_drop_down,
+              size: 16, color: isDark ? const Color(0xFF38BDF8) : _teal),
+          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white : Colors.black87,
           ),
+          items: items.map((i) {
+            return DropdownMenuItem<String>(
+              value: i['id'],
+              child: Text(i['label']!,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  )),
+            );
+          }).toList(),
+          onChanged: onChanged,
         ),
-      ]),
-      centerTitle: false,
-      actions: [
-        ConnectionStatusBadge(
-          status: _connectionStatus,
-          onRetry: () => ConnectionManager().reconnectNow(),
-        ),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: _online ? Colors.blue.shade700 : Colors.grey.shade600,
-            borderRadius: BorderRadius.circular(30),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_online ? Icons.cloud : Icons.cloud_off,
-                color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(_online ? 'Internet' : 'No Internet',
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white)),
-          ]),
-        ),
-        IconButton(
-          icon: _isSyncing
-              ? const SizedBox(
-                  width: 28,
-                  height: 28,
-                  child: CircularProgressIndicator(
-                      color: Colors.white, strokeWidth: 3))
-              : const Icon(Icons.sync, size: 32, color: Colors.white),
-          onPressed: _isSyncing ? null : _forceSync,
-        ),
-        _isLoggingOut
-            ? const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2.5)),
-              )
-            : IconButton(
-                icon: const Icon(Icons.logout, size: 32, color: Colors.white),
-                onPressed: _logout,
-              ),
-          const SizedBox(width: 12),
-        ],
-      );
-    }
+      ),
+    );
+  }
 
   Widget _buildSummaryCards(bool isMobile) {
-    final today = DateFormat('ddMMyy').format(DateTime.now());
-    final activeSession = _selectedSessionFilter == 'auto'
-        ? CampSessionService.getCurrentSession()
-        : _selectedSessionFilter;
-
-    final allEntries = lss.LocalStorageService.getLocalEntries(
-      widget.branchId,
-      dispensaryId: _resolvedDispensaryId,
-      filterByCamp: true,
-      session: activeSession,
-      filterBySession: activeSession != 'all',
-    );
-    final todayEntries =
-        allEntries.where((e) => (e['dateKey'] as String?) == today).toList();
+    final todayEntries = _getFilteredTodayTokens();
 
     int zakat = 0, nonZakat = 0, gmwf = 0;
     int zakatAmount = 0, nonZakatAmount = 0;
@@ -767,21 +895,50 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     final totalAmount = zakatAmount + nonZakatAmount;
 
     final cards = [
-      _compactSummaryCard('Zakat', zakat, 'PKR $zakatAmount',
-          Colors.green[600]!, Icons.volunteer_activism, isMobile: isMobile),
-      _compactSummaryCard('Non-Zakat', nonZakat, 'PKR $nonZakatAmount',
-          Colors.blue[600]!, Icons.person_outline, isMobile: isMobile),
-      _compactSummaryCard('GMWF', gmwf, 'PKR 0', Colors.orange[600]!, null,
-          isImage: true, isMobile: isMobile),
-      _compactSummaryCard('Total', total, 'PKR $totalAmount',
-          Colors.teal[700]!, Icons.people, isMobile: isMobile),
+      _compactSummaryCard(
+        _isKarachi ? 'PKR 20' : 'Zakat',
+        zakat,
+        'PKR $zakatAmount',
+        const Color(0xFF00875A), // Solid Emerald Green
+        Icons.volunteer_activism_rounded,
+        isMobile: isMobile,
+      ),
+      _compactSummaryCard(
+        _isKarachi ? 'PKR 100' : 'Non-Zakat',
+        nonZakat,
+        _isKarachi && nonZakat == 0 ? 'Disabled 🔒' : 'PKR $nonZakatAmount',
+        const Color(0xFF00875A),
+        Icons.person_outline_rounded,
+        isMobile: isMobile,
+        isOutlined: true,
+        outlineColor: const Color(0xFF00875A), // Green Outline on White Card
+      ),
+      _compactSummaryCard(
+        'GMWF',
+        gmwf,
+        'PKR 0',
+        const Color(0xFFD97706), // Solid Amber
+        null,
+        isImage: true,
+        isMobile: isMobile,
+      ),
+      _compactSummaryCard(
+        'Total',
+        total,
+        'PKR $totalAmount',
+        const Color(0xFFD97706),
+        Icons.people_outline_rounded,
+        isMobile: isMobile,
+        isOutlined: true,
+        outlineColor: const Color(0xFFD97706), // Amber Outline on White Card
+      ),
     ];
 
     return Row(
       children: cards
           .map((c) => Expanded(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 2 : 6),
+                  padding: EdgeInsets.symmetric(horizontal: isMobile ? 2 : 4),
                   child: c,
                 ),
               ))
@@ -804,108 +961,103 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     String title,
     int count,
     String amount,
-    Color color,
+    Color solidColor,
     IconData? icon, {
     bool isImage = false,
     bool isMobile = false,
+    bool isOutlined = false,
+    Color? outlineColor,
   }) {
-    final gradientColors = [
-      color.withValues(alpha: 0.85),
-      color.withValues(alpha: 0.95),
-    ];
+    final effectiveOutline = outlineColor ?? solidColor;
+    final bgColor = isOutlined
+        ? (_isDark ? const Color(0xFF1E293B) : Colors.white)
+        : solidColor;
+    final primaryTextColor = isOutlined
+        ? (_isDark ? Colors.white : effectiveOutline)
+        : Colors.white;
+    final secondaryTextColor = isOutlined
+        ? (_isDark
+            ? const Color(0xFF94A3B8)
+            : effectiveOutline.withValues(alpha: 0.85))
+        : Colors.white.withValues(alpha: 0.85);
+
     return Container(
-      height: isMobile ? 80 : 100,
+      height: isMobile ? 70 : 76,
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: gradientColors,
-        ),
+        color: bgColor,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isOutlined
+              ? effectiveOutline
+              : Colors.white.withValues(alpha: 0.22),
+          width: isOutlined ? 1.6 : 1.2,
+        ),
         boxShadow: [
           BoxShadow(
-            color: color.withValues(alpha: 0.25),
-            blurRadius: 10,
+            color: isOutlined
+                ? effectiveOutline.withValues(alpha: _isDark ? 0.25 : 0.15)
+                : solidColor.withValues(alpha: _isDark ? 0.45 : 0.35),
+            blurRadius: isOutlined ? 10 : 14,
+            spreadRadius: 1,
             offset: const Offset(0, 4),
-          )
-        ],
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.2),
-          width: 1.5,
-        ),
-      ),
-      child: Stack(
-        children: [
-          // ── Background watermark (bottom-right) ──────────────────────────
-          Positioned(
-            right: -10,
-            bottom: -10,
-            child: isImage
-                ? Opacity(
-                    opacity: 0.12,
-                    child: Image.asset(
-                      'assets/logo/gmwf-1.webp',
-                      height: isMobile ? 40 : 54,
-                    ),
-                  )
-                : Icon(
-                    icon ?? Icons.spa_rounded,
-                    size: isMobile ? 40 : 54,
-                    color: Colors.white.withValues(alpha: 0.12),
-                  ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: isMobile ? 10 : 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    // ── Top-right icon/logo ───────────────────────────────
-                    if (isImage)
-                      Image.asset('assets/logo/gmwf-1.webp',
-                          height: isMobile ? 14 : 18)
-                    else if (icon != null)
-                      Icon(icon,
-                          size: isMobile ? 12 : 16,
-                          color: Colors.white.withValues(alpha: 0.9)),
-                  ],
+          BoxShadow(
+            color: Colors.black.withValues(alpha: _isDark ? 0.30 : 0.06),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 8 : 10,
+        vertical: isMobile ? 6 : 8,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: primaryTextColor,
+                  fontSize: isMobile ? 10.5 : 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.2,
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: isMobile ? 20 : 26,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    if (!isMobile)
-                      Text(
-                        amount,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.8),
-                          fontSize: 9,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                  ],
+              ),
+              if (isImage)
+                Image.asset('assets/logo/gmwf-1.webp',
+                    height: isMobile ? 14 : 17)
+              else if (icon != null)
+                Icon(icon, size: isMobile ? 14 : 16, color: primaryTextColor),
+            ],
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: primaryTextColor,
+                  fontSize: isMobile ? 18 : 22,
+                  fontWeight: FontWeight.w900,
+                  height: 1.0,
                 ),
-              ],
-            ),
+              ),
+              if (!isMobile)
+                Text(
+                  amount,
+                  style: TextStyle(
+                    color: secondaryTextColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -913,23 +1065,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   Widget _buildTokenLog(bool isMobile) {
-    final today = DateFormat('ddMMyy').format(DateTime.now());
-    final activeSession = _selectedSessionFilter == 'auto'
-        ? CampSessionService.getCurrentSession()
-        : _selectedSessionFilter;
+    final rawList = _getFilteredTodayTokens();
 
-    var entries = lss.LocalStorageService
-        .getLocalEntries(
-          widget.branchId,
-          dispensaryId: _resolvedDispensaryId,
-          filterByCamp: true,
-          session: activeSession,
-          filterBySession: activeSession != 'all',
-        )
-        .where((e) => (e['dateKey'] as String?) == today)
-        .toList();
-
-    entries.sort((a, b) {
+    rawList.sort((a, b) {
       final sa = (a['serial'] as String? ?? '000000-000').split('-').last;
       final sb = (b['serial'] as String? ?? '000000-000').split('-').last;
       final na = int.tryParse(sa) ?? 0;
@@ -937,20 +1075,29 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       return _sortNewestFirst ? nb.compareTo(na) : na.compareTo(nb);
     });
 
-    if (entries.isEmpty) {
-      return const Center(
-          child: Text('No tokens issued today',
-              style: TextStyle(fontSize: 16, color: Colors.grey)));
+    if (rawList.isEmpty) {
+      return Center(
+        child: Text(
+          'No tokens issued today',
+          style: TextStyle(
+              fontSize: 14,
+              color: _isDark ? const Color(0xFF94A3B8) : Colors.grey),
+        ),
+      );
     }
 
     return ListView.separated(
-      itemCount: entries.length,
-      separatorBuilder: (_, _) =>
-          Divider(height: 1, color: Colors.grey[200]),
+      itemCount: rawList.length,
+      separatorBuilder: (_, _) => Divider(
+          height: 1,
+          color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200),
       itemBuilder: (context, i) {
-        final e = entries[i];
+        final e = rawList[i];
         final serial = e['serial'] as String? ?? 'N/A';
-        final name = e['patientName'] as String? ?? 'Unknown Patient';
+        final rawName = (e['patientName'] ?? e['name'] ?? e['fullName'])?.toString().trim();
+        final name = (rawName != null && rawName.isNotEmpty && rawName.toLowerCase() != 'null')
+            ? rawName
+            : 'Unknown Patient';
         final cnic = (e['cnic'] as String?)?.trim() ?? '';
         final guardianCnic = (e['guardianCnic'] as String?)?.trim() ?? '';
         final queueTypeRaw =
@@ -962,26 +1109,84 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (queueTypeRaw == 'zakat') tokenAmount = 20 * days;
         if (queueTypeRaw == 'non-zakat') tokenAmount = 100 * days;
         final hasExtraDays = days > 1 && tokenAmount > 0;
-        final canReverse = _isWaitingOnly(e);
 
+        // Category label & color
         Color badgeColor;
         String displayType;
-        switch (queueTypeRaw) {
-          case 'zakat':
-            badgeColor = Colors.green[600]!;
-            displayType = 'Zakat';
-            break;
-          case 'non-zakat':
-            badgeColor = Colors.blue[600]!;
-            displayType = 'Non-Zakat';
-            break;
-          case 'gmwf':
-            badgeColor = Colors.orange[600]!;
+        if (_isKarachi) {
+          if (queueTypeRaw == 'zakat') {
+            badgeColor = Colors.green.shade600;
+            displayType = 'PKR 20';
+          } else if (queueTypeRaw == 'non-zakat') {
+            badgeColor = Colors.blue.shade600;
+            displayType = 'PKR 100';
+          } else if (queueTypeRaw == 'gmwf') {
+            badgeColor = Colors.orange.shade600;
             displayType = 'GMWF';
-            break;
-          default:
-            badgeColor = Colors.grey[600]!;
-            displayType = 'Unknown';
+          } else {
+            badgeColor = Colors.green.shade600;
+            displayType = 'PKR 20';
+          }
+        } else {
+          switch (queueTypeRaw) {
+            case 'zakat':
+              badgeColor = Colors.green.shade600;
+              displayType = 'Zakat';
+              break;
+            case 'non-zakat':
+              badgeColor = Colors.blue.shade600;
+              displayType = 'Non-Zakat';
+              break;
+            case 'gmwf':
+              badgeColor = Colors.orange.shade600;
+              displayType = 'GMWF';
+              break;
+            default:
+              badgeColor = Colors.grey.shade600;
+              displayType = 'Zakat';
+          }
+        }
+
+        // Status determination
+        final s = (e['status'] as String?)?.toLowerCase().trim() ?? 'waiting';
+        final hasPrescription = (e['prescriptionId'] as String?)?.isNotEmpty == true || e['prescription'] is Map;
+        final isDispensed = s == 'dispensed' || e['dispensedAt'] != null || (e['dispenseStatus'] as String?)?.toLowerCase().trim() == 'dispensed';
+        final isWaitingToDispense = !isDispensed && (hasPrescription || s == 'completed' || s == 'prescribed' || s == 'waiting_to_dispense' || s == 'waiting_for_dispense');
+
+        // Only tokens strictly waiting for doctor (not yet prescribed or dispensed) can be reversed/undone!
+        final isWaitingOnly = !isDispensed && !isWaitingToDispense && s != 'with_doctor' && s != 'with doctor' && s != 'in_consultation' && s != 'cancelled' && s != 'reversed' && s != 'deleted';
+        final canReverse = isWaitingOnly;
+
+        String statusLabel;
+        Color statusBg;
+        Color statusText;
+        IconData statusIcon;
+
+        if (isDispensed) {
+          statusLabel = 'Dispensed';
+          statusBg = _isDark ? const Color(0xFF14532D) : Colors.green.shade50;
+          statusText = _isDark ? const Color(0xFF86EFAC) : Colors.green.shade800;
+          statusIcon = Icons.check_circle_outline_rounded;
+        } else if (isWaitingToDispense) {
+          statusLabel = 'Waiting for Dispense';
+          statusBg = _isDark ? const Color(0xFF1E3A5F) : Colors.blue.shade50;
+          statusText = _isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800;
+          statusIcon = Icons.medication_outlined;
+        } else if (s == 'with_doctor' || s == 'with doctor' || s == 'in_consultation') {
+          statusLabel = 'With Doctor';
+          statusBg = _isDark ? const Color(0xFF3B1D5F) : Colors.purple.shade50;
+          statusText = _isDark ? const Color(0xFFD8B4FE) : Colors.purple.shade800;
+          statusIcon = Icons.medical_services_outlined;
+        } else if (s == 'cancelled' || s == 'reversed') {
+          statusLabel = 'Cancelled';
+          statusBg = _isDark ? const Color(0xFF450A0A) : Colors.red.shade50;
+          statusText = _isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800;
+          statusIcon = Icons.cancel_outlined;
+        } else {
+          statusLabel = 'Waiting';
+          statusBg = _isDark ? const Color(0xFF451A03) : Colors.amber.shade50;
+          statusText = _isDark ? const Color(0xFFFCD34D) : Colors.amber.shade900;
+          statusIcon = Icons.hourglass_empty_rounded;
         }
 
         final displayCnic = cnic.isNotEmpty
@@ -990,184 +1195,303 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 ? guardianCnic
                 : '-';
 
-        if (isMobile) {
-          return Card(
-            margin: const EdgeInsets.symmetric(vertical: 3),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-            child: ListTile(
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              leading: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CircleAvatar(
-                    backgroundColor: badgeColor,
-                    radius: 20,
-                    child: Text(
-                      serial.split('-').last.padLeft(3, '0'),
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12),
-                    ),
-                  ),
-                  if (days > 1)
-                    Positioned(
-                      right: -4,
-                      top: -4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                            color: Colors.deepOrange,
-                            borderRadius: BorderRadius.circular(8)),
-                        child: Text('×$days',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                ],
-              ),
-              title: Text(name,
+        final seqNumber = serial.split('-').last.padLeft(3, '0');
+
+        String campTag = (e['dispensaryTag'] ?? e['dispensaryId'] ?? '').toString().trim().toUpperCase();
+        if (campTag.isEmpty || campTag == 'ALL') {
+          final parts = serial.split('-');
+          if (parts.length >= 3) {
+            campTag = parts[1].toUpperCase();
+          }
+        }
+        if (campTag == 'KAP' || campTag == 'KAPAYYA' || campTag == 'SADDAR' || campTag == 'SAD') {
+          campTag = 'SADD';
+        } else if (campTag == 'HC' || campTag == 'HAJI_CAMP' || campTag == 'HAJICAMP') {
+          campTag = 'HAJI';
+        }
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 2.5),
+          padding: EdgeInsets.symmetric(
+              horizontal: isMobile ? 8 : 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: _isDark
+                ? const Color(0xFF1E293B)
+                : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: _isDark
+                    ? const Color(0xFF334155)
+                    : Colors.grey.shade200),
+          ),
+          child: Row(
+            children: [
+              // ── Token Number Pill ──────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '#$seqNumber',
                   style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 14),
-                  overflow: TextOverflow.ellipsis),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(displayCnic,
-                      style: const TextStyle(fontSize: 11)),
-                  Row(children: [
-                    Text(DateFormat('hh:mm a').format(timestamp),
-                        style: const TextStyle(
-                            fontSize: 11, color: Colors.grey)),
-                    if (hasExtraDays) ...[
-                      const SizedBox(width: 6),
-                      Text('PKR $tokenAmount',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.orange.shade700,
-                              fontWeight: FontWeight.bold)),
-                    ],
-                  ]),
-                ],
-              ),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Chip(
-                    label: Text(displayType,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 10)),
-                    backgroundColor: badgeColor,
-                    visualDensity: VisualDensity.compact,
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
                   ),
-                  if (canReverse)
-                    GestureDetector(
-                      onTap: () => _requestTokenReverse(e),
-                      child: const Icon(Icons.undo,
-                          color: Colors.redAccent, size: 18),
-                    ),
-                ],
+                ),
               ),
-            ),
-          );
-        } else {
-          return Card(
-            elevation: 2,
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
-              leading: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  CircleAvatar(
-                    backgroundColor: badgeColor,
-                    radius: 28,
-                    child: Text(
-                      serial.split('-').last.padLeft(3, '0'),
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18),
-                    ),
-                  ),
-                  if (days > 1)
-                    Positioned(
-                      right: -6,
-                      top: -6,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.deepOrange,
-                          borderRadius: BorderRadius.circular(10),
-                          border:
-                              Border.all(color: Colors.white, width: 1.5),
+              const SizedBox(width: 10),
+
+              // ── Patient Info ──────────────────────────────────
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: isMobile ? 13 : 14,
+                              color: _isDark
+                                  ? Colors.white
+                                  : Colors.black87,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        child: Text('×$days',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold)),
-                      ),
+                        if (days > 1) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.deepOrange,
+                              borderRadius:
+                                  BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '×$days d',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
-                ],
-              ),
-              title: Text(name,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 18)),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                      '$displayCnic • ${DateFormat('hh:mm a').format(timestamp)}',
-                      style: TextStyle(
-                          color: Colors.grey[600], fontSize: 13)),
-                  if (hasExtraDays)
-                    Text(
-                        'PKR $tokenAmount total ($days-day prescription)',
-                        style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600)),
-                ],
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Chip(
-                    label: Text(displayType,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 12)),
-                    backgroundColor: badgeColor,
-                  ),
-                  if (canReverse) ...[
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.undo,
-                          color: Colors.redAccent, size: 24),
-                      onPressed: () => _requestTokenReverse(e),
+                    const SizedBox(height: 2),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 2,
+                      crossAxisAlignment:
+                          WrapCrossAlignment.center,
+                      children: [
+                        Tooltip(
+                          message: 'Click to copy CNIC',
+                          child: InkWell(
+                            onTap: (displayCnic.isEmpty || displayCnic == '-')
+                                ? null
+                                : () {
+                                    Clipboard.setData(ClipboardData(text: displayCnic));
+                                    ScaffoldMessenger.of(context).clearSnackBars();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.check_circle,
+                                                color: Colors.white, size: 16),
+                                            const SizedBox(width: 8),
+                                            Text('Copied: $displayCnic',
+                                                style: const TextStyle(fontSize: 12)),
+                                          ],
+                                        ),
+                                        duration: const Duration(seconds: 2),
+                                        behavior: SnackBarBehavior.floating,
+                                        backgroundColor: _teal,
+                                        width: 250,
+                                      ),
+                                    );
+                                  },
+                            borderRadius: BorderRadius.circular(4),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 3, vertical: 1),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    displayCnic,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: _isDark
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFF00796B),
+                                      decoration: (displayCnic.isNotEmpty && displayCnic != '-')
+                                          ? TextDecoration.underline
+                                          : TextDecoration.none,
+                                      decorationStyle: TextDecorationStyle.dotted,
+                                    ),
+                                  ),
+                                  if (displayCnic.isNotEmpty && displayCnic != '-') ...[
+                                    const SizedBox(width: 3),
+                                    Icon(
+                                      Icons.copy,
+                                      size: 10,
+                                      color: _isDark
+                                          ? const Color(0xFF38BDF8)
+                                          : const Color(0xFF00796B),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        Text('•',
+                            style: TextStyle(
+                                fontSize: 9,
+                                color: Colors.grey.shade400)),
+                        Text(
+                          DateFormat('hh:mm a').format(timestamp),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: _isDark
+                                ? const Color(0xFF94A3B8)
+                                : Colors.grey.shade600,
+                          ),
+                        ),
+                        if (_selectedSessionFilter == 'all' && (e['session'] as String?)?.isNotEmpty == true) ...[
+                          Text('•',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.grey.shade400)),
+                          Text(
+                            e['session'].toString(),
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: e['session'].toString().toLowerCase().contains('morn')
+                                  ? Colors.amber.shade700
+                                  : Colors.indigo.shade400,
+                            ),
+                          ),
+                        ],
+                        if (_selectedCampFilter == 'all' && _hasMultiCamps && campTag.isNotEmpty) ...[
+                          Text('•',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.grey.shade400)),
+                          Text(
+                            campTag,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.teal.shade600,
+                            ),
+                          ),
+                        ],
+                        if (hasExtraDays) ...[
+                          Text('•',
+                              style: TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.grey.shade400)),
+                          Text(
+                            'PKR $tokenAmount',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.orange.shade800,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
-                ],
+                ),
               ),
-            ),
-          );
-        }
+              const SizedBox(width: 6),
+
+              // ── Fee Badge ─────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                      color: badgeColor.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  displayType,
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // ── Status Chip ───────────────────────────────────
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: statusBg,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                      color: statusText.withValues(alpha: 0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(statusIcon, size: 11, color: statusText),
+                    const SizedBox(width: 3),
+                    Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusText,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ── Undo / Reversal ───────────────────────────────
+              if (canReverse) ...[
+                const SizedBox(width: 2),
+                IconButton(
+                  icon: const Icon(Icons.undo,
+                      color: Colors.redAccent, size: 16),
+                  tooltip: 'Cancel / Reverse Token',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                      minWidth: 26, minHeight: 26),
+                  onPressed: () => _requestTokenReverse(e),
+                ),
+              ],
+            ],
+          ),
+        );
       },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 800;
 
@@ -1256,6 +1580,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   ),
                 ]),
                 const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Text(
+                      '${_getFilteredTodayTokens().length} total',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
                 Expanded(
                   child: ValueListenableBuilder<int>(
                     valueListenable: _refreshNotifier,
@@ -1295,32 +1632,48 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   Widget _buildDesktopBody() {
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1600),
+        constraints: const BoxConstraints(maxWidth: 1650),
         child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 24),
+              // ── Left Column (flex: 3): Action Toggle + Main Form Card ───────
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                flex: 3,
+                child: Column(
                   children: [
+                    _buildDesktopToggle(),
+                    const SizedBox(height: 16),
                     Expanded(
-                      flex: 3,
-                      child: Column(children: [
-                        Center(child: _buildDesktopToggle()),
-                        const SizedBox(height: 16),
-                        Expanded(
-                          child: Card(
-                            elevation: 12,
-                            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(36)),
-                            child: Padding(
-                              padding: const EdgeInsets.all(32),
+                      child: Card(
+                        elevation: 10,
+                        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(28)),
+                        clipBehavior: Clip.antiAlias,
+                        child: Stack(
+                          children: [
+                            // ── Authentic Islamic Pattern Background (Vibrant Golden) ──
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: Opacity(
+                                  opacity: _isDark ? 0.18 : 0.28,
+                                  child: Image.asset(
+                                    'assets/images/islamic_pattern.webp',
+                                    fit: BoxFit.cover,
+                                    color: _isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37),
+                                    colorBlendMode: BlendMode.srcIn,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            // ── Form Content ──
+                            Padding(
+                              padding: const EdgeInsets.all(28),
                               child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 500),
+                                duration: const Duration(milliseconds: 400),
                                 child: _activeSection == 'register'
                                     ? PatientRegisterPage(
                                         key: _registerKey,
@@ -1342,53 +1695,76 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                       ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                      ]),
+                      ),
                     ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      flex: 2,
-                      child: ValueListenableBuilder<int>(
-                        valueListenable: _refreshNotifier,
-                        builder: (context, _, _) =>
-                            ValueListenableBuilder<Box>(
-                          valueListenable: _entriesListenable,
-                          builder: (context, _, _) =>
-                              ValueListenableBuilder<Box>(
+                  ],
+                ),
+              ),
+              const SizedBox(width: 20),
+
+              // ── Right Column (flex: 2): Summary Cards + Today's Tokens Card ──
+              Expanded(
+                flex: 2,
+                child: ValueListenableBuilder<int>(
+                  valueListenable: _refreshNotifier,
+                  builder: (context, _, _) => ValueListenableBuilder<Box>(
+                    valueListenable: _entriesListenable,
+                    builder: (context, _, _) => Column(
+                      children: [
+                        _buildSummaryCards(false),
+                        const SizedBox(height: 16),
+                        Expanded(
+                          child: ValueListenableBuilder<Box>(
                             valueListenable: _patientsListenable,
                             builder: (context, box, _) {
-                              final today =
-                                  DateFormat('ddMMyy').format(DateTime.now());
-                              final todayCount = lss.LocalStorageService
-                                  .getLocalEntries(widget.branchId, dispensaryId: _resolvedDispensaryId, filterByCamp: true)
-                                  .where((e) =>
-                                      (e['dateKey'] as String?) == today)
-                                  .length;
+                              final todayCount = _getFilteredTodayTokens().length;
+                              return Card(
+                                elevation: 8,
+                                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius:
+                                        BorderRadius.circular(24)),
+                                clipBehavior: Clip.antiAlias,
+                                child: Stack(
+                                  children: [
+                                    // ── Vibrant Golden Islamic Watermark (Center Touching Right Edge + Rotated) ──
+                                    Positioned(
+                                      right: -135,
+                                      bottom: -50,
+                                      width: 320,
+                                      height: 320,
+                                      child: IgnorePointer(
+                                        child: Transform.rotate(
+                                          angle: -0.16, // ~9.2 degrees graceful tilt
+                                          child: Opacity(
+                                            opacity: _isDark ? 0.22 : 0.32,
+                                            child: Image.asset(
+                                              'assets/images/1.webp',
+                                              fit: BoxFit.contain,
+                                              color: _isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37),
+                                              colorBlendMode: BlendMode.srcIn,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
 
-                              return Column(children: [
-                                _buildSummaryCards(false),
-                                const SizedBox(height: 16),
-                                Expanded(
-                                  child: Card(
-                                    elevation: 8,
-                                    color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                                    shape: RoundedRectangleBorder(
-                                        borderRadius:
-                                            BorderRadius.circular(24)),
-                                    child: Padding(
+                                    // ── Today's Tokens Content ──
+                                    Padding(
                                       padding: const EdgeInsets.all(20),
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Row(children: [
-                                            Icon(Icons.list_alt,
-                                                color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 32),
-                                            const SizedBox(width: 16),
+                                            Icon(Icons.list_alt_rounded,
+                                                color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 26),
+                                            const SizedBox(width: 10),
                                             Text("Today's Tokens",
                                                 style: TextStyle(
-                                                    fontSize: 22,
+                                                    fontSize: 19,
                                                     fontWeight:
                                                         FontWeight.bold,
                                                     color: _isDark ? Colors.white : _teal)),
@@ -1400,38 +1776,46 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                                           .arrow_downward_rounded
                                                       : Icons
                                                           .arrow_upward_rounded,
-                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal),
+                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                                  size: 20),
                                               onPressed: () => setState(() =>
                                                   _sortNewestFirst =
                                                       !_sortNewestFirst),
+                                              tooltip: _sortNewestFirst
+                                                  ? 'Sort: Oldest First'
+                                                  : 'Sort: Newest First',
                                             ),
-                                            // Refresh Button
                                             IconButton(
-                                              icon: Icon(Icons.refresh,
-                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 28),
+                                              icon: Icon(Icons.refresh_rounded,
+                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 22),
                                               onPressed: _refreshTokenLog,
                                               tooltip: 'Refresh token list',
                                             ),
                                           ]),
-                                          Text('$todayCount total',
-                                              style: TextStyle(
-                                                  color: _isDark ? const Color(0xFF94A3B8) : Colors.grey,
-                                                  fontSize: 16)),
-                                          const Divider(height: 36),
-                                          Expanded(
-                                              child: _buildTokenLog(false)),
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            children: [
+                                              Text('$todayCount total',
+                                                  style: TextStyle(
+                                                      color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                                      fontSize: 13,
+                                                      fontWeight: FontWeight.w600)),
+                                            ],
+                                          ),
+                                          const Divider(height: 20),
+                                          Expanded(child: _buildTokenLog(false)),
                                         ],
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ),
-                              ]);
+                              );
                             },
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ],
@@ -1444,46 +1828,146 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   Widget _buildDesktopToggle() {
     final isToken = _activeSection == 'token';
     return Container(
+      width: double.infinity,
+      height: 54,
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: _isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(32),
-        boxShadow: const [
+        border: Border.all(
+          color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          width: 1.5,
+        ),
+        boxShadow: [
           BoxShadow(
-              color: Colors.black12, blurRadius: 10, offset: Offset(0, 5))
+            color: Colors.black.withValues(alpha: _isDark ? 0.20 : 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
         ],
       ),
-      child: ToggleButtons(
-        borderRadius: BorderRadius.circular(32),
-        selectedColor: Colors.white,
-        fillColor: _isDark ? const Color(0xFF0F766E) : const Color(0xFF004D40),
-        color: _isDark ? const Color(0xFFCBD5E1) : const Color(0xFF00695C),
-        constraints:
-            const BoxConstraints(minHeight: 52, minWidth: 190),
-        isSelected: [!isToken, isToken],
+      child: Row(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Row(children: const [
-              Icon(Icons.person_add, size: 22),
-              SizedBox(width: 10),
-              Text('Register Patient',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
-            ]),
+          // ── Register Patient ──────────────────────────────────────────
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => setState(() => _activeSection = 'register'),
+                borderRadius: BorderRadius.circular(28),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: !isToken
+                        ? const LinearGradient(
+                            colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: !isToken
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF00A86B).withValues(alpha: _isDark ? 0.45 : 0.35),
+                              blurRadius: 14,
+                              spreadRadius: 1,
+                              offset: const Offset(0, 3),
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.person_add_alt_1_rounded,
+                        size: 19,
+                        color: !isToken
+                            ? Colors.white
+                            : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Register Patient',
+                        style: TextStyle(
+                          fontWeight: !isToken ? FontWeight.bold : FontWeight.w600,
+                          fontSize: 14.5,
+                          color: !isToken
+                              ? Colors.white
+                              : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-            child: Row(children: const [
-              Icon(Icons.token, size: 22),
-              SizedBox(width: 10),
-              Text('Issue Token',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold, fontSize: 15)),
-            ]),
+          const SizedBox(width: 4),
+          // ── Issue Token ───────────────────────────────────────────────
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => setState(() => _activeSection = 'token'),
+                borderRadius: BorderRadius.circular(28),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    gradient: isToken
+                        ? const LinearGradient(
+                            colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    borderRadius: BorderRadius.circular(28),
+                    boxShadow: isToken
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF00A86B).withValues(alpha: _isDark ? 0.45 : 0.35),
+                              blurRadius: 14,
+                              spreadRadius: 1,
+                              offset: const Offset(0, 3),
+                            )
+                          ]
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.inventory_2_rounded,
+                        size: 19,
+                        color: isToken
+                            ? Colors.white
+                            : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Issue Token',
+                        style: TextStyle(
+                          fontWeight: isToken ? FontWeight.bold : FontWeight.w600,
+                          fontSize: 14.5,
+                          color: isToken
+                              ? Colors.white
+                              : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
-        onPressed: (index) => setState(
-            () => _activeSection = index == 0 ? 'register' : 'token'),
       ),
     );
   }
@@ -1493,7 +1977,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     _refreshNotifier.dispose();
     _mobileTabController.dispose();
-    ConnectionManager().stop();
+    if (!widget.isEmbedded) {
+      ConnectionManager().stop();
+    }
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

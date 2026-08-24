@@ -35,88 +35,106 @@ class PayrollCalculatorService {
     final results = <Map<String, dynamic>>[];
 
     for (final emp in employees) {
-      final employeeId = emp['localId'] as String;
-      final employeeName = emp['name'] as String? ?? 'Unknown';
+      try {
+        final employeeId = emp['localId'] as String;
+        final employeeName = emp['name'] as String? ?? 'Unknown';
 
-      // 1. Fetch attendance & salary details
-      final summary = FinanceLocalStorage.getPayrollAttendanceSummary(employeeId, monthKey);
-      
-      // Derive per-day and earned salary from attendance summary to ensure
-      // consistent rules across UI and service.
-      final int totalDays = (summary['totalDays'] as num?)?.toInt() ?? 30;
-      final int totalEmployedDays = (summary['totalEmployedDays'] as num?)?.toInt() ?? 0;
-      final double absentDays = (summary['absentDays'] as num?)?.toDouble() ?? 0.0;
-      final double unpaidLeaves = (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0;
-      final double sundayOvertimeDays = (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0;
-      final double holidayBonusDouble = (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0;
-      final double sundayOvertimeBonusDouble = (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0;
-      final double absenceDeductionsDouble = (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
-      final double fullMonthWeightedSalary = (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
+        // 1. Fetch attendance & salary details
+        final summary = FinanceLocalStorage.getPayrollAttendanceSummary(employeeId, monthKey);
+        
+        final int totalDays = (summary['totalDays'] as num?)?.toInt() ?? 30;
+        final int totalEmployedDays = (summary['totalEmployedDays'] as num?)?.toInt() ?? 0;
+        final double absentDays = (summary['absentDays'] as num?)?.toDouble() ?? 0.0;
+        final double unpaidLeaves = (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0;
+        final double sundayOvertimeDays = (summary['sundayOvertimeDays'] as num?)?.toDouble() ?? 0.0;
+        final double holidayBonusDouble = (summary['holidayBonus'] as num?)?.toDouble() ?? 0.0;
+        final double sundayOvertimeBonusDouble = (summary['sundayOvertimeBonus'] as num?)?.toDouble() ?? 0.0;
+        final double absenceDeductionsDouble = (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
+        final double fullMonthWeightedSalary = (summary['fullMonthWeightedSalary'] as num?)?.toDouble() ?? 0.0;
+        final double workingDays = (summary['workingDays'] as num?)?.toDouble() ?? 0.0;
 
-      final double perDay = totalDays > 0 ? (fullMonthWeightedSalary / totalDays) : 0.0;
-      final double paidDays = (totalEmployedDays.toDouble() - absentDays - unpaidLeaves).clamp(0.0, double.infinity);
-      final double baseSalaryDouble = perDay * (paidDays + sundayOvertimeDays);
+        final double perDay = totalDays > 0 ? (fullMonthWeightedSalary / totalDays) : 0.0;
+        final double paidDays = (totalEmployedDays.toDouble() - absentDays - unpaidLeaves).clamp(0.0, double.infinity);
+        final double baseSalaryDouble = perDay * (paidDays + sundayOvertimeDays);
 
-      // 2. Convert to minor units (paisa)
-      final baseSalaryMinor = (baseSalaryDouble * 100).round();
-      final absenceDeductionsMinor = (absenceDeductionsDouble * 100).round();
-      final holidayBonusMinor = (holidayBonusDouble * 100).round();
-      final sundayOvertimeBonusMinor = (sundayOvertimeBonusDouble * 100).round();
+        // 2. Convert to minor units (paisa)
+        final baseSalaryMinor = (baseSalaryDouble * 100).round();
+        final absenceDeductionsMinor = (absenceDeductionsDouble * 100).round();
+        final holidayBonusMinor = (holidayBonusDouble * 100).round();
+        final sundayOvertimeBonusMinor = (sundayOvertimeBonusDouble * 100).round();
 
-      // 3. Compute Gross Salary
-      final grossSalaryMinor = baseSalaryMinor + holidayBonusMinor + sundayOvertimeBonusMinor - absenceDeductionsMinor;
+        // 3. Compute Gross Salary
+        final grossSalaryMinor = baseSalaryMinor + holidayBonusMinor + sundayOvertimeBonusMinor - absenceDeductionsMinor;
 
-      // 4. Calculate outstanding advance/loans installment recovery
-      final activeLoans = FinanceLoansStorage.getLoansForEmployee(employeeId)
-          .where((l) => l['status'] == 'active')
-          .toList();
+        // 4. Calculate outstanding advance/loans installment recovery
+        final activeLoans = FinanceLoansStorage.getLoansForEmployee(employeeId)
+            .where((l) => l['status'] == 'active')
+            .toList();
 
-      double outstandingLoansTotalDouble = 0.0;
-      for (final loan in activeLoans) {
-        outstandingLoansTotalDouble += FinanceLoansStorage.getLoanBalance(loan);
+        double outstandingLoansTotalDouble = 0.0;
+        for (final loan in activeLoans) {
+          outstandingLoansTotalDouble += FinanceLoansStorage.getLoanBalance(loan);
+        }
+        final outstandingLoansTotalMinor = (outstandingLoansTotalDouble * 100).round();
+
+        final double monthlyInstallmentDouble = (emp['monthlyAdvanceInstallment'] as num?)?.toDouble() ?? 0.0;
+        final monthlyInstallmentMinor = (monthlyInstallmentDouble * 100).round();
+
+        int advanceInstallmentMinor = 0;
+        if (outstandingLoansTotalMinor > 0) {
+          advanceInstallmentMinor = monthlyInstallmentMinor < outstandingLoansTotalMinor
+              ? monthlyInstallmentMinor
+              : outstandingLoansTotalMinor;
+        }
+
+        if (advanceInstallmentMinor > grossSalaryMinor) {
+          advanceInstallmentMinor = grossSalaryMinor.clamp(0, advanceInstallmentMinor);
+        }
+
+        // 5. Compute Net Salary
+        final netSalaryMinor = grossSalaryMinor - advanceInstallmentMinor;
+
+        // 6. Check if has attendance data (for paid status detection)
+        final hasAttData = FinanceLocalStorage.hasAttendanceDataForMonth(employeeId, monthKey);
+
+        results.add({
+          'employeeId': employeeId,
+          'employeeName': employeeName,
+          'baseSalaryEarnedMinor': baseSalaryMinor,
+          'absenceDeductionsMinor': absenceDeductionsMinor,
+          'holidayBonusMinor': holidayBonusMinor,
+          'sundayOvertimeBonusMinor': sundayOvertimeBonusMinor,
+          'grossSalaryMinor': grossSalaryMinor,
+          'advanceInstallmentMinor': advanceInstallmentMinor,
+          'netSalaryMinor': netSalaryMinor,
+          // Legacy fields for UI binding compatibility
+          'baseSalaryEarned': baseSalaryMinor / 100.0,
+          'absenceDeductions': absenceDeductionsMinor / 100.0,
+          'holidayBonus': holidayBonusMinor / 100.0,
+          'sundayOvertimeBonus': sundayOvertimeBonusMinor / 100.0,
+          'grossSalary': grossSalaryMinor / 100.0,
+          'advanceInstallment': advanceInstallmentMinor / 100.0,
+          'netSalary': netSalaryMinor / 100.0,
+          'isCalculatedByServer': false,
+          // Pre-computed attendance summary for UI (avoids re-fetching in build)
+          'fullMonthWeightedSalary': fullMonthWeightedSalary,
+          'totalDays': totalDays,
+          'totalEmployedDays': totalEmployedDays,
+          'workingDays': workingDays,
+          'absentDays': absentDays,
+          'unpaidLeaves': unpaidLeaves,
+          'sundayOvertimeDays': sundayOvertimeDays,
+          'hasAttendanceData': hasAttData,
+          // Employee metadata for UI (avoids re-fetching in build)
+          'empName': employeeName,
+          'empRole': emp['role']?.toString() ?? 'Employee',
+          'empDepartment': emp['department']?.toString() ?? 'Other',
+          'empBranchId': emp['branchId']?.toString() ?? branchId,
+          'empIsActive': emp['isActive'] ?? true,
+        });
+      } catch (e, stack) {
+        debugPrint('[PayrollCalculatorService] Error processing employee ${emp['localId']}: $e\n$stack');
       }
-      final outstandingLoansTotalMinor = (outstandingLoansTotalDouble * 100).round();
-
-      // Installment from profile
-      final double monthlyInstallmentDouble = (emp['monthlyAdvanceInstallment'] as num?)?.toDouble() ?? 0.0;
-      final monthlyInstallmentMinor = (monthlyInstallmentDouble * 100).round();
-
-      // Recovery is the minimum of the outstanding balance and the scheduled installment
-      int advanceInstallmentMinor = 0;
-      if (outstandingLoansTotalMinor > 0) {
-        advanceInstallmentMinor = monthlyInstallmentMinor < outstandingLoansTotalMinor
-            ? monthlyInstallmentMinor
-            : outstandingLoansTotalMinor;
-      }
-
-      // Recovery cannot exceed gross salary
-      if (advanceInstallmentMinor > grossSalaryMinor) {
-        advanceInstallmentMinor = grossSalaryMinor.clamp(0, advanceInstallmentMinor);
-      }
-
-      // 5. Compute Net Salary
-      final netSalaryMinor = grossSalaryMinor - advanceInstallmentMinor;
-
-      results.add({
-        'employeeId': employeeId,
-        'employeeName': employeeName,
-        'baseSalaryEarnedMinor': baseSalaryMinor,
-        'absenceDeductionsMinor': absenceDeductionsMinor,
-        'holidayBonusMinor': holidayBonusMinor,
-        'sundayOvertimeBonusMinor': sundayOvertimeBonusMinor,
-        'grossSalaryMinor': grossSalaryMinor,
-        'advanceInstallmentMinor': advanceInstallmentMinor,
-        'netSalaryMinor': netSalaryMinor,
-        // Legacy fields for UI binding compatibility
-        'baseSalaryEarned': baseSalaryMinor / 100.0,
-        'absenceDeductions': absenceDeductionsMinor / 100.0,
-        'holidayBonus': holidayBonusMinor / 100.0,
-        'sundayOvertimeBonus': sundayOvertimeBonusMinor / 100.0,
-        'grossSalary': grossSalaryMinor / 100.0,
-        'advanceInstallment': advanceInstallmentMinor / 100.0,
-        'netSalary': netSalaryMinor / 100.0,
-        'isCalculatedByServer': false,
-      });
     }
 
     return results;

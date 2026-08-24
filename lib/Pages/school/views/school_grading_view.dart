@@ -7,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../services/image_upload_service.dart';
 import '../models/school_grade.dart';
 import '../models/school_student.dart';
 import '../theme/school_theme.dart';
@@ -50,12 +51,20 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
   final List<String> _subjects = [
     'Mathematics',
     'English',
-    'Physics',
-    'Chemistry',
-    'Computer Science',
     'Urdu',
     'Islamiyat',
     'Pakistan Studies',
+    'General Science',
+    'Physics',
+    'Chemistry',
+    'Biology',
+    'Computer Science',
+    'Computer Studies & Graphics',
+    'Fine Arts',
+    'Civics & Economics',
+    'General Mathematics',
+    'Social Studies',
+    'Nazra Quran',
   ];
   final List<String> _examTypes = ['Quiz', 'Assignment', 'Midterm', 'Final'];
   final List<String> _terms = ['Term 1', 'Term 2', 'Final Term'];
@@ -564,14 +573,32 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
       ),
       child: Row(
         children: [
-          // Roll No Avatar
-          CircleAvatar(
-            radius: 20,
-            backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
-            child: Text(
-              student.rollNo.isNotEmpty ? student.rollNo : '0',
-              style: const TextStyle(color: SchoolTheme.primary, fontWeight: FontWeight.bold, fontSize: 13),
-            ),
+          // Student Photo Avatar
+          Builder(
+            builder: (context) {
+              final bytes = ImageUploadService.decodeBase64ToBytes(student.photoUrl);
+              if (bytes != null && bytes.isNotEmpty) {
+                return CircleAvatar(
+                  radius: 20,
+                  backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                  backgroundImage: MemoryImage(bytes),
+                );
+              } else if (student.photoUrl.startsWith('http')) {
+                return CircleAvatar(
+                  radius: 20,
+                  backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                  backgroundImage: NetworkImage(student.photoUrl),
+                );
+              }
+              return CircleAvatar(
+                radius: 20,
+                backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                child: Text(
+                  student.rollNo.isNotEmpty ? student.rollNo : '0',
+                  style: const TextStyle(color: SchoolTheme.primary, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+              );
+            },
           ),
           const SizedBox(width: 14),
 

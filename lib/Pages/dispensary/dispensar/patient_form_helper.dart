@@ -55,10 +55,13 @@ class PatientFormHelper {
     final name = (m['name'] ?? '').toString().toLowerCase();
     return type.contains('injection') ||
         type.contains('inj') ||
+        type.contains('infusion') ||
+        type.contains('inf') ||
         type.contains('drip') ||
         type.contains('syringe') ||
         name.contains('injection') ||
-        name.contains('inj');
+        name.contains('inj') ||
+        name.contains('infusion');
   }
 
   static String getUnitUrdu(Map med) {
@@ -71,6 +74,12 @@ class PatientFormHelper {
         name.contains('syp') ||
         dosage.contains('spoon')) {
       return 'چمچ';
+    }
+    if (type.contains('injection') || type.contains('inj') || name.contains('injection') || name.contains('inj')) {
+      return 'ٹیقہ';
+    }
+    if (type.contains('infusion') || type.contains('inf') || type.contains('drip') || name.contains('infusion')) {
+      return 'ڈرپ';
     }
     if (type.contains('capsule') || type.contains('cap')) return 'کیپسول';
     return 'گولی';
@@ -564,7 +573,9 @@ class PatientFormHelper {
     return items.map((m) {
       final rawName = m['name']?.toString() ?? '';
       final prefixType = _getMedAbbrevStatic(m['type']);
-      final name = '$prefixType$rawName'.trim();
+      final doseStr = (m['dose'] ?? m['dosage'] ?? '').toString().trim();
+      final doseSuffix = doseStr.isNotEmpty ? ' ($doseStr)' : '';
+      final name = '$prefixType$rawName$doseSuffix'.trim();
       final timing = m['timing']?.toString() ?? '';
       final quantity = m['quantity'] ?? 1;
       final total = totalPerDay(timing);

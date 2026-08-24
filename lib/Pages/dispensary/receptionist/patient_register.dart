@@ -42,6 +42,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   bool    _isSaving      = false;
   bool    _isChild       = false;
 
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
+
   final _nameNode        = FocusNode();
   final _cnicNode        = FocusNode();
   final _phoneNode       = FocusNode();
@@ -62,23 +67,25 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   final _scrollController = ScrollController();
 
   List<FocusNode> get activeFocusNodes {
-    if (_isChild) {
-      return [
-        _cnicNode, _phoneNode, _nameNode, _dobNode,
-        _genderNode, _bloodGroupNode, _visitNode, _registerButtonNode,
-      ];
-    } else {
-      return [
-        _nameNode, _cnicNode, _phoneNode, _dobNode,
-        _genderNode, _bloodGroupNode, _visitNode, _registerButtonNode,
-      ];
-    }
+    return [
+      _cnicNode,
+      _phoneNode,
+      _nameNode,
+      _dobNode,
+      _genderNode,
+      _bloodGroupNode,
+      _visitNode,
+      _registerButtonNode,
+    ];
   }
 
   @override
   void initState() {
     super.initState();
     _addFocusListeners();
+    _cnicController.addListener(() {
+      _checkIfAdultExistsForCnic(_cnicController.text);
+    });
     if (widget.initialCnic != null && widget.initialCnic!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         prefillCnic(widget.initialCnic!);
@@ -233,7 +240,10 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
             SnackBar(content: Text(message), backgroundColor: const Color(0xFF00695C)));
       }
 
-      widget.onPatientRegistered?.call(patientId);
+      final searchKey = _isChild
+          ? (_cnicController.text.trim().isNotEmpty ? _cnicController.text.trim() : patientId)
+          : (_cnicController.text.trim().isNotEmpty ? _cnicController.text.trim() : patientId);
+      widget.onPatientRegistered?.call(searchKey);
 
       _nameController.clear();
       _cnicController.clear();
@@ -259,6 +269,32 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
+  void _checkIfAdultExistsForCnic(String cnic) {
+    final clean = cnic.replaceAll(RegExp(r'[^0-9]'), '');
+    if (clean.length < 13) return;
+    final formatted = _formatCnic(clean);
+
+    try {
+      final list = LocalStorageService.searchPatientsByCnicOrGuardian(
+          formatted, branchId: widget.branchId);
+      final hasAdult = list.any((p) =>
+          p['isAdult'] == true ||
+          (p['guardianCnic'] == null || (p['guardianCnic'] as String).trim().isEmpty));
+      if (hasAdult && !_isChild) {
+        setState(() {
+          _isChild = true;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('ℹ️ Adult patient already exists on this CNIC. Switched to Child registration.'),
+            backgroundColor: Color(0xFF00695C),
+            duration: Duration(seconds: 2),
+          ));
+        }
+      }
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile  = MediaQuery.of(context).size.width < 600;
@@ -278,6 +314,33 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
             if (newValue != null) {
               setState(() => _selectedGender = newValue);
               _formScopeNode.requestFocus(_bloodGroupNode);
+              return KeyEventResult.handled;
+            }
+          }
+          if (_bloodGroupNode.hasFocus) {
+            String? bg;
+            if (event.logicalKey == LogicalKeyboardKey.keyN || event.logicalKey == LogicalKeyboardKey.digit0) {
+              bg = 'N/A';
+            } else if (event.logicalKey == LogicalKeyboardKey.keyA || event.logicalKey == LogicalKeyboardKey.digit1) {
+              bg = 'A+';
+            } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
+              bg = 'A-';
+            } else if (event.logicalKey == LogicalKeyboardKey.keyB || event.logicalKey == LogicalKeyboardKey.digit3) {
+              bg = 'B+';
+            } else if (event.logicalKey == LogicalKeyboardKey.digit4) {
+              bg = 'B-';
+            } else if (event.logicalKey == LogicalKeyboardKey.keyO || event.logicalKey == LogicalKeyboardKey.digit5) {
+              bg = 'O+';
+            } else if (event.logicalKey == LogicalKeyboardKey.digit6) {
+              bg = 'O-';
+            } else if (event.logicalKey == LogicalKeyboardKey.keyX || event.logicalKey == LogicalKeyboardKey.digit7) {
+              bg = 'AB+';
+            } else if (event.logicalKey == LogicalKeyboardKey.digit8) {
+              bg = 'AB-';
+            }
+            if (bg != null) {
+              setState(() => _selectedBloodGroup = bg);
+              _formScopeNode.requestFocus(_visitNode);
               return KeyEventResult.handled;
             }
           }
@@ -306,9 +369,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
               margin: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 0),
               padding: EdgeInsets.all(isMobile ? 16 : 20),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF80CBC4), width: 1.5),
+                border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4), width: 1.5),
               ),
               child: Form(
                 key: _formKey,
@@ -324,7 +387,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       style: TextStyle(
                           fontSize:   isMobile ? 20 : 24,
                           fontWeight: FontWeight.bold,
-                          color:      const Color(0xFF004D40)),
+                          color:      _isDark ? Colors.white : const Color(0xFF004D40)),
                     ),
                     const SizedBox(height: 24),
 
@@ -332,21 +395,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFE0F2F1),
+                        color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFE0F2F1),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF80CBC4)),
+                        border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
                             Icon(Icons.person_add,
-                                color: const Color(0xFF004D40),
+                                color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
                                 size: isMobile ? 18 : 20),
                             SizedBox(width: isMobile ? 4 : 8),
                             Text('Registration Type',
                                 style: TextStyle(
-                                    color:    const Color(0xFF00796B),
+                                    color:    _isDark ? const Color(0xFF94A3B8) : const Color(0xFF00796B),
                                     fontSize: isMobile ? 12 : 14)),
                           ]),
                           const SizedBox(height: 8),
@@ -356,11 +419,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               contentPadding: EdgeInsets.zero,
                               title: Text('Adult',
                                   style: TextStyle(
-                                      color:    const Color(0xFF004D40),
+                                      color:    _isDark ? Colors.white : const Color(0xFF004D40),
                                       fontSize: fontSize)),
                               value:      false,
                               groupValue: _isChild,
-                              activeColor: const Color(0xFF00695C),
+                              activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
                               onChanged: (v) => setState(() => _isChild = v!),
                             )),
                             Expanded(child: RadioListTile<bool>(
@@ -368,11 +431,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               contentPadding: EdgeInsets.zero,
                               title: Text('Child',
                                   style: TextStyle(
-                                      color:    const Color(0xFF004D40),
+                                      color:    _isDark ? Colors.white : const Color(0xFF004D40),
                                       fontSize: fontSize)),
                               value:      true,
                               groupValue: _isChild,
-                              activeColor: const Color(0xFF00695C),
+                              activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
                               onChanged: (v) {
                                 setState(() {
                                   if (!_isChild && v == true) {
@@ -417,7 +480,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       focusNode: _phoneNode,
                       key:       _phoneKey,
                       maxLength: 11,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)],
                       validator: (v) {
                         if (v != null && v.isNotEmpty && v.length != 11) {
                           return 'Phone must be 11 digits';
@@ -526,21 +589,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFE0F2F1),
+                          color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFE0F2F1),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFF80CBC4)),
+                          border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(children: [
                               Icon(Icons.mosque,
-                                  color: const Color(0xFF004D40),
+                                  color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
                                   size: isMobile ? 18 : 20),
                               SizedBox(width: isMobile ? 4 : 8),
                               Text('Visit Type',
                                   style: TextStyle(
-                                      color:    const Color(0xFF00796B),
+                                      color:    _isDark ? const Color(0xFF94A3B8) : const Color(0xFF00796B),
                                       fontSize: isMobile ? 12 : 14)),
                             ]),
                             const SizedBox(height: 8),
@@ -548,37 +611,37 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               Expanded(child: RadioListTile<String>(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                title: Text('Zakat',
+                                title: Text(_isKarachi ? 'PKR 20 Token' : 'Zakat',
                                     style: TextStyle(
-                                        color: const Color(0xFF004D40),
+                                        color: _isDark ? Colors.white : const Color(0xFF004D40),
                                         fontSize: fontSize)),
                                 value:       'Zakat',
                                 groupValue:  _visitType,
-                                activeColor: const Color(0xFF00695C),
+                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
                                 onChanged:   (v) => setState(() => _visitType = v!),
                               )),
                               Expanded(child: RadioListTile<String>(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
-                                title: Text('Non-Zakat',
+                                title: Text(_isKarachi ? 'PKR 100 (Disabled)' : 'Non-Zakat',
                                     style: TextStyle(
-                                        color: const Color(0xFF004D40),
+                                        color: _isKarachi ? Colors.grey : (_isDark ? Colors.white : const Color(0xFF004D40)),
                                         fontSize: fontSize)),
                                 value:       'Non-Zakat',
                                 groupValue:  _visitType,
-                                activeColor: const Color(0xFF00695C),
-                                onChanged:   (v) => setState(() => _visitType = v!),
+                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                onChanged:   _isKarachi ? null : (v) => setState(() => _visitType = v!),
                               )),
                               Expanded(child: RadioListTile<String>(
                                 dense: true,
                                 contentPadding: EdgeInsets.zero,
                                 title: Text('GMWF',
                                     style: TextStyle(
-                                        color: const Color(0xFF004D40),
+                                        color: _isDark ? Colors.white : const Color(0xFF004D40),
                                         fontSize: fontSize)),
                                 value:       'GMWF',
                                 groupValue:  _visitType,
-                                activeColor: const Color(0xFF00695C),
+                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
                                 onChanged:   (v) => setState(() => _visitType = v!),
                               )),
                             ]),
@@ -590,21 +653,53 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
 
                     Focus(
                       focusNode: _registerButtonNode,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSaving ? null : _savePatient,
-                        icon: _isSaving
-                            ? const SizedBox(
-                                width: 18, height: 18,
-                                child: CircularProgressIndicator(
-                                    color: Colors.white, strokeWidth: 2))
-                            : const Icon(Icons.save, size: 18),
-                        label: Text(_isSaving ? 'Saving...' : 'Register Patient'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          backgroundColor: const Color(0xFF00695C),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
+                      child: Container(
+                        height: 52,
+                        decoration: BoxDecoration(
+                          gradient: _isSaving
+                              ? null
+                              : const LinearGradient(
+                                  colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                          color: _isSaving
+                              ? (_isDark ? const Color(0xFF334155) : Colors.grey[400])
+                              : null,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: _isSaving
+                              ? null
+                              : [
+                                  BoxShadow(
+                                    color: const Color(0xFF00A86B).withValues(alpha: 0.3),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                        ),
+                        child: ElevatedButton.icon(
+                          onPressed: _isSaving ? null : _savePatient,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 20, height: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.person_add_alt_1_rounded, size: 20),
+                          label: Text(
+                            _isSaving ? 'Saving...' : 'Register Patient',
+                            style: const TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            foregroundColor: Colors.white,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14)),
+                          ),
                         ),
                       ),
                     ),
@@ -621,10 +716,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   bool get _isDark {
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
       }
     } catch (_) {}
-    return false;
+    return Theme.of(context).brightness == Brightness.dark;
   }
 
   Widget _buildTextField({

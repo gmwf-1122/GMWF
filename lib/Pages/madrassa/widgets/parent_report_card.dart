@@ -1,5 +1,6 @@
 // lib/pages/madrassa/widgets/parent_report_card.dart
 
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -2204,8 +2205,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     if (targetIndex == -1) return 0;
     
     final targetLog = sorted[targetIndex].data() as Map<String, dynamic>?;
-    final targetLines = (targetLog?[studentId]?['currentLines'] as num?)?.toInt() ?? int.tryParse(targetLog?[studentId]?['currentLines']?.toString() ?? '');
+    final sLog = targetLog?[studentId] as Map<String, dynamic>?;
+    if (sLog == null) return 0;
+
+    if (sLog.containsKey('sabakLines') && sLog['sabakLines'] != null) {
+      final explicit = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
+      if (explicit != null) return explicit;
+    }
+    
+    final targetLines = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
     if (targetLines == null) return 0;
+
+    if (targetLines <= 50) {
+      return targetLines;
+    }
     
     int prevLines = -1;
     for (int i = targetIndex - 1; i >= 0; i--) {
@@ -2513,7 +2526,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 Expanded(
                                   child: Text(
                                     linesRead > 0
-                                        ? (context.isUrdu ? "+$linesRead لائنیں مکمل ہوئیں" : "+$linesRead lines completed")
+                                        ? (context.isUrdu ? "$linesRead لائنیں" : "$linesRead lines")
                                         : context.t("No lines recorded"),
                                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
@@ -2996,9 +3009,28 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
   }
 
   Map<String, dynamic> _calculateEstimationData(List<QueryDocumentSnapshot> allLogs) {
-    final currentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
+    int sumOfSabakLines = 0;
+    int maxLogCurrentLines = 0;
+    for (final doc in allLogs) {
+      final rawData = doc.data() as Map<String, dynamic>?;
+      final studentLog = rawData?[widget.studentId] as Map<String, dynamic>?;
+      if (studentLog != null) {
+        final sLines = (studentLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(studentLog['sabakLines']?.toString() ?? '');
+        if (sLines != null && sLines > 0) {
+          sumOfSabakLines += sLines;
+        }
+        final cLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
+        if (cLines != null && cLines > maxLogCurrentLines) {
+          maxLogCurrentLines = cLines;
+        }
+      }
+    }
+
+    final studentCurrentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
     final prevLines = int.tryParse(studentData['prevHifzLines']?.toString() ?? '0') ?? 0;
-    final totalMemorized = currentLines + prevLines;
+
+    final effectiveCurrentLines = [studentCurrentLines, maxLogCurrentLines, sumOfSabakLines].reduce(math.max);
+    final totalMemorized = (effectiveCurrentLines + prevLines).clamp(0, 8640);
 
     final dynamic joinField = studentData['joinDate'];
     DateTime? joinDate;
@@ -3891,7 +3923,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
   }) {
     final currentPara = (currentTotalLines / 288).floor() + 1;
     final linesInPara = currentTotalLines % 288;
-    final pageInPara = (linesInPara / 16).floor() + 1;
+    final pageInPara = math.min(16, (linesInPara / 18).floor() + 1);
     final juzPercentage = ((currentTotalLines / 8640) * 100).clamp(0.0, 100.0);
 
     final sabkiPara = selectedDateLog['sabkiPara'] ?? 0;
@@ -5706,6 +5738,23 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
     int monthGain = 0;
     if (monthLogsFiltered.isNotEmpty) {
+      int monthSabakSum = 0;
+      for (final doc in monthLogsFiltered) {
+        final logMap = doc.data() as Map<String, dynamic>?;
+        final sLog = logMap?[widget.studentId] as Map<String, dynamic>?;
+        if (sLog != null) {
+          final sLines = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
+          if (sLines != null && sLines > 0) {
+            monthSabakSum += sLines;
+          } else {
+            final cLines = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+            if (cLines != null && cLines > 0 && cLines <= 50) {
+              monthSabakSum += cLines;
+            }
+          }
+        }
+      }
+
       final sortedMonthAsc = [...monthLogsFiltered]..sort((a, b) => a.id.compareTo(b.id));
 
       final firstMap = sortedMonthAsc.first.data() as Map<String, dynamic>?;
@@ -5724,11 +5773,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         startLines = firstLogLines;
       }
 
+      int deltaLines = 0;
       if (startLines != -1 && endLines >= startLines) {
-        monthGain = (endLines - startLines).clamp(0, 8640);
-      } else {
-        monthGain = 0;
+        deltaLines = (endLines - startLines).clamp(0, 8640);
       }
+
+      monthGain = math.max(monthSabakSum, deltaLines).clamp(0, 8640);
     }
 
     // Congrats & nearing completion
@@ -5883,15 +5933,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           ElevatedButton.icon(
             onPressed: () => setState(() => _selectedTab = 0),
-            icon: const Icon(Icons.arrow_back_rounded, size: 18),
+            icon: const Icon(Icons.arrow_back_rounded, size: 20),
             label: Text(
-              context.isUrdu ? 'ڈیش بورڈ' : 'Back',
+              context.isUrdu ? 'ہوم اسکرین پر واپس جائیں' : 'Back to Home Screen',
               style: TextStyle(fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
             ),
             style: ElevatedButton.styleFrom(
               backgroundColor: ParentReportCard.primaryColor,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),

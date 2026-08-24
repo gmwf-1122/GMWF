@@ -15,6 +15,7 @@ import 'package:rxdart/rxdart.dart';
 import '../theme/app_theme.dart';
 import '../services/donations_local_storage.dart';
 import '../services/local_storage_service.dart';
+import '../services/home_dashboard_service.dart';
 import '../pages/donations/donations_shared.dart' as don;
 import '../theme/role_theme_provider.dart';
 
@@ -204,9 +205,9 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     debugPrint('[DashCache] HIT for $cacheKey');
     return cached.stats;
   }
+  final range = _resolveFilter(filter);
   try {
     final branchId = originalBranchId.toLowerCase().trim();
-    final range = _resolveFilter(filter);
     DateTime start = range.start;
     DateTime end = range.end;
 
@@ -227,12 +228,13 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     final dashStart = DateFormat('yyyy-MM-dd').format(start);
     final dashEnd   = DateFormat('yyyy-MM-dd').format(end);
 
-    // 1. Fetch donations for the date range
+    // 1. Fetch donations for the date range (with 1.5s timeout)
     final donSnap = await FirebaseFirestore.instance
         .collection('branches').doc(branchId).collection('donations')
         .where('date', isGreaterThanOrEqualTo: dashStart)
         .where('date', isLessThanOrEqualTo: dashEnd)
-        .get();
+        .get()
+        .timeout(const Duration(milliseconds: 1500));
 
     final seenReceipts = <String>{};
     for (final doc in donSnap.docs) {
@@ -253,19 +255,6 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
       donTotal += (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
     }
 
-    // 2. Fetch daily serials — PARALLELIZED across all days in the range.
-    //
-    // PREVIOUSLY: this was a `for (final day in days) { await Future.wait([...6
-    // queries...]); }` loop. The 6 queries within a single day ran in parallel,
-    // but each day was awaited before starting the next day — meaning a
-    // "Month" range (~30 days) triggered ~30 SEQUENTIAL network round-trips
-    // per branch. On a slow/mobile connection that easily takes 15-30+
-    // seconds per branch, which is what made Week/Month filters look like
-    // they were "stuck searching" and never resolving.
-    //
-    // NOW: every day's query batch is fired at once via Future.wait over the
-    // whole `days` list, so total latency is roughly one round-trip instead
-    // of one round-trip per day.
     final df = DateFormat('ddMMyy');
 
     Future<Map<String, int>> fetchDay(DateTime day) async {
@@ -277,10 +266,10 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
         base.collection('zakat').get(),
         base.collection('non-zakat').get(),
         base.collection('gmwf').get(),
-        base.collection('dasterkhwan').get(), // Use original path where tokens reside
+        base.collection('dasterkhwan').get(),
         FirebaseFirestore.instance.collection('branches/$branchId/dispensary/$dsLegacy/$dsLegacy').get(),
         FirebaseFirestore.instance.collection('branches').doc(branchId).collection('dasterkhwaan').doc(dsDash).get(),
-      ]);
+      ]).timeout(const Duration(milliseconds: 1500));
 
       final dayZ  = (results[0] as QuerySnapshot).size;
       final dayNz = (results[1] as QuerySnapshot).size;
@@ -288,7 +277,6 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
 
       int dayDispRev = 0, dayZRev = 0, dayNzRev = 0, dayGmRev = 0;
 
-      // Calculate actual revenue by summing up daysOfMedicine (Multiple tokens)
       for (final doc in (results[0] as QuerySnapshot).docs) {
         final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
         final rev = 20 * d.toInt();
@@ -343,8 +331,10 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     _statsCachePut(cacheKey, result);
     return result;
   } catch (e) {
-    debugPrint('[fetchBranchStats] Error: $e');
-    return const BranchStats();
+    debugPrint('[fetchBranchStats] Error or Timeout ($e). Using local Hive stats fallback.');
+    final localResult = await fetchLocalBranchStats(originalBranchId, range.start);
+    _statsCachePut(cacheKey, localResult);
+    return localResult;
   }
 }
 
@@ -2992,8 +2982,15 @@ class ActionableKPICard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final Color mainColor = color;
-    final LinearGradient gradient;
-    final Color glowColor;
+    final LinearGradient gradient = LinearGradient(
+      colors: [
+        mainColor,
+        Color.lerp(mainColor, Colors.black, 0.32)!,
+      ],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    );
+    final Color glowColor = mainColor.withValues(alpha: 0.30);
     final Color labelColor = Colors.white.withValues(alpha: 0.75);
     final Color valueColor = Colors.white;
     final Color prefixColor = Colors.white.withValues(alpha: 0.7);
@@ -3001,44 +2998,6 @@ class ActionableKPICard extends StatelessWidget {
     final Color iconColor = Colors.white;
     final Color insightBgColor = Colors.white.withValues(alpha: 0.15);
     final Color insightTextColor = Colors.white;
-
-    final cleanLabel = label.toLowerCase();
-    if (cleanLabel.contains('revenue') || mainColor.toARGB32() == 0xFF10B981 || mainColor.toARGB32() == 0xFF1A7A4A) {
-      gradient = const LinearGradient(
-        colors: [Color(0xFF0D9488), Color(0xFF0F766E)], // Teal/Emerald
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-      glowColor = const Color(0xFF0F766E).withValues(alpha: 0.35);
-    } else if (cleanLabel.contains('patients') || mainColor.toARGB32() == 0xFF2196F3 || mainColor.toARGB32() == 0xFF1976D2 || mainColor.toARGB32() == 0xFF2563EB) {
-      gradient = const LinearGradient(
-        colors: [Color(0xFF6366F1), Color(0xFF4338CA)], // Indigo
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-      glowColor = const Color(0xFF4338CA).withValues(alpha: 0.35);
-    } else if (cleanLabel.contains('served') || cleanLabel.contains('food') || mainColor.toARGB32() == 0xFFFF9800 || mainColor.toARGB32() == 0xFFF57C00 || mainColor.toARGB32() == 0xFFD97706) {
-      gradient = const LinearGradient(
-        colors: [Color(0xFFF97316), Color(0xFFC2410C)], // Orange
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-      glowColor = const Color(0xFFC2410C).withValues(alpha: 0.35);
-    } else if (cleanLabel.contains('donations') || mainColor.toARGB32() == 0xFF9C27B0 || mainColor.toARGB32() == 0xFF7B1FA2 || mainColor.toARGB32() == 0xFF8B5CF6) {
-      gradient = const LinearGradient(
-        colors: [Color(0xFF8B5CF6), Color(0xFF6D28D9)], // Purple
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-      glowColor = const Color(0xFF6D28D9).withValues(alpha: 0.35);
-    } else {
-      gradient = LinearGradient(
-        colors: [mainColor, mainColor.withValues(alpha: 0.85)],
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-      );
-      glowColor = mainColor.withValues(alpha: 0.35);
-    }
 
     return Container(
       padding: EdgeInsets.all(isPrimary ? 20 : 16),

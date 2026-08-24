@@ -1,10 +1,9 @@
-// lib/pages/dispensary/doctor/doctor_screen.dart
-
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/sync_service.dart';
@@ -13,12 +12,14 @@ import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
+import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import '../user_settings_dialog.dart';
 import 'patient_queue.dart';
 import 'patient_info.dart';
 import 'doctor_right_panel.dart';
 import 'patient_history.dart';
+import 'package:gmwf/widgets/camp_selector_chip.dart';
 import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 
 class DoctorScreen extends StatefulWidget {
@@ -40,7 +41,9 @@ class DoctorScreen extends StatefulWidget {
 }
 
 class _DoctorScreenState extends State<DoctorScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   Map<String, dynamic>? _selectedPatientData;
 
   final TextEditingController _complaintController = TextEditingController();
@@ -100,6 +103,8 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
     _loadBranchName();
     _listenConnectivity();
+
+    CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // _fetchDoctorName() starts the connection once the name is resolved so
@@ -200,27 +205,45 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   void _handleRealtimeUpdate(Map<String, dynamic> event) {
     final type = event['event_type'] as String?;
-    final data = event['data'] as Map<String, dynamic>? ?? event;
+    final rawData = event['data'];
+    final data = (rawData is Map) ? Map<String, dynamic>.from(rawData) : Map<String, dynamic>.from(event);
     if (type == null) return;
 
     final senderId = event['_clientId']?.toString() ?? '';
     final myId = RealtimeManager().clientId;
     if (senderId.isNotEmpty && myId != null && senderId == myId) return;
 
-    if (type == 'token_created' || type == RealtimeEvents.saveEntry) {
+    if (type == 'token_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'waiting' || data['status'] == null) && data['prescriptions'] == null)) {
       _handleNewToken(data);
-    } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
+    } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'completed' || data['prescriptions'] != null))) {
       _handlePrescriptionUpdate(data);
     } else if (type == 'dispense_completed') {
       _handleDispenseCompleted(data);
     }
   }
 
-  // [BUG-14] Use LocalStorageService.saveEntryLocal instead of raw Hive write
   void _handleNewToken(Map<String, dynamic> data) {
     final serial = data['serial']?.toString();
     if (serial != null && serial.isNotEmpty) {
       LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
+    }
+    
+    // Ignore if not a waiting new token
+    final status = (data['status'] ?? '').toString().toLowerCase();
+    if (status == 'completed' || status == 'prescribed' || data['prescriptions'] != null) {
+      return;
+    }
+
+    final activeCamp = CampSessionService.getActiveCamp(widget.branchId);
+    if (activeCamp != null && activeCamp.isNotEmpty && activeCamp != 'all') {
+      final matches = CampSessionService.matchesCamp(
+        selectedCamp: activeCamp,
+        dispensaryId: data['dispensaryId']?.toString(),
+        campId: data['campId']?.toString(),
+        dispensaryTag: data['dispensaryTag']?.toString(),
+        serial: serial,
+      );
+      if (!matches) return;
     }
     if (mounted) {
       setState(() {});
@@ -344,7 +367,8 @@ class _DoctorScreenState extends State<DoctorScreen>
     setState(() => _isSaving = true);
     try {
       _selectedPatientData = Map.from(rawEntry);
-      final prescription = rawEntry['prescription'] as Map<String, dynamic>?;
+      final rawPresc = rawEntry['prescription'];
+      final prescription = (rawPresc is Map) ? Map<String, dynamic>.from(rawPresc) : null;
 
       _prescriptions
         ..clear()
@@ -369,6 +393,109 @@ class _DoctorScreenState extends State<DoctorScreen>
 
       final screenWidth = MediaQuery.of(context).size.width;
       if (screenWidth < 900) _tabController.animateTo(1);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _skipPatient() async {
+    if (_selectedPatientData == null || _isSaving || !mounted) return;
+
+    final patient = Map<String, dynamic>.from(_selectedPatientData!);
+    final serial = (patient['serial'] ?? patient['id'])?.toString();
+    if (serial == null || serial.isEmpty) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final nowIso = DateTime.now().toIso8601String();
+      patient['status'] = 'skipped';
+      patient['skippedAt'] = nowIso;
+      patient['skippedBy'] = _username ?? widget.doctorName;
+      patient['updatedAt'] = nowIso;
+
+      // Clear idempotency key so receptionist can issue a new token if patient returns
+      final patientId = (patient['patientId'] ?? '').toString();
+      final dateKey = CampSessionService.getDateKeyFromSerial(serial);
+      if (patientId.isNotEmpty) {
+        final idempotencyKey = '${widget.branchId}_${patientId}_$dateKey';
+        try {
+          if (Hive.isBoxOpen('issued_token_keys')) {
+            await Hive.box('issued_token_keys').delete(idempotencyKey);
+          }
+        } catch (_) {}
+      }
+
+      // 1. Save locally in Hive
+      await LocalStorageService.saveEntryLocal(widget.branchId, serial, patient);
+
+      // 2. Broadcast via LAN
+      try {
+        RealtimeManager().sendMessage(RealtimeEvents.payload(
+          type: RealtimeEvents.saveEntry,
+          branchId: widget.branchId,
+          data: patient,
+        ));
+      } catch (e) {
+        debugPrint('[DoctorScreen] Skip LAN broadcast failed: $e');
+      }
+
+      // 3. Firestore background sync
+      try {
+        final dateKey = CampSessionService.getDateKeyFromSerial(serial);
+        final queueType = resolveQueueType(patient['queueType']?.toString() ?? patient['status']?.toString());
+        await FirebaseFirestore.instance
+            .collection('branches').doc(widget.branchId)
+            .collection('serials').doc(dateKey)
+            .collection(queueType)
+            .doc(serial)
+            .set({
+          'status': 'skipped',
+          'skippedAt': nowIso,
+          'skippedBy': _username ?? widget.doctorName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('[DoctorScreen] Skip Firestore update deferred: $e');
+      }
+
+      if (mounted) {
+        Flushbar(
+          message: '⏩ Patient #$serial skipped',
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 3),
+        ).show(context);
+      }
+
+      // Clear current inputs
+      _complaintController.clear();
+      _diagnosisController.clear();
+      _prescriptions.clear();
+      _labResults.clear();
+      _selectedPatientData = null;
+
+      // Auto-select next waiting patient from today's queue
+      final userDisp = CampSessionService.getActiveCamp(widget.branchId);
+      final todayKey = CampSessionService.resolveShiftAndDateKey().dateKey;
+      final waiting = LocalStorageService.getLocalEntries(
+        widget.branchId,
+        dispensaryId: userDisp,
+        filterByCamp: true,
+      ).where((e) {
+        final dk = (e['dateKey'] ?? '').toString();
+        final st = (e['status'] ?? '').toString().toLowerCase();
+        return dk == todayKey && st == 'waiting';
+      }).toList();
+
+      if (waiting.isNotEmpty) {
+        waiting.sort((a, b) {
+          final sA = (a['serial'] ?? '').toString();
+          final sB = (b['serial'] ?? '').toString();
+          return sA.compareTo(sB);
+        });
+        await _selectPatient(waiting.first);
+      } else {
+        if (mounted) setState(() {});
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -415,14 +542,24 @@ class _DoctorScreenState extends State<DoctorScreen>
     );
   }
 
+  bool get _isDark {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
+      }
+    } catch (_) {}
+    return Theme.of(context).brightness == Brightness.dark;
+  }
+
   PreferredSizeWidget _buildAppBar(bool isMobile, bool isDark) {
     final gradient = LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: isDark
           ? [
-              const Color(0xFF02140F),
-              const Color(0xFF052C22),
+              const Color(0xFF0F172A),
+              const Color(0xFF1E293B),
             ]
           : [
               const Color(0xFF004D40), // Premium Emerald Teal
@@ -430,155 +567,89 @@ class _DoctorScreenState extends State<DoctorScreen>
             ],
     );
 
-    if (isMobile) {
-      return AppBar(
-        automaticallyImplyLeading: false,
-        flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
-        elevation: 4,
-        toolbarHeight: 56,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Row(children: [
-          Image.asset('assets/logo/gmwf-1.webp', height: 32),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Doctor – ${_username ?? '...'}',
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-              overflow: TextOverflow.ellipsis,
-            ),
+    return GmwfAppBar(
+      title: 'Doctor Panel – ${_username ?? widget.doctorName}',
+      subtitle: CampSessionService.getBranchAndCampDisplayName(
+        branchName: _branchName ?? 'Free Dispensary',
+        branchId: widget.branchId,
+        campId: CampSessionService.getActiveCamp(widget.branchId),
+      ),
+      onTitleLongPress: () => DispensaryUserSettingsDialog.show(
+        context,
+        branchId: widget.branchId,
+        onUserUpdated: () {
+          if (mounted) setState(() { _fetchDoctorName(); });
+        },
+      ),
+      titleTooltip: 'Long press for Settings',
+      connectionStatus: _connectionStatus,
+      onRetryConnection: () => ConnectionManager().reconnectNow(),
+      isOnline: _online,
+      isSyncing: _isSyncing,
+      onSync: _forceSync,
+      onLogout: _logout,
+      extraActions: [
+        if (CampSessionService.hasCampsForBranch(widget.branchId))
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: CampSelectorChip(branchId: widget.branchId),
           ),
-        ]),
-        actions: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
-            width: 9, height: 9,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _connectionStatus.isConnected ? Colors.greenAccent : Colors.redAccent,
-            ),
-          ),
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 14, horizontal: 3),
-            width: 9, height: 9,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: _online ? Colors.lightBlueAccent : Colors.grey,
-            ),
-          ),
-          if (_isSyncing)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 16),
-              child: SizedBox(width: 20, height: 20,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
-            )
-          else
-            IconButton(
-                icon: const Icon(Icons.sync, color: Colors.white, size: 20),
-                onPressed: _forceSync),
-          IconButton(
-            icon: const Icon(Icons.inventory, color: Colors.white, size: 20),
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDoctor: true, isDispenser: false))),
-          ),
-          IconButton(
-              icon: const Icon(Icons.logout, color: Colors.white, size: 20),
-              onPressed: _logout),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white60,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-          tabs: const [
-            Tab(icon: Icon(Icons.people, size: 18), text: 'Queue'),
-            Tab(icon: Icon(Icons.medical_services, size: 18), text: 'Prescription'),
-            Tab(icon: Icon(Icons.history, size: 18), text: 'History'),
-          ],
-        ),
-      );
-    }
-
-    return AppBar(
-      automaticallyImplyLeading: false,
-      flexibleSpace: Container(decoration: BoxDecoration(gradient: gradient)),
-      elevation: 10,
-      shadowColor: Colors.black26,
-      toolbarHeight: 100,
-      iconTheme: const IconThemeData(color: Colors.white),
-      title: Row(children: [
-        Image.asset('assets/logo/gmwf-1.webp', height: 60),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              GestureDetector(
-                onLongPress: () => DispensaryUserSettingsDialog.show(
-                  context,
-                  branchId: widget.branchId,
-                  onUserUpdated: () {
-                    if (mounted) setState(() { _fetchDoctorName(); });
-                  },
-                ),
-                child: Tooltip(
-                  message: 'Long press for Settings',
-                  child: Text('Doctor Panel – ${_username ?? 'Loading...'}',
-                      style: const TextStyle(
-                          fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+        Tooltip(
+          message: 'Medicine Inventory',
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => InventoryPage(
+                    branchId: widget.branchId,
+                    isDoctor: true,
+                    isDispenser: false,
+                  ),
                 ),
               ),
-              if (!_loadingBranch)
-                Text(
-                  CampSessionService.getBranchAndCampDisplayName(
-                    branchName: _branchName ?? 'Free Dispensary',
-                    branchId: widget.branchId,
-                    campId: CampSessionService.getActiveCamp(),
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                    width: 1,
                   ),
-                  style: const TextStyle(fontSize: 16, color: Colors.white70),
                 ),
-            ],
+                child: Center(
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    size: 18,
+                    color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
-      ]),
-      centerTitle: false,
-      actions: [
-        ConnectionStatusBadge(
-            status: _connectionStatus,
-            onRetry: () => ConnectionManager().reconnectNow()),
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: _online ? Colors.blue.shade700 : Colors.grey.shade600,
-            borderRadius: BorderRadius.circular(30),
-          ),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_online ? Icons.cloud : Icons.cloud_off, color: Colors.white, size: 20),
-            const SizedBox(width: 8),
-            Text(_online ? 'Internet' : 'No Internet',
-                style: const TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-          ]),
-        ),
-        IconButton(
-          icon: _isSyncing
-              ? const SizedBox(width: 28, height: 28,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3))
-              : const Icon(Icons.sync, size: 32, color: Colors.white),
-          onPressed: _isSyncing ? null : _forceSync,
-        ),
-        IconButton(
-          icon: const Icon(Icons.inventory, size: 32, color: Colors.white),
-          onPressed: () => Navigator.push(context,
-              MaterialPageRoute(builder: (_) => InventoryPage(branchId: widget.branchId, isDoctor: true, isDispenser: false))),
-        ),
-        IconButton(
-            icon: const Icon(Icons.logout, size: 32, color: Colors.white),
-            onPressed: _logout),
-        const SizedBox(width: 12),
       ],
+      bottom: isMobile
+          ? PreferredSize(
+              preferredSize: const Size.fromHeight(44),
+              child: TabBar(
+                controller: _tabController,
+                indicatorColor: const Color(0xFF00A86B),
+                labelColor: const Color(0xFF00A86B),
+                unselectedLabelColor: Colors.grey,
+                labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                tabs: const [
+                  Tab(icon: Icon(Icons.people, size: 18), text: 'Queue'),
+                  Tab(icon: Icon(Icons.medical_services, size: 18), text: 'Prescription'),
+                  Tab(icon: Icon(Icons.history, size: 18), text: 'History'),
+                ],
+              ),
+            )
+          : null,
     );
   }
 
@@ -623,13 +694,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         final idx = _prescriptions.indexWhere((m) => m['name'] == med['name']);
         if (idx != -1) setState(() => _prescriptions[idx] = med);
       },
-      onSavePrescription: () async {
-        if (mounted) {
-          Flushbar(message: 'Prescription saved',
-              backgroundColor: Colors.green.shade700,
-              duration: const Duration(seconds: 3)).show(context);
-        }
-      },
+      onSavePrescription: () async {},
       onEntryCompleted: () => setState(() {
         _selectedPatientData = null;
         _complaintController.clear();
@@ -639,6 +704,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         _rightPanelKey++;
       }),
       onRepeatData: _applyRepeatData,
+      onSkipPatient: _skipPatient,
     );
   }
 
@@ -694,7 +760,8 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    super.build(context);
+    final isDark = _isDark;
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 900;
 
@@ -704,7 +771,7 @@ class _DoctorScreenState extends State<DoctorScreen>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: isDark
-              ? [const Color(0xFF031611), const Color(0xFF07211B)]
+              ? [const Color(0xFF0B1120), const Color(0xFF0F172A)]
               : [const Color(0xFFE8F5E9), const Color(0xFFF1F8E9)],
         ),
       ),
@@ -714,16 +781,16 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (widget.isEmbedded) return body;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF031611) : const Color(0xFFE8F5E9),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFE8F5E9),
       appBar: _buildAppBar(isMobile, isDark),
       body: body,
     );
   }
 
   Widget _buildMobileBody(bool isDark) {
-    final cardColor = isDark ? const Color(0xFF061E18) : Colors.white;
+    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
     final cardBorder = isDark
-        ? const BorderSide(color: Color(0xFF0D382B), width: 1)
+        ? const BorderSide(color: Color(0xFF334155), width: 1)
         : BorderSide.none;
 
     return TabBarView(
@@ -738,6 +805,8 @@ class _DoctorScreenState extends State<DoctorScreen>
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: cardBorder),
             child: PatientQueue(
               branchId: widget.branchId,
+              doctorId: widget.doctorId,
+              doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
               selectedPatient: _selectedPatientData,
               onPatientSelected: _selectPatient,
               isSaving: _isSaving,
@@ -758,6 +827,7 @@ class _DoctorScreenState extends State<DoctorScreen>
                   doctorId: widget.doctorId,
                   doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
                   branchId: widget.branchId,
+                  onSkipPatient: _skipPatient,
                   onVitalsUpdated: (updatedVitals) {
                     if (mounted && _selectedPatientData != null) {
                       setState(() {
@@ -799,48 +869,61 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   Widget _buildDesktopBody(bool isDark) {
-    final cardColor = isDark ? const Color(0xFF061E18) : Colors.white;
+    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
     final cardBorder = isDark
-        ? const BorderSide(color: Color(0xFF0D382B), width: 1)
-        : BorderSide.none;
+        ? const BorderSide(color: Color(0xFF334155), width: 1)
+        : const BorderSide(color: Color(0xFFE2E8F0), width: 1);
 
     return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(children: [
-        const SizedBox(height: 20),
-        Expanded(
-          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            Expanded(
-              flex: 3,
-              child: Card(
-                color: cardColor,
-                elevation: isDark ? 6 : 12,
-                clipBehavior: Clip.antiAlias,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
-                child: PatientQueue(
-                  branchId: widget.branchId,
-                  selectedPatient: _selectedPatientData,
-                  onPatientSelected: _selectPatient,
-                  isSaving: _isSaving,
-                ),
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Left Queue Column
+          Expanded(
+            flex: 3,
+            child: Card(
+              color: cardColor,
+              elevation: isDark ? 2 : 4,
+              clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: cardBorder,
+              ),
+              child: PatientQueue(
+                branchId: widget.branchId,
+                doctorId: widget.doctorId,
+                doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
+                selectedPatient: _selectedPatientData,
+                onPatientSelected: _selectPatient,
+                isSaving: _isSaving,
               ),
             ),
-            const SizedBox(width: 24),
-            Expanded(
-              flex: 8,
-              child: Column(children: [
+          ),
+          const SizedBox(width: 16),
+
+          // Right Workspace Column
+          Expanded(
+            flex: 8,
+            child: Column(
+              children: [
+                // Top Patient Info & Vitals Header Card
                 SizedBox(
-                  height: 230,
+                  height: 168,
                   child: Card(
                     color: cardColor,
-                    elevation: isDark ? 6 : 12,
+                    elevation: isDark ? 2 : 4,
                     clipBehavior: Clip.antiAlias,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: cardBorder,
+                    ),
                     child: PatientInfo(
                       patientData: _selectedPatientData,
                       doctorId: widget.doctorId,
                       doctorName: _username?.isNotEmpty == true ? _username! : widget.doctorName,
                       branchId: widget.branchId,
+                      onSkipPatient: _skipPatient,
                       onVitalsUpdated: (updatedVitals) {
                         if (mounted && _selectedPatientData != null) {
                           setState(() {
@@ -851,44 +934,58 @@ class _DoctorScreenState extends State<DoctorScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 14),
+
+                // Bottom Clinical Panels: Prescription Form & Visit History
                 Expanded(
-                  child: Row(children: [
-                    Expanded(
-                      flex: 7,
-                      child: Card(
-                        color: cardColor,
-                        elevation: isDark ? 6 : 12,
-                        clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
-                        child: Padding(
-                          padding: const EdgeInsets.all(24),
+                  child: Row(
+                    children: [
+                      // Prescription Panel
+                      Expanded(
+                        flex: 7,
+                        child: Card(
+                          color: cardColor,
+                          elevation: isDark ? 2 : 4,
+                          clipBehavior: Clip.antiAlias,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            side: cardBorder,
+                          ),
                           child: _buildPrescriptionPanel(),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 20),
-                    Expanded(
-                      flex: 4,
-                      child: Card(
-                        color: cardColor,
-                        elevation: isDark ? 6 : 12,
-                        clipBehavior: Clip.antiAlias,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: cardBorder),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: _buildHistoryPanel(),
+                      const SizedBox(width: 14),
+
+                      // Visit History Panel
+                      Expanded(
+                        flex: 4,
+                        child: Card(
+                          color: cardColor,
+                          elevation: isDark ? 2 : 4,
+                          clipBehavior: Clip.antiAlias,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            side: cardBorder,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8),
+                            child: _buildHistoryPanel(),
+                          ),
                         ),
                       ),
-                    ),
-                  ]),
+                    ],
+                  ),
                 ),
-              ]),
+              ],
             ),
-          ]),
-        ),
-      ]),
+          ),
+        ],
+      ),
     );
+  }
+
+  void _onActiveCampChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -897,7 +994,10 @@ class _DoctorScreenState extends State<DoctorScreen>
     _syncDebounce?.cancel();
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
-    ConnectionManager().stop();
+    CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
+    if (!widget.isEmbedded) {
+      ConnectionManager().stop();
+    }
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

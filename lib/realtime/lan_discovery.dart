@@ -23,7 +23,7 @@ class DiscoveredServer {
 
 class LanDiscovery {
   static Future<DiscoveredServer?> findServer({
-    Duration timeout = const Duration(seconds: 12),
+    Duration timeout = const Duration(seconds: 8),
     void Function(String)? onStatus,
   }) async {
     onStatus?.call('Searching for server...');
@@ -31,9 +31,9 @@ class LanDiscovery {
 
     final completer = Completer<DiscoveredServer?>();
 
-    _tryMdns(completer, onStatus);
     _tryUdp(completer, onStatus);
     _tryScan(completer, onStatus);
+    _tryMdns(completer, onStatus);
 
     Timer(timeout, () {
       if (!completer.isCompleted) completer.complete(null);
@@ -55,11 +55,13 @@ class LanDiscovery {
             debugPrint('mDNS found: $ip:$port');
             s?.call('Found server at $ip');
             c.complete(DiscoveredServer(ip: ip, port: port, method: 'mdns'));
-            d.stop();
+            try { d.stop(); } catch (_) {}
           }
         }
       });
-      Future.delayed(const Duration(seconds: 8), d.stop);
+      Future.delayed(const Duration(seconds: 6), () {
+        try { d.stop(); } catch (_) {}
+      });
     } catch (e) {
       debugPrint('mDNS error: $e');
     }
@@ -89,7 +91,7 @@ class LanDiscovery {
           }
         }
       });
-      Future.delayed(const Duration(seconds: 10), () { try { sock.close(); } catch (_) {} });
+      Future.delayed(const Duration(seconds: 7), () { try { sock.close(); } catch (_) {} });
     } catch (e) {
       debugPrint('UDP error: $e');
     }
@@ -97,7 +99,6 @@ class LanDiscovery {
 
   static Future<void> _tryScan(Completer<DiscoveredServer?> c, void Function(String)? s) async {
     try {
-      await Future.delayed(const Duration(milliseconds: 400));
       if (c.isCompleted) return;
 
       final myIp = await getPrimaryLanIp();
@@ -106,19 +107,37 @@ class LanDiscovery {
       final parts = myIp.split('.');
       if (parts.length != 4) return;
       final subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+      final myLastOctet = int.tryParse(parts[3]) ?? 100;
       final port = AppNetwork.websocketPort;
 
       debugPrint('Subnet scan: $subnet.1-254 :$port');
       s?.call('Scanning $subnet.*...');
 
-      const batchSize = 25;
-      for (int b = 0; b < 11 && !c.isCompleted; b++) {
-        final start = b * batchSize + 1;
-        final end = ((b + 1) * batchSize).clamp(1, 254);
-        await Future.wait([
-          for (int i = start; i <= end; i++)
-            if ('$subnet.$i' != myIp) _probe('$subnet.$i', port, c)
-        ]);
+      // Build ordered list of IPs to probe:
+      // Priority 1: Common static server IPs (.1, .100, .2, .10, .50, .200, .254)
+      // Priority 2: Neighborhood around client's current IP (±15)
+      // Priority 3: Remaining subnet IPs
+      final prioritySet = <int>{1, 100, 2, 10, 50, 200, 254};
+      for (int offset = 1; offset <= 15; offset++) {
+        if (myLastOctet - offset >= 1) prioritySet.add(myLastOctet - offset);
+        if (myLastOctet + offset <= 254) prioritySet.add(myLastOctet + offset);
+      }
+      prioritySet.remove(myLastOctet); // Skip self
+
+      final allRemaining = <int>[];
+      for (int i = 1; i <= 254; i++) {
+        if (i != myLastOctet && !prioritySet.contains(i)) {
+          allRemaining.add(i);
+        }
+      }
+
+      final probeOrder = [...prioritySet, ...allRemaining];
+
+      // Scan in parallel chunks of 40
+      const batchSize = 40;
+      for (int i = 0; i < probeOrder.length && !c.isCompleted; i += batchSize) {
+        final chunk = probeOrder.sublist(i, (i + batchSize).clamp(0, probeOrder.length));
+        await Future.wait(chunk.map((octet) => _probe('$subnet.$octet', port, c)));
       }
     } catch (e) {
       debugPrint('Scan error: $e');
@@ -128,37 +147,21 @@ class LanDiscovery {
   static Future<void> _probe(String host, int port, Completer<DiscoveredServer?> c) async {
     if (c.isCompleted) return;
     try {
-      final sock = await Socket.connect(host, port, timeout: const Duration(milliseconds: 500));
+      final sock = await Socket.connect(host, port, timeout: const Duration(milliseconds: 350));
       sock.destroy();
       if (!c.isCompleted) {
-        final ok = await _verify(host, port);
-        if (ok && !c.isCompleted) {
-          debugPrint('Scan found: $host:$port');
-          c.complete(DiscoveredServer(ip: host, port: port, method: 'scan'));
-        }
+        debugPrint('Scan found open port: $host:$port');
+        c.complete(DiscoveredServer(ip: host, port: port, method: 'scan'));
       }
     } on SocketException {
       // unreachable
     } catch (_) {}
   }
 
-  static Future<bool> _verify(String host, int port) async {
-    try {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(milliseconds: 400);
-      final req = await client.get(host, port, '/');
-      final resp = await req.close();
-      final body = await resp.transform(utf8.decoder).join();
-      client.close(force: true);
-      return body.contains('GMWF');
-    } catch (_) {
-      return true; // TCP connected = probably our server
-    }
-  }
-
   static Future<bool> isReachable(String ip, int port) async {
+    if (kIsWeb) return true; // Web cannot use dart:io Socket, proceed directly to WebSocket connect
     try {
-      final s = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 800));
+      final s = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 500));
       s.destroy();
       return true;
     } catch (_) {

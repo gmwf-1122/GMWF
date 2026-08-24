@@ -54,13 +54,16 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:web_socket_channel/status.dart' as ws_status;
 
+import '../services/auto_update_service.dart';
+import '../services/camp_session_service.dart';
+import 'realtime_events.dart';
 import 'realtime_router.dart';
 import '../services/local_storage_service.dart';
 
@@ -163,7 +166,7 @@ class RealtimeManager {
     _flushedOnConnect = false;
 
     if (_clientId == null || _clientId!.isEmpty) {
-      _clientId = '${DateTime.now().millisecondsSinceEpoch}_${_role}_${Random().nextInt(9999)}';
+      _clientId = 'client_${const Uuid().v4()}';
     }
 
     if (kDebugMode) {
@@ -216,13 +219,15 @@ class RealtimeManager {
       );
 
       final identifyMsg = {
-        'event_type': 'identify',
-        'role':       _role,
-        'branchId':   _branchId,
-        'username':   _username ?? _role,
-        'platform':   kIsWeb ? 'web' : 'native',
-        '_clientId':  _clientId,
-        '_timestamp': DateTime.now().millisecondsSinceEpoch,
+        'event_type':      'identify',
+        'role':            _role,
+        'branchId':        _branchId,
+        'username':        _username ?? _role,
+        'platform':        kIsWeb ? 'web' : 'native',
+        'protocolVersion': AutoUpdateService.protocolVersion,
+        'appVersion':      AutoUpdateService.currentVersion,
+        '_clientId':       _clientId,
+        '_timestamp':      DateTime.now().millisecondsSinceEpoch,
       };
       _channel!.sink.add(jsonEncode(identifyMsg));
 
@@ -255,6 +260,24 @@ class RealtimeManager {
     try {
       final decoded = jsonDecode(msg) as Map<String, dynamic>;
 
+      // Auto-calibrate client clock to authoritative server time
+      final serverEpoch = (decoded['serverEpoch'] as num?)?.toInt() ??
+          (decoded['_serverEpoch'] as num?)?.toInt();
+      if (serverEpoch != null && serverEpoch > 0) {
+        CampSessionService.updateServerOffset(
+            DateTime.fromMillisecondsSinceEpoch(serverEpoch));
+      } else if (decoded['timestamp'] is String) {
+        final st = DateTime.tryParse(decoded['timestamp'] as String);
+        if (st != null) {
+          CampSessionService.updateServerOffset(st);
+        }
+      }
+
+      if (decoded['event_type'] == 'pong' || decoded['type'] == 'pong') {
+        _lastPong = DateTime.now();
+        return;
+      }
+
       if (decoded['event_type'] == 'identified' && !_serverIdentified) {
         _serverIdentified = true;
         if (kDebugMode) {
@@ -283,6 +306,7 @@ class RealtimeManager {
         if (ackedId != null && ackedId.isNotEmpty) {
           _removeFromOutboxByMessageId(ackedId);
         }
+        return;
       }
 
       _routeIncoming(decoded);
@@ -291,30 +315,36 @@ class RealtimeManager {
     }
   }
 
-  // ── Remove outbox entry by _messageId (called on server ACK) ──────────────
+  // ── Remove outbox entry by messageId (called on server ACK) ──────────────
   void _removeFromOutboxByMessageId(String messageId) {
     try {
       final box = Hive.box(_outboxBox);
       for (final key in box.keys.toList()) {
         final entry = box.get(key);
-        if (entry is Map && entry['_messageId']?.toString() == messageId) {
-          box.delete(key);
-          if (kDebugMode) {
-            print('[RealtimeManager] ACK: removed outbox entry for msgId=$messageId');
+        if (entry is Map) {
+          final entryMsgId = (entry['_messageId'] ?? entry['messageId'])?.toString();
+          if (entryMsgId == messageId) {
+            box.delete(key);
+            if (kDebugMode) {
+              print('[RealtimeManager] ACK: removed outbox entry for msgId=$messageId');
+            }
+            return;
           }
-          return;
         }
       }
       // Also check failed outbox in case it was already moved there.
       final failedBox = Hive.box(_failedOutboxBox);
       for (final key in failedBox.keys.toList()) {
         final entry = failedBox.get(key);
-        if (entry is Map && entry['_messageId']?.toString() == messageId) {
-          failedBox.delete(key);
-          if (kDebugMode) {
-            print('[RealtimeManager] ACK: removed failed-outbox entry for msgId=$messageId');
+        if (entry is Map) {
+          final entryMsgId = (entry['_messageId'] ?? entry['messageId'])?.toString();
+          if (entryMsgId == messageId) {
+            failedBox.delete(key);
+            if (kDebugMode) {
+              print('[RealtimeManager] ACK: removed failed-outbox entry for msgId=$messageId');
+            }
+            return;
           }
-          return;
         }
       }
     } catch (e) {
@@ -413,6 +443,34 @@ class RealtimeManager {
         Timer(Duration(seconds: delaySeconds), _connectClient);
   }
 
+  // ── [FIX 6] Durable Outbox helpers for Users, Sessions, and Credentials ─────
+  void sendUserRecord(Map<String, dynamic> userData, {bool isDelete = false}) {
+    final payload = RealtimeEvents.payload(
+      type: isDelete ? RealtimeEvents.deleteUser : RealtimeEvents.saveUser,
+      data: userData,
+      branchId: userData['branchId']?.toString(),
+    );
+    sendMessage(payload);
+  }
+
+  void sendSessionEvent(Map<String, dynamic> sessionData) {
+    final payload = RealtimeEvents.payload(
+      type: 'session_event',
+      data: sessionData,
+      branchId: sessionData['branchId']?.toString(),
+    );
+    sendMessage(payload);
+  }
+
+  void sendCredentialSync(Map<String, dynamic> credData) {
+    final payload = RealtimeEvents.payload(
+      type: 'credential_sync',
+      data: credData,
+      branchId: credData['branchId']?.toString(),
+    );
+    sendMessage(payload);
+  }
+
   // ── Send ───────────────────────────────────────────────────────────────────
   void sendMessage(Map<String, dynamic> payload) {
     final normalized = _normalizeMessage(payload);
@@ -427,6 +485,12 @@ class RealtimeManager {
     if (isUnknown) {
       if (kDebugMode) print('[RealtimeManager] ⚠️ Suppressing message with missing/unknown event_type');
       return;
+    }
+
+    if (!isPing && !isAck && !isHandshake) {
+      try {
+        _messageController.add(normalized);
+      } catch (_) {}
     }
 
     // [FIX-P1] Write to Hive outbox FIRST (skip ping/ack/handshake).
@@ -660,8 +724,7 @@ class RealtimeManager {
     return copy;
   }
 
-  String _generateMessageId() =>
-      '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(100000)}';
+  String _generateMessageId() => const Uuid().v4();
 
   // ── Route incoming ─────────────────────────────────────────────────────────
   void _routeIncoming(Map<String, dynamic> decoded) {

@@ -394,6 +394,7 @@ class _OverviewScreenState extends State<OverviewScreen>
   }
 
   Widget _buildInnerKPI(BuildContext context, BranchStats s, int branchCount) {
+    final t = RoleThemeScope.dataOf(context);
     if (_activeTab == 'overall') {
       return Column(
         children: [
@@ -405,7 +406,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   value: fmtNum(s.totalRevenue),
                   prefix: 'PKR ',
                   icon: Icons.payments_rounded,
-                  color: DS.green,
+                  color: t.cardFillTokens,
                   isPrimary: true,
                   insight: s.totalRevenue > 0
                       ? 'Peak performance reached'
@@ -418,7 +419,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Total Patients',
                   value: fmtNum(s.tokens),
                   icon: Icons.people_alt_rounded,
-                  color: DS.blue,
+                  color: t.cardFillPrescriptions,
                   isPrimary: true,
                   insight: '$branchCount active branches',
                 ),
@@ -433,7 +434,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Tokens Served',
                   value: fmtNum(s.dasterkhwaanServed),
                   icon: Icons.restaurant_rounded,
-                  color: DS.orange,
+                  color: t.cardFillDispensary,
                   insight: '${s.dasterkhwaan} tokens issued',
                 ),
               ),
@@ -444,14 +445,14 @@ class _OverviewScreenState extends State<OverviewScreen>
                   value: fmtNum(s.donations),
                   prefix: 'PKR ',
                   icon: Icons.volunteer_activism_rounded,
-                  color: DS.purple,
+                  color: t.accent,
                   insight: 'Today\'s contributions',
                 ),
               ),
             ],
           ),
           const SizedBox(height: DS.s2),
-          PatientDistributionCard(t: RoleThemeScope.dataOf(context), s: s),
+          PatientDistributionCard(t: t, s: s),
         ],
       );
     } else if (_activeTab == 'dispensary') {
@@ -465,7 +466,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   value: fmtNum(s.dispensaryRevenue),
                   prefix: 'PKR ',
                   icon: Icons.payments_rounded,
-                  color: DS.green,
+                  color: t.cardFillDispensary,
                   insight: 'From medicine fee contributions',
                 ),
               ),
@@ -475,7 +476,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Patients Treated',
                   value: fmtNum(s.tokens),
                   icon: Icons.people_alt_rounded,
-                  color: DS.blue,
+                  color: t.cardFillTokens,
                   insight: 'Total clinical visits',
                 ),
               ),
@@ -489,7 +490,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Zakat Patients',
                   value: fmtNum(s.zakat),
                   icon: Icons.assignment_ind_rounded,
-                  color: DS.green,
+                  color: t.zakat,
                   insight: 'Received free/subsidized care',
                 ),
               ),
@@ -499,14 +500,14 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Non-Zakat Patients',
                   value: fmtNum(s.nonZakat),
                   icon: Icons.badge_rounded,
-                  color: DS.blue,
+                  color: t.nonZakat,
                   insight: 'Received standard operations',
                 ),
               ),
             ],
           ),
           const SizedBox(height: DS.s2),
-          PatientDistributionCard(t: RoleThemeScope.dataOf(context), s: s),
+          PatientDistributionCard(t: t, s: s),
         ],
       );
     } else if (_activeTab == 'tokens') {
@@ -519,7 +520,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Tokens Issued',
                   value: fmtNum(s.dasterkhwaan),
                   icon: Icons.tag_rounded,
-                  color: DS.orange,
+                  color: t.cardFillTokens,
                   insight: 'Total issued today',
                 ),
               ),
@@ -529,7 +530,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Tokens Served',
                   value: fmtNum(s.dasterkhwaanServed),
                   icon: Icons.restaurant_rounded,
-                  color: DS.green,
+                  color: t.cardFillPrescriptions,
                   insight: 'Dasterkhwaan meals served',
                 ),
               ),
@@ -543,7 +544,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   label: 'Pending Meals',
                   value: fmtNum(s.dasterkhwaanPending),
                   icon: Icons.hourglass_empty_rounded,
-                  color: DS.orange,
+                  color: t.cardFillDispensary,
                   insight: 'Awaiting food service',
                 ),
               ),
@@ -554,7 +555,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                   value: fmtNum(s.dasterkhwaanRevenue),
                   prefix: 'PKR ',
                   icon: Icons.monetization_on_rounded,
-                  color: DS.green,
+                  color: t.accent,
                   insight: 'Token fee contributions',
                 ),
               ),
@@ -568,7 +569,7 @@ class _OverviewScreenState extends State<OverviewScreen>
         value: fmtNum(s.donations),
         prefix: 'PKR ',
         icon: Icons.volunteer_activism_rounded,
-        color: DS.purple,
+        color: t.accent,
         insight: 'Global donation portfolio',
       );
     }
@@ -591,51 +592,63 @@ class _OverviewHeader extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF0F172A), // Deep Slate Base
-            t.accent.withValues(alpha: 0.85), // Dynamic Role Accent
+            Color.lerp(t.accent, Colors.black, 0.40)!,
+            Color.lerp(t.accent, Colors.black, 0.72)!,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: t.accent.withValues(alpha: 0.7),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
             color: t.accent.withValues(alpha: 0.15),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
         ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
-          // Translucent glass decorative shapes
+          // Islamic Pattern in WHITE on the Right Side (assets/images/1.webp)
           Positioned(
-            right: -30,
-            top: -30,
-            child: Container(
-              width: 150,
-              height: 150,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.04),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 80,
-            bottom: -40,
-            child: Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.02),
+            right: isMobile ? -55 : -80,
+            top: -20,
+            bottom: -20,
+            width: isMobile ? 220 : 320,
+            child: IgnorePointer(
+              child: ShaderMask(
+                shaderCallback: (rect) {
+                  return const LinearGradient(
+                    begin: Alignment.centerRight,
+                    end: Alignment.centerLeft,
+                    colors: [
+                      Colors.black,
+                      Colors.black87,
+                      Colors.transparent,
+                    ],
+                    stops: [0.0, 0.65, 1.0],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.dstIn,
+                child: Opacity(
+                  opacity: 0.35,
+                  child: Transform.rotate(
+                    angle: -0.15,
+                    child: Image.asset(
+                      'assets/images/1.webp',
+                      color: Colors.white,
+                      colorBlendMode: BlendMode.srcIn,
+                      fit: BoxFit.contain,
+                      alignment: Alignment.centerRight,
+                      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),

@@ -303,23 +303,23 @@ class FinanceLedgerStorage {
   /// 7. Custom / Other departments
   static List<String> sortDepartmentsCanonical(Iterable<String> depts) {
     const canonicalOrder = [
-      'Administration Staff',
-      'Administration',
-      'Admin',
-      'Office',
-      'Dasterkhwaan',
-      'Dastarkhwan',
-      'Dispensary',
-      'Madrassa',
-      'Madrasa',
-      'School',
+      'office',
+      'administration staff',
+      'administration',
+      'admin',
+      'dasterkhwaan',
+      'dastarkhwan',
+      'dispensary',
+      'madrassa',
+      'madrasa',
+      'school',
     ];
 
     int getOrderIndex(String dept) {
       final clean = dept.trim().toLowerCase();
       for (int i = 0; i < canonicalOrder.length; i++) {
-        final cand = canonicalOrder[i].toLowerCase();
-        if (clean == cand || clean.startsWith(cand) || cand.startsWith(clean)) {
+        final cand = canonicalOrder[i];
+        if (clean == cand || clean.startsWith(cand) || cand.startsWith(clean) || clean.contains(cand)) {
           return i;
         }
       }

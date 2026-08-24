@@ -3,21 +3,96 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:hive/hive.dart';
 import 'dart:convert';
+import 'dart:async';
+
+/// Result wrapper for secure storage read operations to distinguish missing credentials from errors.
+class StorageReadResult {
+  final String? value;
+  final bool hasError;
+  final String? errorMessage;
+  final bool isTimeout;
+
+  const StorageReadResult.success(this.value)
+      : hasError = false,
+        errorMessage = null,
+        isTimeout = false;
+
+  const StorageReadResult.notFound()
+      : value = null,
+        hasError = false,
+        errorMessage = null,
+        isTimeout = false;
+
+  const StorageReadResult.error(this.errorMessage, {this.isTimeout = false})
+      : value = null,
+        hasError = true;
+
+  bool get isFound => !hasError && value != null && value!.isNotEmpty;
+  bool get isNotFound => !hasError && (value == null || value!.isEmpty);
+}
 
 /// Offline authentication service.
-///
-/// Credentials are stored per-user so that multiple users can log in on the
-/// same device. The last successful login is also remembered so the username
-/// field can be pre-filled.
 class OfflineAuthService {
   static const String _keyHasLoggedIn   = 'has_logged_in';
   static const String _keyLastUsername  = 'last_username';
   static const String _keyLastLoginTime = 'last_login_time';
 
-  // Per-user keys — include the (lowercased) username/email in the key name.
-  static String _pwKey(String u)   => 'pw__${u.trim().toLowerCase()}';
-  static String _dataKey(String u) => 'ud__${u.trim().toLowerCase()}';
+  static String _aliasMapKey(String alias) => 'alias_map_${alias.trim().toLowerCase()}';
+  static String _pwKey(String uidOrKey)   => 'pw__${uidOrKey.trim().toLowerCase()}';
+  static String _dataKey(String uidOrKey) => 'ud__${uidOrKey.trim().toLowerCase()}';
+
+  /// Resolves an alias/email to a canonical UID key. If a legacy pw__<alias> key exists,
+  /// transparently migrates it to pw__<uid> and ud__<uid> without data loss.
+  static Future<String> _resolveKeyOrMigrate(String usernameOrEmailOrUid) async {
+    final rawKey = usernameOrEmailOrUid.trim().toLowerCase();
+    if (rawKey.isEmpty) return rawKey;
+
+    // Check alias mapping first
+    final mappedUid = await _secureRead(_aliasMapKey(rawKey));
+    if (mappedUid != null && mappedUid.isNotEmpty) {
+      return mappedUid.trim().toLowerCase();
+    }
+
+    // Check legacy pw__<alias> key
+    final legacyPwRes = await _secureReadDetailed(_pwKey(rawKey));
+    if (legacyPwRes.isFound) {
+      final legacyDataRes = await _secureReadDetailed(_dataKey(rawKey));
+      if (legacyDataRes.isFound) {
+        try {
+          final userData = jsonDecode(legacyDataRes.value!) as Map<String, dynamic>;
+          final canonicalUid = (userData['uid'] ?? userData['id'])?.toString().trim().toLowerCase();
+          if (canonicalUid != null && canonicalUid.isNotEmpty && canonicalUid != rawKey) {
+            debugPrint('[OfflineAuth] 🔄 Migrating legacy key "$rawKey" to canonical UID "$canonicalUid"');
+            await _secureWrite(_pwKey(canonicalUid), legacyPwRes.value!);
+            await _secureWrite(_dataKey(canonicalUid), legacyDataRes.value!);
+            await _secureWrite(_aliasMapKey(rawKey), canonicalUid);
+            await _secure.delete(key: _pwKey(rawKey));
+            await _secure.delete(key: _dataKey(rawKey));
+            return canonicalUid;
+          }
+        } catch (_) {}
+      }
+    }
+
+    return rawKey;
+  }
+
+  /// Updates alias mapping when a user's email/username changes to prevent stale alias routing.
+  static Future<void> updateAliasMapping(String oldAlias, String newAlias, String uid) async {
+    try {
+      final oldKey = _aliasMapKey(oldAlias);
+      final newKey = _aliasMapKey(newAlias);
+      final cleanUid = uid.trim().toLowerCase();
+
+      await _secure.delete(key: oldKey);
+      await _secureWrite(newKey, cleanUid);
+      debugPrint('[OfflineAuth] 🔄 Updated alias mapping: "$oldAlias" -> deleted, "$newAlias" -> "$cleanUid"');
+    } catch (e) {
+      debugPrint('[OfflineAuth] ⚠️ Failed to update alias mapping: $e');
+    }
+  }
 
   /// Clears active login session flags so logging out does not auto-login to a previous user.
   static Future<void> clearCachedUserData() async {
@@ -43,7 +118,7 @@ class OfflineAuthService {
   static final _secure = FlutterSecureStorage(
     aOptions: const AndroidOptions(
       encryptedSharedPreferences: true,
-      resetOnError: true, // Recover from keystore corruption
+      resetOnError: false, // DO NOT reset keystore on error — preserve user data
     ),
     iOptions: const IOSOptions(
       accessibility: KeychainAccessibility.first_unlock, // Accessible after first unlock
@@ -53,20 +128,32 @@ class OfflineAuthService {
     wOptions: const WindowsOptions(useBackwardCompatibility: true),
   );
 
-  // ── Safe timeout wrapper for all secure storage operations ───────────────
-  // On Windows guest accounts, DPAPI calls can hang forever instead of throwing.
-  // This wrapper ensures we always get a result within 5 seconds.
-  static Future<String?> _secureRead(String key) async {
+  // ── Safe timeout wrapper with error/not-found distinction ───────────────
+  static Future<StorageReadResult> _secureReadDetailed(String key) async {
     try {
-      return await _secure.read(key: key)
-          .timeout(const Duration(seconds: 5), onTimeout: () {
-        debugPrint('[OfflineAuth] ⚠️ Secure storage read timed out for key: $key (guest account DPAPI restriction)');
-        return null;
-      });
+      final value = await _secure.read(key: key).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {
+          throw TimeoutException('Secure storage read timed out for key: $key');
+        },
+      );
+      if (value == null) {
+        return const StorageReadResult.notFound();
+      }
+      return StorageReadResult.success(value);
+    } on TimeoutException catch (tex) {
+      debugPrint('[OfflineAuth] ⚠️ Secure storage read timeout for key $key: $tex');
+      return StorageReadResult.error(tex.toString(), isTimeout: true);
     } catch (e) {
       debugPrint('[OfflineAuth] ⚠️ Secure storage read error for key $key: $e');
-      return null;
+      return StorageReadResult.error(e.toString());
     }
+  }
+
+  static Future<String?> _secureRead(String key) async {
+    final res = await _secureReadDetailed(key);
+    if (res.hasError) return null;
+    return res.value;
   }
 
   static Future<void> _secureWrite(String key, String value) async {
@@ -89,38 +176,56 @@ class OfflineAuthService {
     required Map<String, dynamic> userData,
     bool setAsLastLoggedIn = true,
   }) async {
-    final key = usernameOrEmail.trim().toLowerCase();
-    debugPrint('[OfflineAuth] Saving credentials for: $key (setAsLastLoggedIn: $setAsLastLoggedIn)');
+    final rawAlias = usernameOrEmail.trim().toLowerCase();
+    final uid = (userData['uid'] ?? userData['id'])?.toString().trim().toLowerCase();
+    final canonicalKey = (uid != null && uid.isNotEmpty) ? uid : await _resolveKeyOrMigrate(rawAlias);
+
+    debugPrint('[OfflineAuth] Saving credentials for canonical key: $canonicalKey (alias: $rawAlias)');
 
     try {
+      if (uid != null && uid.isNotEmpty) {
+        final aliases = <String>{
+          rawAlias,
+          if (userData['username'] != null) userData['username'].toString().trim().toLowerCase(),
+          if (userData['usernameLower'] != null) userData['usernameLower'].toString().trim().toLowerCase(),
+          if (userData['email'] != null) userData['email'].toString().trim().toLowerCase(),
+        };
+
+        for (final alias in aliases) {
+          if (alias.isNotEmpty && alias != uid) {
+            await _secureWrite(_aliasMapKey(alias), uid);
+          }
+        }
+      }
+
       // Write password
-      await _secureWrite(_pwKey(key), password);
+      await _secureWrite(_pwKey(canonicalKey), password);
 
       // Verify password write
-      final savedPw = await _secureRead(_pwKey(key));
-      if (savedPw != password) {
-        debugPrint('[OfflineAuth] ❌ Password verification failed — storage may be unavailable');
+      final pwRes = await _secureReadDetailed(_pwKey(canonicalKey));
+      if (pwRes.hasError || pwRes.value != password) {
+        debugPrint('[OfflineAuth] ❌ Password verification failed (err: ${pwRes.errorMessage}) — storage may be unavailable');
         return false;
       }
 
       // Write user data blob
-      await _secureWrite(_dataKey(key), jsonEncode(_sanitizeForJson(userData)));
+      await _secureWrite(_dataKey(canonicalKey), jsonEncode(_sanitizeForJson(userData)));
 
       // Verify data write
-      final savedData = await _secureRead(_dataKey(key));
-      if (savedData == null) {
-        debugPrint('[OfflineAuth] ❌ User data verification failed — storage may be unavailable');
+      final dataRes = await _secureReadDetailed(_dataKey(canonicalKey));
+      if (dataRes.hasError || dataRes.isNotFound) {
+        debugPrint('[OfflineAuth] ❌ User data verification failed (err: ${dataRes.errorMessage}) — storage may be unavailable');
         return false;
       }
 
       if (setAsLastLoggedIn) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_keyHasLoggedIn, true);
-        await prefs.setString(_keyLastUsername, key);
+        await prefs.setString(_keyLastUsername, rawAlias);
         await prefs.setString(_keyLastLoginTime, DateTime.now().toIso8601String());
       }
 
-      debugPrint('[OfflineAuth] ✅ Credentials saved and verified for $key');
+      debugPrint('[OfflineAuth] ✅ Credentials saved and verified for canonicalKey $canonicalKey');
       return true;
     } catch (e) {
       debugPrint('[OfflineAuth] ❌ Save failed: $e');
@@ -133,32 +238,52 @@ class OfflineAuthService {
     required String usernameOrEmail,
     required String password,
   }) async {
-    final key = usernameOrEmail.trim().toLowerCase();
-    debugPrint('[OfflineAuth] Verifying credentials for: $key');
+    final rawKey = usernameOrEmail.trim().toLowerCase();
+    final key = await _resolveKeyOrMigrate(rawKey);
+    debugPrint('[OfflineAuth] Verifying credentials for canonical key: $key (raw: $rawKey)');
 
     try {
-      // Look up this specific user's credentials directly — do NOT rely on
-      // the global _keyHasLoggedIn flag, which only tells us SOMEONE logged in.
-      final cachedPw   = await _secureRead(_pwKey(key));
-      final cachedData = await _secureRead(_dataKey(key));
+      final resPw   = await _secureReadDetailed(_pwKey(key));
+      final resData = await _secureReadDetailed(_dataKey(key));
 
-      if (cachedPw == null || cachedData == null) {
-        debugPrint('[OfflineAuth] No cached credentials found for $key');
-        return null;
+      if (!resPw.hasError && resPw.isFound && !resData.hasError && resData.isFound) {
+        if (password == resPw.value) {
+          final userData = jsonDecode(resData.value!) as Map<String, dynamic>;
+          debugPrint('[OfflineAuth] ✅ Verified: $key → role=${userData['role']}');
+          return userData;
+        } else {
+          debugPrint('[OfflineAuth] Password mismatch for $key');
+          return null;
+        }
       }
-
-      if (password != cachedPw) {
-        debugPrint('[OfflineAuth] Password mismatch for $key');
-        return null;
-      }
-
-      final userData = jsonDecode(cachedData) as Map<String, dynamic>;
-      debugPrint('[OfflineAuth] ✅ Verified: $key → role=${userData['role']}');
-      return userData;
     } catch (e) {
       debugPrint('[OfflineAuth] ❌ Verify error: $e');
-      return null;
     }
+
+    // Fallback to Hive local_users box if secure storage lookup fails or is missing
+    try {
+      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+      for (final val in box.values) {
+        if (val is Map) {
+          final u = Map<String, dynamic>.from(val);
+          final email = (u['email']?.toString() ?? '').toLowerCase();
+          final username = (u['username']?.toString() ?? '').toLowerCase();
+          final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase();
+          final uUid = (u['uid']?.toString() ?? u['id']?.toString() ?? '').toLowerCase();
+          final savedPass = u['password']?.toString();
+
+          if ((username == rawKey || usernameLower == rawKey || email == rawKey || uUid == rawKey || uUid == key) &&
+              savedPass != null && savedPass == password) {
+            debugPrint('[OfflineAuth] ✅ Verified via local_users Hive fallback for $rawKey');
+            return u;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[OfflineAuth] Hive local_users fallback verification failed: $e');
+    }
+
+    return null;
   }
 
   // ── Get the last-used username for pre-filling the login field ───────────
@@ -187,13 +312,36 @@ class OfflineAuthService {
 
       if (key == null) return null;
 
-      final raw = await _secureRead(_dataKey(key));
-      if (raw == null) return null;
-      return jsonDecode(raw) as Map<String, dynamic>;
+      final canonicalKey = await _resolveKeyOrMigrate(key);
+
+      final res = await _secureReadDetailed(_dataKey(canonicalKey));
+      if (!res.hasError && res.isFound) {
+        return jsonDecode(res.value!) as Map<String, dynamic>;
+      }
+
+      if (canonicalKey != key) {
+        final resRaw = await _secureReadDetailed(_dataKey(key));
+        if (!resRaw.hasError && resRaw.isFound) {
+          return jsonDecode(resRaw.value!) as Map<String, dynamic>;
+        }
+      }
+
+      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+      for (final val in box.values) {
+        if (val is Map) {
+          final u = Map<String, dynamic>.from(val);
+          final email = (u['email']?.toString() ?? '').toLowerCase();
+          final username = (u['username']?.toString() ?? '').toLowerCase();
+          final uUid = (u['uid']?.toString() ?? u['id']?.toString() ?? '').toLowerCase();
+          if (username == key || email == key || uUid == key || uUid == canonicalKey) {
+            return u;
+          }
+        }
+      }
     } catch (e) {
       debugPrint('[OfflineAuth] getCachedUserData error: $e');
-      return null;
     }
+    return null;
   }
 
   // ── Update the cached user data blob ─────────────────────────────────────
@@ -205,8 +353,12 @@ class OfflineAuthService {
         key = prefs.getString(_keyLastUsername);
       }
       if (key == null) return;
-      await _secureWrite(_dataKey(key), jsonEncode(_sanitizeForJson(userData)));
-      debugPrint('[OfflineAuth] User data updated in cache for $key');
+      final canonicalKey = await _resolveKeyOrMigrate(key);
+      await _secureWrite(_dataKey(canonicalKey), jsonEncode(_sanitizeForJson(userData)));
+      if (canonicalKey != key) {
+        await _secureWrite(_dataKey(key), jsonEncode(_sanitizeForJson(userData)));
+      }
+      debugPrint('[OfflineAuth] User data updated in cache for $canonicalKey ($key)');
     } catch (e) {
       debugPrint('[OfflineAuth] updateCachedUserData error: $e');
     }
@@ -235,8 +387,14 @@ class OfflineAuthService {
   /// Retrieves stored password for a specific user.
   static Future<String?> getStoredPassword(String usernameOrEmail) async {
     try {
-      final key = usernameOrEmail.trim().toLowerCase();
-      return await _secureRead(_pwKey(key));
+      final rawKey = usernameOrEmail.trim().toLowerCase();
+      final key = await _resolveKeyOrMigrate(rawKey);
+      final res = await _secureReadDetailed(_pwKey(key));
+      if (res.hasError) {
+        debugPrint('[OfflineAuth] ⚠️ Storage error reading password for $key: ${res.errorMessage}');
+        return null;
+      }
+      return res.value;
     } catch (_) {
       return null;
     }
@@ -245,24 +403,26 @@ class OfflineAuthService {
   // ── Update the cached password (called after a successful password change) ─
   static Future<bool> updateCachedPassword(String newPassword, {String? usernameOrEmail}) async {
     try {
-      String? key = usernameOrEmail?.trim().toLowerCase();
+      String? rawKey = usernameOrEmail?.trim().toLowerCase();
 
-      if (key == null || key.isEmpty) {
+      if (rawKey == null || rawKey.isEmpty) {
         final prefs = await SharedPreferences.getInstance();
-        key = prefs.getString(_keyLastUsername);
+        rawKey = prefs.getString(_keyLastUsername);
       }
 
-      if (key == null) {
+      if (rawKey == null) {
         debugPrint('[OfflineAuth] updateCachedPassword: no key found');
         return false;
       }
 
+      final key = await _resolveKeyOrMigrate(rawKey);
+
       await _secureWrite(_pwKey(key), newPassword);
 
       // Verify
-      final saved = await _secureRead(_pwKey(key));
-      if (saved != newPassword) {
-        debugPrint('[OfflineAuth] ❌ Password update verification failed');
+      final pwRes = await _secureReadDetailed(_pwKey(key));
+      if (pwRes.hasError || pwRes.value != newPassword) {
+        debugPrint('[OfflineAuth] ❌ Password update verification failed (err: ${pwRes.errorMessage})');
         return false;
       }
 
@@ -297,15 +457,66 @@ class OfflineAuthService {
   /// Checks whether credentials for a specific user have been cached.
   static Future<bool> hasCachedCredentialsFor(String usernameOrEmail) async {
     try {
-      final key = usernameOrEmail.trim().toLowerCase();
-      final pw  = await _secureRead(_pwKey(key));
-      return pw != null && pw.isNotEmpty;
+      final rawKey = usernameOrEmail.trim().toLowerCase();
+      final key = await _resolveKeyOrMigrate(rawKey);
+      final res = await _secureReadDetailed(_pwKey(key));
+      if (!res.hasError && res.isFound) return true;
+
+      if (key != rawKey) {
+        final resRaw = await _secureReadDetailed(_pwKey(rawKey));
+        if (!resRaw.hasError && resRaw.isFound) return true;
+      }
+
+      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+      for (final val in box.values) {
+        if (val is Map) {
+          final u = Map<String, dynamic>.from(val);
+          final email = (u['email']?.toString() ?? '').toLowerCase();
+          final username = (u['username']?.toString() ?? '').toLowerCase();
+          final uUid = (u['uid']?.toString() ?? u['id']?.toString() ?? '').toLowerCase();
+          if (username == rawKey || email == rawKey || uUid == rawKey || uUid == key) {
+            return true;
+          }
+        }
+      }
+      return false;
     } catch (_) {
       return false;
     }
   }
 
-  /// Clear ALL cached credentials (full logout / reset).
+  /// Safely clears cached credentials ONLY for a specific user (scoped deletion).
+  /// Leaves all other users' stored credentials on shared devices untouched.
+  static Future<void> clearCredentialsForUser(String usernameOrEmailOrUid) async {
+    try {
+      final key = usernameOrEmailOrUid.trim().toLowerCase();
+      if (key.isEmpty) return;
+
+      final canonicalUid = await _resolveKeyOrMigrate(key);
+
+      await _secure.delete(key: _pwKey(canonicalUid));
+      await _secure.delete(key: _dataKey(canonicalUid));
+      if (canonicalUid != key) {
+        await _secure.delete(key: _pwKey(key));
+        await _secure.delete(key: _dataKey(key));
+        await _secure.delete(key: _aliasMapKey(key));
+      }
+
+      final prefs = await SharedPreferences.getInstance();
+      final lastUser = prefs.getString(_keyLastUsername);
+      if (lastUser?.trim().toLowerCase() == key || lastUser?.trim().toLowerCase() == canonicalUid) {
+        await prefs.remove(_keyLastUsername);
+        await prefs.remove(_keyHasLoggedIn);
+        await prefs.remove(_keyLastLoginTime);
+      }
+
+      debugPrint('[OfflineAuth] ✅ Credentials cleared strictly for user: $key ($canonicalUid)');
+    } catch (e) {
+      debugPrint('[OfflineAuth] ⚠️ clearCredentialsForUser error for $usernameOrEmailOrUid: $e');
+    }
+  }
+
+  /// Clear ALL cached credentials across all users (full factory reset only).
   static Future<void> clearCredentials() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -313,7 +524,7 @@ class OfflineAuthService {
       await prefs.remove(_keyLastUsername);
       await prefs.remove(_keyLastLoginTime);
       await _secure.deleteAll();
-      debugPrint('[OfflineAuth] ✅ All credentials cleared');
+      debugPrint('[OfflineAuth] ✅ All credentials cleared (full reset)');
     } catch (e) {
       debugPrint('[OfflineAuth] clearCredentials error: $e');
       rethrow;

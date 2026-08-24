@@ -1500,7 +1500,9 @@ class MadrassaReportHelper {
                 if (att == 'present') {
                   uniformText = uni ? 'Clean' : 'Not Clean';
                   
-                  final int lines = log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0);
+                  final int lines = (log.containsKey('sabakLines') && log['sabakLines'] != null)
+                      ? ((log['sabakLines'] as num?)?.toInt() ?? 0)
+                      : (log['currentLines'] is int ? log['currentLines'] as int : (int.tryParse(log['currentLines']?.toString() ?? '') ?? 0));
                   sabakText = lines > 0 ? '$lines lines' : '-';
 
                   final int sabkiPara = log['sabkiPara'] is int ? log['sabkiPara'] as int : (int.tryParse(log['sabkiPara']?.toString() ?? '') ?? 0);

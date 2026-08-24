@@ -883,6 +883,10 @@ class _UsersScreenState extends State<UsersScreen>
     final initials = name.trim().isEmpty ? '?' :
         name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase();
 
+    final gender = (data['gender'] ?? data['patientGender'] ?? '').toString().toLowerCase();
+    final isFemale = gender == 'female';
+    final isMale = gender == 'male';
+
     final rawRole = (data['role'] as String? ?? '').toLowerCase();
     final isGuardianRole = rawRole == 'madrassa parent' || rawRole == 'madrassa guardian';
     final isOnline = _isUserOnline(data);
@@ -964,7 +968,9 @@ class _UsersScreenState extends State<UsersScreen>
                           width: 46, height: 46,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isChairmanCard ? const Color(0xFF382207) : t.accentMuted,
+                            color: isChairmanCard
+                                ? const Color(0xFF382207)
+                                : (isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : t.accentMuted)),
                             border: isChairmanCard ? Border.all(color: const Color(0xFFFBBF24), width: 2) : null,
                             image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
                                 ? DecorationImage(
@@ -983,8 +989,14 @@ class _UsersScreenState extends State<UsersScreen>
                             ],
                           ),
                           alignment: Alignment.center,
-                          child: profilePicUrl == null
-                              ? Text(initials, style: TextStyle(color: isChairmanCard ? const Color(0xFFFBBF24) : t.accent, fontWeight: FontWeight.w900, fontSize: 15))
+                          child: (profilePicUrl == null || profilePicUrl.trim().isEmpty)
+                              ? (isChairmanCard
+                                  ? Text(initials, style: const TextStyle(color: Color(0xFFFBBF24), fontWeight: FontWeight.w900, fontSize: 15))
+                                  : (isFemale
+                                      ? const Icon(Icons.face_3_rounded, size: 24, color: Color(0xFFDB2777))
+                                      : (isMale
+                                          ? const Icon(Icons.face_6_rounded, size: 24, color: Color(0xFF0284C7))
+                                          : Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 15)))))
                               : null,
                         ),
                         if (isOnline)

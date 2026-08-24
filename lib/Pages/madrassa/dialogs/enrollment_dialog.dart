@@ -9,6 +9,7 @@ import '../madrassa_strings.dart';
 import '../widgets/madrassa_common_widgets.dart';
 import '../../../services/auth_service.dart';
 import '../../../../services/image_upload_service.dart';
+import '../../../../services/zkteco_network_service.dart';
 import '../../../../widgets/media_upload_tile.dart';
 import '../../../utils/formatters.dart';
 
@@ -32,6 +33,10 @@ void showAddStudentDialog(
   final nameCtrl = TextEditingController(text: studentData?['name']);
   final rollCtrl = TextEditingController(text: studentData?['rollNumber']);
   final studentCnicCtrl = TextEditingController(text: studentData?['studentCnic']);
+  final initialPin = isEdit
+      ? (ZkTecoNetworkService.getCredentialByEntityId(studentId)?.biometricPin ?? studentData?['biometricPin']?.toString() ?? '')
+      : '';
+  final pinCtrl = TextEditingController(text: initialPin);
   final guardianNameCtrl = TextEditingController(text: studentData?['guardianName']);
   final guardianCnicCtrl = TextEditingController(text: studentData?['guardianCnic']);
   final contactCtrl = TextEditingController(text: studentData?['contactPhone']);
@@ -348,6 +353,16 @@ void showAddStudentDialog(
                   onChanged: (v) {
                     if (studentCnicError != null) setDs(() => studentCnicError = null);
                   },
+                ),
+                const SizedBox(height: 10),
+                buildTf(
+                  pinCtrl,
+                  'Biometric Scanner PIN (Optional)',
+                  Icons.fingerprint_rounded,
+                  context,
+                  hint: 'e.g. 3015',
+                  inputType: TextInputType.number,
+                  formatters: [FilteringTextInputFormatter.digitsOnly],
                 ),
                 const SizedBox(height: 10),
                 InkWell(
@@ -766,6 +781,21 @@ void showAddStudentDialog(
                   gPassError = null;
                 }
 
+                final enteredPin = pinCtrl.text.trim();
+                if (enteredPin.isNotEmpty) {
+                  final targetEntityId = isEdit ? studentId : '';
+                  final conflict = ZkTecoNetworkService.findPinConflict(enteredPin, excludeEntityId: targetEntityId.isNotEmpty ? targetEntityId : null);
+                  if (conflict != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+                }
+
                 if (!isValid) {
                   setDs(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -783,6 +813,7 @@ void showAddStudentDialog(
                 setDs(() => isSaving = true);
                 try {
                   String? gUid;
+                  String bId = branchId.toLowerCase().trim();
                   DocumentReference? sRef;
                   if (isGuardianLinkedOrCreating) {
                     if (foundGuardian != null) {
@@ -909,6 +940,7 @@ void showAddStudentDialog(
                     'name': nameCtrl.text.trim(),
                     'rollNumber': rollCtrl.text.trim(),
                     'studentCnic': studentCnicCtrl.text.trim(),
+                    'biometricPin': enteredPin,
                     'guardianName': guardianNameCtrl.text.trim(),
                     'guardianCnic': guardianCnicCtrl.text.trim(),
                     'contactPhone': contactCtrl.text.trim(),
@@ -975,8 +1007,18 @@ void showAddStudentDialog(
                     );
                   }
 
+                  final finalStudentId = isEdit ? studentId : sRef!.id;
+                  if (enteredPin.isNotEmpty) {
+                    await ZkTecoNetworkService.assignPinToEntity(
+                      entityId: finalStudentId,
+                      entityName: nameCtrl.text.trim(),
+                      entityType: 'madrassa_student',
+                      branchId: branchId,
+                      customPin: enteredPin,
+                    );
+                  }
+
                   if (gUid != null) {
-                    final finalStudentId = isEdit ? studentId : sRef!.id;
                     final linkUpdate = {'studentIds': FieldValue.arrayUnion([finalStudentId])};
                     await FirebaseFirestore.instance.collection('users').doc(gUid).update(linkUpdate);
                     await FirebaseFirestore.instance
