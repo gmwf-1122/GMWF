@@ -1,7 +1,8 @@
 ; ------------------------------------------------------------
 ; GMWF Installer Script — 32-bit Windows (x86)
 ; Handles: single instance kill, Hive lock cleanup,
-;          safe upgrades, data preservation, future-proof
+;          safe upgrades, data preservation, python preservation,
+;          enhanced dialogs, future-proof
 ; ------------------------------------------------------------
 
 [Setup]
@@ -31,10 +32,13 @@ SolidCompression=yes
 ; Privileges
 PrivilegesRequired=admin
 
-; UI
+; UI & Modern Dialogs
 WizardStyle=modern
+WizardSizePercent=100
+WizardResizable=no
 DisableDirPage=no
 DisableProgramGroupPage=yes
+SetupLogging=yes
 
 ; Uninstall display
 UninstallDisplayIcon={app}\gmwf.exe
@@ -48,6 +52,13 @@ RestartApplications=no
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+SetupWindowTitle=GMWF Management Platform Setup (32-bit)
+WelcomeLabel1=Welcome to the GMWF Setup Wizard (32-bit)
+WelcomeLabel2=This wizard will install or safely upgrade GMWF on your computer.%n%nAll your local records, sync queues, and existing Python environments will be preserved.
+ReadyLabel1=Ready to Install
+ReadyLabel2a=Setup is now ready to begin installing GMWF on your computer.
+
 [Files]
 ; ── Main Flutter Release Build ───────────────────────────────
 Source: "build\windows\x64\runner\Release\*"; \
@@ -56,9 +67,11 @@ Source: "build\windows\x64\runner\Release\*"; \
 
 ; ── Standalone Python Runtime (x86 / 32-bit) ──────────────────
 ; Bundled with pyzk & firebase-admin pre-installed (Zero setup / 100% offline)
+; Automatically detects if Python already exists in {app}\python and skips extraction without overwriting
 Source: "Installer\python-3.12.10-embed-win32\*"; \
     DestDir: "{app}\python"; \
-    Flags: recursesubdirs createallsubdirs ignoreversion
+    Check: ShouldInstallPython; \
+    Flags: recursesubdirs createallsubdirs onlyifdoesntexist uninsneveruninstall
 
 ; ── Background Sync Scripts & Configs ────────────────────────
 Source: "scripts\*"; \
@@ -88,10 +101,10 @@ Filename: "{tmp}\vc_redist.x64.exe"; \
     StatusMsg: "Installing Microsoft Visual C++ Runtime..."; \
     Flags: waituntilterminated
 
-  Filename: "{cmd}"; \
-    Parameters: "/c schtasks /Create /TN ""GMWF Server"" /TR ""{app}\gmwf.exe"" /SC ONLOGON /RL HIGHEST /F"; \
-    Tasks: serverautostart; \
-    Flags: runhidden waituntilterminated
+Filename: "{cmd}"; \
+  Parameters: "/c schtasks /Create /TN ""GMWF Server"" /TR ""{app}\gmwf.exe"" /SC ONLOGON /RL HIGHEST /F"; \
+  Tasks: serverautostart; \
+  Flags: runhidden waituntilterminated
 
 Filename: "{app}\gmwf.exe"; \
     Description: "Launch GMWF now"; \
@@ -103,16 +116,26 @@ Filename: "{cmd}"; \
     Flags: runhidden waituntilterminated; \
     RunOnceId: "KillGMWF"
 
-  Filename: "{cmd}"; \
-    Parameters: "/c schtasks /Delete /TN ""GMWF Server"" /F"; \
-    Flags: runhidden waituntilterminated; \
-    RunOnceId: "RemoveGMWFServerTask"
+Filename: "{cmd}"; \
+  Parameters: "/c schtasks /Delete /TN ""GMWF Server"" /F"; \
+  Flags: runhidden waituntilterminated; \
+  RunOnceId: "RemoveGMWFServerTask"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\*.log"
 
+; ── Hive data in AppData ─────────────────────────────────────
+; IMPORTANT: The lines below are commented out intentionally.
+; Uncommenting them will DELETE the user's local patient data,
+; donation records, and cached credentials on uninstall.
+; Only uncomment for a "full wipe" / factory-reset scenario.
+;
+; Type: filesandordirs; Name: "{userappdata}\com.example\gmwf"
+; ─────────────────────────────────────────────────────────────
+
 [Code]
+// ── Pascal Script section ────────────────────────────────────
 function KillProcessByName(ExeName: String): Boolean;
 var
   ResultCode: Integer;
@@ -142,6 +165,61 @@ begin
       FindClose(FindRec);
     end;
   end;
+end;
+
+// Checks if Python is already present in target installation directory.
+// Returns False to skip extracting bundled Python and preserve existing setup.
+function ShouldInstallPython(): Boolean;
+var
+  AppPython: String;
+begin
+  AppPython := ExpandConstant('{app}\python\python.exe');
+  if FileExists(AppPython) then
+  begin
+    Log('[GMWF Setup] Existing Python runtime detected at ' + AppPython + '. Preserving existing Python files without overwrite.');
+    Result := False;
+  end
+  else
+  begin
+    Log('[GMWF Setup] No Python runtime found at ' + AppPython + '. Installing bundled standalone Python 3.12 (x86).');
+    Result := True;
+  end;
+end;
+
+function IsUpgrade(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\gmwf.exe'));
+end;
+
+// Customize the Ready to Install summary page with clear details on Python and upgrade status
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+var
+  S: String;
+begin
+  S := '';
+  if IsUpgrade() then
+  begin
+    S := S + 'Installation Mode:' + NewLine + Space + 'Seamless Upgrade (All local records & databases preserved)' + NewLine + NewLine;
+  end
+  else
+  begin
+    S := S + 'Installation Mode:' + NewLine + Space + 'Fresh Installation' + NewLine + NewLine;
+  end;
+
+  if not ShouldInstallPython() then
+  begin
+    S := S + 'Python Environment:' + NewLine + Space + 'Existing Python runtime found (Preserved - will NOT overwrite)' + NewLine + NewLine;
+  end
+  else
+  begin
+    S := S + 'Python Environment:' + NewLine + Space + 'Installing bundled standalone Python 3.12 (32-bit)' + NewLine + NewLine;
+  end;
+
+  S := S + MemoDirInfo + NewLine + NewLine;
+  if MemoTasksInfo <> '' then
+    S := S + MemoTasksInfo + NewLine + NewLine;
+
+  Result := S;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
