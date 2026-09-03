@@ -127,8 +127,12 @@ final madrassaAllLogsProvider = StreamProvider.family<List<Map<String, dynamic>>
   final Stream<List<Map<String, dynamic>>> hiveSource = () async* {
     yield MadrassaLocalStorage.getAllLogsCached(branchId);
     final box = Hive.box(MadrassaLocalStorage.logsBox);
-    await for (final _ in box.watch()) {
-      yield MadrassaLocalStorage.getAllLogsCached(branchId);
+    final prefix = '${branchId.toLowerCase().trim()}__log__';
+    await for (final event in box.watch()) {
+      final key = event.key?.toString() ?? '';
+      if (key.isEmpty || key.startsWith(prefix)) {
+        yield MadrassaLocalStorage.getAllLogsCached(branchId);
+      }
     }
   }();
   return hiveSource.distinct((a, b) => const DeepCollectionEquality().equals(a, b));

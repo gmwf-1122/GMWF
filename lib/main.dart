@@ -1,6 +1,7 @@
 // lib/main.dart
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,8 +30,10 @@ import 'pages/donations/donations_shared.dart';
 
 import 'services/local_storage_service.dart';
 import 'services/donations_local_storage.dart';
+import 'services/camp_session_service.dart';
 import 'services/offline_auth_service.dart' as offline_auth;
 import 'services/zkteco_network_service.dart';
+import 'services/python_runner_service.dart';
 import 'realtime/server_sync_manager.dart';
 import 'realtime/realtime_router.dart';
 import 'widgets/gmwf_loading_view.dart';
@@ -175,20 +178,38 @@ void _installGlobalErrorHandlers() {
       try { appWindow.show(); } catch (_) {}
     }
     FlutterError.presentError(details);
-    _logError(details.exceptionAsString(), details.stack?.toString());
-    _markLastCrash();
-    // Report to Sentry
-    Sentry.captureException(details.exception, stackTrace: details.stack);
+
+    final exStr = details.exceptionAsString().toLowerCase();
+    final isTransientLayout = exStr.contains('overflowed') ||
+        exStr.contains('renderbox was not laid out') ||
+        exStr.contains('hassize') ||
+        exStr.contains('_needslayout') ||
+        exStr.contains('needs-paint') ||
+        exStr.contains('childsemantics');
+
+    if (!isTransientLayout) {
+      _logError(details.exceptionAsString(), details.stack?.toString());
+      _markLastCrash();
+      Sentry.captureException(details.exception, stackTrace: details.stack);
+    }
   };
 
   PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
     if (!kIsWeb && Platform.isWindows) {
       try { appWindow.show(); } catch (_) {}
     }
-    _logError(error.toString(), stack.toString());
-    _markLastCrash();
-    // Report to Sentry
-    Sentry.captureException(error, stackTrace: stack);
+    final errStr = error.toString().toLowerCase();
+    final isTransientLayout = errStr.contains('overflowed') ||
+        errStr.contains('renderbox was not laid out') ||
+        errStr.contains('hassize') ||
+        errStr.contains('_needslayout') ||
+        errStr.contains('childsemantics');
+
+    if (!isTransientLayout) {
+      _logError(error.toString(), stack.toString());
+      _markLastCrash();
+      Sentry.captureException(error, stackTrace: stack);
+    }
     return true;
   };
 }
@@ -204,7 +225,7 @@ Future<void> main() async {
       doWhenWindowReady(() {
         appWindow.minSize = const Size(1280, 720);
         appWindow.alignment = Alignment.center;
-        appWindow.title = "Gulzar Madina Dispensary";
+        appWindow.title = "Gulzar-e-Madina Welfare Foundation";
         appWindow.show();
         appWindow.maximize();
       });
@@ -258,7 +279,11 @@ Future<void> main() async {
         return <dynamic>[];
       });
 
+      CampSessionService.checkClockSkew();
+      unawaited(CampSessionService.syncInternetTime());
+
       await LocalStorageService.seedLocalAdmins();
+      LocalStorageService.repairMisassignedShiftSessions();
     } catch (e, st) {
       debugPrint('[Main] Pre-init error caught safely: $e');
       _logError('Pre-init error: $e', st.toString());
@@ -332,6 +357,12 @@ Future<void> _startInit() async {
       if (!kIsWeb) {
         unawaited(ZkTecoNetworkService.startServer().catchError((e) {
           debugPrint('[Init] ZKTeco background server start error: $e');
+          return false;
+        }));
+
+        // Automatically start Python ZKTeco background sync daemon
+        unawaited(PythonRunnerService.instance.initAutoStart().catchError((e) {
+          debugPrint('[Init] Python background sync auto-start warning: $e');
           return false;
         }));
       }
@@ -432,8 +463,40 @@ Future<void> _startInit() async {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final AppLifecycleListener _lifecycleListener;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!kIsWeb) {
+      _lifecycleListener = AppLifecycleListener(
+        onDetach: () {
+          PythonRunnerService.instance.stopProcess();
+        },
+        onExitRequested: () async {
+          await PythonRunnerService.instance.stopProcess();
+          return AppExitResponse.exit;
+        },
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    if (!kIsWeb) {
+      _lifecycleListener.dispose();
+      PythonRunnerService.instance.stopProcess();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -627,25 +690,13 @@ class MyApp extends StatelessWidget {
             );
 
             if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
-              return MediaQuery(
-                data: appMediaQuery,
-                child: Directionality(
-                  textDirection: appDirection,
-                  child: Material(
-                    color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
-                    child: Overlay(
-                      initialEntries: [
-                        OverlayEntry(
-                          builder: (context) => Column(
-                            children: [
-                              const CustomTitleBar(),
-                              Expanded(child: adjustedChild),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+              return Material(
+                color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
+                child: Column(
+                  children: [
+                    const CustomTitleBar(),
+                    Expanded(child: ClipRect(child: adjustedChild)),
+                  ],
                 ),
               );
             }

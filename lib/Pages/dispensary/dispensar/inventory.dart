@@ -15,10 +15,14 @@ import 'universal_proforma_sheet.dart';
 import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/widgets/global_module_wrapper.dart';
 import 'package:gmwf/widgets/app_back_button.dart';
 import 'package:gmwf/widgets/camp_selector_chip.dart';
 import 'package:gmwf/utils/string_similarity_helper.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/sync_service.dart';
 import 'inventory_pdf_helper.dart';
 
 class InventoryPage extends StatefulWidget {
@@ -40,6 +44,17 @@ class InventoryPage extends StatefulWidget {
     this.isDoctor = false,
     this.isReadOnly = false,
   });
+
+  static bool canDeleteInventoryItemFromRole(Map<dynamic, dynamic>? userData) {
+    final raw = userData == null ? '' : (userData['role'] ?? userData['userRole'] ?? '').toString();
+    final role = raw.trim().toLowerCase();
+    return role == 'chairman' ||
+        role == 'hq manager' ||
+        role == 'hq_manager' ||
+        role == 'hqmanager' ||
+        role == 'headquarters manager' ||
+        role.contains('admin');
+  }
 
   @override
   State<InventoryPage> createState() => _InventoryPageState();
@@ -74,6 +89,19 @@ class _InventoryPageState extends State<InventoryPage>
     try {
       if (Hive.isBoxOpen('app_settings')) {
         return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  bool get _canDeleteInventoryItem {
+    if (widget.isAdmin) return true;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (uData is Map) {
+          return InventoryPage.canDeleteInventoryItemFromRole(Map<dynamic, dynamic>.from(uData));
+        }
       }
     } catch (_) {}
     return false;
@@ -146,6 +174,35 @@ class _InventoryPageState extends State<InventoryPage>
   final ScrollController _scrollController = ScrollController();
   int _displayLimit = 50;
   bool _isExportingPdf = false;
+  bool _showRemoveAllMeds = false;
+
+  bool _handleKeyboardShortcuts(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final isCtrl = HardwareKeyboard.instance.isControlPressed;
+      final isShift = HardwareKeyboard.instance.isShiftPressed;
+      if (isCtrl && isShift && event.logicalKey == LogicalKeyboardKey.delete) {
+        setState(() {
+          _showRemoveAllMeds = !_showRemoveAllMeds;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                _showRemoveAllMeds
+                    ? '🔓 "Remove All Meds" button unlocked and visible.'
+                    : '🔒 "Remove All Meds" button hidden.',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              duration: const Duration(seconds: 2),
+              backgroundColor: _showRemoveAllMeds ? Colors.red.shade800 : Colors.blueGrey.shade800,
+            ),
+          );
+        }
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Cached state for performance/lazy loading
   List<Map<String, dynamic>> _rawItems = [];
@@ -166,6 +223,7 @@ class _InventoryPageState extends State<InventoryPage>
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyboardShortcuts);
     final tabCount = _isSupervisorOrReadOnly
         ? 6
         : (_canRegisterMedicine ? 8 : 7);
@@ -176,11 +234,32 @@ class _InventoryPageState extends State<InventoryPage>
       }
     });
     _scrollController.addListener(_onScroll);
+
+    final isHqOrAdmin = widget.isAdmin || _canDeleteInventoryItem;
+    final active = CampSessionService.getActiveCamp(widget.branchId);
+    final availableOptions = CampSessionService.getAvailableCampOptions();
+    _selectedCampFilter = (active != null && active.isNotEmpty)
+        ? active
+        : (isHqOrAdmin ? 'all' : (availableOptions.isNotEmpty ? availableOptions.first['id'] : 'all'));
+
+    CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
+
     _initSync();
 
     // Cache database loading
     Hive.box(LocalStorageService.stockBox).listenable().addListener(_debouncedLoadDataFromHive);
     _loadDataFromHive();
+  }
+
+  void _onActiveCampChanged() {
+    if (!mounted) return;
+    final active = CampSessionService.getActiveCamp(widget.branchId);
+    if (active != null && active.isNotEmpty && active != 'all' && active != _selectedCampFilter) {
+      setState(() {
+        _selectedCampFilter = active;
+      });
+      _loadDataFromHive();
+    }
   }
 
   @override
@@ -205,12 +284,24 @@ class _InventoryPageState extends State<InventoryPage>
       campId: activeCamp,
     );
 
+    final onLan = RealtimeManager().isConnected;
+    if (onLan) {
+      debugPrint('[Inventory] LAN server connected — running 100% offline from Hive (0 Firestore reads)');
+      final localSyncStream = Hive.box(LocalStorageService.syncBox)
+          .watch()
+          .map((_) => _getPendingLogs());
+      _logCombinedSub = localSyncStream
+          .startWith(_getPendingLogs())
+          .listen((list) => _logState.add(list));
+      return;
+    }
+
     // 1. Download inventory in background (using cached Hive immediately for 0ms load)
     LocalStorageService.downloadInventory(widget.branchId, forceFull: false, campId: activeCamp).then((_) {
       if (mounted) _loadDataFromHive();
     });
 
-    // 2. Real-time Live Listener: Scoped to updates while view is active
+    // 2. Real-time Live Listener: Scoped to updates while view is active (Cloud Fallback)
     _fireInvSub = FirebaseFirestore.instance
         .collection('branches')
         .doc(widget.branchId)
@@ -274,7 +365,9 @@ class _InventoryPageState extends State<InventoryPage>
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyboardShortcuts);
     _debounceLoadTimer?.cancel();
+    CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     Hive.box(LocalStorageService.stockBox).listenable().removeListener(_debouncedLoadDataFromHive);
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -312,12 +405,38 @@ class _InventoryPageState extends State<InventoryPage>
   void _loadDataFromHive() {
     final box = Hive.box(LocalStorageService.stockBox);
     final normBranch = widget.branchId.toLowerCase().trim();
-    final allMapDocs = box.values
-        .whereType<Map>()
-        .map((v) => Map<String, dynamic>.from(v))
-        .toList();
+    final allMapDocs = <Map<String, dynamic>>[];
+    for (final key in box.keys) {
+      final val = box.get(key);
+      if (val is Map) {
+        final m = Map<String, dynamic>.from(val);
+        if (m['id'] == null || m['id'].toString().isEmpty || m['id'] == 'unknown') {
+          final kStr = key.toString();
+          m['id'] = kStr.startsWith('stock:') ? kStr.substring(6) : kStr;
+        }
+
+        // Auto-normalize medicine name & formula to latest master catalog
+        final rawName = (m['name'] ?? m['formula'] ?? '').toString();
+        final cleanName = MasterProformaService.cleanBrandToFormula(rawName);
+        if (cleanName.isNotEmpty) {
+          m['name'] = cleanName;
+          m['formula'] = cleanName;
+        }
+
+        // Auto-normalize Kapayya/Kapaya camp to Saddar
+        final rawCamp = (m['campId'] ?? m['dispensaryId'] ?? '').toString().toLowerCase();
+        final rawId = m['id'].toString().toLowerCase();
+        if (rawCamp.contains('kapay') || rawCamp == 'kapayya' || rawCamp == 'kapaya' || rawId.startsWith('kapay')) {
+          m['campId'] = 'saddar';
+          m['dispensaryId'] = 'saddar';
+        }
+
+        allMapDocs.add(m);
+      }
+    }
 
     var filtered = allMapDocs.where((v) {
+      if (normBranch == 'all' || normBranch.isEmpty) return true;
       final b = v['branchId']?.toString().toLowerCase().trim();
       if (b == null || b.isEmpty) return true; // Branch stock fallback
       return b == normBranch ||
@@ -327,8 +446,9 @@ class _InventoryPageState extends State<InventoryPage>
           (b.isNotEmpty && normBranch.contains(b));
     }).toList();
 
-    if (CampSessionService.hasCampsForBranch(widget.branchId)) {
+    if (CampSessionService.hasCampsForBranch(widget.branchId) || widget.branchId.toLowerCase().contains('karachi')) {
       final activeCamp = _selectedCampFilter ?? 'all';
+
       if (activeCamp.isNotEmpty && activeCamp != 'all') {
         filtered = filtered.where((v) {
           return CampSessionService.matchesCamp(
@@ -940,6 +1060,187 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
+  Future<void> _showDeleteInventoryDialog(Map<String, dynamic> batchData) async {
+    if (!_canDeleteInventoryItem) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only the Chairman and HQ Manager can delete medicines from inventory.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final docIds = List<String>.from(batchData['_docIds'] as List? ?? []);
+    debugPrint('[InventoryDelete] Dialog opened for medicine: ${batchData['name']} (DocIDs: $docIds)');
+
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Medicine From Inventory'),
+        content: Text(
+          'Are you sure you want to delete "${batchData['name']}" from inventory?\n\n'
+          'Type: ${batchData['type'] ?? '—'}\n'
+          'Dose: ${batchData['dose'] ?? '—'}\n'
+          'Total Quantity: ${batchData['quantity'] ?? 0}\n\n'
+          'This action is restricted to Chairman and HQ Manager.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_forever_rounded),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            label: const Text('Delete Permanently'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete != true || !mounted) return;
+
+    try {
+      final activeCamp = (_selectedCampFilter != null && _selectedCampFilter!.isNotEmpty && _selectedCampFilter != 'all')
+          ? _selectedCampFilter!
+          : (CampSessionService.getActiveCamp(widget.branchId) ?? 'all');
+
+      // 1. Delete from local Hive cache FIRST (instant 0ms response)
+      final box = Hive.box(LocalStorageService.stockBox);
+      int deletedHiveCount = 0;
+      final targetBatchName = (batchData['name'] ?? '').toString().toLowerCase().trim();
+      final targetBatchType = (batchData['type'] ?? '').toString().toLowerCase().trim();
+      final targetBatchDose = (batchData['dose'] ?? '').toString().toLowerCase().trim();
+
+      final keysToRemove = <dynamic>{};
+
+      for (final id in docIds) {
+        if (id.isNotEmpty && id != 'unknown') {
+          keysToRemove.add('stock:$id');
+          keysToRemove.add(id);
+        }
+      }
+
+      for (final k in box.keys) {
+        final kStr = k.toString().toLowerCase();
+        for (final id in docIds) {
+          if (id.isNotEmpty && id != 'unknown') {
+            if (kStr == id.toLowerCase() || kStr == 'stock:${id.toLowerCase()}' || kStr.endsWith(':${id.toLowerCase()}')) {
+              keysToRemove.add(k);
+            }
+          }
+        }
+        final val = box.get(k);
+        if (val is Map) {
+          final vName = (val['name'] ?? '').toString().toLowerCase().trim();
+          final vType = (val['type'] ?? '').toString().toLowerCase().trim();
+          final vDose = (val['dose'] ?? '').toString().toLowerCase().trim();
+          if (vName == targetBatchName && vType == targetBatchType && (targetBatchDose.isEmpty || vDose == targetBatchDose)) {
+            keysToRemove.add(k);
+          }
+        }
+      }
+
+      for (final k in keysToRemove) {
+        await box.delete(k);
+        deletedHiveCount++;
+      }
+      await box.flush();
+
+      // Refresh UI instantly
+      if (mounted) {
+        _loadDataFromHive();
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ "${batchData['name']}" deleted successfully ($deletedHiveCount items removed).'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+
+      // 2. Broadcast over LAN WebSocket to all peer PCs
+      try {
+        for (final id in docIds) {
+          if (id.isNotEmpty && id != 'unknown') {
+            RealtimeManager().sendMessage(RealtimeEvents.payload(
+              type: RealtimeEvents.deleteStockItem,
+              branchId: widget.branchId,
+              data: {'medicineId': id},
+            ));
+          }
+        }
+      } catch (_) {}
+
+      // 3. Enqueue for persistent cloud sync
+      for (final id in docIds) {
+        if (id.isNotEmpty && id != 'unknown') {
+          await LocalStorageService.enqueueSync({
+            'type': 'delete_inventory_item',
+            'branchId': widget.branchId,
+            'campId': activeCamp,
+            'medicineId': id,
+            'data': {'id': id, 'name': batchData['name']},
+          });
+        }
+      }
+      SyncService().triggerUpload();
+
+      // 4. Background cloud delete from all potential collections
+      unawaited(() async {
+        try {
+          final db = FirebaseFirestore.instance;
+          final batch = db.batch();
+          final collections = <CollectionReference>{
+            db.collection('branches').doc(widget.branchId).collection('inventory'),
+          };
+
+          if (activeCamp.isNotEmpty && activeCamp != 'all') {
+            final campPath = CampSessionService.getCampInventoryPath(branchId: widget.branchId, campId: activeCamp);
+            collections.add(db.collection('branches').doc(widget.branchId).collection(campPath));
+          }
+
+          if (widget.branchId.toLowerCase().contains('karachi')) {
+            collections.add(db.collection('branches').doc(widget.branchId).collection('inventory_haji_camp'));
+            collections.add(db.collection('branches').doc(widget.branchId).collection('inventory_saddar'));
+          }
+
+          bool hasDeletes = false;
+          for (final col in collections) {
+            for (final id in docIds) {
+              if (id.isNotEmpty && id != 'unknown') {
+                batch.delete(col.doc(id));
+                hasDeletes = true;
+              }
+            }
+          }
+
+          if (hasDeletes) {
+            await batch.commit().timeout(const Duration(seconds: 8));
+            debugPrint('[InventoryDelete] ✅ Background Firestore batch delete successful for $docIds');
+          }
+        } catch (e) {
+          debugPrint('[InventoryDelete] ⚠️ Background Firestore delete deferred to sync queue: $e');
+        }
+      }());
+    } catch (e, st) {
+      debugPrint('[InventoryDelete] ❌ ERROR: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Delete notice: $e'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
   PreferredSizeWidget _buildAppBar({bool isMobile = false}) => AppBar(
         backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
         elevation: 1,
@@ -970,6 +1271,7 @@ class _InventoryPageState extends State<InventoryPage>
           CampSelectorChip(
             branchId: widget.branchId,
             onCampChanged: (newCamp) {
+              _selectedCampFilter = newCamp;
               _loadDataFromHive();
             },
           ),
@@ -1177,7 +1479,7 @@ class _InventoryPageState extends State<InventoryPage>
         Expanded(
           child: LayoutBuilder(builder: (ctx, constraints) {
             return constraints.maxWidth > 640
-                ? _stockTable(_displayItems, constraints.maxWidth, _filteredBatches.length)
+                ? _stockTable(_displayItems, constraints.maxWidth, _filteredBatches.length, constraints.maxHeight)
                 : _stockCards(_displayItems, _filteredBatches.length);
           }),
         ),
@@ -1187,7 +1489,7 @@ class _InventoryPageState extends State<InventoryPage>
 
   Widget _buildCampFilterChip(String campId, String label) {
     final active = _selectedCampFilter ?? 'all';
-    final isSelected = active == campId;
+    final isSelected = active == campId || (campId == 'haji_camp' && active == 'haji') || (campId == 'haji' && active == 'haji_camp');
     return InkWell(
       onTap: () {
         setState(() {
@@ -1195,6 +1497,7 @@ class _InventoryPageState extends State<InventoryPage>
           _displayLimit = 50;
           _loadDataFromHive();
         });
+        CampSessionService.setActiveCamp(campId);
       },
       borderRadius: BorderRadius.circular(6),
       child: Container(
@@ -1218,6 +1521,9 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _buildFilterSection() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isCompact = screenWidth < 768;
+    final hasCamps = widget.branchId.toLowerCase().contains('karachi') ||
+        CampSessionService.hasCampsForBranch(widget.branchId) ||
+        _canDeleteInventoryItem;
 
     final widgets = [
       Expanded(
@@ -1311,7 +1617,7 @@ class _InventoryPageState extends State<InventoryPage>
           ),
         ),
       ),
-      if (CampSessionService.hasCampsForBranch(widget.branchId)) ...[
+      if (hasCamps && !widget.isDoctor) ...[
         const SizedBox(width: 8),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -1327,7 +1633,7 @@ class _InventoryPageState extends State<InventoryPage>
               const SizedBox(width: 4),
               _buildCampFilterChip('saddar', '📍 Saddar'),
               const SizedBox(width: 4),
-              _buildCampFilterChip('haji', '📍 Haji Camp'),
+              _buildCampFilterChip('haji_camp', '📍 Haji Camp'),
             ],
           ),
         ),
@@ -1439,11 +1745,240 @@ class _InventoryPageState extends State<InventoryPage>
       );
     }
 
+    if (_canDeleteInventoryItem && _showRemoveAllMeds) {
+      widgets.add(const SizedBox(width: 8));
+      final isSpecificCampSelected = _selectedCampFilter != null && _selectedCampFilter != 'all';
+      final campLabel = isSpecificCampSelected
+          ? CampSessionService.getCampLabel(_selectedCampFilter!)
+          : 'Camp';
+      widgets.add(
+        ElevatedButton.icon(
+          onPressed: _confirmRemoveAllMedsFromCurrentCamp,
+          icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 16),
+          label: Text(
+            isSpecificCampSelected
+                ? 'Remove All Meds From $campLabel'
+                : 'Remove Camp Meds (Select Camp)',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: isSpecificCampSelected ? Colors.red.shade800 : Colors.grey.shade700,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            minimumSize: const Size(0, 38),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+    }
+
+    if (_canDeleteInventoryItem) {
+      // Restore / Sync from Cloud button
+      widgets.add(const SizedBox(width: 8));
+      widgets.add(
+        ElevatedButton.icon(
+          onPressed: _syncInventoryFromCloud,
+          icon: const Icon(Icons.cloud_download_rounded, color: Colors.white, size: 16),
+          label: const Text(
+            'Sync / Restore Cloud',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.blueGrey.shade700,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            minimumSize: const Size(0, 38),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+    }
+
     return Container(
       color: _isDark ? const Color(0xFF0F172A) : _bg,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: Row(children: widgets),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(children: widgets),
+      ),
     );
+  }
+
+  Future<void> _syncInventoryFromCloud() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('🔄 Downloading & restoring inventory from Firestore...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+    await LocalStorageService.downloadInventory(widget.branchId, forceFull: true, campId: _selectedCampFilter);
+    if (mounted) {
+      _loadDataFromHive();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Inventory restored successfully! Showing ${_displayItems.length} records.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmRemoveAllMedsFromCurrentCamp() async {
+    final activeCamp = _selectedCampFilter ?? CampSessionService.getActiveCamp(widget.branchId);
+
+    // SAFETY GUARD: Prevent clearing all camps simultaneously!
+    if (activeCamp == null || activeCamp == 'all' || activeCamp.isEmpty) {
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.amber, size: 28),
+              SizedBox(width: 10),
+              Text('Select a Specific Camp'),
+            ],
+          ),
+          content: const Text(
+            'To protect inventory from accidental total deletion, please click on a specific camp first:\n\n'
+            '👉 "📍 Haji Camp" or "📍 Saddar"\n\n'
+            'Then tap "Remove All Meds From [Camp]". This ensures ONLY that camp is deleted while preserving the other camp\'s stock completely.',
+            style: TextStyle(fontSize: 13.5),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Understood'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    final campLabel = CampSessionService.getCampLabel(activeCamp);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Delete $campLabel Meds',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          '⚠️ WARNING: You are about to permanently delete all medicines assigned ONLY to:\n\n'
+          '👉 "$campLabel"\n\n'
+          '• Local database records for $campLabel will be erased in 0ms.\n'
+          '• Real-time LAN deletion will notify all connected stations.\n'
+          '• Cloud Firestore documents for $campLabel will be purged from database.\n'
+          '• Other camps (such as Saddar) will remain completely intact.\n\n'
+          'Are you sure you want to proceed?',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.delete_forever_rounded, size: 18),
+            label: Text('Yes, Delete $campLabel Meds', style: const TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final count = await LocalStorageService.clearLocalCampStock(widget.branchId, activeCamp);
+
+      // LAN broadcast
+      try {
+        RealtimeManager().sendMessage(RealtimeEvents.payload(
+          type: RealtimeEvents.deleteStockItem,
+          branchId: widget.branchId,
+          data: {'clearCamp': activeCamp, 'count': count},
+        ));
+      } catch (_) {}
+
+      // Background permanent Firestore purge for ONLY this camp
+      unawaited(() async {
+        try {
+          final db = FirebaseFirestore.instance;
+          final isHaji = activeCamp.toLowerCase().contains('haji');
+          final isSaddar = activeCamp.toLowerCase().contains('sadd') || activeCamp.toLowerCase().contains('kap');
+
+          for (final bId in [widget.branchId, widget.branchId.toLowerCase(), widget.branchId.toUpperCase()]) {
+            final invColRef = db.collection('branches').doc(bId).collection('inventory');
+            final snap = await invColRef.get();
+            if (snap.docs.isNotEmpty) {
+              final batch = db.batch();
+              int batchCount = 0;
+              for (final doc in snap.docs) {
+                final dId = doc.id.toLowerCase();
+                final dData = doc.data();
+                final dCamp = (dData['campId'] ?? dData['dispensaryId'] ?? '').toString().toLowerCase();
+
+                bool shouldDelete = false;
+                if (isHaji && (dId.startsWith('haji') || dCamp.contains('haji'))) {
+                  shouldDelete = true;
+                } else if (isSaddar && (dId.startsWith('kapayya') || dId.startsWith('saddar') || dCamp.contains('sadd') || dCamp.contains('kap'))) {
+                  shouldDelete = true;
+                }
+
+                if (shouldDelete) {
+                  batch.delete(doc.reference);
+                  batchCount++;
+                }
+              }
+              if (batchCount > 0) {
+                await batch.commit();
+                debugPrint('[ClearCampMeds] Deleted $batchCount Firestore docs for $activeCamp in branches/$bId/inventory');
+              }
+            }
+
+            final subColName = isHaji ? 'inventory_haji' : 'inventory_saddar';
+            final subSnap = await db.collection('branches').doc(bId).collection(subColName).get();
+            if (subSnap.docs.isNotEmpty) {
+              final batch = db.batch();
+              for (final doc in subSnap.docs) {
+                batch.delete(doc.reference);
+              }
+              await batch.commit();
+            }
+          }
+        } catch (e) {
+          debugPrint('[ClearCampMeds] Background Firestore delete error: $e');
+        }
+      }());
+
+      if (mounted) {
+        _loadDataFromHive();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Removed $count medicine record(s) from $campLabel (Local & Cloud).'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to clear camp meds: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildUpdateStockButton() {
@@ -1678,7 +2213,7 @@ class _InventoryPageState extends State<InventoryPage>
 
   // ── Stock Table (wide screens) ─────────────────────────────────────────────
   Widget _stockTable(
-      List<Map<String, dynamic>> data, double screenWidth, int totalCount) {
+      List<Map<String, dynamic>> data, double screenWidth, int totalCount, [double? availableHeight]) {
     final double cardInnerWidth = screenWidth - 32;
     final double w = cardInnerWidth < 1000 ? 1000 : cardInnerWidth;
     
@@ -1692,160 +2227,160 @@ class _InventoryPageState extends State<InventoryPage>
       _Col('Expiry', w * 0.14, 'expiry'),
     ];
 
-    final tableWidget = Column(
-      children: [
-        Container(
-          height: 38,
-          color: _isDark ? const Color(0xFF0F766E) : _teal,
-          child: Row(
-              children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
-        ),
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: EdgeInsets.zero,
-            itemCount: data.length + 1,
-            itemBuilder: (ctx, i) {
-              if (i == data.length) {
-                return Container(
-                  width: w,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  alignment: Alignment.center,
-                  color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                  child: Text(
-                    data.length >= totalCount
-                        ? 'Showing all $totalCount medicines'
-                        : 'Loading more...',
-                    style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
-                  ),
-                );
-              }
-              final b = data[i];
-              final qty = b['quantity'] as int;
-              final type = b['type'] as String;
-              final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
-              final lowStock = qty < 10;
-              final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
-              final expText = _formatDate(b['expiryDate'] as String?);
-              final isWarning = lowStock || expSoon;
-              final rowColor = _isDark
-                  ? (isWarning
-                      ? const Color(0xFF2D1214)
-                      : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
-                  : (isWarning
-                      ? const Color(0xFFFFF5F5)
-                      : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA)));
+    Widget buildTableRow(int i) {
+      if (i == data.length) {
+        return Container(
+          width: w,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          alignment: Alignment.center,
+          color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+          child: Text(
+            data.length >= totalCount
+                ? 'Showing all $totalCount medicines'
+                : 'Loading more...',
+            style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        );
+      }
+      final b = data[i];
+      final qty = b['quantity'] as int;
+      final type = b['type'] as String;
+      final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
+      final lowStock = qty < 10;
+      final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
+      final expText = _formatDate(b['expiryDate'] as String?);
+      final isWarning = lowStock || expSoon;
+      final rowColor = _isDark
+          ? (isWarning
+              ? const Color(0xFF2D1214)
+              : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
+          : (isWarning
+              ? const Color(0xFFFFF5F5)
+              : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA)));
 
-              final rowContent = Container(
-                decoration: BoxDecoration(
-                  color: rowColor,
-                  border: Border(
-                    bottom: BorderSide(
-                        color: isWarning
-                            ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
-                            : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
-                        width: 1.0),
-                  ),
-                ),
-                child: Stack(
-                  children: [
-                    Row(children: [
-                      _dCell(
-                          cols[0].w,
-                          Text('${i + 1}',
-                              style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
-                      _dCell(
-                          cols[1].w,
-                          Row(children: [
-                            Expanded(
-                              child: RichText(
-                                overflow: TextOverflow.ellipsis,
-                                text: TextSpan(
-                                  style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
-                                  children: [
-                                    TextSpan(
-                                      text: b['name'] ?? '',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        color: _isDark
-                                            ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
-                                            : (isWarning ? _red.withValues(alpha: 0.9) : _textDark),
-                                      ),
-                                    ),
-                                    if (b['formula'] != null && (b['formula'] as String).isNotEmpty) ...[
-                                      const TextSpan(text: ' '),
-                                      TextSpan(
-                                        text: '(${b['formula']})',
-                                        style: TextStyle(
-                                          color: _isDark
-                                              ? (isWarning ? const Color(0xFFFCA5A5) : const Color(0xFF94A3B8))
-                                              : (isWarning ? _red.withValues(alpha: 0.7) : _textLight),
-                                          fontWeight: FontWeight.normal,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ])),
-                      _dCell(cols[2].w, _barcodeCell(barcode)),
-                      _dCell(cols[3].w, _typePill(type)),
-                      _dCell(
-                          cols[4].w,
-                          Text(b['dose'] ?? '—',
-                              style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5))),
-                      _dCell(
-                          cols[5].w,
-                          Text(NumberFormat('#,###').format(qty),
-                              style: TextStyle(
-                                  color: _isDark
-                                      ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
-                                      : (lowStock ? _red : _textDark),
-                                  fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
-                                  fontSize: 12.5))),
-                      _dCell(
-                          cols[6].w,
-                          Text(expText,
-                              style: TextStyle(
-                                  color: _isDark
-                                      ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
-                                      : (expSoon ? _red : _textDark),
-                                  fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
-                                  fontSize: 12.5))),
-                    ]),
-                  ],
-                ),
-              );
-
-              return InkWell(
-                  onTap: _isDirectEditAllowed
-                      ? () => _showEditSheet(b)
-                      : () {
-                          if (widget.isDispenser && mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text(
-                                  '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                ),
-                                backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
-                                duration: const Duration(seconds: 3),
-                              ),
-                            );
-                          }
-                        },
-                  hoverColor: _isDark ? const Color(0xFF334155) : const Color(0xFFF3F7F6),
-                  child: rowContent,
-                );
-            },
+      final rowContent = Container(
+        decoration: BoxDecoration(
+          color: rowColor,
+          border: Border(
+            bottom: BorderSide(
+                color: isWarning
+                    ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
+                    : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
+                width: 1.0),
           ),
         ),
-      ],
-    );
+        child: Stack(
+          children: [
+            if (_canDeleteInventoryItem)
+              Positioned(
+                right: 10,
+                top: 6,
+                child: Tooltip(
+                  message: 'Delete medicine from inventory',
+                  child: InkWell(
+                    onTap: () => _showDeleteInventoryDialog(b),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                      ),
+                      child: const Icon(Icons.delete_forever_rounded, size: 15, color: Colors.red),
+                    ),
+                  ),
+                ),
+              ),
+            Row(children: [
+              _dCell(
+                  cols[0].w,
+                  Text('${i + 1}',
+                      style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
+              _dCell(
+                  cols[1].w,
+                  RichText(
+                    overflow: TextOverflow.ellipsis,
+                    text: TextSpan(
+                      style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
+                      children: [
+                        TextSpan(
+                          text: b['name'] ?? '',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _isDark
+                                ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
+                                : (isWarning ? _red.withValues(alpha: 0.9) : _textDark),
+                          ),
+                        ),
+                        if (b['formula'] != null && (b['formula'] as String).isNotEmpty) ...[
+                          const TextSpan(text: ' '),
+                          TextSpan(
+                            text: '(${b['formula']})',
+                            style: TextStyle(
+                              color: _isDark
+                                  ? (isWarning ? const Color(0xFFFCA5A5) : const Color(0xFF94A3B8))
+                                  : (isWarning ? _red.withValues(alpha: 0.7) : _textLight),
+                              fontWeight: FontWeight.normal,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  )),
+              _dCell(cols[2].w, _barcodeCell(barcode)),
+              _dCell(cols[3].w, _typePill(type)),
+              _dCell(
+                  cols[4].w,
+                  Text(b['dose'] ?? '—',
+                      style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5))),
+              _dCell(
+                  cols[5].w,
+                  Text(NumberFormat('#,###').format(qty),
+                      style: TextStyle(
+                          color: _isDark
+                              ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
+                              : (lowStock ? _red : _textDark),
+                          fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
+                          fontSize: 12.5))),
+              _dCell(
+                  cols[6].w,
+                  Text(expText,
+                      style: TextStyle(
+                          color: _isDark
+                              ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
+                              : (expSoon ? _red : _textDark),
+                          fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
+                          fontSize: 12.5))),
+            ]),
+          ],
+        ),
+      );
 
-    final cardContent = Container(
+      return InkWell(
+        onTap: _isDirectEditAllowed
+            ? () => _showEditSheet(b)
+            : () {
+                if (widget.isDispenser && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text(
+                        '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                      backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                      duration: const Duration(seconds: 3),
+                    ),
+                  );
+                }
+              },
+        hoverColor: _isDark ? const Color(0xFF334155) : const Color(0xFFF3F7F6),
+        child: rowContent,
+      );
+    }
+
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       decoration: BoxDecoration(
         color: _isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -1860,17 +2395,43 @@ class _InventoryPageState extends State<InventoryPage>
         ],
       ),
       clipBehavior: Clip.antiAlias,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: SizedBox(
-          width: w, 
-          child: tableWidget
-        ),
+      child: LayoutBuilder(
+        builder: (ctx, constraints) {
+          final tableContent = Column(
+            children: [
+              Container(
+                height: 38,
+                color: _isDark ? const Color(0xFF0F766E) : _teal,
+                child: Row(
+                    children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollController,
+                  padding: EdgeInsets.zero,
+                  itemCount: data.length + 1,
+                  itemBuilder: (ctx, i) => buildTableRow(i),
+                ),
+              ),
+            ],
+          );
+
+          if (w > constraints.maxWidth) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: SizedBox(
+                width: w,
+                height: constraints.maxHeight,
+                child: tableContent,
+              ),
+            );
+          }
+
+          return tableContent;
+        },
       ),
     );
-
-    return cardContent;
   }
 
   // ── Stock Cards (narrow screens) ──────────────────────────────────────────
@@ -1955,7 +2516,32 @@ class _InventoryPageState extends State<InventoryPage>
                                 fontSize: 13.5)),
                       ],
                     )),
-                    _qtyBadge(qty, lowStock),
+                    if (_canDeleteInventoryItem)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Tooltip(
+                          message: 'Delete medicine from inventory',
+                          child: InkWell(
+                            onTap: () => _showDeleteInventoryDialog(b),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                              ),
+                              child: const Icon(Icons.delete_forever_rounded, size: 15, color: Colors.red),
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      _qtyBadge(qty, lowStock),
+                    if (_canDeleteInventoryItem) ...[
+                      const SizedBox(width: 8),
+                      _qtyBadge(qty, lowStock),
+                    ],
                   ]),
                   const SizedBox(height: 10),
                   Wrap(spacing: 8, runSpacing: 6, children: [
@@ -2352,6 +2938,52 @@ class _InventoryPageState extends State<InventoryPage>
         },
       );
 
+  String _resolveCampLabel(Map<String, dynamic> data) {
+    String? rawCamp = data['campName']?.toString() ??
+        data['campLabel']?.toString() ??
+        data['campId']?.toString() ??
+        data['dispensaryId']?.toString() ??
+        data['camp']?.toString();
+
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final items = data['items'] ?? data['draftItems'];
+      if (items is List && items.isNotEmpty && items.first is Map) {
+        rawCamp = items.first['campId']?.toString() ??
+            items.first['dispensaryId']?.toString() ??
+            items.first['campName']?.toString();
+      }
+    }
+
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final orig = data['originalData'];
+      if (orig is Map) {
+        rawCamp = orig['campId']?.toString() ??
+            orig['dispensaryId']?.toString() ??
+            orig['campName']?.toString();
+      }
+    }
+
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final docId = (data['docId'] ?? data['id'] ?? '').toString().toLowerCase();
+      if (docId.contains('saddar') || docId.contains('sadd') || docId.contains('kapay')) {
+        rawCamp = 'saddar';
+      } else if (docId.contains('haji')) {
+        rawCamp = 'haji_camp';
+      }
+    }
+
+    if (rawCamp != null && rawCamp.isNotEmpty && rawCamp != 'all') {
+      if (rawCamp.toLowerCase().contains('kapay')) {
+        rawCamp = 'saddar';
+      }
+      return CampSessionService.getCampLabel(rawCamp);
+    }
+
+    return (_selectedCampFilter != null && _selectedCampFilter != 'all')
+        ? CampSessionService.getCampLabel(_selectedCampFilter!)
+        : 'Saddar Camp';
+  }
+
   Widget _requestCard(
       String docId, Map<String, dynamic> data, String status) {
     final requestType = data['requestType']?.toString() ?? '';
@@ -2413,6 +3045,8 @@ class _InventoryPageState extends State<InventoryPage>
         : (data['items'] as List?) ?? [];
     final items = rawItems.cast<Map<String, dynamic>>();
 
+    final campLabel = _resolveCampLabel(data);
+
     return Card(
       color: _green50,
       elevation: status == 'pending' ? 4 : 2,
@@ -2435,6 +3069,31 @@ class _InventoryPageState extends State<InventoryPage>
                     color: _tealDark),
               ),
             ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.holiday_village_rounded, size: 13, color: Color(0xFF0284C7)),
+                  const SizedBox(width: 4),
+                  Text(
+                    campLabel.toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF0284C7),
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
             Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -2459,6 +3118,19 @@ class _InventoryPageState extends State<InventoryPage>
                       const TextStyle(fontSize: 13, color: _textDark)),
             ]),
           ),
+          const SizedBox(height: 4),
+          Row(children: [
+            const Icon(Icons.location_on_rounded, size: 14, color: _tealDark),
+            const SizedBox(width: 6),
+            Text(
+              'Facility Camp: $campLabel',
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.bold,
+                color: _tealDark,
+              ),
+            ),
+          ]),
           const SizedBox(height: 4),
           if (ts != null)
             Row(children: [

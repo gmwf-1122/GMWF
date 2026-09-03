@@ -85,6 +85,14 @@ class UserModuleAccessService {
       return false;
     }
 
+    // RULE 2.5: HQ Manager specific exclusions (Server Control & Office Boy removed for HQ Manager only)
+    if (cleanRole == 'hq manager' || cleanRole == 'hq_manager' || cleanRole == 'headquarters manager' || cleanRole == 'hqmanager' || cleanRole == 'hq') {
+      final mod = moduleId.toLowerCase().trim();
+      if (mod == 'server_sync' || mod == 'server' || mod == 'office_boy' || mod == 'office boy' || mod == 'officeboy') {
+        return false;
+      }
+    }
+
     // RULE 3: Global Admin / CEO / HQ Manager default access
     if (cleanRole == 'global admin' || cleanRole == 'admin' || cleanRole == 'ceo' || cleanRole == 'hq manager') {
       return true;
@@ -118,6 +126,8 @@ class UserModuleAccessService {
       case 'school':
         return ['chairman', 'ceo', 'admin', 'global admin', 'principal', 'school admin', 'school teacher', 'branch manager'].contains(cleanRole);
       case 'dasterkhwaan':
+        return ['chairman', 'ceo', 'admin', 'global admin', 'server', 'office boy', 'kitchen', 'branch manager', 'supervisor'].contains(cleanRole);
+      case 'dasterkhwaan_food_log':
         return ['chairman', 'ceo', 'admin', 'global admin', 'server', 'office boy', 'kitchen', 'branch manager', 'supervisor'].contains(cleanRole);
       case 'donations':
         return ['chairman', 'ceo', 'admin', 'global admin', 'donations', 'office boy', 'global accounts', 'branch manager', 'hq manager', 'manager'].contains(cleanRole);

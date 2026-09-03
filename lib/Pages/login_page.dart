@@ -123,11 +123,17 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  bool _hasCheckedUpdate = false;
+
   Future<void> _checkConnectivityFast() async {
     final online = await _hasRealInternet();
     if (mounted && online != _isOnline) {
       setState(() => _isOnline = online);
       debugPrint('[LoginPage] Automatic connectivity check → online: $online');
+      if (online && !_hasCheckedUpdate) {
+        _hasCheckedUpdate = true;
+        UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+      }
     }
   }
 
@@ -294,7 +300,7 @@ class _LoginPageState extends State<LoginPage> {
       try {
         final nowTs = FieldValue.serverTimestamp();
         final uid = user.uid;
-        final bId = userData['branchId']?.toString() ?? 'global';
+        final bId = userData['branchId']?.toString() ?? 'all';
         FirebaseFirestore.instance.collection('users').doc(uid).set({
           'lastLoginAt': nowTs,
           'lastOnlineAt': nowTs,

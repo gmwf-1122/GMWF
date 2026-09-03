@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/quota_service.dart';
 import '../../constants/colors.dart';
 
 class DataCleanupScreen extends StatefulWidget {
@@ -82,7 +86,577 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     }
   }
 
-  // ─── Schema Auto-Heal & Backfill ─────────────────────────────────────────────
+  // ─── Schema Auto-Heal & Backfill with Interactive Preview ──────────────────
+
+  Future<void> _scanAndPreviewPatientRepairs() async {
+    setState(() {
+      _isProcessing = true;
+      _logs = ["🔍 Scanning local Hive & database for patient schema anomalies..."];
+      _progress = 0.0;
+    });
+
+    final previewItems = <_PatientRepairPreviewItem>[];
+
+    try {
+      // 1. Scan Local Hive patientsBox
+      if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+        final pBox = Hive.box(LocalStorageService.patientsBox);
+        for (final k in pBox.keys) {
+          final raw = pBox.get(k);
+          if (raw is Map) {
+            final pMap = Map<String, dynamic>.from(raw);
+            final resolvedId = LocalStorageService.resolveIndividualPatientId(pMap);
+            final currentId = (pMap['patientId'] ?? pMap['id'] ?? '').toString().trim();
+            final guard = (pMap['guardianCnic'] ?? '').toString().trim();
+            final name = (pMap['patientName'] ?? pMap['name'] ?? pMap['fullName'] ?? '').toString().trim();
+            final proposedIsAdult = guard.isEmpty && !resolvedId.contains('_child_');
+            final currentIsAdult = pMap['isAdult'];
+
+            bool needsRepair = false;
+            if (resolvedId.isNotEmpty && (currentId.isEmpty || currentId != resolvedId)) needsRepair = true;
+            if (currentIsAdult == null) needsRepair = true;
+            if (pMap['patientName'] == null && name.isNotEmpty) needsRepair = true;
+
+            if (needsRepair) {
+              previewItems.add(_PatientRepairPreviewItem(
+                key: k.toString(),
+                branchId: (pMap['branchId'] ?? '').toString(),
+                patientName: name.isNotEmpty ? name : 'Unknown Patient',
+                cnic: (pMap['cnic'] ?? '').toString(),
+                guardianCnic: guard,
+                currentPatientId: currentId.isNotEmpty ? currentId : '(Missing ID)',
+                proposedPatientId: resolvedId,
+                currentIsAdult: currentIsAdult,
+                proposedIsAdult: proposedIsAdult,
+                recordType: 'Local Patient Profile',
+                source: 'hive_patients',
+                rawData: pMap,
+              ));
+            }
+          }
+        }
+      }
+
+      // 2. Scan Local Hive entriesBox
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final eBox = Hive.box(LocalStorageService.entriesBox);
+        for (final k in eBox.keys) {
+          final raw = eBox.get(k);
+          if (raw is Map) {
+            final eMap = Map<String, dynamic>.from(raw);
+            final resolvedId = LocalStorageService.resolveIndividualPatientId(eMap);
+            final currentId = (eMap['patientId'] ?? eMap['id'] ?? '').toString().trim();
+            final name = (eMap['patientName'] ?? eMap['name'] ?? eMap['fullName'] ?? '').toString().trim();
+            final rawQueue = eMap['queueType'] ?? eMap['category'] ?? eMap['status'];
+            final resolvedQueue = SyncService().resolveQueueType(rawQueue?.toString());
+            final currentQueue = eMap['queueType']?.toString().trim();
+
+            bool needsRepair = false;
+            if (resolvedId.isNotEmpty && (currentId.isEmpty || currentId != resolvedId)) needsRepair = true;
+            if (currentQueue == null || currentQueue.isEmpty || currentQueue != resolvedQueue) needsRepair = true;
+
+            if (needsRepair) {
+              previewItems.add(_PatientRepairPreviewItem(
+                key: k.toString(),
+                branchId: (eMap['branchId'] ?? '').toString(),
+                patientName: name.isNotEmpty ? name : 'Unknown Patient',
+                cnic: (eMap['patientCnic'] ?? eMap['cnic'] ?? '').toString(),
+                guardianCnic: (eMap['guardianCnic'] ?? '').toString(),
+                currentPatientId: currentId.isNotEmpty ? currentId : '(Missing ID)',
+                proposedPatientId: resolvedId.isNotEmpty ? resolvedId : currentId,
+                currentIsAdult: eMap['isAdult'],
+                proposedIsAdult: resolvedId.contains('_child_') ? false : true,
+                recordType: 'Token Queue Entry (${eMap['serial'] ?? k}) [$resolvedQueue]',
+                source: 'hive_entries',
+                rawData: {...eMap, 'queueType': resolvedQueue},
+              ));
+            }
+          }
+        }
+      }
+
+      _log("✅ Scan complete: Found ${previewItems.length} records requiring repair.");
+    } catch (e) {
+      _log("❌ Error during diagnostic scan: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _progress = 1.0;
+        });
+
+        if (previewItems.isEmpty) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+                  SizedBox(width: 10),
+                  Text("All Records Clean"),
+                ],
+              ),
+              content: const Text(
+                "All local patient profiles, token entries, and prescriptions have valid individual Patient IDs and schema flags.\n\nNo repair action is needed.",
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text("OK"),
+                ),
+              ],
+            ),
+          );
+        } else {
+          _showPatientRepairPreviewDialog(previewItems);
+        }
+      }
+    }
+  }
+
+  void _showPatientRepairPreviewDialog(List<_PatientRepairPreviewItem> items) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return _PatientRepairPreviewModal(
+          initialItems: items,
+          onApplyFixes: (selectedItems) async {
+            Navigator.pop(ctx);
+            await _executeSelectedPatientRepairs(selectedItems);
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _executeSelectedPatientRepairs(List<_PatientRepairPreviewItem> selectedItems) async {
+    setState(() {
+      _isProcessing = true;
+      _logs = ["🚀 Applying fixes to ${selectedItems.length} selected records..."];
+      _progress = 0.0;
+    });
+
+    int fixedLocal = 0;
+    try {
+      final pBox = Hive.isBoxOpen(LocalStorageService.patientsBox) ? Hive.box(LocalStorageService.patientsBox) : null;
+      final eBox = Hive.isBoxOpen(LocalStorageService.entriesBox) ? Hive.box(LocalStorageService.entriesBox) : null;
+      final prBox = Hive.isBoxOpen(LocalStorageService.prescriptionsBox) ? Hive.box(LocalStorageService.prescriptionsBox) : null;
+
+      for (int i = 0; i < selectedItems.length; i++) {
+        final item = selectedItems[i];
+        final updatedData = Map<String, dynamic>.from(item.rawData);
+        updatedData['patientId'] = item.proposedPatientId;
+        updatedData['id'] = item.proposedPatientId;
+        updatedData['isAdult'] = item.proposedIsAdult;
+        if (item.patientName.isNotEmpty && item.patientName != 'Unknown Patient') {
+          updatedData['patientName'] = item.patientName;
+          updatedData['name'] = item.patientName;
+        }
+
+        final sanitized = LocalStorageService.sanitize(updatedData);
+
+        if (item.source == 'hive_patients' && pBox != null) {
+          await pBox.put(item.key, sanitized);
+          if (item.proposedPatientId.isNotEmpty && item.key != item.proposedPatientId) {
+            await pBox.put(item.proposedPatientId, sanitized);
+          }
+          final bId = (item.branchId.isNotEmpty ? item.branchId : widget.key?.toString() ?? '').trim();
+          if (bId.isNotEmpty) {
+            await LocalStorageService.enqueueSync({
+              'type': 'save_patient',
+              'branchId': bId,
+              'patientId': item.proposedPatientId,
+              'data': sanitized,
+            });
+          }
+          fixedLocal++;
+        } else if (item.source == 'hive_entries' && eBox != null) {
+          await eBox.put(item.key, sanitized);
+          final bId = (item.branchId.isNotEmpty ? item.branchId : '').trim();
+          final serial = (sanitized['serial'] ?? sanitized['id'] ?? '').toString().trim();
+          if (bId.isNotEmpty && serial.isNotEmpty) {
+            await LocalStorageService.enqueueSync({
+              'type': 'save_entry',
+              'branchId': bId,
+              'serial': serial,
+              'data': sanitized,
+            });
+          }
+          fixedLocal++;
+        } else if (item.source == 'hive_prescriptions' && prBox != null) {
+          await prBox.put(item.key, sanitized);
+          fixedLocal++;
+        }
+
+        setState(() {
+          _progress = (i + 1) / selectedItems.length;
+        });
+      }
+
+      _log("🎉 Successfully updated $fixedLocal local records! Enqueued changes for background sync.");
+      Future.delayed(const Duration(milliseconds: 500), () {
+        SyncService().triggerUpload();
+      });
+    } catch (e) {
+      _log("❌ Error applying patient fixes: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _progress = 1.0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Successfully repaired $fixedLocal patient records and scheduled sync!"),
+            backgroundColor: AppColors.primary,
+          ),
+        );
+      }
+    }
+  }
+
+  // ─── Serials ↔ Dispensary Reconciliation with Interactive Preview ─────────────
+
+  Future<void> _scanAndPreviewSerialsDispensary() async {
+    setState(() {
+      _isProcessing = true;
+      _logs = ["🔍 Scanning local Hive & database for all waiting serials & dispensary records..."];
+      _progress = 0.0;
+    });
+
+    final previewItems = <_SerialsDispensaryPreviewItem>[];
+    final seenSerials = <String>{};
+
+    try {
+      // 1. SCAN ALL LOCAL HIVE BOXES (entries, dispensary, prescriptions)
+      _log("📦 Scanning local Hive cache (entries, dispensary, prescriptions)...");
+      final eBox = Hive.isBoxOpen(LocalStorageService.entriesBox) ? Hive.box(LocalStorageService.entriesBox) : null;
+      final dBox = Hive.isBoxOpen(LocalStorageService.dispensaryBox) ? Hive.box(LocalStorageService.dispensaryBox) : null;
+      final prBox = Hive.isBoxOpen(LocalStorageService.prescriptionsBox) ? Hive.box(LocalStorageService.prescriptionsBox) : null;
+
+      final localSerialMap = <String, Map<String, dynamic>>{};
+      final localDispensaryMap = <String, Map<String, dynamic>>{};
+      final localPrescriptionMap = <String, Map<String, dynamic>>{};
+
+      if (eBox != null) {
+        for (final raw in eBox.values) {
+          if (raw is Map) {
+            final data = Map<String, dynamic>.from(raw);
+            final s = (data['serial'] ?? data['id'] ?? '').toString().trim().toUpperCase();
+            if (s.isNotEmpty) localSerialMap[s] = data;
+          }
+        }
+      }
+
+      if (dBox != null) {
+        for (final raw in dBox.values) {
+          if (raw is Map) {
+            final data = Map<String, dynamic>.from(raw);
+            final s = (data['serial'] ?? data['id'] ?? '').toString().trim().toUpperCase();
+            if (s.isNotEmpty) localDispensaryMap[s] = data;
+          }
+        }
+      }
+
+      if (prBox != null) {
+        for (final raw in prBox.values) {
+          if (raw is Map) {
+            final data = Map<String, dynamic>.from(raw);
+            final s = (data['serial'] ?? data['id'] ?? '').toString().trim().toUpperCase();
+            if (s.isNotEmpty) localPrescriptionMap[s] = data;
+          }
+        }
+      }
+
+      // Collect all unique serial keys from local Hive
+      final allLocalKeys = <String>{...localSerialMap.keys, ...localDispensaryMap.keys, ...localPrescriptionMap.keys};
+
+      for (final sKey in allLocalKeys) {
+        final serData = localSerialMap[sKey];
+        final dispData = localDispensaryMap[sKey] ?? {};
+        final prescData = localPrescriptionMap[sKey] ?? {};
+
+        final sStatus = (serData?['dispenseStatus'] ?? serData?['status'] ?? 'waiting').toString().toLowerCase();
+        final dStatus = (dispData['dispenseStatus'] ?? dispData['status'] ?? '').toString().toLowerCase();
+
+        final pName = (serData?['patientName'] ?? dispData['patientName'] ?? dispData['name'] ?? prescData['patientName'] ?? 'Unknown Patient').toString();
+        final branch = (serData?['branchId'] ?? dispData['branchId'] ?? prescData['branchId'] ?? '').toString();
+        final date = (dispData['dateKey'] ?? serData?['dateKey'] ?? prescData['dateKey'] ?? '').toString();
+
+        final rawQT = serData?['queueType'] ?? dispData['queueType'] ?? prescData['queueType'] ?? serData?['category'] ?? dispData['category'] ?? serData?['status'] ?? dispData['status'];
+        final qType = SyncService().resolveQueueType(rawQT?.toString());
+        final hasPrescription = dispData['prescription'] != null || dispData['medicines'] != null || prescData['medicines'] != null || prescData['prescription'] != null || serData?['prescription'] != null || serData?['medicines'] != null;
+
+        // Include ALL serials that are in waiting status, or have prescription data, or have dispensary documents
+        if (sStatus != 'dispensed' || hasPrescription || dispData.isNotEmpty) {
+          seenSerials.add(sKey);
+          previewItems.add(_SerialsDispensaryPreviewItem(
+            serial: sKey,
+            branchId: branch,
+            dateKey: date,
+            patientName: pName,
+            queueType: qType,
+            currentStatus: sStatus,
+            proposedStatus: 'dispensed',
+            hasPrescriptionMerge: hasPrescription,
+            hasMatchingSerial: serData != null,
+            serialRef: null,
+            dispensaryRef: null,
+            dispensaryData: {
+              ...dispData,
+              'queueType': qType,
+              if (prescData.isNotEmpty && dispData['prescription'] == null) 'prescription': prescData['prescription'] ?? prescData['medicines'],
+              if (prescData.isNotEmpty && dispData['medicines'] == null) 'medicines': prescData['medicines'],
+            },
+            serialData: serData,
+          ));
+        }
+      }
+
+      _log("✨ Found ${previewItems.length} records in local Hive storage.");
+
+      _log("✅ Local Hive scan complete: Found ${previewItems.length} records to reconcile (0 Cloud Reads used).");
+    } catch (e) {
+      _log("❌ Reconciliation scan failed: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _progress = 1.0;
+        });
+
+        if (previewItems.isEmpty) {
+          showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+                  SizedBox(width: 10),
+                  Text("Serials In Sync"),
+                ],
+              ),
+              content: const Text(
+                "All serials and dispensary records are completely in sync and marked as dispensed.\n\nNo reconciliation needed.",
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text("OK"),
+                ),
+              ],
+            ),
+          );
+        } else {
+          _showSerialsDispensaryPreviewDialog(previewItems);
+        }
+      }
+    }
+  }
+
+  void _showSerialsDispensaryPreviewDialog(List<_SerialsDispensaryPreviewItem> items) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return _SerialsDispensaryPreviewModal(
+          initialItems: items,
+          onApplyFixes: (selectedItems) async {
+            Navigator.pop(ctx);
+            await _executeSelectedSerialsReconciliation(selectedItems);
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _executeSelectedSerialsReconciliation(List<_SerialsDispensaryPreviewItem> selectedItems) async {
+    setState(() {
+      _isProcessing = true;
+      _logs = ["🚀 Reconciling & backfilling ${selectedItems.length} selected serial records..."];
+      _progress = 0.0;
+    });
+
+    int mergedCount = 0;
+    int deletedCount = 0;
+
+    try {
+      final eBox = Hive.isBoxOpen(LocalStorageService.entriesBox) ? Hive.box(LocalStorageService.entriesBox) : null;
+      final dBox = Hive.isBoxOpen(LocalStorageService.dispensaryBox) ? Hive.box(LocalStorageService.dispensaryBox) : null;
+      final prBox = Hive.isBoxOpen(LocalStorageService.prescriptionsBox) ? Hive.box(LocalStorageService.prescriptionsBox) : null;
+
+      for (int i = 0; i < selectedItems.length; i++) {
+        final item = selectedItems[i];
+        final serialRef = item.serialRef;
+        final dispRef = item.dispensaryRef;
+        final dispensaryData = Map<String, dynamic>.from(item.dispensaryData);
+
+        // Also check if prescriptionsBox has additional clinical data for this serial
+        if (prBox != null) {
+          final pRaw = prBox.get(item.serial) ?? prBox.get(item.serial.toLowerCase()) ?? prBox.get(item.serial.toUpperCase());
+          if (pRaw is Map) {
+            final pMap = Map<String, dynamic>.from(pRaw);
+            if (dispensaryData['prescription'] == null && pMap['prescription'] != null) dispensaryData['prescription'] = pMap['prescription'];
+            if (dispensaryData['medicines'] == null && pMap['medicines'] != null) dispensaryData['medicines'] = pMap['medicines'];
+            if (dispensaryData['doctorName'] == null && pMap['doctorName'] != null) dispensaryData['doctorName'] = pMap['doctorName'];
+            if (dispensaryData['doctorId'] == null && pMap['doctorId'] != null) dispensaryData['doctorId'] = pMap['doctorId'];
+            if (dispensaryData['daysOfMedicine'] == null && pMap['daysOfMedicine'] != null) dispensaryData['daysOfMedicine'] = pMap['daysOfMedicine'];
+            if (dispensaryData['vitals'] == null && pMap['vitals'] != null) dispensaryData['vitals'] = pMap['vitals'];
+          }
+        }
+
+        // 1. UPDATE / CREATE IN LOCAL HIVE ENTRIES BOX FIRST!
+        if (eBox != null) {
+          final sUpper = item.serial.toUpperCase();
+          final sLower = item.serial.toLowerCase();
+          final rawEntry = eBox.get(sUpper) ?? eBox.get(sLower) ?? eBox.get(item.serial);
+          final updatedEntry = rawEntry != null && rawEntry is Map ? Map<String, dynamic>.from(rawEntry) : <String, dynamic>{};
+
+          final qType = SyncService().resolveQueueType(
+            dispensaryData['queueType']?.toString() ??
+            item.queueType
+          );
+
+          updatedEntry['serial'] = item.serial;
+          updatedEntry['id'] = item.serial;
+          updatedEntry['queueType'] = qType;
+          if (item.branchId.isNotEmpty) updatedEntry['branchId'] = item.branchId;
+          if (item.dateKey.isNotEmpty) updatedEntry['dateKey'] = item.dateKey;
+          if (item.patientName.isNotEmpty && item.patientName != 'Unknown Patient') updatedEntry['patientName'] = item.patientName;
+          
+          updatedEntry['dispenseStatus'] = 'dispensed';
+          updatedEntry['status'] = 'completed';
+          
+          if (dispensaryData['prescription'] != null) updatedEntry['prescription'] = dispensaryData['prescription'];
+          if (dispensaryData['medicines'] != null) updatedEntry['medicines'] = dispensaryData['medicines'];
+          if (dispensaryData['doctorName'] != null) updatedEntry['doctorName'] = dispensaryData['doctorName'];
+          if (dispensaryData['doctorId'] != null) updatedEntry['doctorId'] = dispensaryData['doctorId'];
+          if (dispensaryData['daysOfMedicine'] != null) updatedEntry['daysOfMedicine'] = dispensaryData['daysOfMedicine'];
+          if (dispensaryData['vitals'] != null) updatedEntry['vitals'] = dispensaryData['vitals'];
+          if (dispensaryData['charges'] != null) updatedEntry['charges'] = dispensaryData['charges'];
+          if (dispensaryData['receivedAmount'] != null) updatedEntry['receivedAmount'] = dispensaryData['receivedAmount'];
+
+          final sanitized = LocalStorageService.sanitize(updatedEntry);
+          await eBox.put(sUpper, sanitized);
+          await eBox.put(sLower, sanitized);
+        }
+
+        // 2. Enqueue Sync for offline/online synchronization
+        final bId = item.branchId.isNotEmpty ? item.branchId : (widget.key?.toString() ?? '');
+        final qType = SyncService().resolveQueueType(
+          dispensaryData['queueType']?.toString() ??
+          item.queueType
+        );
+        if (bId.isNotEmpty && item.serial.isNotEmpty) {
+          await LocalStorageService.enqueueSync({
+            'type': 'save_entry',
+            'branchId': bId,
+            'serial': item.serial,
+            'queueType': qType,
+            'data': {
+              'serial': item.serial,
+              'id': item.serial,
+              'patientName': item.patientName,
+              'branchId': item.branchId,
+              'dateKey': item.dateKey,
+              'queueType': qType,
+              'dispenseStatus': 'dispensed',
+              'status': 'completed',
+              if (dispensaryData['prescription'] != null) 'prescription': dispensaryData['prescription'],
+              if (dispensaryData['medicines'] != null) 'medicines': dispensaryData['medicines'],
+              if (dispensaryData['doctorName'] != null) 'doctorName': dispensaryData['doctorName'],
+              if (dispensaryData['doctorId'] != null) 'doctorId': dispensaryData['doctorId'],
+              if (dispensaryData['daysOfMedicine'] != null) 'daysOfMedicine': dispensaryData['daysOfMedicine'],
+              if (dispensaryData['vitals'] != null) 'vitals': dispensaryData['vitals'],
+              if (dispensaryData['charges'] != null) 'charges': dispensaryData['charges'],
+              if (dispensaryData['receivedAmount'] != null) 'receivedAmount': dispensaryData['receivedAmount'],
+            }
+          });
+        }
+
+        // 3. Attempt direct cloud write if available, otherwise handled by syncQueueBox
+        DocumentReference? targetSerialRef = serialRef;
+        if (targetSerialRef == null && item.branchId.isNotEmpty && item.dateKey.isNotEmpty && item.serial.isNotEmpty) {
+          targetSerialRef = _fs.collection('branches').doc(item.branchId).collection('serials').doc(item.dateKey).collection(qType).doc(item.serial);
+        }
+
+        if (targetSerialRef != null) {
+          try {
+            final mergePayload = <String, dynamic>{
+              'serial': item.serial,
+              'id': item.serial,
+              'patientName': item.patientName,
+              'branchId': item.branchId,
+              'dateKey': item.dateKey,
+              'queueType': qType,
+              'dispenseStatus': 'dispensed',
+              'status': 'completed',
+              'updatedAt': FieldValue.serverTimestamp(),
+            };
+            if (dispensaryData['prescription'] != null) mergePayload['prescription'] = dispensaryData['prescription'];
+            if (dispensaryData['medicines'] != null) mergePayload['medicines'] = dispensaryData['medicines'];
+            if (dispensaryData['doctorName'] != null) mergePayload['doctorName'] = dispensaryData['doctorName'];
+            if (dispensaryData['doctorId'] != null) mergePayload['doctorId'] = dispensaryData['doctorId'];
+            if (dispensaryData['daysOfMedicine'] != null) mergePayload['daysOfMedicine'] = dispensaryData['daysOfMedicine'];
+            if (dispensaryData['vitals'] != null) mergePayload['vitals'] = dispensaryData['vitals'];
+            if (dispensaryData['charges'] != null) mergePayload['charges'] = dispensaryData['charges'];
+            if (dispensaryData['receivedAmount'] != null) mergePayload['receivedAmount'] = dispensaryData['receivedAmount'];
+
+            await targetSerialRef.set(mergePayload, SetOptions(merge: true));
+            mergedCount++;
+          } catch (cloudWriteErr) {
+            if (QuotaService.isQuotaError(cloudWriteErr)) {
+              QuotaService.recordQuotaExceeded(error: cloudWriteErr);
+            }
+          }
+        }
+
+        if (dispRef != null) {
+          try {
+            await dispRef.delete();
+            deletedCount++;
+          } catch (_) {}
+        }
+
+        setState(() {
+          _progress = (i + 1) / selectedItems.length;
+        });
+      }
+
+      _log("✨ Reconciliation complete: Merged and copied clinical data to $mergedCount serials, scheduled sync.");
+      Future.delayed(const Duration(milliseconds: 500), () {
+        SyncService().triggerUpload();
+      });
+    } catch (e) {
+      _log("❌ Reconciliation execution failed: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _progress = 1.0;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Reconciliation complete: Merged ${selectedItems.length} records and enqueued for sync."),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    }
+  }
 
   Future<void> _fixAllLegacyDataSchema() async {
     setState(() {
@@ -1491,6 +2065,38 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isProcessing ? null : _scanAndPreviewPatientRepairs,
+                    icon: const Icon(Icons.preview_rounded),
+                    label: const Text('Preview & Repair Patient IDs'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0D9488),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _isProcessing ? null : _scanAndPreviewSerialsDispensary,
+                    icon: const Icon(Icons.compare_arrows_rounded),
+                    label: const Text('Preview & Fix Serials/Dispensary'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF7C3AED),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           
           Expanded(
             child: _activeTab == 0 
@@ -2620,6 +3226,720 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     ),
                     child: const Text("Delete Prescription (Safe)"),
                   ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Diagnostic Preview Model & Interactive Review Modal ──────────────────────
+
+class _PatientRepairPreviewItem {
+  final String key;
+  final String branchId;
+  final String patientName;
+  final String cnic;
+  final String guardianCnic;
+  final String currentPatientId;
+  final String proposedPatientId;
+  final bool? currentIsAdult;
+  final bool proposedIsAdult;
+  final String recordType;
+  final String source;
+  final Map<String, dynamic> rawData;
+  bool isSelected;
+
+  _PatientRepairPreviewItem({
+    required this.key,
+    required this.branchId,
+    required this.patientName,
+    required this.cnic,
+    required this.guardianCnic,
+    required this.currentPatientId,
+    required this.proposedPatientId,
+    required this.currentIsAdult,
+    required this.proposedIsAdult,
+    required this.recordType,
+    required this.source,
+    required this.rawData,
+    this.isSelected = true,
+  });
+}
+
+class _PatientRepairPreviewModal extends StatefulWidget {
+  final List<_PatientRepairPreviewItem> initialItems;
+  final Future<void> Function(List<_PatientRepairPreviewItem> selectedItems) onApplyFixes;
+
+  const _PatientRepairPreviewModal({
+    required this.initialItems,
+    required this.onApplyFixes,
+  });
+
+  @override
+  State<_PatientRepairPreviewModal> createState() => _PatientRepairPreviewModalState();
+}
+
+class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> {
+  late List<_PatientRepairPreviewItem> _items;
+  String _searchQuery = '';
+  bool _selectAll = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.initialItems);
+  }
+
+  List<_PatientRepairPreviewItem> get _filteredItems {
+    if (_searchQuery.trim().isEmpty) return _items;
+    final q = _searchQuery.toLowerCase().trim();
+    return _items.where((i) {
+      return i.patientName.toLowerCase().contains(q) ||
+          i.cnic.toLowerCase().contains(q) ||
+          i.guardianCnic.toLowerCase().contains(q) ||
+          i.proposedPatientId.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  int get _selectedCount => _items.where((i) => i.isSelected).length;
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredItems;
+    final theme = Theme.of(context);
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Container(
+        width: 850,
+        height: 650,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header Row
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.fact_check_rounded, color: Color(0xFF0D9488), size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Patient ID & Schema Repair Preview",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.navy),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        "Review proposed individual IDs and schema updates before applying changes.",
+                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Search Bar & Filter Controls
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: "Search patient name, CNIC, or ID...",
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.gray50,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: AppColors.gray300),
+                      ),
+                    ),
+                    onChanged: (val) => setState(() => _searchQuery = val),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                FilterChip(
+                  label: Text(_selectAll ? "Deselect All" : "Select All"),
+                  selected: _selectAll,
+                  onSelected: (val) {
+                    setState(() {
+                      _selectAll = val;
+                      for (final it in _items) {
+                        it.isSelected = val;
+                      }
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Diagnostic Summary Counter
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFBBF7D0)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 16, color: Color(0xFF16A34A)),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Total Detected: ${_items.length} records  •  Selected for Fix: $_selectedCount records",
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF15803D)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // List of Review Cards
+            Expanded(
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Text(
+                        _searchQuery.isEmpty ? "No records require repair." : "No matching records found for '$_searchQuery'",
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (ctx, idx) {
+                        final item = filtered[idx];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(
+                              color: item.isSelected ? const Color(0xFF0D9488) : AppColors.gray200,
+                              width: item.isSelected ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Checkbox(
+                                  value: item.isSelected,
+                                  activeColor: const Color(0xFF0D9488),
+                                  onChanged: (val) {
+                                    setState(() {
+                                      item.isSelected = val ?? false;
+                                      _selectAll = _items.every((i) => i.isSelected);
+                                    });
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            item.patientName,
+                                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppColors.navy),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.gray100,
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              item.recordType,
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.gray700),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        children: [
+                                          if (item.cnic.isNotEmpty)
+                                            Text(
+                                              "CNIC: ${item.cnic}  ",
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                            ),
+                                          if (item.guardianCnic.isNotEmpty)
+                                            Text(
+                                              "Guardian: ${item.guardianCnic}  ",
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      // Diff Chip Box
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Row(
+                                                children: [
+                                                  const Text("Current ID: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  Text(
+                                                    item.currentPatientId,
+                                                    style: const TextStyle(fontSize: 11.5, color: Colors.red, fontWeight: FontWeight.bold),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.grey),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Row(
+                                                children: [
+                                                  const Text("Proposed Clean ID: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  Text(
+                                                    item.proposedPatientId,
+                                                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: item.proposedIsAdult ? const Color(0xFFDBEAFE) : const Color(0xFFFEF3C7),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                item.proposedIsAdult ? "Adult" : "Child",
+                                                style: TextStyle(
+                                                  fontSize: 10.5,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: item.proposedIsAdult ? const Color(0xFF1E40AF) : const Color(0xFF92400E),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 16),
+
+            // Footer Actions
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text("Cancel"),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _selectedCount == 0
+                      ? null
+                      : () => widget.onApplyFixes(_items.where((i) => i.isSelected).toList()),
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: Text("Apply Fixes to Selected ($_selectedCount)"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D9488),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Serials ↔ Dispensary Reconciliation Preview Model & Modal ───────────────
+
+class _SerialsDispensaryPreviewItem {
+  final String serial;
+  final String branchId;
+  final String dateKey;
+  final String patientName;
+  final String queueType;
+  final String currentStatus;
+  final String proposedStatus;
+  final bool hasPrescriptionMerge;
+  final bool hasMatchingSerial;
+  final DocumentReference? serialRef;
+  final DocumentReference? dispensaryRef;
+  final Map<String, dynamic> dispensaryData;
+  final Map<String, dynamic>? serialData;
+  bool isSelected;
+
+  _SerialsDispensaryPreviewItem({
+    required this.serial,
+    required this.branchId,
+    required this.dateKey,
+    required this.patientName,
+    required this.queueType,
+    required this.currentStatus,
+    required this.proposedStatus,
+    required this.hasPrescriptionMerge,
+    required this.hasMatchingSerial,
+    required this.serialRef,
+    required this.dispensaryRef,
+    required this.dispensaryData,
+    required this.serialData,
+    this.isSelected = true,
+  });
+}
+
+class _SerialsDispensaryPreviewModal extends StatefulWidget {
+  final List<_SerialsDispensaryPreviewItem> initialItems;
+  final Future<void> Function(List<_SerialsDispensaryPreviewItem> selectedItems) onApplyFixes;
+
+  const _SerialsDispensaryPreviewModal({
+    required this.initialItems,
+    required this.onApplyFixes,
+  });
+
+  @override
+  State<_SerialsDispensaryPreviewModal> createState() => _SerialsDispensaryPreviewModalState();
+}
+
+class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPreviewModal> {
+  late List<_SerialsDispensaryPreviewItem> _items;
+  String _searchQuery = '';
+  bool _selectAll = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = List.from(widget.initialItems);
+  }
+
+  List<_SerialsDispensaryPreviewItem> get _filteredItems {
+    if (_searchQuery.trim().isEmpty) return _items;
+    final q = _searchQuery.toLowerCase().trim();
+    return _items.where((i) {
+      return i.patientName.toLowerCase().contains(q) ||
+          i.serial.toLowerCase().contains(q) ||
+          i.branchId.toLowerCase().contains(q) ||
+          i.dateKey.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  int get _selectedCount => _items.where((i) => i.isSelected).length;
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredItems;
+
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      child: Container(
+        width: 850,
+        height: 650,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header Row
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.compare_arrows_rounded, color: Color(0xFF7C3AED), size: 28),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        "Serials ↔ Dispensary Reconciliation Preview",
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.navy),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        "Review clinical data merges and legacy dispensary document cleanup before applying.",
+                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+
+            // Search Bar & Filter Controls
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: "Search serial, patient name, or branch...",
+                      prefixIcon: const Icon(Icons.search, size: 20),
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.gray50,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: BorderSide(color: AppColors.gray300),
+                      ),
+                    ),
+                    onChanged: (val) => setState(() => _searchQuery = val),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                FilterChip(
+                  label: Text(_selectAll ? "Deselect All" : "Select All"),
+                  selected: _selectAll,
+                  onSelected: (val) {
+                    setState(() {
+                      _selectAll = val;
+                      for (final it in _items) {
+                        it.isSelected = val;
+                      }
+                    });
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Counter Panel
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F3FF),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFDDD6FE)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 16, color: Color(0xFF7C3AED)),
+                  const SizedBox(width: 8),
+                  Text(
+                    "Total Discrepancies: ${_items.length} records  •  Selected to Fix: $_selectedCount records",
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF6D28D9)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // List of Review Cards
+            Expanded(
+              child: filtered.isEmpty
+                  ? Center(
+                      child: Text(
+                        _searchQuery.isEmpty ? "No discrepancies found." : "No matching records found for '$_searchQuery'",
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: filtered.length,
+                      itemBuilder: (ctx, idx) {
+                        final item = filtered[idx];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            side: BorderSide(
+                              color: item.isSelected ? const Color(0xFF7C3AED) : AppColors.gray200,
+                              width: item.isSelected ? 1.5 : 1.0,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Checkbox(
+                                  value: item.isSelected,
+                                  activeColor: const Color(0xFF7C3AED),
+                                  onChanged: (val) {
+                                    setState(() {
+                                      item.isSelected = val ?? false;
+                                      _selectAll = _items.every((i) => i.isSelected);
+                                    });
+                                  },
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            "Serial: ${item.serial}",
+                                            style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: AppColors.navy),
+                                          ),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.gray100,
+                                              borderRadius: BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              "Branch: ${item.branchId.toUpperCase()} • Date: ${item.dateKey}",
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.gray700),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        "Patient: ${item.patientName}",
+                                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      // Diff / Action Box
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: AppColors.gray50,
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Expanded(
+                                              child: Row(
+                                                children: [
+                                                  const Text("Current Status: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  Text(
+                                                    item.currentStatus,
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      color: item.currentStatus == 'dispensed' ? Colors.green : Colors.orange.shade800,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.grey),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Row(
+                                                children: [
+                                                  const Text("Target Status: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  Text(
+                                                    item.proposedStatus,
+                                                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF7C3AED), fontWeight: FontWeight.bold),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            if (item.hasPrescriptionMerge)
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFFD1FAE5),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: const Text(
+                                                  "+ Prescription",
+                                                  style: TextStyle(
+                                                    fontSize: 10.5,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Color(0xFF065F46),
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+            const SizedBox(height: 16),
+
+            // Footer Actions
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text("Cancel"),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _selectedCount == 0
+                      ? null
+                      : () => widget.onApplyFixes(_items.where((i) => i.isSelected).toList()),
+                  icon: const Icon(Icons.check_circle_outline, size: 18),
+                  label: Text("Apply Reconciliation to Selected ($_selectedCount)"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
               ],
             ),
           ],

@@ -8,6 +8,8 @@ import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/staff_patient_link_service.dart';
+import 'package:gmwf/widgets/app_skeleton.dart';
 
 // Alias kept for backwards compatibility with existing call sites
 typedef PatientHistory = PatientHistoryPanel;
@@ -43,13 +45,6 @@ class _IdHelper {
     return false;
   }
 
-  static List<List<T>> chunk<T>(List<T> list, int size) {
-    final result = <List<T>>[];
-    for (int i = 0; i < list.length; i += size) {
-      result.add(list.sublist(i, (i + size).clamp(0, list.length)));
-    }
-    return result;
-  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -79,11 +74,22 @@ class _PatientIdentity {
           patientId: '', cnic: '', guardianCnic: '', name: '', isAdult: true);
     }
     final d = data ?? {};
-    String pid      = (d['patientId'] ?? d['id'] ?? '').toString().trim();
+    String pid      = (d['patientId'] ?? '').toString().trim();
     String cnic     = (d['cnic'] ?? d['patientCnic'] ?? rawCnic ?? '').toString().trim();
     String guardian = (d['guardianCnic'] ?? '').toString().trim();
-    String name     = (d['name'] ?? d['patientName'] ?? '').toString().trim();
+    String name     = (d['name'] ?? d['patientName'] ?? d['fullName'] ?? '').toString().trim();
     bool isAdult    = d['isAdult'] as bool? ?? cnic.isNotEmpty;
+
+    // If patientId is empty or was set to a daily serial string (e.g. 030926-HAJI-007),
+    // resolve the individual patient ID from local storage
+    if (pid.isEmpty || (pid.contains('-') && RegExp(r'^\d{6}-').hasMatch(pid))) {
+      final resolved = LocalStorageService.resolveIndividualPatientId(d);
+      if (resolved.isNotEmpty && !RegExp(r'^\d{6}-').hasMatch(resolved)) {
+        pid = resolved;
+      } else if (pid.isEmpty) {
+        pid = (d['id'] ?? '').toString().trim();
+      }
+    }
 
     // Normalise — strip hyphens for comparison
     cnic     = cnic.replaceAll('-', '');
@@ -106,9 +112,10 @@ class _PatientIdentity {
     if (!isAdult && guardianCnic.isNotEmpty && name.isNotEmpty) {
       return '${guardianCnic}_child_${name.replaceAll(RegExp(r'[^a-z0-9]'), '')}';
     }
-    if (patientId.isNotEmpty) return patientId;
+    if (patientId.isNotEmpty && !RegExp(r'^\d{6}-').hasMatch(patientId)) return patientId;
     if (cnic.isNotEmpty) return cnic;
-    return '';
+    if (name.isNotEmpty) return 'name_${name.replaceAll(RegExp(r'[^a-z0-9]'), '')}';
+    return patientId;
   }
 
   bool get isEmpty => key.isEmpty;
@@ -167,9 +174,7 @@ class PatientHistoryPanel extends StatefulWidget {
     this.patientCnic,
     this.onRepeatLast,
     this.compactMode = false,
-  }) : assert(
-            patientData != null || patientCnic != null,
-            'Provide patientData or patientCnic');
+  });
 
   @override
   State<PatientHistoryPanel> createState() => _PatientHistoryPanelState();
@@ -189,6 +194,16 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
   // The identity of the patient whose data is currently displayed (or loading).
   _PatientIdentity _currentIdentity = const _PatientIdentity(
       patientId: '', cnic: '', guardianCnic: '', name: '', isAdult: true);
+
+  bool _getIsDark(BuildContext context) {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
+      }
+    } catch (_) {}
+    return Theme.of(context).brightness == Brightness.dark;
+  }
 
   @override
   void initState() {
@@ -224,192 +239,239 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
   }
 
   Future<void> _loadHistory(_PatientIdentity identity) async {
-    // FIX-4: grab a token; if it changes we've been superseded
     final token = ++_loadToken;
-
     debugPrint('[PatientHistory] Loading history for: ${identity.key}');
 
-    // Optionally enrich identity from Firestore patient doc
-    Map<String, dynamic>? firestorePatient;
-    for (final variant in _IdHelper.variants(
-        identity.patientId.isNotEmpty ? identity.patientId : identity.cnic)) {
-      if (variant.isEmpty) continue;
+    final List<_HistoryEntry> found = [];
+    final Set<String> seen = {};
+    final searchIds = identity.searchIds;
+
+    // ── Step 1: Instant Local Hive Scan (entries, dispensary, prescriptions) ──
+    void scanLocalBox(String boxName, String sourceLabel) {
       try {
-        final doc = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId.toLowerCase())
-            .collection('patients')
-            .doc(variant)
-            .get()
-            .timeout(const Duration(seconds: 8));
-        if (doc.exists) { firestorePatient = doc.data(); break; }
-      } catch (_) {}
-    }
+        if (!Hive.isBoxOpen(boxName)) return;
+        final box = Hive.box(boxName);
+        for (final key in box.keys) {
+          final raw = box.get(key);
+          if (raw is! Map) continue;
+          final data = Map<String, dynamic>.from(raw);
 
-    // Build enriched identity with any extra IDs from Firestore
-    final enrichedData = {
-      ...?widget.patientData,
-      ...?firestorePatient,
-    };
-    final enriched = _PatientIdentity.fromMap(enrichedData, widget.patientCnic);
+          // Must have clinical, prescription, or vitals content
+          final hasData = data['medicines'] != null ||
+              data['prescriptions'] != null ||
+              data['prescription'] != null ||
+              data['oralMedicines'] != null ||
+              data['injectables'] != null ||
+              data['diagnosis'] != null ||
+              data['vitals'] != null ||
+              data['receptionistVitals'] != null ||
+              data['bp'] != null;
+          if (!hasData) continue;
 
-    if (_loadToken != token) return; // superseded
-
-    final List<_HistoryEntry> found    = [];
-    final Set<String>         seen     = {};
-    final searchIds                    = enriched.searchIds;
-
-    debugPrint('[PatientHistory] Search IDs: $searchIds');
-
-    // ── Step 1: Hive local_prescriptions ─────────────────────────────────────
-    try {
-      final box = Hive.box(LocalStorageService.prescriptionsBox);
-      for (final key in box.keys) {
-        final raw = box.get(key);
-        if (raw is! Map) continue;
-        final data = Map<String, dynamic>.from(raw);
-
-        bool belongs = false;
-        for (final field in ['patientId', 'cnic', 'patientCnic', 'guardianCnic']) {
-          final v = data[field]?.toString().trim() ?? '';
-          if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) {
-            belongs = true;
-            break;
+          bool belongs = false;
+          for (final field in ['patientId', 'id', 'cnic', 'patientCnic', 'guardianCnic']) {
+            final v = data[field]?.toString().trim() ?? '';
+            if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) {
+              belongs = true;
+              break;
+            }
           }
-        }
-        if (!belongs) continue;
-        // FIX-3: for children, require name match to avoid sibling bleed
-        if (!enriched.docBelongsToThisChild(data)) continue;
 
-        final entry = _HistoryEntry.fromMap(data, source: 'Hive Cache');
-        if (entry != null && seen.add(entry.serial)) found.add(entry);
-      }
-    } catch (e) {
-      debugPrint('[PatientHistory] Hive scan error: $e');
-    }
-
-    if (_loadToken != token) return;
-
-    // ── Step 2: Firestore prescriptions/{id}/prescriptions ───────────────────
-    for (final id in searchIds) {
-      if (id.isEmpty) continue;
-      try {
-        final query = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId.toLowerCase())
-            .collection('prescriptions')
-            .doc(id)
-            .collection('prescriptions')
-            .orderBy('createdAt', descending: true)
-            .get()
-            .timeout(const Duration(seconds: 12));
-
-        debugPrint('[PatientHistory] Prescriptions[$id]: ${query.docs.length} docs');
-
-        for (final doc in query.docs) {
-          if (_loadToken != token) return;
-          final data = Map<String, dynamic>.from(doc.data());
-          data['serial'] ??= doc.id;
-          // FIX-3: name check for children
-          if (!enriched.docBelongsToThisChild(data)) continue;
-
-          final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
-          if (entry != null && seen.add(entry.serial)) {
-            found.add(entry);
-            try {
-              Hive.box(LocalStorageService.reportsCacheBox)
-                  .put('legacy_${id}_${entry.serial}', data);
-            } catch (_) {}
+          // Robust fallback: Match by patient name when CNIC is missing or unlinked
+          if (!belongs && identity.name.isNotEmpty && identity.name.length >= 3) {
+            final docName = (data['patientName'] ?? data['name'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase()
+                .replaceAll(RegExp(r'[^a-z0-9]'), '');
+            final myName = identity.name.replaceAll(RegExp(r'[^a-z0-9]'), '');
+            if (docName.isNotEmpty && (docName == myName || docName.contains(myName) || myName.contains(docName))) {
+              belongs = true;
+            }
           }
+          if (!belongs || !identity.docBelongsToThisChild(data)) continue;
+
+          if (data['prescription'] is Map) {
+            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
+            for (final k in nested.keys) {
+              data.putIfAbsent(k, () => nested[k]);
+            }
+          }
+
+          data['serial'] ??= data['id'] ?? key.toString();
+          final entry = _HistoryEntry.fromMap(data, source: sourceLabel);
+          if (entry != null && seen.add(entry.serial)) found.add(entry);
         }
       } catch (e) {
-        debugPrint('[PatientHistory] Prescriptions[$id] error: $e');
+        debugPrint('[PatientHistory] $boxName scan error: $e');
       }
     }
 
-    if (_loadToken != token) return;
+    scanLocalBox(LocalStorageService.prescriptionsBox, 'Prescriptions');
+    scanLocalBox(LocalStorageService.entriesBox, 'Token History');
+    scanLocalBox(LocalStorageService.dispensaryBox, 'Dispensary');
 
-    // ── Step 3: Firestore dispensary ──────────────────────────────────────────
+    // Show cached entries immediately without waiting for network!
+    if (found.isNotEmpty && mounted && _loadToken == token) {
+      found.sort((a, b) => b.date.compareTo(a.date));
+      setState(() {
+        _entries = List.from(found);
+        _isLoading = false;
+      });
+    }
+
+    // ── Step 2: Parallel Remote Fetches ──────────────────────────────────────
     try {
-      final dispensaryRef = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId.toLowerCase())
-          .collection('dispensary');
+      // 1. Patient Doc Enrichment in background
+      Map<String, dynamic>? firestorePatient;
+      for (final variant in _IdHelper.variants(
+          identity.patientId.isNotEmpty ? identity.patientId : identity.cnic)) {
+        if (variant.isEmpty) continue;
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId.toLowerCase())
+              .collection('patients')
+              .doc(variant)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (doc.exists) { firestorePatient = doc.data(); break; }
+        } catch (_) {}
+      }
 
-      final dateDocs = await dispensaryRef
-          .get()
-          .timeout(const Duration(seconds: 12));
+      final enriched = _PatientIdentity.fromMap({
+        ...?widget.patientData,
+        ...?firestorePatient,
+      }, widget.patientCnic);
+      final allSearchIds = enriched.searchIds;
 
-      final chunks = _IdHelper.chunk(searchIds, 10);
+      if (_loadToken != token) return;
 
-      for (final dateDoc in dateDocs.docs) {
-        if (_loadToken != token) return;
-        final dateKey = dateDoc.id;
+      // 2. Parallel Prescriptions queries
+      final prescFutures = allSearchIds.where((id) => id.isNotEmpty).map((id) async {
+        try {
+          final query = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId.toLowerCase())
+              .collection('prescriptions')
+              .doc(id)
+              .collection('prescriptions')
+              .orderBy('createdAt', descending: true)
+              .limit(15)
+              .get()
+              .timeout(const Duration(seconds: 4));
 
-        for (final chunk in chunks) {
-          for (final field in ['patientId', 'patientCnic', 'cnic']) {
-            try {
-              final q = await dispensaryRef
-                  .doc(dateKey)
-                  .collection(dateKey)
-                  .where(field, whereIn: chunk)
-                  .get()
-                  .timeout(const Duration(seconds: 12));
-
-              _addDispensaryDocs(q.docs, found, seen, enriched);
-            } catch (e) {
-              debugPrint('[PatientHistory] Dispensary $dateKey.$field error: $e');
-            }
+          for (final doc in query.docs) {
             if (_loadToken != token) return;
+            final data = Map<String, dynamic>.from(doc.data());
+            data['serial'] ??= doc.id;
+            if (!enriched.docBelongsToThisChild(data)) continue;
+
+            final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
+            if (entry != null && seen.add(entry.serial)) {
+              found.add(entry);
+              try {
+                Hive.box(LocalStorageService.reportsCacheBox)
+                    .put('legacy_${id}_${entry.serial}', data);
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+      });
+
+      // 3. Local dispensary cache check (instant, 0 Firestore reads)
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+          final dBox = Hive.box(LocalStorageService.dispensaryBox);
+          for (final key in dBox.keys) {
+            final raw = dBox.get(key);
+            if (raw is Map) {
+              final d = Map<String, dynamic>.from(raw);
+              final pCnic = (d['patientCnic'] ?? d['cnic'] ?? '').toString().trim();
+              final pId = (d['patientId'] ?? '').toString().trim();
+              if (allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) {
+                if (d['prescription'] is Map) {
+                  final nested = Map<String, dynamic>.from(d['prescription'] as Map);
+                  for (final k in nested.keys) {
+                    d.putIfAbsent(k, () => nested[k]);
+                  }
+                }
+                d['serial'] ??= d['id'] ?? key.toString();
+                if (enriched.docBelongsToThisChild(d)) {
+                  final entry = _HistoryEntry.fromMap(d, source: 'Dispensary');
+                  if (entry != null && !seen.contains(entry.key)) {
+                    seen.add(entry.key);
+                    found.add(entry);
+                  }
+                }
+              }
+            }
           }
         }
-      }
+      } catch (_) {}
+
+      // 4. Local serial / queue entries fallback (same source as token status)
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+          final eBox = Hive.box(LocalStorageService.entriesBox);
+          for (final key in eBox.keys) {
+            final raw = eBox.get(key);
+            if (raw is! Map) continue;
+            final d = Map<String, dynamic>.from(raw);
+            final pCnic = (d['patientCnic'] ?? d['cnic'] ?? '').toString().trim();
+            final pId = (d['patientId'] ?? '').toString().trim();
+            if ((allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) && enriched.docBelongsToThisChild(d)) {
+              d['serial'] ??= d['id'] ?? key.toString();
+              final entry = _HistoryEntry.fromMap(d, source: 'Serials');
+              if (entry != null && !seen.contains(entry.key)) {
+                seen.add(entry.key);
+                found.add(entry);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 5. Remote serials lookup (only when needed, final safety net)
+      try {
+        final serialRoot = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId.toLowerCase())
+            .collection('serials');
+        final serialDates = await serialRoot.get().timeout(const Duration(seconds: 4));
+        for (final dayDoc in serialDates.docs) {
+          for (final queue in ['zakat', 'non-zakat', 'gmwf']) {
+            final queueSnap = await dayDoc.reference.collection(queue).get().timeout(const Duration(seconds: 3));
+            for (final doc in queueSnap.docs) {
+              final data = Map<String, dynamic>.from(doc.data());
+              data['serial'] ??= doc.id;
+              final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
+              final pId = (data['patientId'] ?? '').toString().trim();
+              if ((allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) && enriched.docBelongsToThisChild(data)) {
+                final entry = _HistoryEntry.fromMap(data, source: 'Serials');
+                if (entry != null && !seen.contains(entry.key)) {
+                  seen.add(entry.key);
+                  found.add(entry);
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      await Future.wait(prescFutures);
     } catch (e) {
-      debugPrint('[PatientHistory] Dispensary block error: $e');
+      debugPrint('[PatientHistory] Parallel fetch error: $e');
     }
 
     if (_loadToken != token) return;
 
     found.sort((a, b) => b.date.compareTo(a.date));
-    debugPrint('[PatientHistory] Total entries: ${found.length}');
-
     if (mounted && _loadToken == token) {
       setState(() {
-        _entries   = found;
+        _entries = found;
         _isLoading = false;
       });
-    }
-  }
-
-  void _addDispensaryDocs(
-    List<QueryDocumentSnapshot> docs,
-    List<_HistoryEntry> found,
-    Set<String> seen,
-    _PatientIdentity identity,
-  ) {
-    for (final doc in docs) {
-      final data = Map<String, dynamic>.from(doc.data() as Map);
-
-      if (data['prescription'] is Map) {
-        final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-        for (final key in nested.keys) {
-          data.putIfAbsent(key, () => nested[key]);
-        }
-      }
-
-      data['serial'] ??= data['id'] ?? doc.id;
-
-      // FIX-3: name check for children
-      if (!identity.docBelongsToThisChild(data)) continue;
-
-      final entry = _HistoryEntry.fromMap(data, source: 'Dispensary');
-      if (entry != null && seen.add(entry.serial)) {
-        found.add(entry);
-        try {
-          Hive.box(LocalStorageService.reportsCacheBox)
-              .put('disp_${entry.serial}', data);
-        } catch (_) {}
-      }
     }
   }
 
@@ -431,28 +493,31 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
       return _buildCompactLatestVisit(patientName);
     }
 
+    final isDark = _getIsDark(context);
+    final tealColor = isDark ? const Color(0xFF2DD4BF) : _teal;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Row(children: [
-            const Icon(Icons.history, color: _teal, size: 20),
+            Icon(Icons.history, color: tealColor, size: 20),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('History — $patientName',
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold, color: _teal)),
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold, color: tealColor)),
                   Text(_currentIdentity.key,
-                      style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                      style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : Colors.grey[600])),
                 ],
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.refresh, color: _teal, size: 20),
+              icon: Icon(Icons.refresh, color: tealColor, size: 20),
               tooltip: 'Reload history',
               onPressed: _isLoading ? null : _reload,
               padding: EdgeInsets.zero,
@@ -460,23 +525,23 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
             ),
           ]),
         ),
-        const Divider(height: 1),
+        Divider(height: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
         Expanded(
           child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: _teal))
+              ? const PatientHistorySkeleton(count: 3)
               : _entries.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(Icons.assignment_outlined,
-                              size: 56, color: Colors.grey[300]),
+                              size: 56, color: isDark ? const Color(0xFF475569) : Colors.grey[300]),
                           const SizedBox(height: 12),
                           Text(
                             'No prescription history found\nfor $patientName',
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                                color: Colors.grey[500], fontSize: 14),
+                                color: isDark ? const Color(0xFF94A3B8) : Colors.grey[500], fontSize: 14),
                           ),
                         ],
                       ),
@@ -550,7 +615,10 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
             )
           else
             _CompactLatestCard(
-              entry: _entries.first,
+              entry: _entries.firstWhere(
+                (e) => e.medicines.isNotEmpty || e.diagnosis.isNotEmpty || e.complaint.isNotEmpty,
+                orElse: () => _entries.first,
+              ),
               onRepeat: widget.onRepeatLast,
             ),
         ],
@@ -625,23 +693,70 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
     final List<_HistoryEntry> found = [];
     final Set<String> seen = {};
 
-    // Hive
-    try {
-      final box = Hive.box(LocalStorageService.prescriptionsBox);
-      for (final key in box.keys) {
-        final raw = box.get(key);
-        if (raw is! Map) continue;
-        final data = Map<String, dynamic>.from(raw);
-        bool belongs = false;
-        for (final field in ['patientId', 'cnic', 'patientCnic', 'guardianCnic']) {
-          final v = data[field]?.toString().trim() ?? '';
-          if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) { belongs = true; break; }
+    // Instant Local Hive Scan (entries, dispensary, prescriptions)
+    void scanLocalBox(String boxName, String sourceLabel) {
+      try {
+        if (!Hive.isBoxOpen(boxName)) return;
+        final box = Hive.box(boxName);
+        for (final key in box.keys) {
+          final raw = box.get(key);
+          if (raw is! Map) continue;
+          final data = Map<String, dynamic>.from(raw);
+          final hasData = data['medicines'] != null ||
+              data['prescriptions'] != null ||
+              data['prescription'] != null ||
+              data['oralMedicines'] != null ||
+              data['injectables'] != null ||
+              data['diagnosis'] != null ||
+              data['vitals'] != null ||
+              data['receptionistVitals'] != null ||
+              data['bp'] != null;
+          if (!hasData) continue;
+
+          bool belongs = false;
+          for (final field in ['patientId', 'id', 'cnic', 'patientCnic', 'guardianCnic']) {
+            final v = data[field]?.toString().trim() ?? '';
+            if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) { belongs = true; break; }
+          }
+
+          // Robust fallback: Match by patient name when CNIC is missing or unlinked
+          if (!belongs && enriched.name.isNotEmpty && enriched.name.length >= 3) {
+            final docName = (data['patientName'] ?? data['name'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase()
+                .replaceAll(RegExp(r'[^a-z0-9]'), '');
+            final myName = enriched.name.replaceAll(RegExp(r'[^a-z0-9]'), '');
+            if (docName.isNotEmpty && (docName == myName || docName.contains(myName) || myName.contains(docName))) {
+              belongs = true;
+            }
+          }
+          if (!belongs || !enriched.docBelongsToThisChild(data)) continue;
+
+          if (data['prescription'] is Map) {
+            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
+            for (final k in nested.keys) {
+              data.putIfAbsent(k, () => nested[k]);
+            }
+          }
+
+          data['serial'] ??= data['id'] ?? key.toString();
+          final entry = _HistoryEntry.fromMap(data, source: sourceLabel);
+          if (entry != null && seen.add(entry.serial)) found.add(entry);
         }
-        if (!belongs || !enriched.docBelongsToThisChild(data)) continue;
-        final entry = _HistoryEntry.fromMap(data, source: 'Hive Cache');
-        if (entry != null && seen.add(entry.serial)) found.add(entry);
+      } catch (e) {
+        debugPrint('[PatientHistoryPage] $boxName scan error: $e');
       }
-    } catch (_) {}
+    }
+
+    scanLocalBox(LocalStorageService.prescriptionsBox, 'Prescriptions');
+    scanLocalBox(LocalStorageService.entriesBox, 'Token History');
+    scanLocalBox(LocalStorageService.dispensaryBox, 'Dispensary');
+
+    if (found.isNotEmpty && mounted && _loadToken == token) {
+      found.sort((a, b) => b.date.compareTo(a.date));
+      setState(() { _entries = List.from(found); _isLoading = false; });
+    }
 
     if (_loadToken != token) return;
 
@@ -657,7 +772,7 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
             .collection('prescriptions')
             .orderBy('createdAt', descending: true)
             .get()
-            .timeout(const Duration(seconds: 12));
+            .timeout(const Duration(seconds: 4));
         for (final doc in query.docs) {
           if (_loadToken != token) return;
           final data = Map<String, dynamic>.from(doc.data());
@@ -674,62 +789,8 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
 
     if (_loadToken != token) return;
 
-    // Dispensary
-    try {
-      final dispensaryRef = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId.toLowerCase())
-          .collection('dispensary');
-      final dateDocs = await dispensaryRef.get().timeout(const Duration(seconds: 12));
-      final chunks   = _IdHelper.chunk(searchIds, 10);
-
-      for (final dateDoc in dateDocs.docs) {
-        if (_loadToken != token) return;
-        final dateKey = dateDoc.id;
-        for (final chunk in chunks) {
-          for (final field in ['patientId', 'patientCnic', 'cnic']) {
-            try {
-              final q = await dispensaryRef
-                  .doc(dateKey).collection(dateKey)
-                  .where(field, whereIn: chunk)
-                  .get()
-                  .timeout(const Duration(seconds: 12));
-              _addDispensaryDocs(q.docs, found, seen, enriched);
-            } catch (e) { debugPrint('[PatientHistoryPage] $dateKey.$field: $e'); }
-            if (_loadToken != token) return;
-          }
-        }
-      }
-    } catch (e) { debugPrint('[PatientHistoryPage] Dispensary: $e'); }
-
-    if (_loadToken != token) return;
-
     found.sort((a, b) => b.date.compareTo(a.date));
     if (mounted && _loadToken == token) setState(() { _entries = found; _isLoading = false; });
-  }
-
-  void _addDispensaryDocs(
-    List<QueryDocumentSnapshot> docs,
-    List<_HistoryEntry> found,
-    Set<String> seen,
-    _PatientIdentity identity,
-  ) {
-    for (final doc in docs) {
-      final data = Map<String, dynamic>.from(doc.data() as Map);
-      if (data['prescription'] is Map) {
-        final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-        for (final key in nested.keys) {
-          data.putIfAbsent(key, () => nested[key]);
-        }
-      }
-      data['serial'] ??= data['id'] ?? doc.id;
-      if (!identity.docBelongsToThisChild(data)) continue;
-      final entry = _HistoryEntry.fromMap(data, source: 'Dispensary');
-      if (entry != null && seen.add(entry.serial)) {
-        found.add(entry);
-        try { Hive.box(LocalStorageService.reportsCacheBox).put('disp_${entry.serial}', data); } catch (_) {}
-      }
-    }
   }
 
   @override
@@ -745,7 +806,24 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                Builder(builder: (_) {
+                  final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
+                    cnic: widget.patientData['cnic'] ?? widget.patientData['patientCnic'] ?? widget.patientData['guardianCnic'],
+                    name: name,
+                  );
+                  if (staffInfo != null) {
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: StaffPatientLinkService.buildStaffBadge(staffInfo, isDark: true),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                }),
+              ],
+            ),
             Text(id, style: const TextStyle(fontSize: 12, color: Colors.white70)),
           ],
         ),
@@ -1061,7 +1139,7 @@ class _CompactLatestCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FULL HISTORY CARD  (unchanged UI)
+// FULL HISTORY CARD (Ultra-Compact, High Information Density)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _HistoryCard extends StatelessWidget {
@@ -1073,318 +1151,535 @@ class _HistoryCard extends StatelessWidget {
 
   static const Color _teal = Color(0xFF00695C);
 
+  bool _getIsDark(BuildContext context) {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final dark = Hive.box('app_settings').get('is_dark_mode');
+        if (dark != null) return dark == true;
+      }
+    } catch (_) {}
+    return Theme.of(context).brightness == Brightness.dark;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final e        = entry;
-    final dateStr  = DateFormat('d MMM yyyy').format(e.date);
-    final timeStr  = DateFormat('hh:mm a').format(e.date);
-    final oralMeds    = e.medicines.where((m) => !m.isInjectable).toList();
+    final isDark = _getIsDark(context);
+    final e = entry;
+    final dateStr = DateFormat('d MMM yyyy • hh:mm a').format(e.date);
+    final oralMeds = e.medicines.where((m) => !m.isInjectable).toList();
     final injectables = e.medicines.where((m) => m.isInjectable).toList();
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: isLatest ? 4 : 2,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: _teal,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    const Icon(Icons.calendar_today, color: Colors.white, size: 14),
-                    Text(dateStr, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
-                    const SizedBox(width: 2),
-                    const Icon(Icons.access_time, color: Colors.white70, size: 14),
-                    Text(timeStr, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    const SizedBox(width: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(6)),
-                      child: Text('${e.days} Days', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text('Serial: ${e.serial}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              ])),
-              if (isLatest)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
-                  child: const Text('LATEST', style: TextStyle(color: _teal, fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
-            ]),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: e.sourceColor.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white54),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(e.sourceIcon, size: 12, color: Colors.white),
-                const SizedBox(width: 4),
-                Text(e.source, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.white)),
-              ]),
-            ),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (e.isVitalsOnly) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade300),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.monitor_heart_outlined, color: Colors.orange.shade900, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Vitals Inspection Only Visit',
-                      style: TextStyle(color: Colors.orange.shade900, fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-            if (e.doctorName.isNotEmpty) ...[
-              Row(children: [
-                Icon(Icons.person, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 6),
-                Text(e.doctorName,
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.grey[700])),
-              ]),
-              const SizedBox(height: 12),
-            ],
-            if (e.complaint.isNotEmpty) ...[
-              _buildSectionTitle('Condition', Icons.medical_services_outlined),
-              const SizedBox(height: 6),
-              Text(e.complaint, style: const TextStyle(fontSize: 14, color: Colors.black87)),
-              const SizedBox(height: 12),
-            ],
-            if (e.diagnosis.isNotEmpty) ...[
-              _buildSectionTitle('Diagnosis', Icons.assignment_outlined),
-              const SizedBox(height: 6),
-              Text(e.diagnosis, style: const TextStyle(fontSize: 14, color: Colors.black87)),
-              const SizedBox(height: 12),
-            ],
-            if (e.vitals.isNotEmpty) ...[
-              _buildSectionTitle('Vitals', Icons.favorite_outline),
-              const SizedBox(height: 8),
-              _buildFullVitalsDisplay(e.vitals),
-              const SizedBox(height: 12),
-            ],
-            if (oralMeds.isNotEmpty) ...[
-              _buildSectionTitle('Medicines', Icons.medication),
-              const SizedBox(height: 8),
-              ...oralMeds.map(_buildMedicineRow),
-              const SizedBox(height: 12),
-            ],
-            if (injectables.isNotEmpty) ...[
-              _buildSectionTitle('Injectables', Icons.vaccines_outlined),
-              const SizedBox(height: 8),
-              ...injectables.map(_buildInjectableRow),
-              const SizedBox(height: 12),
-            ],
-            if (e.labTests.isNotEmpty) ...[
-              _buildSectionTitle(
-                  e.raw['isPhysiotherapist'] == true ? 'Physiotherapies' : 'Lab Tests',
-                  e.raw['isPhysiotherapist'] == true ? Icons.accessibility : Icons.biotech),
-              const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6,
-                  children: e.labTests.map((t) => Chip(
-                    label: Text(t, style: const TextStyle(fontSize: 12)),
-                    backgroundColor: Colors.orange.shade50,
-                    side: BorderSide(color: Colors.orange.shade300),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  )).toList()),
-              const SizedBox(height: 8),
-            ],
-            if (onRepeatLast != null) ...[
-              const Divider(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => onRepeatLast!(entry.raw),
-                  icon: const Icon(Icons.repeat, size: 18),
-                  label: const Text('Repeat This Prescription'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _teal, foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ),
-            ],
-          ]),
-        ),
-      ]),
-    );
-  }
+    final cardBg = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final cardBorder = isDark ? const Color(0xFF334155) : _teal.withValues(alpha: 0.25);
+    final textPrimary = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF1E293B);
 
-  Widget _buildSectionTitle(String title, IconData icon) => Row(children: [
-        Icon(icon, size: 16, color: _teal),
-        const SizedBox(width: 6),
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: _teal)),
-      ]);
-
-  Widget _buildVitalChip(String label, String value, Color color) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text('$label: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
-        Text(value,      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,  color: color)),
-      ]));
-
-  Widget _buildMedicineRow(_MedEntry med) {
-    final parts = <String>[];
-    if (med.dosage.isNotEmpty)    parts.add(med.dosage);
-    if (med.frequency.isNotEmpty) parts.add(med.frequency);
-    if (med.timing.isNotEmpty)    parts.add(med.timing);
-    if (med.meal.isNotEmpty)      parts.add(med.meal);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: _teal.withValues(alpha: 0.05), borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _teal.withValues(alpha: 0.2)),
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(color: _teal, borderRadius: BorderRadius.circular(6)),
-            child: Text(med.abbrev.isNotEmpty ? med.abbrev : 'Med',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+        color: cardBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cardBorder, width: 1.1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(med.name,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87))),
-        ]),
-        if (parts.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Text(parts.join(' • '), style: TextStyle(fontSize: 12, color: Colors.grey[700])),
         ],
-      ]),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ── Compact Header ──
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : const Color(0xFF065F46),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+              border: Border(
+                bottom: BorderSide(
+                  color: isDark ? const Color(0xFF334155) : const Color(0xFF047857),
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.calendar_today_rounded, color: Colors.white, size: 12),
+                const SizedBox(width: 5),
+                Text(
+                  dateStr,
+                  style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    '${e.days}d',
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                if (e.doctorName.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Dr. ${e.doctorName}',
+                        style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w600),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                Text(
+                  '#${e.serial}',
+                  style: TextStyle(
+                    color: isDark ? const Color(0xFF94A3B8) : Colors.white70,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (isLatest) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'LATEST',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
+          // ── Compact Body ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Condition & Diagnosis Inline (Distinct harmonious colors)
+                if (e.complaint.isNotEmpty || e.diagnosis.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (e.complaint.isNotEmpty)
+                          Expanded(
+                            child: _compactInlineBlock(
+                              label: 'Condition',
+                              value: e.complaint,
+                              icon: Icons.medical_services_outlined,
+                              accentColor: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                              bgColor: isDark ? const Color(0xFF082F49).withValues(alpha: 0.35) : const Color(0xFFF0F9FF),
+                              borderColor: isDark ? const Color(0xFF0369A1).withValues(alpha: 0.5) : const Color(0xFFBAE6FD),
+                              textPrimary: textPrimary,
+                            ),
+                          ),
+                        if (e.complaint.isNotEmpty && e.diagnosis.isNotEmpty)
+                          const SizedBox(width: 8),
+                        if (e.diagnosis.isNotEmpty)
+                          Expanded(
+                            child: _compactInlineBlock(
+                              label: 'Diagnosis',
+                              value: e.diagnosis,
+                              icon: Icons.assignment_outlined,
+                              accentColor: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
+                              bgColor: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5),
+                              borderColor: isDark ? const Color(0xFF047857).withValues(alpha: 0.5) : const Color(0xFFA7F3D0),
+                              textPrimary: textPrimary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                // Vitals
+                if (e.vitals.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _buildCompactVitalsRow(e.vitals, isDark),
+                  ),
+
+                // Medicines Wrap
+                if (oralMeds.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          margin: const EdgeInsets.only(right: 6, top: 1),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF0D9488).withValues(alpha: 0.25) : _teal.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.medication_rounded, size: 11, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Medicines',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: oralMeds.map((m) => _compactMedChip(m, isDark)).toList(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Injectables Wrap
+                if (injectables.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          margin: const EdgeInsets.only(right: 6, top: 1),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.4) : Colors.blue.shade100,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.vaccines_rounded, size: 11, color: Color(0xFF2563EB)),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Injectables',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade900),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: injectables.map((m) => _compactInjChip(m, isDark)).toList(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                // Lab tests / Physiotherapies
+                if (e.labTests.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                          margin: const EdgeInsets.only(right: 6, top: 1),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF451A03) : Colors.orange.shade100,
+                            borderRadius: BorderRadius.circular(5),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                e.raw['isPhysiotherapist'] == true ? Icons.accessibility_rounded : Icons.science_rounded,
+                                size: 11,
+                                color: isDark ? const Color(0xFFFB923C) : Colors.orange.shade900,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                e.raw['isPhysiotherapist'] == true ? 'Physiotherapy' : 'Lab Tests',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFB923C) : Colors.orange.shade900),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 5,
+                            runSpacing: 4,
+                            children: e.labTests.map((t) => Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.7) : Colors.orange.shade50,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: isDark ? const Color(0xFF9A3412) : Colors.orange.shade300),
+                              ),
+                              child: Text(
+                                t,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade900,
+                                ),
+                              ),
+                            )).toList(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                if (onRepeatLast != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => onRepeatLast!(entry.raw),
+                        icon: const Icon(Icons.repeat, size: 14),
+                        label: const Text('Repeat This Prescription', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isDark ? const Color(0xFF0D9488) : _teal,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildFullVitalsDisplay(Map<String, dynamic> vitals) {
-    final recVitals = (vitals['receptionistVitals'] is Map)
-        ? Map<String, dynamic>.from(vitals['receptionistVitals'])
-        : <String, dynamic>{};
-    final docVitals = (vitals['doctorVitals'] is Map)
-        ? Map<String, dynamic>.from(vitals['doctorVitals'])
-        : <String, dynamic>{};
-
-    final hasDocEdit = docVitals.isNotEmpty;
-
-    if (hasDocEdit) {
-      return Column(
+  Widget _compactInlineBlock({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color accentColor,
+    required Color bgColor,
+    required Color borderColor,
+    required Color textPrimary,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: borderColor),
+      ),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.support_agent, size: 13, color: Colors.blue),
-                const SizedBox(width: 4),
-                Text('Added by Receptionist (${recVitals['addedBy'] ?? 'Receptionist'})',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            if (recVitals['bp'] != null && recVitals['bp'] != 'N/A') _buildVitalChip('BP', recVitals['bp'].toString(), Colors.blue),
-            if (recVitals['temp'] != null && recVitals['temp'] != 'N/A') _buildVitalChip('Temp', '${recVitals['temp']}°C', Colors.orange),
-            if (recVitals['sugar'] != null && recVitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', recVitals['sugar'].toString(), Colors.purple),
-            if (recVitals['weight'] != null && recVitals['weight'] != 'N/A') _buildVitalChip('Weight', '${recVitals['weight']} kg', Colors.teal),
-          ]),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: Colors.amber.shade50,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.amber.shade300),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.medical_services, size: 13, color: Colors.amber),
-                const SizedBox(width: 4),
-                Text('Updated by Doctor (${docVitals['updatedBy'] ?? 'Doctor'})',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.amber.shade900)),
-              ],
+          Icon(icon, size: 13, color: accentColor),
+          const SizedBox(width: 5),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: '$label: ',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: accentColor,
+                    ),
+                  ),
+                  TextSpan(
+                    text: value,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            if (docVitals['bp'] != null && docVitals['bp'] != 'N/A') _buildVitalChip('BP', docVitals['bp'].toString(), Colors.pink),
-            if (docVitals['temp'] != null && docVitals['temp'] != 'N/A') _buildVitalChip('Temp', '${docVitals['temp']}°C', Colors.orange),
-            if (docVitals['sugar'] != null && docVitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', docVitals['sugar'].toString(), Colors.purple),
-            if (docVitals['weight'] != null && docVitals['weight'] != 'N/A') _buildVitalChip('Weight', '${docVitals['weight']} kg', Colors.teal),
-          ]),
         ],
-      );
-    }
-
-    return Wrap(spacing: 8, runSpacing: 8, children: [
-      if (vitals['bp'] != null && vitals['bp'] != 'N/A') _buildVitalChip('BP', vitals['bp'].toString(), Colors.pink),
-      if (vitals['temp'] != null && vitals['temp'] != 'N/A') _buildVitalChip('Temp', '${vitals['temp']} ${vitals['tempUnit'] ?? ''}', Colors.orange),
-      if (vitals['sugar'] != null && vitals['sugar'].toString().isNotEmpty) _buildVitalChip('Sugar', vitals['sugar'].toString(), Colors.purple),
-      if (vitals['weight'] != null && vitals['weight'] != 'N/A') _buildVitalChip('Weight', '${vitals['weight']} kg', Colors.teal),
-    ]);
+      ),
+    );
   }
 
-  Widget _buildInjectableRow(_MedEntry med) => Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+  Widget _buildCompactVitalsRow(Map<String, dynamic> vitals, bool isDark) {
+    final chips = <Widget>[];
+
+    final merged = <String, dynamic>{};
+    if (vitals['receptionistVitals'] is Map) {
+      merged.addAll(Map<String, dynamic>.from(vitals['receptionistVitals'] as Map));
+    }
+    if (vitals['doctorVitals'] is Map) {
+      merged.addAll(Map<String, dynamic>.from(vitals['doctorVitals'] as Map));
+    }
+    for (final k in vitals.keys) {
+      if (k != 'receptionistVitals' && k != 'doctorVitals' && vitals[k] != null) {
+        merged.putIfAbsent(k, () => vitals[k]);
+      }
+    }
+
+    final bp = merged['bp'] ?? merged['bloodPressure'] ?? merged['BP'];
+    if (bp != null && bp.toString().trim().isNotEmpty && bp != 'N/A') {
+      chips.add(_microVitalChip('BP', bp.toString(), const Color(0xFFF43F5E), isDark));
+    }
+
+    final temp = merged['temp'] ?? merged['temperature'] ?? merged['Temp'];
+    if (temp != null && temp.toString().trim().isNotEmpty && temp != 'N/A') {
+      chips.add(_microVitalChip('Temp', '${temp.toString().replaceAll('°C', '')}°C', const Color(0xFFFB923C), isDark));
+    }
+
+    final sugar = merged['sugar'] ?? merged['bloodSugar'] ?? merged['Sugar'] ?? merged['glucose'] ?? merged['rbs'];
+    if (sugar != null && sugar.toString().trim().isNotEmpty && sugar != 'N/A') {
+      chips.add(_microVitalChip('Sugar', sugar.toString(), const Color(0xFFC084FC), isDark));
+    }
+
+    final weight = merged['weight'] ?? merged['wt'] ?? merged['Weight'];
+    if (weight != null && weight.toString().trim().isNotEmpty && weight != 'N/A') {
+      chips.add(_microVitalChip('Weight', '${weight.toString().replaceAll('kg', '')}kg', const Color(0xFF2DD4BF), isDark));
+    }
+
+    final pulse = merged['pulse'] ?? merged['heartRate'] ?? merged['spo2'] ?? merged['hr'];
+    if (pulse != null && pulse.toString().trim().isNotEmpty && pulse != 'N/A') {
+      chips.add(_microVitalChip('Pulse', pulse.toString(), const Color(0xFF38BDF8), isDark));
+    }
+
+    if (chips.isEmpty) return const SizedBox();
+
+    return Wrap(spacing: 5, runSpacing: 4, children: chips);
+  }
+
+  Widget _microVitalChip(String label, String value, Color color, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
       decoration: BoxDecoration(
-        color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.blue.shade200),
+        color: color.withValues(alpha: isDark ? 0.16 : 0.08),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.25)),
       ),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
-          child: const Icon(Icons.vaccines, color: Colors.white, size: 16),
-        ),
-        const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(med.name,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
-          Text('Quantity: ${med.quantity}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[700])),
-        ])),
-      ]));
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color),
+          ),
+          Text(
+            value,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactMedChip(_MedEntry med, bool isDark) {
+    final parts = <String>[];
+    if (med.dosage.isNotEmpty) parts.add(med.dosage);
+    if (med.frequency.isNotEmpty) parts.add(med.frequency);
+    if (med.meal.isNotEmpty) parts.add(med.meal);
+
+    final bg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9);
+    final border = isDark ? const Color(0xFF334155) : Colors.grey.shade300;
+    final textNameColor = isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A);
+    final textPartsColor = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0D9488) : _teal,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              med.abbrev.isNotEmpty ? med.abbrev : 'Med',
+              style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            med.name,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textNameColor),
+          ),
+          if (parts.isNotEmpty) ...[
+            const SizedBox(width: 4),
+            Text(
+              '(${parts.join(' · ')})',
+              style: TextStyle(fontSize: 10.5, color: textPartsColor, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _compactInjChip(_MedEntry med, bool isDark) {
+    final bg = isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.3) : Colors.blue.shade50;
+    final border = isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.35) : Colors.blue.shade200;
+    final textNameColor = isDark ? const Color(0xFFF8FAFC) : Colors.blue.shade900;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.vaccines, size: 12, color: Color(0xFF2563EB)),
+          const SizedBox(width: 5),
+          Text(
+            med.name,
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textNameColor),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Qty: ${med.quantity}',
+            style: TextStyle(fontSize: 10.5, color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade700, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1408,6 +1703,8 @@ class _HistoryEntry {
     required this.campId, required this.campName,
     required this.isVitalsOnly,
   });
+
+  String get key => serial;
 
   static _HistoryEntry? fromMap(Map<String, dynamic> data, {required String source}) {
     final serial = (data['serial'] ?? data['id'] ?? '').toString().trim();
@@ -1449,12 +1746,15 @@ class _HistoryEntry {
     }
 
     final meds = <_MedEntry>[];
-    final rawMeds = data['prescriptions'] ?? data['medicines'];
-    if (rawMeds is List) {
-      for (final m in rawMeds) {
+    void addMedList(dynamic list) {
+      if (list is! List) return;
+      for (final m in list) {
         if (m is! Map) continue;
+        final name = (m['name'] ?? m['displayName'] ?? m['medicineName'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+        if (meds.any((existing) => existing.name.toLowerCase() == name.toLowerCase())) continue;
         meds.add(_MedEntry(
-          name:      m['name']?.toString() ?? m['displayName']?.toString() ?? '',
+          name:      name,
           type:      m['type']?.toString() ?? '',
           timing:    m['timing']?.toString() ?? '',
           meal:      m['meal']?.toString() ?? '',
@@ -1465,13 +1765,110 @@ class _HistoryEntry {
       }
     }
 
+    addMedList(data['prescriptions']);
+    addMedList(data['medicines']);
+    addMedList(data['oralMedicines']);
+    addMedList(data['injectables']);
+    addMedList(data['items']);
+    addMedList(data['prescriptionList']);
+    addMedList(data['prescriptionsList']);
+    if (data['prescription'] is Map) {
+      final p = data['prescription'] as Map;
+      addMedList(p['prescriptions']);
+      addMedList(p['medicines']);
+      addMedList(p['oralMedicines']);
+      addMedList(p['injectables']);
+      addMedList(p['items']);
+    }
+
+    String extractedDiagnosis = (data['diagnosis'] ??
+        data['patientDiagnosis'] ??
+        data['finalDiagnosis'] ??
+        data['provisionalDiagnosis'] ??
+        (data['prescription'] is Map ? data['prescription']['diagnosis'] : null) ??
+        '')
+        .toString()
+        .trim();
+
+    String extractedComplaint = (data['complaint'] ??
+        data['condition'] ??
+        data['patientCondition'] ??
+        data['reason'] ??
+        data['symptoms'] ??
+        data['chiefComplaint'] ??
+        (data['prescription'] is Map ? (data['prescription']['complaint'] ?? data['prescription']['condition']) : null) ??
+        '')
+        .toString()
+        .trim();
+
+    String extractedDoctor = (data['doctorName'] ??
+        data['prescribedBy'] ??
+        data['doctor'] ??
+        data['doctor_name'] ??
+        (data['prescription'] is Map ? data['prescription']['doctorName'] : null) ??
+        '')
+        .toString()
+        .trim();
+
+    // Cross-box fallback lookup if medicines or diagnosis missing on this record
+    if (meds.isEmpty || extractedDiagnosis.isEmpty) {
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+          final dBox = Hive.box(LocalStorageService.dispensaryBox);
+          final dRaw = dBox.get(serial) ?? dBox.get(serial.toLowerCase()) ?? dBox.get(serial.toUpperCase());
+          if (dRaw is Map) {
+            addMedList(dRaw['medicines']);
+            addMedList(dRaw['prescriptions']);
+            addMedList(dRaw['oralMedicines']);
+            addMedList(dRaw['injectables']);
+            if (dRaw['prescription'] is Map) {
+              addMedList(dRaw['prescription']['medicines']);
+              addMedList(dRaw['prescription']['prescriptions']);
+              if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['prescription']['diagnosis'] ?? '').toString();
+              if (extractedComplaint.isEmpty) extractedComplaint = (dRaw['prescription']['complaint'] ?? dRaw['prescription']['condition'] ?? '').toString();
+            }
+            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['diagnosis'] ?? '').toString();
+            if (extractedDoctor.isEmpty) extractedDoctor = (dRaw['doctorName'] ?? dRaw['prescribedBy'] ?? '').toString();
+          }
+        }
+        if (meds.isEmpty && Hive.isBoxOpen(LocalStorageService.prescriptionsBox)) {
+          final prBox = Hive.box(LocalStorageService.prescriptionsBox);
+          final prRaw = prBox.get(serial) ?? prBox.get(serial.toLowerCase()) ?? prBox.get(serial.toUpperCase());
+          if (prRaw is Map) {
+            addMedList(prRaw['medicines']);
+            addMedList(prRaw['prescriptions']);
+            if (prRaw['prescription'] is Map) {
+              addMedList(prRaw['prescription']['medicines']);
+              addMedList(prRaw['prescription']['prescriptions']);
+            }
+            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (prRaw['diagnosis'] ?? '').toString();
+            if (extractedDoctor.isEmpty) extractedDoctor = (prRaw['doctorName'] ?? prRaw['prescribedBy'] ?? '').toString();
+          }
+        }
+      } catch (_) {}
+    }
+
     final labs = <String>[];
-    final rawLabs = data['labResults'];
-    if (rawLabs is List) {
-      for (final l in rawLabs) {
-        final name = (l is Map ? (l['name'] ?? l['testName']) : l)?.toString().trim() ?? '';
-        if (name.isNotEmpty) labs.add(name);
+    void addLabList(dynamic list) {
+      if (list is! List) return;
+      for (final l in list) {
+        final name = (l is Map ? (l['name'] ?? l['testName'] ?? l['title']) : l)?.toString().trim() ?? '';
+        if (name.isNotEmpty && !labs.contains(name)) labs.add(name);
       }
+    }
+
+    addLabList(data['labResults']);
+    addLabList(data['labTests']);
+    addLabList(data['tests']);
+    addLabList(data['lab_tests']);
+    addLabList(data['physiotherapies']);
+    if (data['prescription'] is Map) {
+      final p = data['prescription'] as Map;
+      addLabList(p['labResults']);
+      addLabList(p['labTests']);
+      addLabList(p['tests']);
+      addLabList(p['lab_tests']);
+      addLabList(p['physiotherapies']);
     }
 
     final rawVitals = data['vitals'] ?? data['receptionistVitals'];
@@ -1485,6 +1882,10 @@ class _HistoryEntry {
                 if (data['sugar'] != null) 'sugar': data['sugar'],
               }
             : {};
+
+    if (data['doctorVitals'] is Map && (data['doctorVitals'] as Map).isNotEmpty) {
+      extractedVitals['doctorVitals'] = data['doctorVitals'];
+    }
 
     if (extractedVitals.isEmpty) {
       try {
@@ -1521,9 +1922,9 @@ class _HistoryEntry {
     return _HistoryEntry(
       serial:    serial,
       date:      date,
-      diagnosis: data['diagnosis']?.toString() ?? '',
-      complaint: (data['complaint'] ?? data['condition'] ?? '').toString(),
-      doctorName:(data['doctorName'] ?? data['prescribedBy'] ?? '').toString(),
+      diagnosis: extractedDiagnosis,
+      complaint: extractedComplaint,
+      doctorName:extractedDoctor,
       medicines: meds,
       labTests:  labs,
       vitals:    extractedVitals,

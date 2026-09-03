@@ -13,6 +13,7 @@ import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/staff_patient_link_service.dart';
 
 class PatientQueue extends StatefulWidget {
   final String branchId;
@@ -36,25 +37,28 @@ class PatientQueue extends StatefulWidget {
   State<PatientQueue> createState() => _PatientQueueState();
 }
 
-class _PatientQueueState extends State<PatientQueue>
-    with SingleTickerProviderStateMixin {
+class _PatientQueueState extends State<PatientQueue> {
   static const Color _teal   = Color(0xFF00695C);
   static const Color _amber  = Color(0xFFFFA000);
   static const Color _purple = Color(0xFF6A1B9A);
 
-  late final AnimationController _pulseController;
-  late final Animation<double> _pulseAnimation;
-
   String _filter = 'all';
   String _selectedSessionFilter = 'auto';
   String _selectedCampFilter = 'all';
+  
+  // ─── HANG FIX: Debounce + Cache ────────────────────────────────────
+  Timer? _debounceRebuildTimer;  // Batch multiple events into single rebuild
+  List<Map<String, dynamic>>? _cachedQueue;  // Cache sorted queue
+  DateTime? _queueCacheTime;  // Track cache freshness
+  static const _queueCacheTTL = Duration(milliseconds: 500);  // Cache for 500ms
   bool get _hasMultiCamps => CampSessionService.hasCampsForBranch(widget.branchId);
   String get _todayKey => CampSessionService.resolveShiftAndDateKey().dateKey;
 
   late StreamSubscription<Map<String, dynamic>> _realtimeSub;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   StreamSubscription<QuerySnapshot>? _exceptionSub;
-  List<StreamSubscription>? _todaySerialsSubs;
+    List<StreamSubscription>? _todaySerialsSubs;
+  Timer? _firestoreFallbackPollTimer; // NEW
   final List<StreamSubscription> _inventoryLiveSubs = [];
   List<DocumentSnapshot> _exceptionRequests = [];
   List<Map<String, dynamic>> _localExceptionRequests = [];
@@ -68,7 +72,7 @@ class _PatientQueueState extends State<PatientQueue>
     return {};
   }
 
-  List<String> get _allowedSessions => CampSessionService.getUserAllowedSessions(_getUserData());
+  List<String> get _allowedSessions => CampSessionService.getAllowedSessions(widget.branchId, userData: _getUserData());
 
   List<String> get _allowedCamps {
     final userData = _getUserData();
@@ -97,15 +101,27 @@ class _PatientQueueState extends State<PatientQueue>
     final allowed = _allowedSessions;
     if (allowed.contains('all')) return true;
     if (sessionValue == 'auto') {
-      final current = CampSessionService.getCurrentSession();
+      final current = CampSessionService.getCurrentSession(null, widget.branchId);
       return allowed.contains(current);
     }
     return allowed.contains(sessionValue);
   }
 
+  String _completedFilter = 'my'; // 'my' vs 'all'
+  String _selectedSession = 'auto'; // 'auto' (Current Active Shift), 'morning', 'evening', 'night', 'all'
+  String _doctorScopeFilter = 'all'; // 'my' vs 'all' for Total list
+
+  bool _isDoctorMatch(String? docA, String? docB) {
+    if (docA == null || docB == null) return false;
+    String cleanA = docA.trim().toLowerCase().replaceAll('dr.', '').replaceAll('dr', '').replaceAll('doctor', '').replaceAll('.', '').trim();
+    String cleanB = docB.trim().toLowerCase().replaceAll('dr.', '').replaceAll('dr', '').replaceAll('doctor', '').replaceAll('.', '').trim();
+    if (cleanA.isEmpty || cleanB.isEmpty) return false;
+    return cleanA == cleanB || cleanA.contains(cleanB) || cleanB.contains(cleanA);
+  }
+
   bool _isPrescribedByMe(Map<String, dynamic> p, [Map<String, dynamic>? optionalPresc]) {
     final myDocId = (widget.doctorId ?? '').trim().toLowerCase();
-    final myDocName = (widget.doctorName ?? '').trim().toLowerCase();
+    final myDocName = (widget.doctorName ?? '').trim();
 
     // If no doctor context was passed, default to allow
     if (myDocId.isEmpty && myDocName.isEmpty) return true;
@@ -114,27 +130,30 @@ class _PatientQueueState extends State<PatientQueue>
         ? Map<String, dynamic>.from(p['prescription'] as Map)
         : (LocalStorageService.getLocalPrescription((p['serial'] ?? p['id'] ?? '').toString()) ?? {}));
 
-    final pDocId = (presc['doctorId'] ?? p['doctorId'] ?? '').toString().trim().toLowerCase();
-    final pDocName = (presc['doctorName'] ?? presc['prescribedBy'] ?? p['doctorName'] ?? p['prescribedBy'] ?? p['examinedBy'] ?? '').toString().trim().toLowerCase();
+    final pDocId = (presc['doctorId'] ?? presc['prescribedById'] ?? p['doctorId'] ?? p['prescribedById'] ?? '').toString().trim().toLowerCase();
+    final pDocName = (presc['doctorName'] ?? presc['prescribedBy'] ?? presc['prescribedByName'] ?? presc['examinedBy'] ?? presc['performedBy'] ?? p['doctorName'] ?? p['prescribedBy'] ?? p['prescribedByName'] ?? p['examinedBy'] ?? p['performedBy'] ?? '').toString().trim();
 
     if (myDocId.isNotEmpty && pDocId.isNotEmpty) {
       if (pDocId == myDocId || pDocId.contains(myDocId) || myDocId.contains(pDocId)) return true;
     }
     if (myDocName.isNotEmpty && pDocName.isNotEmpty) {
-      if (pDocName == myDocName || pDocName.contains(myDocName) || myDocName.contains(pDocName)) return true;
+      if (_isDoctorMatch(pDocName, myDocName)) return true;
     }
     return false;
   }
 
   // ─── Strict two-group sort ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _getSortedQueue() {
-    final activeShift = CampSessionService.getCurrentSession();
+    final currentRealShift = CampSessionService.getCurrentSession(null, widget.branchId);
+    final targetShift = _selectedSession == 'auto' ? currentRealShift : _selectedSession;
     final allowedCamps = _allowedCamps;
 
     final effectiveCamp = _hasMultiCamps
-        ? (allowedCamps.isNotEmpty && !allowedCamps.contains('all')
-            ? allowedCamps.first
-            : CampSessionService.getActiveCamp(widget.branchId))
+        ? (_selectedCampFilter != 'all'
+            ? _selectedCampFilter
+            : (allowedCamps.isNotEmpty && !allowedCamps.contains('all')
+                ? allowedCamps.first
+                : null))
         : null;
 
     var all = LocalStorageService.getLocalEntries(widget.branchId)
@@ -148,7 +167,7 @@ class _PatientQueueState extends State<PatientQueue>
             if (rawTime != null) {
               final dt = DateTime.tryParse(rawTime.toString());
               if (dt != null) {
-                final dtKey = CampSessionService.resolveShiftAndDateKey(dt).dateKey;
+                final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
                 if (dtKey != _todayKey) return false;
               } else {
                 return false;
@@ -159,10 +178,6 @@ class _PatientQueueState extends State<PatientQueue>
           }
 
           if (serial.isEmpty) return false;
-          if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) {
-            return false;
-          }
-
           // Strict camp matching in multi-camp branch
           if (_hasMultiCamps && effectiveCamp != null && effectiveCamp.isNotEmpty && effectiveCamp != 'all') {
             final matches = CampSessionService.matchesCamp(
@@ -196,22 +211,44 @@ class _PatientQueueState extends State<PatientQueue>
     }
     all = uniqueBySerial.values.toList();
 
-    // Strictly isolate to the active session
-    all = all.where((entry) {
-      final s = (entry['session'] ?? '').toString().toLowerCase().trim();
-      if (s.isNotEmpty) {
-        if (s != activeShift) return false;
-      } else {
-        final rawTime = entry['timestamp'] ?? entry['createdAt'] ?? entry['date'];
-        if (rawTime != null) {
-          final dt = DateTime.tryParse(rawTime.toString());
-          if (dt != null && CampSessionService.getCurrentSession(dt) != activeShift) {
-            return false;
+    // Filter by target shift if not 'all'
+    if (targetShift != 'all') {
+      all = all.where((entry) {
+        String resolved = (entry['session'] ?? entry['shift'] ?? entry['campSession'] ?? entry['slot'] ?? '').toString().toLowerCase().trim();
+
+        // Only infer session from createdAt if explicit session is missing/unknown
+        if (resolved.isEmpty || resolved == 'unknown' || resolved == 'all' || resolved == 'auto') {
+          final rawTime = entry['createdAt'] ?? entry['time'] ?? entry['timestamp'] ?? entry['date'];
+          if (rawTime != null) {
+            DateTime? dt;
+            if (rawTime is Timestamp) {
+              dt = rawTime.toDate().toLocal();
+            } else if (rawTime is DateTime) {
+              dt = rawTime.toLocal();
+            } else {
+              dt = DateTime.tryParse(rawTime.toString())?.toLocal();
+            }
+            if (dt != null) {
+              final hasNight = _allowedSessions.contains('night');
+              if (dt.hour >= 6 && dt.hour < 14) {
+                resolved = 'morning';
+              } else if (dt.hour >= 14 && (dt.hour < 22 || !hasNight)) {
+                resolved = 'evening';
+              } else if (hasNight && (dt.hour >= 22 || dt.hour < 6)) {
+                resolved = 'night';
+              } else {
+                resolved = CampSessionService.getCurrentSession(dt, widget.branchId);
+              }
+            }
           }
         }
-      }
-      return true;
-    }).toList();
+
+        if (resolved.isNotEmpty) {
+          return resolved == targetShift;
+        }
+        return true;
+      }).toList();
+    }
 
     final waiting = <Map<String, dynamic>>[];
     final skipped = <Map<String, dynamic>>[];
@@ -297,18 +334,24 @@ class _PatientQueueState extends State<PatientQueue>
 
   bool _isOnline = true;
 
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
+
   // ── Pricing: base PKR per day per queue type ───────────────────────────────
-  static const Map<String, int> _baseDayPrice = {
+  Map<String, int> get _baseDayPrice => {
     'zakat':     20,
-    'non-zakat': 100,
+    'non-zakat': _isKarachi ? 20 : 100,
     'gmwf':      0,
   };
 
   // ─── Queue-type normaliser ─────────────────────────────────────────────────
-  static String _normaliseQueueType(String? raw) {
+  String _normaliseQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
         s == 'non_zakat' || s.startsWith('non')) {
+      if (_isKarachi) return 'zakat';
       return 'non-zakat';
     }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') {
@@ -329,15 +372,6 @@ class _PatientQueueState extends State<PatientQueue>
     }
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
 
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 1),
-    )..repeat(reverse: true);
-
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.4).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
       final type = event['event_type'] as String?;
       final rawData = event['data'];
@@ -355,43 +389,50 @@ class _PatientQueueState extends State<PatientQueue>
         if (serial != null && serial.isNotEmpty) {
           LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
         }
-        if (mounted) {
-          setState(() {});
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _tryAutoSelectSmallestWaiting();
-          });
-        }
+        _debouncedRebuild();
       } else if (type == 'dispense_completed') {
         final serial = (data['serial'] ?? data['id'])?.toString();
         if (serial != null && serial.isNotEmpty) {
-          final entryKey = '${widget.branchId}-$serial';
-          final existing = Hive.box(LocalStorageService.entriesBox).get(entryKey);
-          if (existing is Map) {
-            final updated = Map<String, dynamic>.from(existing)
-              ..['dispenseStatus'] = 'dispensed'
-              ..['status'] = 'completed';
-            Hive.box(LocalStorageService.entriesBox).put(entryKey, updated);
+          LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+        }
+        _debouncedRebuild();
+      } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created' || type == 'save_prescription') {
+        if (data.isNotEmpty) {
+          LocalStorageService.saveLocalPrescription(data);
+          // [FIX] Link prescription → entry in entriesBox (mirrors server SSM).
+          // Without this, the entry stays 'waiting' because only prescriptionsBox
+          // was updated — the queue reads from entriesBox.
+          final serial = (data['serial'] ?? data['id'])?.toString()?.trim();
+          if (serial != null && serial.isNotEmpty) {
+            try {
+              final eBox = Hive.box(LocalStorageService.entriesBox);
+              final normBranch = widget.branchId.toLowerCase().trim();
+              final key = '$normBranch-$serial';
+              final existing = eBox.get(key) ?? eBox.get('$normBranch-${serial.toUpperCase()}');
+              if (existing != null && existing is Map) {
+                final updated = Map<String, dynamic>.from(existing);
+                updated['status'] = 'completed';
+                updated['prescription'] = data;
+                updated['prescriptionId'] = data['id'] ?? serial;
+                updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
+                if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];
+                if (data['doctorId'] != null) updated['doctorId'] = data['doctorId'];
+                if (data['daysOfMedicine'] != null) updated['daysOfMedicine'] = data['daysOfMedicine'];
+                eBox.put(existing == eBox.get(key) ? key : '$normBranch-${serial.toUpperCase()}', updated);
+              }
+            } catch (_) {}
           }
         }
-        if (mounted) {
-          setState(() {});
-        }
-      } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
-        if (mounted) {
-          setState(() {});
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _tryAutoSelectSmallestWaiting();
-          });
-        }
+        _debouncedRebuild();
       } else if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered') {
         LocalStorageService.saveLocalInventoryItem(data);
         if (mounted) setState(() {});
       } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
         final mId = (data['id'] ?? data['medicineId'])?.toString();
         if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
-        if (mounted) setState(() {});
-      } else if (type == RealtimeEvents.tokenExceptionRequest) {
-        final requestId = data['requestId']?.toString() ??
+        _debouncedRebuild();
+      } else if (type == RealtimeEvents.tokenExceptionRequest || type == 'token_exception_request') {
+        final requestId = (data['requestId'] ?? data['id'])?.toString() ??
             'local_${DateTime.now().millisecondsSinceEpoch}';
         final localReq = <String, dynamic>{
           'id':          requestId,
@@ -435,8 +476,7 @@ class _PatientQueueState extends State<PatientQueue>
           Future.microtask(() async {
             await _syncQueueFromFirestore();
             if (mounted) {
-              setState(() {});
-              _tryAutoSelectSmallestWaiting();
+              _debouncedRebuild();  // ← HANG FIX: Debounce
             }
           });
         }
@@ -474,7 +514,7 @@ class _PatientQueueState extends State<PatientQueue>
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _debounceRebuildTimer?.cancel();  // ← HANG FIX: Clean up debounce timer
     _realtimeSub.cancel();
     _connSub?.cancel();
     _exceptionSub?.cancel();
@@ -484,6 +524,20 @@ class _PatientQueueState extends State<PatientQueue>
     }
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     super.dispose();
+  }
+  
+  // ─── HANG FIX: Debounce rebuild to batch events ─────────────────────
+    void _debouncedRebuild() {
+    _debounceRebuildTimer?.cancel();
+    _debounceRebuildTimer = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) {
+        _cachedQueue = null;  // Invalidate cache
+        setState(() {});
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _tryAutoSelectSmallestWaiting();
+        });
+      }
+    });
   }
 
   void _startLiveInventoryListener() {
@@ -524,7 +578,7 @@ class _PatientQueueState extends State<PatientQueue>
     }
   }
 
-  void _startTodaySerialsListener() {
+    void _startTodaySerialsListener() {
     _cancelTodaySerialsListeners();
     if (widget.branchId.isEmpty) return;
     _todaySerialsSubs = [];
@@ -534,6 +588,61 @@ class _PatientQueueState extends State<PatientQueue>
       dateKey: _todayKey,
     );
 
+    Future<void> fetchOnce() async {
+      for (final docId in docIds) {
+        final serialsRef = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('serials')
+            .doc(docId);
+
+        for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+          try {
+            final snap = await serialsRef.collection(type)
+                .get(const GetOptions(source: Source.serverAndCache));
+            bool hasChanges = false;
+            for (final doc in snap.docs) {
+              final data = doc.data();
+              final serial = (data['serial'] ?? doc.id).toString();
+              final entryData = Map<String, dynamic>.from(data);
+              entryData['queueType'] ??= type;
+              entryData['dateKey']   ??= _todayKey;
+              entryData['serial']    ??= serial;
+
+              if (entryData['prescription'] is Map && (entryData['prescription'] as Map).isNotEmpty) {
+                LocalStorageService.saveLocalPrescription(Map<String, dynamic>.from(entryData['prescription'] as Map));
+              }
+
+              LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+              hasChanges = true;
+            }
+            if (hasChanges && mounted) {
+              _debouncedRebuild();
+            }
+          } catch (e) {
+            debugPrint('[PatientQueue] Fallback serials fetch ($type / $docId): $e');
+          }
+        }
+      }
+    }
+
+    if (RealtimeManager().isConnected) {
+      // LAN is up: avoid holding a permanent live Firestore listener (keeps
+      // read quota/cost down), but poll every couple of minutes instead of
+      // fetching only ONCE. A single one-time fetch at listener-start can
+      // never see tokens written to Firestore *after* that fetch — which is
+      // exactly what happens when another device is briefly LAN-disconnected
+      // and falls back to writing straight to Firestore. This periodic poll
+      // is the safety net that recovers those tokens.
+      fetchOnce();
+      _firestoreFallbackPollTimer?.cancel();
+      _firestoreFallbackPollTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+        if (mounted && RealtimeManager().isConnected) fetchOnce();
+      });
+      return;
+    }
+
+    // Not connected to the LAN server at all — use a fully live listener.
     for (final docId in docIds) {
       final serialsRef = FirebaseFirestore.instance
           .collection('branches')
@@ -565,10 +674,7 @@ class _PatientQueueState extends State<PatientQueue>
             }
           }
           if (hasChanges && mounted) {
-            setState(() {});
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              _tryAutoSelectSmallestWaiting();
-            });
+            _debouncedRebuild();
           }
         }, onError: (e) {
           debugPrint('[PatientQueue] Today serials listener error ($type / $docId): $e');
@@ -585,6 +691,8 @@ class _PatientQueueState extends State<PatientQueue>
       }
       _todaySerialsSubs = null;
     }
+    _firestoreFallbackPollTimer?.cancel();
+    _firestoreFallbackPollTimer = null;
   }
 
   void _startExceptionListener() {
@@ -792,7 +900,21 @@ class _PatientQueueState extends State<PatientQueue>
   void _tryAutoSelectSmallestWaiting() {
     if (!mounted) return;
     if (widget.selectedPatient != null) return;
-    final queue   = _getSortedQueue();
+    
+    // ← HANG FIX: Use cached queue if fresh, avoid recalculation
+    final now = DateTime.now();
+    final isCacheValid = _cachedQueue != null && 
+                        _queueCacheTime != null && 
+                        now.difference(_queueCacheTime!) < _queueCacheTTL;
+    
+    final queue = isCacheValid ? _cachedQueue! : _getSortedQueue();
+    
+    // Cache the result for 500ms
+    if (!isCacheValid) {
+      _cachedQueue = queue;
+      _queueCacheTime = now;
+    }
+    
     final waiting = queue.where((p) {
       final s = (p['status'] ?? '').toString().toLowerCase();
       final presc = p['prescription'];
@@ -803,7 +925,13 @@ class _PatientQueueState extends State<PatientQueue>
       );
       final isDisp = (p['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed' || s == 'dispensed';
       final isDone = s == 'completed' || s == 'prescribed' || isDisp || hasRealPresc;
-      return !isDone && s != 'skipped';
+      if (isDone || s == 'skipped') return false;
+
+      final activeDoc = p['activeDoctor']?.toString().trim();
+      if (activeDoc != null && activeDoc.isNotEmpty && !_isDoctorMatch(activeDoc, widget.doctorName)) {
+        return false; // Skip if currently being examined by another doctor
+      }
+      return true;
     }).toList();
     if (waiting.isEmpty) return;
 
@@ -816,20 +944,27 @@ class _PatientQueueState extends State<PatientQueue>
   // ─── Firestore sync ────────────────────────────────────────────────────────
   Future<void> _syncQueueFromFirestore() async {
     try {
-      final serialsRef = FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId)
-          .collection('serials').doc(_todayKey);
+      final docKeys = CampSessionService.getAllCampDateDocIds(
+        branchId: widget.branchId,
+        dateKey: _todayKey,
+      );
 
-      for (final type in ['zakat', 'non-zakat', 'gmwf']) {
-        final snap = await serialsRef.collection(type).get();
-        for (final doc in snap.docs) {
-          final data   = doc.data();
-          final serial = doc.id;
-          final entryData = Map<String, dynamic>.from(data);
-          entryData['serial']    ??= serial;
-          entryData['queueType'] ??= type;
-          entryData['dateKey']   ??= _todayKey;
-          await LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+      for (final campDocKey in docKeys) {
+        final serialsRef = FirebaseFirestore.instance
+            .collection('branches').doc(widget.branchId)
+            .collection('serials').doc(campDocKey);
+
+        for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+          final snap = await serialsRef.collection(type).get();
+          for (final doc in snap.docs) {
+            final data   = doc.data();
+            final serial = doc.id;
+            final entryData = Map<String, dynamic>.from(data);
+            entryData['serial']    ??= serial;
+            entryData['queueType'] ??= type;
+            entryData['dateKey']   ??= _todayKey;
+            await LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+          }
         }
       }
     } catch (e) {
@@ -2006,19 +2141,21 @@ class _PatientQueueState extends State<PatientQueue>
           return s == 'skipped';
         }).toList();
 
-        final completed = allPatients.where(isPatientDone).toList();
+        final allCompleted = allPatients.where(isPatientDone).toList();
+        // Strict Isolation: Doctor only ever sees their own prescribed patients across all camps & shifts
+        final myCompleted = allCompleted.where(_isPrescribedByMe).toList();
 
         final waitingCount   = waiting.length;
         final skippedCount   = skipped.length;
-        final completedCount = completed.length;
-        final total          = allPatients.length;
+        final completedCount = myCompleted.length;
+        final total          = waiting.length + skipped.length + myCompleted.length;
 
         List<Map<String, dynamic>> list;
         switch (_filter) {
           case 'waiting':   list = waiting;    break;
           case 'skipped':   list = skipped;    break;
-          case 'completed': list = completed;  break;
-          default:          list = allPatients;
+          case 'completed': list = myCompleted;  break;
+          default:          list = [...waiting, ...skipped, ...myCompleted];
         }
 
         final mergedExceptions = [
@@ -2042,6 +2179,8 @@ class _PatientQueueState extends State<PatientQueue>
         }
         final finalExceptions = uniqueExceptions.values.toList();
 
+        final isDark = _isDark;
+
         return Column(children: [
           // ── Header ──────────────────────────────────────────────────────
           Container(
@@ -2050,20 +2189,80 @@ class _PatientQueueState extends State<PatientQueue>
             child: Row(children: [
               const Icon(Icons.people_alt, color: Colors.white, size: 26),
               const SizedBox(width: 10),
-              const Text("Today's Queue",
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 19,
-                      fontWeight: FontWeight.bold)),
-              const Spacer(),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Today's Queue",
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold)),
+                    if (widget.doctorName != null && widget.doctorName!.isNotEmpty)
+                      Text(
+                        'Logged in as ${widget.doctorName!.startsWith("Dr") ? widget.doctorName : "Dr. ${widget.doctorName}"}',
+                        style: const TextStyle(
+                          color: Color(0xFFCCFBF1),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.refresh, color: Colors.white, size: 24),
+                tooltip: 'Refresh Queue',
                 onPressed: () {
                   setState(() {});
                   WidgetsBinding.instance.addPostFrameCallback(
                       (_) => _tryAutoSelectSmallestWaiting());
                 }),
             ]),
+          ),
+
+          // ── Session / Shift & Camp Filter Bar ───────────────────────────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildSessionChip('auto', '⚡ Current (${CampSessionService.getCurrentSession(null, widget.branchId).toUpperCase()})'),
+                  if (_allowedSessions.contains('morning') || _allowedSessions.contains('all')) ...[
+                    const SizedBox(width: 5),
+                    _buildSessionChip('morning', '☀️ Morning'),
+                  ],
+                  if (_allowedSessions.contains('evening') || _allowedSessions.contains('all')) ...[
+                    const SizedBox(width: 5),
+                    _buildSessionChip('evening', '🌅 Evening'),
+                  ],
+                  if (_allowedSessions.contains('night') || _allowedSessions.contains('all')) ...[
+                    const SizedBox(width: 5),
+                    _buildSessionChip('night', '🌙 Night'),
+                  ],
+                  if (_hasMultiCamps && (_allowedCamps.contains('all') || _allowedCamps.length > 1)) ...[
+                    const SizedBox(width: 10),
+                    Container(height: 16, width: 1, color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                    const SizedBox(width: 10),
+                    if (_allowedCamps.contains('all')) _buildCampChip('all', '🏥 All Camps'),
+                    if (_allowedCamps.contains('all') || _allowedCamps.contains('saddar')) ...[
+                      const SizedBox(width: 5),
+                      _buildCampChip('saddar', 'Saddar'),
+                    ],
+                    if (_allowedCamps.contains('all') || _allowedCamps.contains('haji_camp') || _allowedCamps.contains('haji')) ...[
+                      const SizedBox(width: 5),
+                      _buildCampChip('haji_camp', 'Haji Camp'),
+                    ],
+                  ],
+                ],
+              ),
+            ),
           ),
 
           // ── Filter tabs ──────────────────────────────────────────────────
@@ -2208,22 +2407,34 @@ class _PatientQueueState extends State<PatientQueue>
                     widget.selectedPatient?['id']?.toString() == serial;
 
                 final status    = (patient['status'] ?? '').toString().toLowerCase();
-                final dispenseStatus = (patient['dispenseStatus'] ?? '').toString().toLowerCase();
+                String dispenseStatus = (patient['dispenseStatus'] ?? '').toString().toLowerCase();
+                if (dispenseStatus != 'dispensed' && status != 'dispensed') {
+                  if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+                    final dBox = Hive.box(LocalStorageService.dispensaryBox);
+                    final dKey = (patient['dateKey'] ?? _todayKey).toString();
+                    final rec = dBox.get('${widget.branchId}_${dKey}_$serial') ??
+                                dBox.get('${widget.branchId}-$serial') ??
+                                dBox.get(serial);
+                    if (rec is Map && ((rec['dispenseStatus'] ?? rec['status']) == 'dispensed' || rec['status'] == 'completed')) {
+                      dispenseStatus = 'dispensed';
+                    }
+                  }
+                }
                 final presc = patient['prescription'];
                 final hasRealPresc = presc is Map && (
                   (presc['prescriptions'] is List && (presc['prescriptions'] as List).isNotEmpty) ||
                   (presc['medicines'] is List && (presc['medicines'] as List).isNotEmpty) ||
                   (presc['isVitalsOnly'] == true && presc['completedAt'] != null)
                 );
-                final isDone = status == 'completed' || status == 'prescribed' || status == 'dispensed' || dispenseStatus == 'dispensed' || hasRealPresc;
+                final isDispensed = dispenseStatus == 'dispensed' || status == 'dispensed';
+                final isDone = status == 'completed' || status == 'prescribed' || isDispensed || hasRealPresc;
                 final isSkipped = status == 'skipped';
                 final isWaiting = !isDone && !isSkipped;
                 final isVitalsOnly = patient['isVitalsOnly'] == true || patient['vitalsOnly'] == true;
 
-                // FIX: edit button must only appear for status == 'completed',
-                // and MUST hide immediately once status becomes 'dispensed'
-                // (or dispenseStatus is 'dispensed' even if status is 'completed' for sync reasons).
-                final isCompleted = isDone && dispenseStatus != 'dispensed';
+                // Edit button must only appear for status == 'completed' (not yet dispensed),
+                // and MUST hide immediately once status becomes 'dispensed'.
+                final isCompleted = isDone && !isDispensed;
 
                 final smallestWaitingSerial = waiting.isNotEmpty
                     ? (waiting.first['serial']?.toString() ??
@@ -2250,12 +2461,11 @@ class _PatientQueueState extends State<PatientQueue>
                     ? _amber
                     : (isSkipped ? Colors.orange.shade800 : Colors.green[700]!);
 
-                Widget dot = Container(
+                final Widget dot = Container(
                     width: 10,
                     height: 10,
                     decoration:
                         BoxDecoration(color: dotColor, shape: BoxShape.circle));
-                if (isWaiting) dot = ScaleTransition(scale: _pulseAnimation, child: dot);
 
                 final isDark = _isDark;
                 return AnimatedContainer(
@@ -2317,6 +2527,19 @@ class _PatientQueueState extends State<PatientQueue>
                               spacing: 6,
                               runSpacing: 2,
                               children: [
+                              Builder(builder: (_) {
+                                final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
+                                  cnic: patient['cnic'] ?? patient['patientCnic'] ?? patient['guardianCnic'],
+                                  name: name,
+                                );
+                                if (staffInfo != null) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(right: 2),
+                                    child: StaffPatientLinkService.buildStaffBadge(staffInfo, isDark: isDark),
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              }),
                               Builder(builder: (_) {
                                 if (!_hasMultiCamps) return const SizedBox.shrink();
                                 final ser = serial.toUpperCase();
@@ -2392,13 +2615,96 @@ class _PatientQueueState extends State<PatientQueue>
                                           fontSize: 9,
                                           fontWeight: FontWeight.bold)),
                                 ),
+                              // Doctor attribution badge
+                              Builder(builder: (_) {
+                                final pMap = (presc is Map) ? Map<String, dynamic>.from(presc) : null;
+                                final prescDoc = (pMap?['doctorName'] ?? pMap?['prescribedBy'] ?? patient['doctorName'] ?? patient['prescribedBy'] ?? patient['examinedBy'])?.toString().trim();
+                                final isMine = _isPrescribedByMe(patient, pMap);
+                                
+                                if (isDone && prescDoc != null && prescDoc.isNotEmpty && prescDoc.toLowerCase() != 'unknown') {
+                                  final cleanDoc = prescDoc.startsWith('Dr') ? prescDoc : 'Dr. $prescDoc';
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                    decoration: BoxDecoration(
+                                      color: isMine ? (isDark ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5)) : (isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: isMine ? (isDark ? const Color(0xFF059669) : const Color(0xFF34D399)) : (isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1))),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.medical_services_rounded, size: 10, color: isMine ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569))),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          isMine ? 'Prescribed by You' : cleanDoc,
+                                          style: TextStyle(
+                                            color: isMine ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                final actDoc = patient['activeDoctor']?.toString().trim();
+                                if (isWaiting && actDoc != null && actDoc.isNotEmpty) {
+                                  final isWithMe = _isDoctorMatch(actDoc, widget.doctorName);
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                    decoration: BoxDecoration(
+                                      color: isWithMe ? (isDark ? const Color(0xFF1E3A5F) : const Color(0xFFDBEAFE)) : (isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7)),
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: isWithMe ? const Color(0xFF3B82F6) : const Color(0xFFF59E0B)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.person_pin_circle_rounded, size: 10, color: isWithMe ? const Color(0xFF2563EB) : const Color(0xFFD97706)),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          isWithMe ? 'In Consultation with You' : 'With Dr. $actDoc',
+                                          style: TextStyle(
+                                            color: isWithMe ? (isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF)) : (isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E)),
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return const SizedBox.shrink();
+                              }),
                             ]),
                           ],
                         ),
                       ),
-                      // FIX: show edit button only when status is exactly 'completed'
-                      // (prescription written by doctor but not yet dispensed).
-                      // Hidden immediately once status becomes 'dispensed'.
+                      if (isDispensed)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF14532D) : Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: isDark ? const Color(0xFF16A34A) : Colors.green.shade400),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_rounded, size: 10, color: isDark ? const Color(0xFF86EFAC) : Colors.green.shade800),
+                              const SizedBox(width: 3),
+                              Text(
+                                'Dispensed',
+                                style: TextStyle(
+                                  color: isDark ? const Color(0xFF86EFAC) : Colors.green.shade800,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       if (isCompleted && hasPrescription)
                         IconButton(
                           icon: const Icon(Icons.edit,
@@ -2473,14 +2779,19 @@ class _PatientQueueState extends State<PatientQueue>
 
   Widget _buildSessionChip(String value, String label) {
     final isAllowed  = _isSessionAllowed(value);
-    final isSelected = _selectedSessionFilter == value && isAllowed;
+    final isSelected = (_selectedSession == value || _selectedSessionFilter == value) && (value == 'all' || isAllowed);
     final isDark = _isDark;
     return Opacity(
-      opacity: isAllowed ? 1.0 : 0.4,
+      opacity: (value == 'all' || isAllowed) ? 1.0 : 0.4,
       child: Tooltip(
-        message: isAllowed ? label : 'Restricted to assigned work shifts',
+        message: (value == 'all' || isAllowed) ? label : 'Restricted to assigned work shifts',
         child: InkWell(
-          onTap: isAllowed ? () => setState(() => _selectedSessionFilter = value) : null,
+          onTap: (value == 'all' || isAllowed)
+              ? () => setState(() {
+                    _selectedSession = value;
+                    _selectedSessionFilter = value;
+                  })
+              : null,
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

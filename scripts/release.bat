@@ -1,7 +1,7 @@
 @echo off
 if "%~1"=="" (
     echo [ERROR] Please provide a release version number.
-    echo Usage: scripts\release.bat 1.3.8
+    echo Usage: scripts\release.bat 1.34.1
     exit /b 1
 )
 

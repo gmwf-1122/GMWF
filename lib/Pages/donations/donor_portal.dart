@@ -1,6 +1,7 @@
 // lib/pages/donations/donor_portal.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:gmwf/pages/donations/donations_shared.dart';
@@ -790,6 +791,9 @@ class _DonorPortalState extends State<DonorPortal> {
         TextField(
           controller: controller,
           keyboardType: keyboardType,
+          inputFormatters: keyboardType == TextInputType.phone
+              ? [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)]
+              : null,
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
             hintText: hint,

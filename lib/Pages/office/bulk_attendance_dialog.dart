@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/sync_service.dart';
+import '../../services/local_storage_service.dart';
 
 class BulkAttendanceDialog {
   static void open({
@@ -156,7 +157,7 @@ class BulkAttendanceDialog {
                   statusMessage = 'Saving Attendance...';
                 });
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
                   int employeesUpdated = 0;
 
                   for (final emp in employees) {
@@ -248,7 +249,7 @@ class BulkAttendanceDialog {
                   statusMessage = 'Saving Bulk Present...';
                 });
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
                   int employeesUpdated = 0;
 
                   for (final emp in employees) {

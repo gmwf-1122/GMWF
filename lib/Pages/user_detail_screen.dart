@@ -22,6 +22,8 @@ import '../theme/app_theme.dart';
 import '../widgets/device_badge_widget.dart';
 import '../utils/formatters.dart';
 import '../services/camp_session_service.dart';
+import 'office/offboard_dialog.dart';
+import '../services/staff_patient_link_service.dart';
 
 class UserDetailScreen extends StatefulWidget {
   final String userId;
@@ -106,21 +108,38 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   }
 
   Future<void> _deleteFirebaseAuthUser(String email, String password) async {
+    final cleanEmail = email.trim();
+    if (cleanEmail.isEmpty) {
+      throw Exception('No email was provided for the Firebase Auth account to delete.');
+    }
+    if (password.trim().isEmpty) {
+      throw Exception('A valid password is required to delete the Firebase Auth account.');
+    }
+
+    const appName = 'AdminDeleteAuthApp';
+    FirebaseApp? secondaryApp;
     try {
-      final appName = 'TempAuthApp_${DateTime.now().millisecondsSinceEpoch}';
-      final secondaryApp = await Firebase.initializeApp(
+      secondaryApp = Firebase.app(appName);
+    } catch (_) {
+      secondaryApp = await Firebase.initializeApp(
         name: appName,
         options: Firebase.app().options,
       );
-      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-      final creds = await secondaryAuth.signInWithEmailAndPassword(email: email, password: password);
+    }
+
+    try {
+      final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp!);
+      final creds = await secondaryAuth.signInWithEmailAndPassword(email: cleanEmail, password: password.trim());
       final user = creds.user;
-      if (user != null) {
-        await user.delete();
+      if (user == null) {
+        throw Exception('Firebase Auth user not found for $cleanEmail.');
       }
-      await secondaryApp.delete();
+      await user.delete();
+      await OfflineAuthService.clearCredentialsForUser(cleanEmail);
+      await secondaryAuth.signOut();
     } catch (e) {
       debugPrint('[UserDetailScreen] Failed to delete Firebase Auth user: $e');
+      rethrow;
     }
   }
 
@@ -1138,12 +1157,21 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       ),
     );
     if (confirmed != true) return;
+
+    final String email = data['email']?.toString() ?? '';
+    final String password = data['password']?.toString() ?? '';
+    final isLocal = widget.userId.startsWith('local-');
+    final targetDocId = (data['uid'] ?? data['id'] ?? widget.userId)?.toString() ?? widget.userId;
+
     try {
-      final String email = data['email']?.toString() ?? '';
-      final String password = data['password']?.toString() ?? '1122';
-      final isLocal = widget.userId.startsWith('local-');
-      if (email.isNotEmpty && !isLocal) {
-        await _deleteFirebaseAuthUser(email, password);
+      bool authDeleted = false;
+      if (email.isNotEmpty && !isLocal && password.trim().isNotEmpty) {
+        try {
+          await _deleteFirebaseAuthUser(email, password);
+          authDeleted = true;
+        } catch (e) {
+          debugPrint('[UserDetailScreen] Firebase Auth delete skipped/failed: $e');
+        }
       }
 
       await FinanceLocalStorage.syncBiDirectionalOffboarding(
@@ -1156,24 +1184,30 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         uid: widget.userId,
         branchId: widget.branchId,
         email: email,
+        username: (data['username'] ?? data['usernameLower'] ?? '').toString(),
       );
 
       if (widget.isOnline && !isLocal) {
-        await _firestore
-            .collection('users')
-            .doc(widget.userId)
-            .delete();
-
-        if (widget.branchId != 'all' && widget.branchId.isNotEmpty) {
-          await _firestore
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('users')
-              .doc(widget.userId)
-              .delete();
+        try {
+          await _firestore.collection('users').doc(targetDocId).delete();
+          if (widget.branchId != 'all' && widget.branchId.isNotEmpty && widget.branchId != 'global') {
+            await _firestore
+                .collection('branches')
+                .doc(widget.branchId)
+                .collection('users')
+                .doc(targetDocId)
+                .delete();
+          }
+        } catch (e) {
+          debugPrint('[UserDetailScreen] Firestore delete best effort failed; local queue keeps it synced later: $e');
         }
       }
-      _snack('User deleted', success: true);
+
+      final authMessage = authDeleted
+          ? 'User deleted successfully.'
+          : 'User deleted locally and from the app records. Firebase Auth removal was skipped because no valid password was available for this account.';
+
+      _snack(authMessage, success: true);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       _snack('Error: $e', error: true);
@@ -1372,6 +1406,24 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               tooltip: 'Revoke Access',
               onPressed: () => _showRevokeAccessDialog(data, t),
             ),
+          IconButton(
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.medical_services_outlined,
+                  size: 18, color: Colors.white),
+            ),
+            tooltip: 'Medical History',
+            onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
+              context,
+              name: username,
+              cnic: data['cnic']?.toString(),
+              branchId: data['branchId']?.toString() ?? widget.branchId,
+              role: role,
+            ),
+          ),
           IconButton(
             icon: Container(
               padding: const EdgeInsets.all(8),
@@ -2622,10 +2674,6 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     );
   }
 
-  bool _isChairmanActor() {
-    return _getActorRole() == 'chairman';
-  }
-
   String _getActorRole() {
     if (widget.currentUserRole != null && widget.currentUserRole!.isNotEmpty) {
       return widget.currentUserRole!.toLowerCase().trim();
@@ -2743,8 +2791,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     final targetPass = (data['password'] ?? '112233').toString();
 
     try {
-      if (targetEmail.isNotEmpty) {
-        await _deleteFirebaseAuthUser(targetEmail, targetPass);
+      if (targetEmail.isNotEmpty && targetPass.trim().isNotEmpty) {
+        try {
+          await _deleteFirebaseAuthUser(targetEmail, targetPass);
+        } catch (e) {
+          debugPrint('[UserDetailScreen] Auth deletion skipped because credential is unavailable or invalid: $e');
+        }
       }
 
       // Purge from Local Storage
@@ -2815,9 +2867,20 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         status == 'revoked' ||
         data['isActive'] == false;
 
-    String selectedCategory = isRevoked ? 'Active' : 'Resigned';
+    if (!isRevoked) {
+      final offboardResult = await OffboardDialog.show(
+        context,
+        employeeData: data,
+        performedBy: widget.currentUserRole ?? 'Admin',
+      );
+      if (offboardResult == true && mounted) {
+        setState(() {});
+        _snack('@${data['username'] ?? 'User'} has been offboarded.');
+      }
+      return;
+    }
+
     final reasonCtrl = TextEditingController();
-    final categories = ['Resigned', 'Terminated', 'Retired', 'Suspended', 'Offboarded', 'Inactive'];
 
     final confirmCategory = await showDialog<bool>(
       context: context,
@@ -2837,12 +2900,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: (isRevoked ? Colors.green : Colors.red).withValues(alpha: 0.12),
+                          color: Colors.green.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          isRevoked ? Icons.lock_open_rounded : Icons.no_accounts_rounded,
-                          color: isRevoked ? Colors.green : Colors.red,
+                        child: const Icon(
+                          Icons.lock_open_rounded,
+                          color: Colors.green,
                           size: 24,
                         ),
                       ),
@@ -2852,7 +2915,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isRevoked ? 'Re-Enable App Access' : 'Revoke App Access',
+                              'Re-Enable App Access',
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -2860,9 +2923,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               ),
                             ),
                             Text(
-                              isRevoked
-                                  ? 'Restore access for @${data['username'] ?? 'User'}'
-                                  : 'Offboard employee & block app access',
+                              'Restore access for @${data['username'] ?? 'User'}',
                               style: TextStyle(fontSize: 12, color: t.textTertiary),
                             ),
                           ],
@@ -2871,41 +2932,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     ],
                   ),
                   const SizedBox(height: 20),
-                  if (!isRevoked) ...[
-                    Text(
-                      'Select Revocation Category',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textSecondary),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: t.bg,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: t.bgRule),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: selectedCategory,
-                          isExpanded: true,
-                          dropdownColor: t.bgCard,
-                          style: TextStyle(fontSize: 14, color: t.textPrimary, fontWeight: FontWeight.w600),
-                          items: categories.map((cat) {
-                            return DropdownMenuItem(
-                              value: cat,
-                              child: Text(cat),
-                            );
-                          }).toList(),
-                          onChanged: (v) {
-                            if (v != null) setS(() => selectedCategory = v);
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
                   Text(
-                    isRevoked ? 'Restoration Remarks (Optional)' : 'Reason / Remarks (Optional)',
+                    'Restoration Remarks (Optional)',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textSecondary),
                   ),
                   const SizedBox(height: 8),
@@ -2914,7 +2942,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     maxLines: 2,
                     style: TextStyle(fontSize: 13, color: t.textPrimary),
                     decoration: InputDecoration(
-                      hintText: isRevoked ? 'e.g. Access restored by HQ Manager' : 'e.g. Resigned voluntarily / End of contract',
+                      hintText: 'e.g. Access restored by HQ Manager',
                       hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
                       filled: true,
                       fillColor: t.bg,
@@ -2948,10 +2976,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       Expanded(
                         child: ElevatedButton.icon(
                           onPressed: () => Navigator.pop(ctx, true),
-                          icon: Icon(isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded, size: 18),
-                          label: Text(isRevoked ? 'Restore' : 'Proceed'),
+                          icon: const Icon(Icons.lock_open_rounded, size: 18),
+                          label: const Text('Restore'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isRevoked ? Colors.green : Colors.red,
+                            backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 13),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -2976,26 +3004,15 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     final String reason = reasonCtrl.text.trim();
     final isLocal = widget.userId.startsWith('local-');
 
-    final Map<String, dynamic> updates;
-
-    if (isRevoked) {
-      updates = <String, dynamic>{
-        'status': 'active',
-        'accountStatus': 'active',
-        'isActive': true,
-        'revocationReason': null,
-        'revokedAt': null,
-        'restoredAt': FieldValue.serverTimestamp(),
-      };
-    } else {
-      updates = <String, dynamic>{
-        'status': selectedCategory,
-        'accountStatus': selectedCategory,
-        'isActive': false,
-        'revocationReason': reason.isNotEmpty ? reason : 'Access revoked by admin ($selectedCategory)',
-        'revokedAt': FieldValue.serverTimestamp(),
-      };
-    }
+    final updates = <String, dynamic>{
+      'status': 'active',
+      'accountStatus': 'active',
+      'isActive': true,
+      'revocationReason': null,
+      'revokedAt': null,
+      'restoredAt': FieldValue.serverTimestamp(),
+      if (reason.isNotEmpty) 'restorationRemarks': reason,
+    };
 
     try {
       await LocalStorageService.saveUserOffline(
@@ -3025,7 +3042,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
       }
 
-      _snack(isRevoked ? 'App access restored for ${data['username'] ?? 'user'}' : 'Access revoked for ${data['username'] ?? 'user'} ($selectedCategory)', success: true);
+      _snack('App access restored for ${data['username'] ?? 'user'}', success: true);
     } catch (e) {
       _snack('Error updating access status: $e', error: true);
     }

@@ -267,7 +267,7 @@ class _RegisterState extends State<Register>
   }
 
   String _getBranchId() {
-    if (!_requiresBranch()) return 'global';
+    if (!_requiresBranch()) return 'all';
     if (_selectedBranch == null) throw Exception('Please select a branch for this role');
     final match = _branches.where((b) => b['name'] == _selectedBranch).toList();
     if (match.isEmpty) throw Exception('Selected branch not found — please re-select');

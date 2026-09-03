@@ -21,6 +21,7 @@ import '../services/local_storage_service.dart';
 import 'app_back_button.dart';
 import '../services/user_module_access_service.dart';
 import '../services/auto_update_service.dart';
+import '../services/camp_session_service.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -160,13 +161,23 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     }
 
     // ── Global / executive roles: check cache first ─────────────────────────
-    final localBranches = localBranchesBox.values
-        .where((val) => val is Map && val['id'] != null)
-        .map((val) => {'id': val['id'].toString(), 'name': val['name']?.toString() ?? val['id'].toString()})
-        .toList();
+    final uniqueLocalBranches = <String, Map<String, String>>{};
+    for (final val in localBranchesBox.values) {
+      if (val is Map &&
+          val['id'] != null &&
+          val['isOffboarded'] != true &&
+          val['status'] != 'offboarded') {
+        final id = val['id'].toString().trim();
+        final name = val['name']?.toString().trim() ?? id;
+        if (id.isNotEmpty && id.toLowerCase() != 'all' && id.toLowerCase() != 'global') {
+          uniqueLocalBranches[id.toLowerCase()] = {'id': id, 'name': name};
+        }
+      }
+    }
 
-    if (localBranches.isNotEmpty) {
-      localBranches.sort((a, b) => a['name']!.compareTo(b['name']!));
+    if (uniqueLocalBranches.isNotEmpty) {
+      final localBranches = uniqueLocalBranches.values.toList()
+        ..sort((a, b) => a['name']!.compareTo(b['name']!));
       final allBranchesList = [
         {'id': 'all', 'name': 'All Branches (Consolidated)'},
         ...localBranches,
@@ -188,20 +199,28 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     // Fallback: fetch all branches from Firestore
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
-      final branches = snap.docs.where((d) {
-        final idLower = d.id.toLowerCase().trim();
-        final nameLower = (d.data()['name'] as String? ?? '').toLowerCase().trim();
-        return idLower != 'all' && idLower != 'global' && nameLower != 'all' && nameLower != 'global';
-      }).map((d) {
-        final data = d.data();
-        return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-      }).toList();
+      final uniqueRemoteBranches = <String, Map<String, String>>{};
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final id = doc.id.trim();
+        final name = (data['name'] as String?)?.trim() ?? id;
+        final idLower = id.toLowerCase();
+        final isOffboarded = data['isOffboarded'] == true || data['status'] == 'offboarded';
+        
+        await localBranchesBox.put('branch:$id', {
+          'id': id,
+          'name': name,
+          'isOffboarded': isOffboarded,
+          'status': data['status'] ?? (isOffboarded ? 'offboarded' : 'active'),
+        });
 
-      for (final b in branches) {
-        await localBranchesBox.put('branch:${b['id']}', b);
+        if (!isOffboarded && idLower != 'all' && idLower != 'global') {
+          uniqueRemoteBranches[idLower] = {'id': id, 'name': name};
+        }
       }
 
-      branches.sort((a, b) => a['name']!.compareTo(b['name']!));
+      final branches = uniqueRemoteBranches.values.toList()
+        ..sort((a, b) => a['name']!.compareTo(b['name']!));
       final allBranchesList = [
         {'id': 'all', 'name': 'All Branches (Consolidated)'},
         ...branches,
@@ -252,9 +271,16 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
           .doc(myBranchId)
           .get();
       if (doc.exists) {
-        final name = (doc.data()?['name'] as String?) ?? myBranchId;
+        final data = doc.data() ?? {};
+        final name = (data['name'] as String?) ?? myBranchId;
+        final isOffboarded = data['isOffboarded'] == true || data['status'] == 'offboarded';
         final localBranchesBox = Hive.box(LocalStorageService.branchesBox);
-        await localBranchesBox.put('branch:$myBranchId', {'id': myBranchId, 'name': name});
+        await localBranchesBox.put('branch:$myBranchId', {
+          'id': myBranchId,
+          'name': name,
+          'isOffboarded': isOffboarded,
+          'status': data['status'] ?? (isOffboarded ? 'offboarded' : 'active'),
+        });
       }
     } catch (_) {}
   }
@@ -267,7 +293,13 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
         final data = d.data();
         final id = d.id;
         final name = data['name'] as String? ?? id;
-        await localBranchesBox.put('branch:$id', {'id': id, 'name': name});
+        final isOffboarded = data['isOffboarded'] == true || data['status'] == 'offboarded';
+        await localBranchesBox.put('branch:$id', {
+          'id': id,
+          'name': name,
+          'isOffboarded': isOffboarded,
+          'status': data['status'] ?? (isOffboarded ? 'offboarded' : 'active'),
+        });
       }
     } catch (_) {}
   }
@@ -275,14 +307,19 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   void _selectBranch(String id, String name) {
     // ── Branch-scoped roles cannot switch branches ─────────────────────────
     if (_isBranchScoped) return;
+    if (_selectedBranchId == id) return;
     // ───────────────────────────────────────────────────────────────────────
     setState(() {
       _selectedBranchId = id;
       _selectedBranchName = name;
     });
     _pillAnim.forward(from: 0);
-    // ── Also start sync for the newly selected branch ───────────────────────
-    SyncService().start(id);
+    // ── Start sync for the newly selected branch asynchronously after frame ──
+    Future.delayed(const Duration(milliseconds: 150), () {
+      if (mounted) {
+        SyncService().start(id);
+      }
+    });
     // ───────────────────────────────────────────────────────────────────────
   }
 
@@ -472,10 +509,13 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
         // Branch-scoped roles or finance module see only a read-only branch label, no selector.
         if (widget.module.isBranchDependent && (_isBranchScoped || widget.module.id == 'finance'))
           _LockedBranchLabel(branchName: _selectedBranchName ?? '', t: t),
-        if (widget.module.isBranchDependent && !_isBranchScoped && widget.module.id != 'finance')
+        if (widget.module.isBranchDependent && !_isBranchScoped && widget.module.id != 'finance') ...[
           isMobile
               ? _MobileBranchButton(state: this, t: t)
               : _DesktopBranchDropdown(state: this, t: t),
+          if (CampSessionService.hasCampsForBranch(_selectedBranchId ?? '') || (_selectedBranchId ?? '').toLowerCase().contains('karachi'))
+            _DesktopCampDropdown(state: this, t: t),
+        ],
         const SizedBox(width: 12),
       ],
       bottom: PreferredSize(
@@ -557,42 +597,130 @@ class _DesktopBranchDropdown extends StatelessWidget {
                 ? const Color(0xFF30363D)
                 : t.accent.withValues(alpha: 0.2)),
       ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: state._selectedBranchId,
-          hint: Text('Select Branch',
+      child: Builder(
+        builder: (context) {
+          final uniqueMap = <String, String>{};
+          for (final b in state._branches) {
+            final id = b['id']?.toString().trim() ?? '';
+            final name = b['name']?.toString().trim() ?? id;
+            if (id.isNotEmpty && !uniqueMap.containsKey(id)) {
+              uniqueMap[id] = name;
+            }
+          }
+          final items = uniqueMap.entries
+              .map((e) => DropdownMenuItem<String>(
+                    value: e.key,
+                    child: Text(e.value),
+                  ))
+              .toList();
+
+          final safeValue = items.any((it) => it.value == state._selectedBranchId)
+              ? state._selectedBranchId
+              : (items.isNotEmpty ? items.first.value : null);
+
+          return DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: safeValue,
+              hint: Text('Select Branch',
+                  style: TextStyle(
+                      color: state._isGlobal
+                          ? const Color(0xFF8B949E)
+                          : t.textTertiary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600)),
+              icon: Icon(Icons.keyboard_arrow_down_rounded,
+                  color: t.accent, size: 18),
+              dropdownColor: state._isGlobal
+                  ? const Color(0xFF161B22)
+                  : t.bgCard,
               style: TextStyle(
                   color: state._isGlobal
-                      ? const Color(0xFF8B949E)
-                      : t.textTertiary,
+                      ? const Color(0xFFE6EDF3)
+                      : t.textPrimary,
                   fontSize: 13,
-                  fontWeight: FontWeight.w600)),
-          icon: Icon(Icons.keyboard_arrow_down_rounded,
-              color: t.accent, size: 18),
-          dropdownColor: state._isGlobal
-              ? const Color(0xFF161B22)
-              : t.bgCard,
-          style: TextStyle(
-              color: state._isGlobal
-                  ? const Color(0xFFE6EDF3)
-                  : t.textPrimary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600),
-          items: state._branches
-              .map((b) => DropdownMenuItem<String>(
-                    value: b['id'],
-                    child: Text(b['name']),
-                  ))
-              .toList(),
-          onChanged: (val) {
-            if (val != null) {
-              final b = state._branches
-                  .firstWhere((b) => b['id'] == val);
-              state._selectBranch(val, b['name']);
-            }
-          },
-        ),
+                  fontWeight: FontWeight.w600),
+              items: items,
+              onChanged: (val) {
+                if (val != null) {
+                  final bName = uniqueMap[val] ?? val;
+                  state._selectBranch(val, bName);
+                }
+              },
+            ),
+          );
+        },
       ),
+    );
+  }
+}
+
+// ── Desktop camp dropdown (for multi-camp branches e.g. Karachi) ─────────────
+
+class _DesktopCampDropdown extends StatelessWidget {
+  final _GlobalModuleWrapperState state;
+  final RoleThemeData t;
+
+  const _DesktopCampDropdown({required this.state, required this.t});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: CampSessionService.activeCampNotifier,
+      builder: (context, activeCamp, _) {
+        final currentCamp = (activeCamp == null || activeCamp.isEmpty) ? 'all' : activeCamp;
+        final items = [
+          const DropdownMenuItem<String>(
+            value: 'all',
+            child: Text('All Camps (Collective)'),
+          ),
+          const DropdownMenuItem<String>(
+            value: 'haji_camp',
+            child: Text('Haji Camp Dispensary'),
+          ),
+          const DropdownMenuItem<String>(
+            value: 'saddar',
+            child: Text('Saddar Dispensary'),
+          ),
+        ];
+
+        final safeValue = items.any((it) => it.value == currentCamp)
+            ? currentCamp
+            : (currentCamp.contains('haji') ? 'haji_camp' : (currentCamp.contains('sadd') ? 'saddar' : 'all'));
+
+        return Container(
+          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color: state._isGlobal
+                ? const Color(0xFF21262D)
+                : t.accent.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: state._isGlobal
+                  ? const Color(0xFF30363D)
+                  : t.accent.withValues(alpha: 0.2),
+            ),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: safeValue,
+              icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.accent, size: 18),
+              dropdownColor: state._isGlobal ? const Color(0xFF161B22) : t.bgCard,
+              style: TextStyle(
+                color: state._isGlobal ? const Color(0xFFE6EDF3) : t.textPrimary,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+              ),
+              items: items,
+              onChanged: (val) {
+                if (val != null) {
+                  CampSessionService.setActiveCamp(val);
+                }
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -79,11 +79,11 @@ class LanClient {
         (message) {
           if (_isDisposed) return;
 
+          _lastPongReceived = DateTime.now();
           final trimmed = message.toString().trim();
 
           // Handle pong
-          if (trimmed == 'pong' || trimmed == '{"type":"pong"}') {
-            _lastPongReceived = DateTime.now();
+          if (trimmed == 'pong' || trimmed == '{"type":"pong"}' || trimmed.contains('"pong"')) {
             return;
           }
 

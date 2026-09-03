@@ -3,6 +3,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 /// Service responsible for managing the Universal Master Proforma Medicine Catalog.
 /// Strictly uses Generic Formulas only (no commercial brand names allowed).
@@ -13,6 +15,15 @@ class MasterProformaService {
 
   /// Default Master Seed Catalog using generic medicine formulas ONLY.
   static final List<Map<String, dynamic>> _defaultProformaList = [
+    {
+      'code': 'MED-PARA-400',
+      'name': 'Paracetamol (Panadol)',
+      'formula': 'Paracetamol (Panadol)',
+      'type': 'Tablet',
+      'dose': '400 mg',
+      'defaultPrice': 2.50,
+      'isProformaMaster': true,
+    },
     {
       'code': 'MED-PARA-500',
       'name': 'Paracetamol (Panadol)',
@@ -29,6 +40,60 @@ class MasterProformaService {
       'type': 'Tablet',
       'dose': '500 mg',
       'defaultPrice': 3.50,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-ORPH-PARA-TAB',
+      'name': 'Orphenadrine Citrate + Paracetamol (Norgesic)',
+      'formula': 'Orphenadrine Citrate + Paracetamol (Norgesic)',
+      'type': 'Tablet',
+      'dose': '35 mg / 450 mg',
+      'defaultPrice': 8.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-ANT-TRI-TAB',
+      'name': 'Antacid (Trisil)',
+      'formula': 'Antacid (Trisil)',
+      'type': 'Tablet',
+      'dose': 'Standard',
+      'defaultPrice': 2.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-MEF-SYR',
+      'name': 'Mefenamic Acid (Ponstan)',
+      'formula': 'Mefenamic Acid (Ponstan)',
+      'type': 'Syrup',
+      'dose': '50 mg / 5 ml',
+      'defaultPrice': 95.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-CAP-25-TAB',
+      'name': 'Captopril (Capoten)',
+      'formula': 'Captopril (Capoten)',
+      'type': 'Tablet',
+      'dose': '25 mg',
+      'defaultPrice': 6.50,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-PARA-CPM-DXM-TAB',
+      'name': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)',
+      'formula': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)',
+      'type': 'Tablet',
+      'dose': '500 mg / 2 mg / 15 mg',
+      'defaultPrice': 6.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-PARA-CPM-DXM-SYR',
+      'name': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Corex-D / T-Day)',
+      'formula': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Corex-D / T-Day)',
+      'type': 'Syrup',
+      'dose': '60 ml',
+      'defaultPrice': 110.00,
       'isProformaMaster': true,
     },
     {
@@ -249,8 +314,8 @@ class MasterProformaService {
     },
     {
       'code': 'MED-NS-1000',
-      'name': '0.9% NaCl (Normal Saline)',
-      'formula': '0.9% NaCl',
+      'name': 'Normal Saline (NS)',
+      'formula': 'Normal Saline (NS)',
       'type': 'Infusion',
       'dose': '1000 ml',
       'defaultPrice': 120.00,
@@ -258,8 +323,8 @@ class MasterProformaService {
     },
     {
       'code': 'MED-DS-1000',
-      'name': '5% Dextrose + 0.9% NaCl',
-      'formula': '5% Dextrose + 0.9% NaCl',
+      'name': 'DexoSaline (DS)',
+      'formula': 'DexoSaline (DS)',
       'type': 'Infusion',
       'dose': '1000 ml',
       'defaultPrice': 130.00,
@@ -819,8 +884,8 @@ class MasterProformaService {
     },
     {
       'code': 'MED-ANT-SYR',
-      'name': 'Antacid (Mucaine / Digas)',
-      'formula': 'Aluminium + Magnesium Hydroxide (Mucaine / Digas)',
+      'name': 'Antacid',
+      'formula': 'Antacid',
       'type': 'Syrup',
       'dose': '15 ml',
       'defaultPrice': 85.00,
@@ -837,8 +902,8 @@ class MasterProformaService {
     },
     {
       'code': 'MED-CRM-SYR',
-      'name': 'Carminative Mixture (Gripe Water)',
-      'formula': 'Carminative Mixture (Gripe Water)',
+      'name': 'Carminative Mixture (Cholic Syrup)',
+      'formula': 'Carminative Mixture (Cholic Syrup)',
       'type': 'Syrup',
       'dose': '15 ml',
       'defaultPrice': 65.00,
@@ -854,9 +919,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
-      'code': 'MED-CYN-INJ',
-      'name': 'Cyanocobalamin (Neurobion)',
-      'formula': 'Cyanocobalamin (Neurobion)',
+      'code': 'MED-BCM-INJ',
+      'name': 'B-Complex (Neurobion)',
+      'formula': 'B-Complex (Neurobion)',
       'type': 'Injection',
       'dose': '2 cc',
       'defaultPrice': 35.00,
@@ -927,8 +992,8 @@ class MasterProformaService {
     },
     {
       'code': 'MED-NS-100',
-      'name': '0.9% NaCl (Normal Saline)',
-      'formula': '0.9% NaCl (Normal Saline)',
+      'name': 'Normal Saline (NS)',
+      'formula': 'Normal Saline (NS)',
       'type': 'Infusion',
       'dose': '100 ml',
       'defaultPrice': 60.00,
@@ -936,11 +1001,20 @@ class MasterProformaService {
     },
     {
       'code': 'MED-NS-500',
-      'name': '0.9% NaCl (Normal Saline)',
-      'formula': '0.9% NaCl (Normal Saline)',
+      'name': 'Normal Saline (NS)',
+      'formula': 'Normal Saline (NS)',
       'type': 'Infusion',
       'dose': '500 ml',
       'defaultPrice': 110.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-DS-500',
+      'name': 'DexoSaline (DS)',
+      'formula': 'DexoSaline (DS)',
+      'type': 'Infusion',
+      'dose': '500 ml',
+      'defaultPrice': 115.00,
       'isProformaMaster': true,
     },
     {
@@ -1025,67 +1099,94 @@ class MasterProformaService {
               continue;
             }
 
-            // Auto-sanitize all brand names to generic formulas
-            final cleanName = cleanBrandToFormula(map['name']?.toString() ?? '');
-            final cleanFormula = cleanBrandToFormula(map['formula']?.toString() ?? '');
-            if (cleanName.isNotEmpty) map['name'] = cleanName;
-            if (cleanFormula.isNotEmpty) map['formula'] = cleanFormula;
+            final isCustom = map['isCustomized'] == true ||
+                             map['userEdited'] == true ||
+                             (map['auditTrail'] is List && (map['auditTrail'] as List).isNotEmpty);
 
-            final formulaLower = (map['formula'] as String? ?? '').trim().toLowerCase();
-            final nameLower = (map['name'] as String? ?? '').trim().toLowerCase();
+            if (!isCustom) {
+              // Auto-sanitize all brand names to generic formulas ONLY for unedited seed items
+              final cleanName = cleanBrandToFormula(map['name']?.toString() ?? '');
+              final cleanFormula = cleanBrandToFormula(map['formula']?.toString() ?? '');
+              if (cleanName.isNotEmpty) map['name'] = cleanName;
+              if (cleanFormula.isNotEmpty) map['formula'] = cleanFormula;
 
-            // Auto-sanitize Drip type to Infusion
-            if (map['type'] == 'Drip') {
-              map['type'] = 'Infusion';
-            }
+              final formulaLower = (map['formula'] as String? ?? '').trim().toLowerCase();
+              final nameLower = (map['name'] as String? ?? '').trim().toLowerCase();
 
-            // Auto-sanitize Paracetamol Infusion to Infusion 100 ml always
-            if (formulaLower.contains('paracetamol') && (map['type'] == 'Injection' || map['type'] == 'Drip' || map['type'] == 'Infusion')) {
-              map['type'] = 'Infusion';
-              map['dose'] = '100 ml';
-            }
+              // Auto-sanitize Injection B-Complex (Neurobion)
+              if (itemCode == 'MED-CYN-INJ' || itemCode == 'MED-BCM-INJ' || formulaLower.contains('neurobion') || nameLower.contains('neurobion')) {
+                map['code'] = 'MED-BCM-INJ';
+                map['name'] = 'B-Complex (Neurobion)';
+                map['formula'] = 'B-Complex (Neurobion)';
+                map['type'] = 'Injection';
+                map['dose'] = '2 cc';
+              }
 
-            // Auto-sanitize Omeprazole Infusion
-            if (itemCode == 'MED-OMP-IV') {
-              map['type'] = 'Infusion';
-              map['dose'] = '100 ml';
-            }
+              // Auto-sanitize Drip type to Infusion
+              if (map['type'] == 'Drip') {
+                map['type'] = 'Infusion';
+              }
 
-            // Auto-sanitize Metronidazole (flagyl) items
-            if (itemCode == 'MED-FLG-INJ' || itemCode == 'MED-FLG-400' || itemCode == 'MED-FLG-SYR' || formulaLower.contains('metronidazole') || formulaLower.contains('flagyl') || nameLower.contains('flagyl')) {
-              map['name'] = 'Metronidazole (flagyl)';
-              map['formula'] = 'Metronidazole (flagyl)';
-              final rawType = (map['type'] as String? ?? '').trim().toLowerCase();
-              if (itemCode == 'MED-FLG-INJ' || rawType == 'infusion' || rawType == 'drip' || rawType == 'injection') {
+              // Auto-sanitize Paracetamol Infusion to Infusion 100 ml always
+              if (formulaLower.contains('paracetamol') && (map['type'] == 'Injection' || map['type'] == 'Drip' || map['type'] == 'Infusion')) {
                 map['type'] = 'Infusion';
                 map['dose'] = '100 ml';
-              } else if (itemCode == 'MED-FLG-400' || rawType == 'tablet') {
-                map['type'] = 'Tablet';
-                map['dose'] = '400 mg';
-              } else if (itemCode == 'MED-FLG-SYR' || rawType == 'syrup') {
-                map['type'] = 'Syrup';
+              }
+
+              // Auto-sanitize Omeprazole Infusion
+              if (itemCode == 'MED-OMP-IV') {
+                map['type'] = 'Infusion';
+                map['dose'] = '100 ml';
+              }
+
+              // Auto-sanitize Metronidazole (flagyl) items
+              if (itemCode == 'MED-FLG-INJ' || itemCode == 'MED-FLG-400' || itemCode == 'MED-FLG-SYR' || formulaLower.contains('metronidazole') || formulaLower.contains('flagyl') || nameLower.contains('flagyl')) {
+                map['name'] = 'Metronidazole (flagyl)';
+                map['formula'] = 'Metronidazole (flagyl)';
+                final rawType = (map['type'] as String? ?? '').trim().toLowerCase();
+                if (itemCode == 'MED-FLG-INJ' || rawType == 'infusion' || rawType == 'drip' || rawType == 'injection') {
+                  map['type'] = 'Infusion';
+                  map['dose'] = '100 ml';
+                } else if (itemCode == 'MED-FLG-400' || rawType == 'tablet') {
+                  map['type'] = 'Tablet';
+                  map['dose'] = '400 mg';
+                } else if (itemCode == 'MED-FLG-SYR' || rawType == 'syrup') {
+                  map['type'] = 'Syrup';
+                  map['dose'] = '15 ml';
+                }
+              }
+
+              final type = (map['type'] as String? ?? '').trim().toLowerCase();
+              
+              // Rule: All syrups default to 15 ml if empty
+              if (type == 'syrup' && (map['dose'] == null || (map['dose'] as String).isEmpty)) {
                 map['dose'] = '15 ml';
+              }
+
+              // Rule: All injections default to 2 cc if empty
+              if (type == 'injection' && (map['dose'] == null || (map['dose'] as String).isEmpty)) {
+                map['dose'] = '2 cc';
+              }
+
+              // Auto-sanitize redundant category words from Injection/Infusion names
+              if (type == 'injection' || type == 'infusion' || type == 'drip') {
+                var name = (map['name'] as String? ?? '').trim();
+                name = name.replaceAll(RegExp(r'\s+(Injection|Infusion|\/\s*Infusion|IV)$', caseSensitive: false), '').trim();
+                if (name.isNotEmpty) {
+                  map['name'] = name;
+                }
               }
             }
 
-            final type = (map['type'] as String? ?? '').trim().toLowerCase();
-            
-            // Rule: All syrups are 15 ml always
-            if (type == 'syrup') {
-              map['dose'] = '15 ml';
-            }
-
-            // Rule: All injections are cc (2 cc) instead of mg or ml (except Infusions)
-            if (type == 'injection') {
-              map['dose'] = '2 cc';
-            }
-
-            // Auto-sanitize redundant category words from Injection/Infusion names
-            if (type == 'injection' || type == 'infusion' || type == 'drip') {
-              var name = (map['name'] as String? ?? '').trim();
-              name = name.replaceAll(RegExp(r'\s+(Injection|Infusion|\/\s*Infusion|IV)$', caseSensitive: false), '').trim();
-              if (name.isNotEmpty) {
-                map['name'] = name;
+            // Auto-align code/barcode with medicine type (e.g. fix -INJ on Tablet)
+            final rawCode = (map['code'] ?? map['barcode'] ?? '').toString().trim();
+            final curType = (map['type'] ?? '').toString().trim();
+            final adjustedCode = adjustBarcodeForType(rawCode, curType);
+            if (adjustedCode != rawCode && adjustedCode.isNotEmpty) {
+              map['code'] = adjustedCode;
+              map['barcode'] = adjustedCode;
+              if (box.containsKey(key)) {
+                box.put(key, LocalStorageService.sanitize(map));
               }
             }
 
@@ -1317,59 +1418,13 @@ class MasterProformaService {
     required String newName,
     required Map<String, dynamic> auditLog,
   }) async {
-    try {
-      if (!Hive.isBoxOpen(boxName)) {
-        await Hive.openBox(boxName);
-      }
-      final box = Hive.box(boxName);
-      dynamic existing = box.get('proforma:$code');
-
-      // Fallback search in default list if not yet customized in Hive
-      if (existing == null) {
-        for (final defItem in _defaultProformaList) {
-          if (defItem['code'] == code) {
-            existing = Map<String, dynamic>.from(defItem);
-            break;
-          }
-        }
-      }
-
-      if (existing == null) return false;
-
-      final updated = Map<String, dynamic>.from(existing is Map ? existing : {});
-      final oldName = (updated['name'] ?? updated['formula'] ?? '').toString();
-      final cleanNewName = cleanBrandToFormula(newName);
-
-      updated['name'] = cleanNewName;
-      updated['formula'] = cleanNewName;
-      updated['updatedAt'] = DateTime.now().toIso8601String();
-
-      // Append to audit trail
-      final List<Map<String, dynamic>> auditTrail = [];
-      if (updated['auditTrail'] is List) {
-        auditTrail.addAll((updated['auditTrail'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)));
-      }
-      final fullAuditEntry = {
-        ...auditLog,
-        'action': 'edit_proforma_medicine_name',
-        'medicineCode': code,
-        'oldName': oldName,
-        'newName': cleanNewName,
-        'timestamp': DateTime.now().toIso8601String(),
-      };
-      auditTrail.add(fullAuditEntry);
-      updated['auditTrail'] = auditTrail;
-
-      await box.put('proforma:$code', LocalStorageService.sanitize(updated));
-
-      // Save to local inventory audit logs
-      await LocalStorageService.saveLocalInventoryLog(fullAuditEntry);
-
-      return true;
-    } catch (e) {
-      debugPrint('[MasterProformaService] Error editing proforma item: $e');
-      return false;
-    }
+    return editProformaItem(
+      code: code,
+      newName: newName,
+      newType: '',
+      newDose: '',
+      auditLog: auditLog,
+    );
   }
 
   /// Edits an existing proforma item's name, type, and dose with mandatory audit trail.
@@ -1385,30 +1440,63 @@ class MasterProformaService {
         await Hive.openBox(boxName);
       }
       final box = Hive.box(boxName);
-      dynamic existing = box.get('proforma:$code');
+      dynamic existing = box.get('proforma:$code') ?? box.get(code);
+      String targetKey = 'proforma:$code';
 
-      // Fallback search in default list if not yet customized in Hive
+      // Fallback search in Hive box by code or barcode or formula
+      if (existing == null) {
+        for (final k in box.keys) {
+          final v = box.get(k);
+          if (v is Map) {
+            final c = (v['code'] ?? v['barcode'] ?? '').toString().trim();
+            final f = (v['formula'] ?? v['name'] ?? '').toString().trim().toLowerCase();
+            if ((code.isNotEmpty && c.toLowerCase() == code.toLowerCase()) ||
+                (code.isNotEmpty && f == code.toLowerCase())) {
+              existing = Map<String, dynamic>.from(v);
+              targetKey = k.toString();
+              break;
+            }
+          }
+        }
+      }
+
+      // Fallback search in default seed list if not yet written to Hive
       if (existing == null) {
         for (final defItem in _defaultProformaList) {
-          if (defItem['code'] == code) {
+          final c = (defItem['code'] ?? '').toString().trim();
+          final f = (defItem['formula'] ?? defItem['name'] ?? '').toString().trim().toLowerCase();
+          if ((code.isNotEmpty && c.toLowerCase() == code.toLowerCase()) ||
+              (code.isNotEmpty && f == code.toLowerCase())) {
             existing = Map<String, dynamic>.from(defItem);
             break;
           }
         }
       }
 
-      if (existing == null) return false;
+      if (existing == null) {
+        debugPrint('[MasterProformaService] Could not find proforma item for code: $code');
+        return false;
+      }
 
       final updated = Map<String, dynamic>.from(existing is Map ? existing : {});
       final oldName = (updated['name'] ?? updated['formula'] ?? '').toString();
       final oldType = (updated['type'] ?? 'Tablet').toString();
       final oldDose = (updated['dose'] ?? '').toString();
-      final cleanNewName = cleanBrandToFormula(newName);
+
+      // Respect the user's explicit edited values
+      final cleanNewName = newName.trim().isNotEmpty ? newName.trim() : oldName;
+      final effectiveType = newType.trim().isNotEmpty ? newType.trim() : oldType;
+      final effectiveDose = newDose.trim().isNotEmpty ? newDose.trim() : oldDose;
+      final adjustedCode = adjustBarcodeForType(code, effectiveType);
 
       updated['name'] = cleanNewName;
       updated['formula'] = cleanNewName;
-      updated['type'] = newType;
-      updated['dose'] = newDose;
+      updated['type'] = effectiveType;
+      updated['dose'] = effectiveDose;
+      updated['code'] = adjustedCode;
+      updated['barcode'] = adjustedCode;
+      updated['isCustomized'] = true;
+      updated['userEdited'] = true;
       updated['updatedAt'] = DateTime.now().toIso8601String();
 
       // Append to audit trail
@@ -1419,19 +1507,81 @@ class MasterProformaService {
       final fullAuditEntry = {
         ...auditLog,
         'action': 'edit_proforma_medicine',
-        'medicineCode': code,
+        'medicineCode': adjustedCode,
+        'oldCode': code,
         'oldName': oldName,
         'newName': cleanNewName,
         'oldType': oldType,
-        'newType': newType,
+        'newType': effectiveType,
         'oldDose': oldDose,
-        'newDose': newDose,
+        'newDose': effectiveDose,
         'timestamp': DateTime.now().toIso8601String(),
       };
       auditTrail.add(fullAuditEntry);
       updated['auditTrail'] = auditTrail;
 
-      await box.put('proforma:$code', LocalStorageService.sanitize(updated));
+      // Save to Master Proforma Hive box
+      await box.put(targetKey, LocalStorageService.sanitize(updated));
+      if (targetKey != 'proforma:$adjustedCode' && adjustedCode.isNotEmpty) {
+        await box.put('proforma:$adjustedCode', LocalStorageService.sanitize(updated));
+      }
+      if (adjustedCode != code && code.isNotEmpty) {
+        await box.delete('proforma:$code');
+      }
+
+      // Update in-memory seed list so memory lookups never revert
+      for (int i = 0; i < _defaultProformaList.length; i++) {
+        final dCode = (_defaultProformaList[i]['code'] ?? '').toString().trim();
+        final dForm = (_defaultProformaList[i]['formula'] ?? _defaultProformaList[i]['name'] ?? '').toString().trim().toLowerCase();
+        if ((code.isNotEmpty && dCode.toLowerCase() == code.toLowerCase()) || dForm == oldName.toLowerCase()) {
+          _defaultProformaList[i]['name'] = cleanNewName;
+          _defaultProformaList[i]['formula'] = cleanNewName;
+          _defaultProformaList[i]['type'] = effectiveType;
+          _defaultProformaList[i]['dose'] = effectiveDose;
+          _defaultProformaList[i]['code'] = adjustedCode;
+          _defaultProformaList[i]['barcode'] = adjustedCode;
+          _defaultProformaList[i]['isCustomized'] = true;
+          _defaultProformaList[i]['userEdited'] = true;
+          break;
+        }
+      }
+
+      // Update any matching local stock in stockBox so inventory syncs with proforma edits
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+          final stockBox = Hive.box(LocalStorageService.stockBox);
+          for (final sk in stockBox.keys.toList()) {
+            final sVal = stockBox.get(sk);
+            if (sVal is Map) {
+              final sMap = Map<String, dynamic>.from(sVal);
+              final sCode = (sMap['code'] ?? sMap['barcode'] ?? '').toString().trim();
+              final sFormula = (sMap['formula'] ?? sMap['name'] ?? '').toString().trim().toLowerCase();
+              if ((code.isNotEmpty && sCode.toLowerCase() == code.toLowerCase()) ||
+                  sFormula == oldName.toLowerCase() ||
+                  sFormula == cleanNewName.toLowerCase()) {
+                sMap['name'] = cleanNewName;
+                sMap['formula'] = cleanNewName;
+                sMap['type'] = effectiveType;
+                sMap['dose'] = effectiveDose;
+                sMap['code'] = adjustedCode;
+                sMap['barcode'] = adjustedCode;
+                sMap['updatedAt'] = DateTime.now().toIso8601String();
+                await stockBox.put(sk, LocalStorageService.sanitize(sMap));
+
+                try {
+                  RealtimeManager().sendMessage(RealtimeEvents.payload(
+                    type: RealtimeEvents.saveStockItem,
+                    branchId: sMap['branchId']?.toString() ?? 'karachi',
+                    data: sMap,
+                  ));
+                } catch (_) {}
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('[MasterProformaService] Error updating matching stock: $e');
+      }
 
       // Save to local inventory audit logs
       await LocalStorageService.saveLocalInventoryLog(fullAuditEntry);
@@ -1441,6 +1591,55 @@ class MasterProformaService {
       debugPrint('[MasterProformaService] Error editing proforma item: $e');
       return false;
     }
+  }
+
+  /// Ensures barcode/code matches the dosage form type.
+  /// Replaces mismatching prefixes (e.g. INJ in a tablet or TAB in an injection).
+  static String adjustBarcodeForType(String code, String type) {
+    if (code.isEmpty || type.isEmpty) return code;
+    final t = type.toLowerCase().trim();
+    String newCode = code;
+
+    if (t == 'tablet') {
+      newCode = newCode.replaceAll('-INJ', '-TAB')
+                       .replaceAll('_INJ', '_TAB')
+                       .replaceAll('-SYR', '-TAB')
+                       .replaceAll('_SYR', '_TAB')
+                       .replaceAll('-CAP', '-TAB')
+                       .replaceAll('_CAP', '_TAB')
+                       .replaceAll('-INF', '-TAB')
+                       .replaceAll('_INF', '_TAB');
+    } else if (t == 'syrup') {
+      newCode = newCode.replaceAll('-INJ', '-SYR')
+                       .replaceAll('_INJ', '_SYR')
+                       .replaceAll('-TAB', '-SYR')
+                       .replaceAll('_TAB', '_SYR')
+                       .replaceAll('-CAP', '-SYR')
+                       .replaceAll('_CAP', '_SYR')
+                       .replaceAll('-INF', '-SYR')
+                       .replaceAll('_INF', '_SYR');
+    } else if (t == 'injection') {
+      newCode = newCode.replaceAll('-TAB', '-INJ')
+                       .replaceAll('_TAB', '_INJ')
+                       .replaceAll('-SYR', '-INJ')
+                       .replaceAll('_SYR', '_INJ')
+                       .replaceAll('-CAP', '-INJ')
+                       .replaceAll('_CAP', '_INJ');
+    } else if (t == 'infusion' || t == 'drip') {
+      newCode = newCode.replaceAll('-TAB', '-INJ')
+                       .replaceAll('_TAB', '_INJ')
+                       .replaceAll('-SYR', '-INJ')
+                       .replaceAll('_SYR', '_INJ');
+    } else if (t == 'capsule') {
+      newCode = newCode.replaceAll('-INJ', '-CAP')
+                       .replaceAll('_INJ', '_CAP')
+                       .replaceAll('-TAB', '-CAP')
+                       .replaceAll('_TAB', '_CAP')
+                       .replaceAll('-SYR', '-CAP')
+                       .replaceAll('_SYR', '_CAP');
+    }
+
+    return newCode;
   }
 
   /// Returns all recorded audit logs for a proforma item.
@@ -1482,6 +1681,12 @@ class MasterProformaService {
     }
     if (lower.contains('amoxicillin') || lower.contains('amoxil')) {
       return 'Amoxicillin (Amoxil)';
+    }
+    if (lower.contains('orphnadrin') || lower.contains('orphenadrine') || lower.contains('norgesic') || lower.contains('muscadol') || (lower.contains('paracetamol') && lower.contains('citr'))) {
+      return 'Orphenadrine Citrate + Paracetamol (Norgesic)';
+    }
+    if ((lower.contains('paracetamol') || lower.contains('panadol')) && (lower.contains('dextromethorphan') || lower.contains('dextromethor') || lower.contains('chlorpheramine') || lower.contains('chlorpheniramine') || lower.contains('cf') || lower.contains('t-day') || lower.contains('tday'))) {
+      return 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)';
     }
     if (lower.contains('paracetamol') || lower.contains('panadol') || lower.contains('calpol') || lower.contains('febrol') || lower.contains('disprol')) {
       if (lower.contains('caffeine') || lower.contains('extra')) {
@@ -1570,14 +1775,29 @@ class MasterProformaService {
     if (lower.contains('salbutamol') || lower.contains('ventolin')) {
       return 'Salbutamol (Ventolin)';
     }
-    if (lower.contains('antacid') || lower.contains('mucaine') || lower.contains('digas') || lower.contains('simeco')) {
-      return 'Antacid (Mucaine / Digas)';
+    if (lower.contains('nacl') || lower.contains('normal saline') || lower.contains('(ns)')) {
+      return 'Normal Saline (NS)';
+    }
+    if (lower.contains('dexosaline') || (lower.contains('dextrose') && lower.contains('nacl')) || lower.contains('(ds)')) {
+      return 'DexoSaline (DS)';
+    }
+    if (lower.contains('trisil')) {
+      return 'Antacid (Trisil)';
+    }
+    if (lower.contains('captopril') || lower.contains('capoten')) {
+      return 'Captopril (Capoten)';
+    }
+    if (lower.contains('mefenamic') || lower.contains('ponstan')) {
+      return 'Mefenamic Acid (Ponstan)';
+    }
+    if (lower.contains('antacid') || lower.contains('mucaine') || lower.contains('digas') || lower.contains('simeco') || lower.contains('aluminium') || lower.contains('magnesium hydroxide')) {
+      return 'Antacid';
     }
     if (lower.contains('ammonium chloride') || lower.contains('hydryllin')) {
       return 'Ammonium Chloride (Hydryllin)';
     }
-    if (lower.contains('carminative') || lower.contains('gripe water')) {
-      return 'Carminative Mixture (Gripe Water)';
+    if (lower.contains('carminative') || lower.contains('gripe water') || lower.contains('grape water') || lower.contains('cholic')) {
+      return 'Carminative Mixture (Cholic Syrup)';
     }
     if (lower.contains('dexamethasone') || lower.contains('decadron')) {
       return 'Dexamethasone (Decadron)';
@@ -1596,6 +1816,9 @@ class MasterProformaService {
     }
     if (lower.contains('surbex') || (lower.contains('multivitamin') && lower.contains('zinc'))) {
       return 'Multivitamin + Zinc (Surbex-Z)';
+    }
+    if (lower.contains('neurobion') || lower.contains('cyanocobalamin') || (lower.contains('b-complex') && (lower.contains('inj') || lower.contains('injection')))) {
+      return 'B-Complex (Neurobion)';
     }
     if (lower.contains('polybion') || lower.contains('vitamin b complex') || lower.contains('becosules')) {
       return 'Vitamin B Complex (Polybion)';

@@ -54,8 +54,8 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
     final activeCampLabel = CampSessionService.getCampLabel(activeCampId);
     final options = CampSessionService.getAvailableCampOptions();
 
-    // Hide entirely for single-camp users who have no need to switch
-    if (options.length <= 1 || CampSessionService.isSingleContextUser(branchId: effBranch)) {
+    // Hide only if branch has no camps or options list is empty
+    if (options.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -64,14 +64,43 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
     final borderColor = widget.borderColor ?? Colors.white.withValues(alpha: 0.30);
 
     final isBound = CampSessionService.getBoundDispensaryId() != null;
-    final shiftName = switch (CampSessionService.getCurrentSession()) {
+    final shiftName = switch (CampSessionService.getCurrentSession(null, effBranch)) {
       'morning' => 'Morning',
       'evening' => 'Evening',
       'night'   => 'Night',
       _         => '',
     };
 
-    final isSingleContext = isBound || options.length <= 1;
+    final assignedCamps = (() {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+          if (uData is Map) {
+            return CampSessionService.getAssignedCamps(Map<String, dynamic>.from(uData));
+          }
+        }
+      } catch (_) {}
+      return CampSessionService.getAssignedCampsFromHive();
+    })();
+
+    final matchingSchedule = (() {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+          if (uData is Map) {
+            return CampSessionService.getMatchingScheduledCamps(Map<String, dynamic>.from(uData));
+          }
+        }
+      } catch (_) {}
+      return <String>[];
+    })();
+
+    // In unassigned times or for multi-camp staff, doctors can freely switch camps from the AppBar.
+    // Lock to a static chip if hardware desk bound, options <= 1, or user has only 1 assigned/scheduled camp.
+    final isSingleContext = isBound ||
+        options.length <= 1 ||
+        assignedCamps.length == 1 ||
+        (matchingSchedule.length == 1 && options.length <= 1);
 
     if (isSingleContext) {
       return Container(
@@ -87,13 +116,15 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
             Icon(FontAwesomeIcons.locationDot, color: textColor, size: 11),
             const SizedBox(width: 6),
             Text(
-              '$activeCampLabel · $shiftName',
+              shiftName.isNotEmpty ? '$activeCampLabel · $shiftName' : activeCampLabel,
               style: TextStyle(
                 color: textColor,
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(width: 5),
+            Icon(Icons.check_circle_rounded, color: Colors.tealAccent.shade400, size: 12),
           ],
         ),
       );

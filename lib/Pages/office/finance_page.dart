@@ -73,13 +73,9 @@ class _FinancePageState extends State<FinancePage> {
   String _payrollMonthKey = DateFormat('yyyy-MM').format(DateTime.now());
 
   String _getEffectiveUserBranch() {
-    if (!Hive.isBoxOpen('local_users')) {
-      final raw = widget.branchId;
-      return (raw == 'global' || raw.isEmpty) ? 'all' : raw;
-    }
-    final curUser = Hive.box('local_users').values.firstOrNull;
-    if (curUser is Map) {
-      final role = (curUser['role']?.toString() ?? '').toLowerCase().trim();
+    final curUser = LocalStorageService.getActiveUserData();
+    if (curUser.isNotEmpty) {
+      final role = LocalStorageService.getActiveUserRole();
       final isBranchScoped = role == 'branch manager' || role == 'supervisor';
       if (isBranchScoped) {
         final bId = (curUser['branchId']?.toString() ?? '').trim();
@@ -131,7 +127,7 @@ class _FinancePageState extends State<FinancePage> {
 
   Future<void> _loadBranches() async {
     setState(() => _isLoadingBranches = true);
-    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase().trim();
+    final userRole = LocalStorageService.getActiveUserRole();
     final isBranchScoped = userRole == 'branch manager' || userRole == 'supervisor';
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
@@ -197,10 +193,10 @@ class _FinancePageState extends State<FinancePage> {
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase();
+    final userRole = LocalStorageService.getActiveUserRole();
     
     // Strict Finance Gating
-    if (!PermissionService().isFinanceUser(userRole)) {
+    if (!PermissionService().isFinanceUser(userRole) && !widget.isAdmin) {
       return Scaffold(
         backgroundColor: _kBg,
         body: Center(
@@ -241,24 +237,26 @@ class _FinancePageState extends State<FinancePage> {
 
   // ── Desktop & Mobile Layouts (Sidebar Removed) ──────────────────────────────
   Widget _buildDesktop(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
+    final t = RoleThemeScope.dataOf(ctx);
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: t.bg,
       body: Column(children: [
-        _buildHeader(ctx, canViewAudits),
-        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(),
-        _buildFilterBar(userRole),
+        _buildHeader(ctx, canViewAudits, t),
+        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(t),
+        _buildFilterBar(userRole, t),
         Expanded(child: content),
       ]),
     );
   }
 
   Widget _buildMobile(BuildContext ctx, String userRole, bool canViewAudits, Widget content) {
+    final t = RoleThemeScope.dataOf(ctx);
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: t.bg,
       body: Column(children: [
-        _buildHeader(ctx, canViewAudits),
-        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(),
-        _buildFilterBar(userRole),
+        _buildHeader(ctx, canViewAudits, t),
+        if (_selectedIndex == 0 || _selectedIndex == 6) _buildCashFlowSubTabs(t),
+        _buildFilterBar(userRole, t),
         Expanded(child: content),
       ]),
     );
@@ -274,49 +272,49 @@ class _FinancePageState extends State<FinancePage> {
     Icons.history_edu_outlined, Icons.account_balance_outlined
   ];
 
-  Widget _buildHeader(BuildContext ctx, bool canViewAudits) {
+  Widget _buildHeader(BuildContext ctx, bool canViewAudits, RoleThemeData t) {
     return Container(
       height: 58,
       padding: const EdgeInsets.symmetric(horizontal: 24),
-      decoration: const BoxDecoration(
-        color: _kBgCard,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule)),
       ),
       child: Row(children: [
-        Icon(_sectionIcons[_selectedIndex], color: _kAccent, size: 22),
+        Icon(_sectionIcons[_selectedIndex], color: t.accent, size: 22),
         const SizedBox(width: 10),
         Text(
           _sectionTitles[_selectedIndex],
-          style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
+          style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
         ),
         const Spacer(),
         _buildSyncChip(),
         const SizedBox(width: 12),
         IconButton(
           tooltip: 'Force Refresh Data',
-          icon: Icon(_isDownloadingData ? Icons.sync_rounded : Icons.refresh_rounded, color: _kTextSecondary, size: 20),
+          icon: Icon(_isDownloadingData ? Icons.sync_rounded : Icons.refresh_rounded, color: t.textSecondary, size: 20),
           onPressed: () => _triggerDownloadForActiveBranch(force: true),
         ),
         IconButton(
           tooltip: 'Export Reports',
-          icon: const Icon(Icons.download_outlined, color: _kTextSecondary, size: 20),
+          icon: Icon(Icons.download_outlined, color: t.textSecondary, size: 20),
           onPressed: () => _openExportDialog(ctx),
         ),
         IconButton(
           tooltip: 'Manage Holidays',
-          icon: const Icon(Icons.calendar_month_outlined, color: _kTextSecondary, size: 20),
+          icon: Icon(Icons.calendar_month_outlined, color: t.textSecondary, size: 20),
           onPressed: () => _openHolidaysManager(ctx),
         ),
       ]),
     );
   }
 
-  Widget _buildCashFlowSubTabs() {
+  Widget _buildCashFlowSubTabs(RoleThemeData t) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      decoration: const BoxDecoration(
-        color: _kBgCard,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule)),
       ),
       child: Row(
         children: [
@@ -324,10 +322,11 @@ class _FinancePageState extends State<FinancePage> {
             avatar: const Icon(Icons.account_balance_wallet_rounded, size: 16),
             label: const Text('Treasury Overview'),
             selected: _selectedIndex == 0,
-            selectedColor: _kAccent.withValues(alpha: 0.15),
+            backgroundColor: t.bgCardAlt,
+            selectedColor: t.accent.withValues(alpha: 0.15),
             labelStyle: TextStyle(
               fontWeight: FontWeight.bold,
-              color: _selectedIndex == 0 ? _kAccent : _kTextSecondary,
+              color: _selectedIndex == 0 ? t.accent : t.textSecondary,
               fontSize: 12,
             ),
             onSelected: (_) => setState(() => _selectedIndex = 0),
@@ -337,10 +336,11 @@ class _FinancePageState extends State<FinancePage> {
             avatar: const Icon(Icons.history_edu_rounded, size: 16),
             label: const Text('Audit Trail & Security Logs'),
             selected: _selectedIndex == 6,
-            selectedColor: _kAccent.withValues(alpha: 0.15),
+            backgroundColor: t.bgCardAlt,
+            selectedColor: t.accent.withValues(alpha: 0.15),
             labelStyle: TextStyle(
               fontWeight: FontWeight.bold,
-              color: _selectedIndex == 6 ? _kAccent : _kTextSecondary,
+              color: _selectedIndex == 6 ? t.accent : t.textSecondary,
               fontSize: 12,
             ),
             onSelected: (_) => setState(() => _selectedIndex = 6),
@@ -350,116 +350,117 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
-  Widget _buildFilterBar(String userRole) {
+  Widget _buildFilterBar(String userRole, RoleThemeData t) {
     final cleanRole = userRole.toLowerCase().trim();
     final bool isBranchScoped = cleanRole == 'branch manager' || cleanRole == 'supervisor';
     final effectiveUserBranch = _getEffectiveUserBranch();
-    final depts = ['all', 'Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School']
-      ..addAll(FinanceLocalStorage.getCustomDepartments());
-
     final branchName = FinanceLocalStorage.getBranchName(effectiveUserBranch);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-      decoration: const BoxDecoration(
-        color: _kBgCard,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.filter_list_rounded, size: 16, color: _kTextSecondary),
+          Icon(Icons.filter_list_rounded, size: 16, color: t.textSecondary),
           const SizedBox(width: 8),
-          const Text('Filters:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kTextSecondary)),
+          Text('Filters:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: t.textSecondary)),
           const SizedBox(width: 16),
           if (isBranchScoped) ...[
-            const Text('Branch', style: TextStyle(fontSize: 11, color: _kTextSecondary)),
+            Text('Branch', style: TextStyle(fontSize: 11, color: t.textSecondary)),
             const SizedBox(width: 8),
             Container(
               height: 30,
               padding: const EdgeInsets.symmetric(horizontal: 10),
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: _kBg,
+                color: t.bgCardAlt,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: _kBorder),
+                border: Border.all(color: t.bgRule),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.lock_outline_rounded, size: 12, color: _kAccent),
+                  Icon(Icons.lock_outline_rounded, size: 12, color: t.accent),
                   const SizedBox(width: 6),
                   Text(
                     branchName.isNotEmpty ? branchName : effectiveUserBranch,
-                    style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 16),
           ] else if (_branches.isNotEmpty) ...[
-            const Text('Branch', style: TextStyle(fontSize: 11, color: _kTextSecondary)),
-            const SizedBox(width: 8),
-            Container(
-              height: 30,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: _kBg,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: _kBorder),
-              ),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _activeBranchId,
-                  dropdownColor: _kBgCard,
-                  style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                  items: [
-                    const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-                    ..._branches.map((b) => DropdownMenuItem<String>(
-                      value: b['id']?.toString() ?? '',
-                      child: Text(b['name']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
-                    )),
-                  ],
-                  onChanged: (val) {
-                    if (val != null) {
-                      setState(() {
-                        _activeBranchId = val;
-                      });
-                      _triggerDownloadForActiveBranch();
-                    }
-                  },
-                ),
-              ),
+            Text('Branch', style: TextStyle(fontSize: 11, color: t.textSecondary)),
+            Builder(
+              builder: (context) {
+                final branchItems = _getUniqueBranchDropdownItems();
+                final safeBranchValue = branchItems.any((it) => it.value == _activeBranchId) ? _activeBranchId : 'all';
+                return Container(
+                  height: 30,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: t.bgCardAlt,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: t.bgRule),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: safeBranchValue,
+                      dropdownColor: t.bgCard,
+                      style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                      items: branchItems,
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() {
+                            _activeBranchId = val;
+                          });
+                          _triggerDownloadForActiveBranch();
+                        }
+                      },
+                    ),
+                  ),
+                );
+              },
             ),
             const SizedBox(width: 16),
           ],
-          const Text('Department', style: TextStyle(fontSize: 11, color: _kTextSecondary)),
+          Text('Department', style: TextStyle(fontSize: 11, color: t.textSecondary)),
           const SizedBox(width: 8),
-          Container(
-            height: 30,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: _kBg,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: _kBorder),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedDeptFilter.toLowerCase(),
-                dropdownColor: _kBgCard,
-                style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                items: depts.map((d) => DropdownMenuItem<String>(
-                  value: d.toLowerCase(),
-                  child: Text(d == 'all' ? 'All Departments' : d, style: const TextStyle(fontSize: 11)),
-                )).toList(),
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() {
-                      _selectedDeptFilter = val;
-                    });
-                  }
-                },
-              ),
-            ),
+          Builder(
+            builder: (context) {
+              final deptItems = _getUniqueDepartmentDropdownItems();
+              final safeDeptValue = deptItems.any((it) => it.value == _selectedDeptFilter.toLowerCase())
+                  ? _selectedDeptFilter.toLowerCase()
+                  : 'all';
+              return Container(
+                height: 30,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: t.bgCardAlt,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: t.bgRule),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: safeDeptValue,
+                    dropdownColor: t.bgCard,
+                    style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                    items: deptItems,
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() {
+                          _selectedDeptFilter = val;
+                        });
+                      }
+                    },
+                  ),
+                ),
+              );
+            },
           ),
           const Spacer(),
           if ((!isBranchScoped && _activeBranchId != 'all') || _selectedDeptFilter != 'all')
@@ -485,9 +486,47 @@ class _FinancePageState extends State<FinancePage> {
     );
   }
 
+  List<DropdownMenuItem<String>> _getUniqueDepartmentDropdownItems() {
+    final uniqueDepts = <String, String>{};
+    uniqueDepts['all'] = 'All Departments';
+    final defaults = ['Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School'];
+    for (final d in [...defaults, ...FinanceLocalStorage.getCustomDepartments()]) {
+      final key = d.trim().toLowerCase();
+      if (key.isNotEmpty && key != 'all') {
+        uniqueDepts[key] = d.trim();
+      }
+    }
+    return uniqueDepts.entries.map((e) => DropdownMenuItem<String>(
+      value: e.key,
+      child: Text(e.value, style: const TextStyle(fontSize: 11)),
+    )).toList();
+  }
+
+  List<DropdownMenuItem<String>> _getUniqueBranchDropdownItems({bool includeDetails = false}) {
+    final uniqueBranches = <String, Map<String, dynamic>>{};
+    for (final b in _branches) {
+      final id = b['id']?.toString().trim() ?? '';
+      if (id.isNotEmpty && id.toLowerCase() != 'all') {
+        uniqueBranches[id] = b;
+      }
+    }
+    return [
+      const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
+      ...uniqueBranches.values.map((b) {
+        final bId = b['id']?.toString() ?? '';
+        final name = b['name']?.toString() ?? bId;
+        final label = includeDetails ? '$name ($bId)' : name;
+        return DropdownMenuItem<String>(
+          value: bId,
+          child: Text(label, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
+        );
+      }),
+    ];
+  }
+
   Widget _buildBranchDropdown() {
-    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase();
-    final isBranchManager = userRole == 'branch manager';
+    final userRole = LocalStorageService.getActiveUserRole();
+    final isBranchManager = userRole == 'branch manager' || userRole == 'supervisor';
 
     if (isBranchManager) {
       final bName = _branches.firstWhereOrNull((b) => b['id'] == _activeBranchId)?['name'] ?? _activeBranchId;
@@ -507,23 +546,20 @@ class _FinancePageState extends State<FinancePage> {
       );
     }
 
+    final branchItems = _getUniqueBranchDropdownItems(includeDetails: true);
+    final safeBranchValue = branchItems.any((it) => it.value == _activeBranchId) ? _activeBranchId : 'all';
+
     return Container(
       height: 32,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: _activeBranchId,
+          value: safeBranchValue,
           dropdownColor: _kBgCard,
           style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
           icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
-          items: [
-            const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-            ..._branches.map((b) {
-              final bId = b['id']?.toString() ?? '';
-              return DropdownMenuItem<String>(value: bId, child: Text('${b['name']} ($bId)', style: const TextStyle(fontSize: 11)));
-            }),
-          ],
+          items: branchItems,
           onChanged: (val) { if (val != null) { setState(() => _activeBranchId = val); _triggerDownloadForActiveBranch(); } },
         ),
       ),
@@ -776,7 +812,7 @@ class _FinancePageState extends State<FinancePage> {
   }
 
   void _openHolidaysManager(BuildContext ctx) {
-    final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase();
+    final userRole = LocalStorageService.getActiveUserRole();
     showModalBottomSheet(
       context: ctx,
       isScrollControlled: true,
@@ -841,9 +877,9 @@ class _FinanceSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final userName = Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'User';
-    final userRoleDisplay = Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? '';
-    final isBranchManager = userRoleDisplay.toLowerCase().trim() == 'branch manager';
+    final userName = LocalStorageService.getActiveUsername();
+    final userRoleDisplay = LocalStorageService.getActiveUserRole();
+    final isBranchManager = userRoleDisplay == 'branch manager' || userRoleDisplay == 'supervisor';
 
     return Container(
       width: _kSidebarWidth,
@@ -890,23 +926,39 @@ class _FinanceSidebar extends StatelessWidget {
                 : Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                     decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: activeBranchId, dropdownColor: _kBgCard, isExpanded: true,
-                        style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-                        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
-                        items: [
+                    child: Builder(
+                      builder: (context) {
+                        final uniqueBranches = <String, Map<String, dynamic>>{};
+                        for (final b in branches) {
+                          final id = b['id']?.toString().trim() ?? '';
+                          if (id.isNotEmpty && id.toLowerCase() != 'all') {
+                            uniqueBranches[id] = b;
+                          }
+                        }
+                        final branchItems = [
                           const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-                          ...branches.map((b) {
+                          ...uniqueBranches.values.map((b) {
                             final bId = b['id']?.toString() ?? '';
                             return DropdownMenuItem<String>(
                               value: bId,
                               child: Text('${b['name']} ($bId)', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                             );
                           }),
-                        ],
-                        onChanged: (v) { if (v != null) onBranchChanged(v); },
-                      ),
+                        ];
+                        final safeBranchValue = branchItems.any((it) => it.value == activeBranchId) ? activeBranchId : 'all';
+
+                        return DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: safeBranchValue,
+                            dropdownColor: _kBgCard,
+                            isExpanded: true,
+                            style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
+                            items: branchItems,
+                            onChanged: (v) { if (v != null) onBranchChanged(v); },
+                          ),
+                        );
+                      },
                     ),
                   ),
           ),

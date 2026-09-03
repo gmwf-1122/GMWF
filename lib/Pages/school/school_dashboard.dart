@@ -1,7 +1,6 @@
 // lib/pages/school/school_dashboard.dart
 
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'views/school_overview_view.dart';
 import 'views/school_daily_attendance_view.dart';
 import 'views/school_teacher_attendance_view.dart';
@@ -19,6 +18,11 @@ import '../../widgets/global_module_wrapper.dart';
 import '../../widgets/app_back_button.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/auth_service.dart';
+import '../settings_page.dart';
+import '../../theme/role_theme_provider.dart';
+import '../../theme/app_theme.dart';
+import 'package:motion_tab_bar_v2/motion-tab-bar.dart';
+import 'package:motion_tab_bar_v2/motion-tab-controller.dart';
 
 class _NavItem {
   final String label;
@@ -48,11 +52,12 @@ class SchoolDashboard extends StatefulWidget {
   State<SchoolDashboard> createState() => _SchoolDashboardState();
 }
 
-class _SchoolDashboardState extends State<SchoolDashboard> {
+class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderStateMixin {
   int _selectedIndex = 0;
   List<_NavItem> _navItems = [];
   List<Widget> _views = [];
   bool _isCollapsed = false;
+  MotionTabBarController? _motionTabController;
 
   bool get _isTeacher {
     final r = widget.role.toLowerCase().trim();
@@ -83,7 +88,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
 
   void _initNavItemsAndViews() {
     if (_isPrincipal) {
-      // Principal sees Principal Dashboard (Top Students + School Details), Directory, Fee, Library, Reports
+      // Principal sees Principal Dashboard, Directory, Fee, Library, Reports
       _navItems = const [
         _NavItem(label: 'Principal Dashboard', icon: Icons.dashboard_rounded),
         _NavItem(label: 'Student Directory', icon: Icons.groups_rounded),
@@ -131,7 +136,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
         SchoolAuditLogView(branchId: widget.branchId),
       ];
     } else if (_isTeacher) {
-      // Teachers only see their assigned Daily Class Attendance, Class Grading & Reports, Student Directory (Roster), and School Library
+      // Teachers see assigned Daily Class Attendance, Class Grading & Reports, Student Directory, School Library
       _navItems = const [
         _NavItem(label: 'Daily Attendance', icon: Icons.how_to_reg_rounded),
         _NavItem(label: 'Grading & Reports', icon: Icons.grade_rounded),
@@ -159,7 +164,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
         ),
       ];
     } else {
-      // Admin sees complete school control: Fee Management, Library, Faculty Attendance, Student Visibility, Homeroom Assignment, Reports
+      // Admin sees complete school control: Overview, Admissions, Attendance, Faculty, Fee, Library, Reports, Audit
       _navItems = const [
         _NavItem(label: 'Overview', icon: Icons.analytics_rounded),
         _NavItem(label: 'Student Admissions', icon: Icons.groups_rounded),
@@ -204,6 +209,21 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
         SchoolAuditLogView(branchId: widget.branchId),
       ];
     }
+
+    if (_navItems.length <= 5) {
+      _motionTabController?.dispose();
+      _motionTabController = MotionTabBarController(
+        initialIndex: _selectedIndex.clamp(0, _navItems.length - 1),
+        length: _navItems.length,
+        vsync: this,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _motionTabController?.dispose();
+    super.dispose();
   }
 
   Future<void> _logout() async {
@@ -335,6 +355,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
     if (_navItems.isEmpty) {
       _initNavItemsAndViews();
     }
+    final t = RoleThemeScope.dataOf(context);
     final mediaWidth = MediaQuery.of(context).size.width;
     final isMobile = mediaWidth < 700;
     final isSmallScreen = mediaWidth < 850;
@@ -342,12 +363,109 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
     final isWrapped = GlobalModuleWrapper.isWrapped(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      appBar: isWrapped ? null : _buildTopAppBar(context),
-      drawer: isMobile ? Drawer(child: _buildSidebar(false, isDrawer: true)) : null,
+      backgroundColor: t.bg,
+      appBar: isWrapped ? null : _buildTopAppBar(context, t),
+      drawer: null,
+      bottomNavigationBar: isMobile
+          ? (_navItems.length <= 5 && _motionTabController != null
+              ? MotionTabBar(
+                  controller: _motionTabController,
+                  initialSelectedTab: _navItems[_selectedIndex.clamp(0, _navItems.length - 1)].label,
+                  labels: _navItems.map((n) => n.label).toList(),
+                  icons: _navItems.map((n) => n.icon).toList(),
+                  tabSize: 48,
+                  tabBarHeight: 58,
+                  textStyle: TextStyle(
+                    fontSize: 11,
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  tabIconColor: t.textSecondary,
+                  tabIconSize: 24.0,
+                  tabIconSelectedSize: 22.0,
+                  tabSelectedColor: t.accent,
+                  tabIconSelectedColor: Colors.white,
+                  tabBarColor: t.bgCard,
+                  onTabItemSelected: (int value) {
+                    setState(() {
+                      _selectedIndex = value;
+                      _motionTabController?.index = value;
+                    });
+                  },
+                )
+              : Container(
+                  decoration: BoxDecoration(
+                    color: t.bgCard,
+                    border: Border(top: BorderSide(color: t.bgRule)),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
+                  ),
+                  child: SafeArea(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Row(
+                        children: List.generate(_navItems.length, (idx) {
+                          final item = _navItems[idx];
+                          final isSelected = _selectedIndex == idx;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: InkWell(
+                              onTap: () => setState(() {
+                                _selectedIndex = idx;
+                                if (_motionTabController != null && idx < _navItems.length) {
+                                  _motionTabController?.index = idx;
+                                }
+                              }),
+                              borderRadius: BorderRadius.circular(12),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 200),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? t.accent
+                                      : (t.isDarkCanvas ? const Color(0xFF161B22) : const Color(0xFFF1F5F9)),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isSelected ? t.accent : t.bgRule,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      item.icon,
+                                      size: 16,
+                                      color: isSelected ? Colors.white : t.textSecondary,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      item.label,
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                        color: isSelected ? Colors.white : t.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  ),
+                ))
+          : null,
       body: Row(
         children: [
-          // Sidebar Navigation (Hidden on mobile to give 100% screen width to views)
+          // Sidebar Navigation (Desktop only)
           if (!isMobile) _buildSidebar(effectiveCollapsed),
 
           // Main View Content Area
@@ -362,19 +480,14 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
     );
   }
 
-  PreferredSizeWidget _buildTopAppBar(BuildContext context) {
+  PreferredSizeWidget _buildTopAppBar(BuildContext context, RoleThemeData t) {
     final isMobile = MediaQuery.of(context).size.width < 700;
 
     return AppBar(
-      backgroundColor: SchoolTheme.sidebarBg,
+      backgroundColor: t.bgCard,
       elevation: 0,
+      surfaceTintColor: Colors.transparent,
       automaticallyImplyLeading: false,
-      leading: isMobile
-          ? IconButton(
-              icon: const Icon(Icons.menu_rounded, color: Colors.white),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-            )
-          : const AppBackButton(color: Colors.white),
       title: Row(
         children: [
           // Dual Logo Header: GMWF Logo + TWT Logo
@@ -388,7 +501,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
               errorBuilder: (context, error, stackTrace) => Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: SchoolTheme.primaryDark,
+                  color: t.accent,
                   borderRadius: SchoolTheme.radius8,
                 ),
                 child: const Text('GMWF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
@@ -396,27 +509,27 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
             ),
           ),
           const SizedBox(width: 6),
-          const Text('•', style: TextStyle(color: SchoolTheme.sidebarMuted, fontSize: 16)),
+          Text('•', style: TextStyle(color: t.textTertiary, fontSize: 16)),
           const SizedBox(width: 6),
           ClipRRect(
             borderRadius: SchoolTheme.radius8,
             child: Image.asset(
-              'assets/logo/twt_logo.webp',
+              'assets/logo/twt.webp',
               height: isMobile ? 26 : 32,
               width: isMobile ? 26 : 32,
               fit: BoxFit.contain,
               errorBuilder: (context, error, stackTrace) => Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: SchoolTheme.accent.withValues(alpha: 0.2),
-                  border: Border.all(color: SchoolTheme.accent),
+                  color: t.accent.withValues(alpha: 0.2),
+                  border: Border.all(color: t.accent),
                   borderRadius: SchoolTheme.radius8,
                 ),
                 child: Row(
-                  children: const [
-                    Icon(Icons.school_rounded, color: SchoolTheme.accent, size: 16),
-                    SizedBox(width: 4),
-                    Text('TWT', style: TextStyle(color: SchoolTheme.accent, fontWeight: FontWeight.bold, fontSize: 11)),
+                  children: [
+                    Icon(Icons.school_rounded, color: t.accent, size: 16),
+                    const SizedBox(width: 4),
+                    Text('TWT', style: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: 11)),
                   ],
                 ),
               ),
@@ -428,14 +541,14 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Taleem-o-Tarbiyat School System',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 17),
+                    style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 17),
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'A Project of GMWF • Branch: ${widget.branchId} • Role: ${widget.role}',
-                    style: const TextStyle(color: SchoolTheme.sidebarMuted, fontSize: 12),
+                    'User: ${widget.username} • Role: ${widget.role} • Branch: ${widget.branchId}',
+                    style: TextStyle(color: t.textSecondary, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
@@ -447,24 +560,84 @@ class _SchoolDashboardState extends State<SchoolDashboard> {
       ),
       actions: [
         _SchoolSyncBadge(branchId: widget.branchId),
+        // Settings Button
+        IconButton(
+          tooltip: 'System Settings',
+          icon: Icon(Icons.settings_outlined, color: t.textPrimary),
+          onPressed: () {
+            final uData = LocalStorageService.getActiveUserData();
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => SettingsPage(userData: Map<String, dynamic>.from(uData)),
+              ),
+            );
+          },
+        ),
         // Sidebar toggle only on desktop
         if (!isMobile)
           IconButton(
             tooltip: _isCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar',
             icon: Icon(
               _isCollapsed ? Icons.menu_open_rounded : Icons.menu_rounded,
-              color: Colors.white,
+              color: t.textPrimary,
             ),
             onPressed: () {
               setState(() => _isCollapsed = !_isCollapsed);
             },
           ),
-        // Logout button in AppBar only on mobile (drawer has its own on desktop)
-        IconButton(
-          tooltip: 'Logout',
-          icon: const Icon(Icons.logout_rounded, color: SchoolTheme.statusAbsent),
-          onPressed: _logout,
-        ),
+        // User Profile Section in AppBar
+        if (!isMobile)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: t.isDarkCanvas ? const Color(0xFF161B22) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: t.bgRule),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: t.accent.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.person_rounded, size: 16, color: t.accent),
+                  ),
+                  const SizedBox(width: 8),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.username,
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        widget.role,
+                        style: TextStyle(
+                          color: t.textTertiary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+            ),
+          ),
         const SizedBox(width: 4),
       ],
     );

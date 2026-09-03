@@ -1,5 +1,8 @@
 // lib/realtime/server_sync_manager.dart
 //
+// [ARCH DECISION] This ServerSyncManager is dead code as of 2026-08-27 (only its static initHive helper is called at startup).
+// The live ServerSyncManager is embedded in lib/pages/server.dart (Server Dashboard).
+//
 // FULLY UPDATED — Deduplication, User Attribution, Failed Box & Complete Downloads
 //
 // EXISTING (preserved):
@@ -92,7 +95,7 @@ class ServerSyncManager {
 
   // Per-client serial tracking
   final Map<String, Set<String>> _clientSeenSerials = {};
-  static const int _maxSeenPerClient = 500;
+  static const int _maxSeenPerClient = 2000;
 
   // [USER-TRACK] Connected user identity by socketId
   final Map<String, _UserContext> _connectedUsers = {};
@@ -160,7 +163,7 @@ class ServerSyncManager {
       _prevOnMessage?.call(msg);
     };
 
-    _prevOnConnected = server.onClientConnected;
+        _prevOnConnected = server.onClientConnected;
     server.onClientConnected = (socketId, info) {
       _clientSeenSerials[socketId] = {};
 
@@ -175,7 +178,14 @@ class ServerSyncManager {
       );
 
       _prevOnConnected?.call(socketId, info);
-      Future.delayed(const Duration(seconds: 1), () {
+
+      // Refresh today's tokens from Firestore FIRST, then push catch-up.
+      // Without this, catch-up only sees what was already sitting in this
+      // server's local Hive cache, which can be stale for a reconnecting
+      // client that needs exactly the records created during the gap.
+      Future.delayed(const Duration(milliseconds: 500), () async {
+        if (!_running) return;
+        await _downloadTodayTokens();
         if (_running) _pushCatchUpToSocket(socketId, info).ignore();
       });
     };
@@ -196,7 +206,7 @@ class ServerSyncManager {
       if (_running) _uploadQueue().ignore();
     });
 
-    _downloadTimer = Timer.periodic(const Duration(minutes: 30), (_) {
+        _downloadTimer = Timer.periodic(const Duration(minutes: 3), (_) {
       if (_running) _downloadTodayTokens().ignore();
     });
 
@@ -286,10 +296,13 @@ class ServerSyncManager {
   }
 
   // ── Periodic Catch-up ─────────────────────────────────────────────────────
-  void _periodicCatchUpAll() {
+    void _periodicCatchUpAll() async {
     if (_server == null || _branchId == null || !_running) return;
     final clients = _server!.getConnectedClients();
     if (clients.isEmpty) return;
+
+    await _downloadTodayTokens();
+    if (!_running) return;
 
     debugPrint('[SSM] Periodic catch-up: pushing to ${clients.length} client(s)');
     for (final client in clients) {
@@ -316,6 +329,22 @@ class ServerSyncManager {
 
     if (type == 'ack_serials') {
       _handleClientAck(msg);
+      return;
+    }
+
+        if (type == 'request_catch_up') {
+      final socketId = msg['_socketId']?.toString();
+      final info = socketId == null
+          ? null
+          : _server?.getConnectedClients().cast<Map<String, dynamic>?>().firstWhere(
+                (client) => client?['socketId']?.toString() == socketId,
+                orElse: () => null,
+              );
+      if (socketId != null && info != null) {
+        _downloadTodayTokens().then((_) {
+          if (_running) _pushCatchUpToSocket(socketId, info);
+        });
+      }
       return;
     }
 
@@ -397,6 +426,11 @@ class ServerSyncManager {
         _saveTokenExceptionApproval(data, msg, user: user);
         break;
 
+      case RealtimeEvents.workflowRequest:
+      case RealtimeEvents.workflowDecision:
+        _saveWorkflowEvent(type, data, msg, user: user);
+        break;
+
       // ── ATTENDANCE ────────────────────────────────────────────────────────
       case RealtimeEvents.saveBiometricLog:
       case RealtimeEvents.saveEmployeeAttendance:
@@ -440,6 +474,15 @@ class ServerSyncManager {
       case RealtimeEvents.approveEditRequest:
       case RealtimeEvents.rejectEditRequest:
         _saveSupervisor(type, data, msg, user: user);
+        break;
+
+      // ── EMPLOYEES ─────────────────────────────────────────────────────────
+      case RealtimeEvents.saveEmployee:
+        _saveEmployee(data, msg, user: user);
+        break;
+
+      case RealtimeEvents.deleteEmployee:
+        _deleteEmployee(data, msg, user: user);
         break;
     }
   }
@@ -505,11 +548,6 @@ class ServerSyncManager {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
     final serial   = data['serial']?.toString().trim();
     if (serial == null || serial.isEmpty) return;
-    if (!CampSessionService.isSerialMatchingBranch(serial, branchId)) {
-      debugPrint('[SSM] 🛑 Dropping save_entry for cross-branch serial $serial on branch $branchId');
-      return;
-    }
-
     final dateKey   = data['dateKey']?.toString() ??
         _dateKeyFromSerial(serial, _todayKey());
     final queueType = resolveQueueType(
@@ -522,15 +560,25 @@ class ServerSyncManager {
       'patientId':   data['patientId']   ?? '',
       'patientName': data['patientName'] ?? data['name'] ?? 'Unknown',
       'patientCnic': data['patientCnic'] ?? data['cnic'] ?? '',
-      'createdAt':   data['createdAt']   ?? DateTime.now().toIso8601String(),
+      'createdAt':   data['createdAt']   ?? data['time'] ?? data['timestamp'] ?? DateTime.now().toIso8601String(),
       'status':      data['status']      ?? 'waiting',
       'dateKey':     dateKey,
-      ...?user?.toAuditMap(),
+      if (data['session'] != null) 'session': data['session'],
+      if (data['shift'] != null) 'shift': data['shift'],
+      if (data['createdBy'] != null) 'createdBy': data['createdBy'],
+      if (data['createdByName'] != null) 'createdByName': data['createdByName'],
     };
 
     data.forEach((k, v) {
       if (!entry.containsKey(k) && v != null) entry[k] = v;
     });
+
+    if (user != null) {
+      final audit = user.toAuditMap();
+      audit.forEach((k, v) {
+        if (!entry.containsKey(k) && v != null) entry[k] = v;
+      });
+    }
 
     LocalStorageService.saveEntryLocal(branchId, serial, entry);
     _enqueue({
@@ -551,11 +599,6 @@ class ServerSyncManager {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
     final serial   = (data['serial'] ?? data['id'])?.toString().trim();
     if (serial == null || serial.isEmpty) return;
-    if (!CampSessionService.isSerialMatchingBranch(serial, branchId)) {
-      debugPrint('[SSM] 🛑 Dropping save_prescription for cross-branch serial $serial on branch $branchId');
-      return;
-    }
-
     final prescWithBranch = {
       ...data,
       'branchId': branchId,
@@ -716,6 +759,33 @@ class ServerSyncManager {
     });
   }
 
+  void _saveWorkflowEvent(
+    String eventType,
+    Map<String, dynamic> data,
+    Map<String, dynamic> full, {
+    _UserContext? user,
+  }) {
+    final requestId = (data['requestId'] ?? data['id'])?.toString().trim();
+    if (requestId == null || requestId.isEmpty) return;
+
+    final request = <String, dynamic>{
+      ...data,
+      'requestId': requestId,
+      'branchId': _field(data, full, 'branchId') ?? _branchId,
+      'eventType': eventType,
+      'updatedAt': DateTime.now().toIso8601String(),
+      ...?user?.toAuditMap(),
+    };
+    final box = Hive.box(_editRequestsBox);
+    box.put(requestId, LocalStorageService.sanitize(request));
+    _enqueue({
+      'type': 'workflow_request',
+      'branchId': request['branchId'],
+      'requestId': requestId,
+      'data': request,
+    });
+  }
+
   void _saveDispensaryRecord(
     Map<String, dynamic> data,
     Map<String, dynamic> full, {
@@ -821,6 +891,50 @@ class ServerSyncManager {
     });
   }
 
+  void _saveEmployee(Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final localId = data['localId']?.toString() ?? data['id']?.toString() ?? '';
+    if (localId.isEmpty) return;
+
+    final rec = {...data, 'branchId': branchId, 'localId': localId, ...?user?.toAuditMap()};
+
+    // Update local Hive box on host
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        final box = Hive.box(LocalStorageService.employeesBox);
+        final existing = box.get(localId);
+        final merged = existing is Map ? (Map<String, dynamic>.from(existing)..addAll(rec)) : rec;
+        merged['syncStatus'] = 'synced';
+        box.put(localId, LocalStorageService.sanitize(merged));
+      }
+    } catch (_) {}
+
+    _enqueue({
+      'type': 'save_employee',
+      'branchId': branchId,
+      'localId': localId,
+      'data': rec,
+    });
+  }
+
+  void _deleteEmployee(Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
+    final branchId = _field(data, full, 'branchId') ?? _branchId!;
+    final localId = data['localId']?.toString() ?? data['id']?.toString() ?? '';
+    if (localId.isEmpty) return;
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        Hive.box(LocalStorageService.employeesBox).delete(localId);
+      }
+    } catch (_) {}
+
+    _enqueue({
+      'type': 'delete_employee',
+      'branchId': branchId,
+      'localId': localId,
+    });
+  }
+
   // ── Catch-up Push ─────────────────────────────────────────────────────────
   Future<void> _pushCatchUpToSocket(
       String socketId, Map<String, dynamic> info) async {
@@ -829,9 +943,14 @@ class ServerSyncManager {
     final role = (info['role'] ?? '').toString().toLowerCase();
     if (role == 'receptionist') return;
 
-    final today   = _todayKey();
+    final today   = CampSessionService.resolveShiftAndDateKey().dateKey;
     final entries = LocalStorageService.getLocalEntries(_branchId!)
-        .where((e) => (e['dateKey'] ?? '') == today)
+        .where((e) {
+          final dk = (e['dateKey'] ?? '').toString().trim();
+          final serial = (e['serial'] ?? '').toString().trim();
+          final serialDk = _dateKeyFromSerial(serial, '');
+          return dk == today || serialDk == today;
+        })
         .toList();
 
     final clientSeen = _clientSeenSerials[socketId] ?? <String>{};
@@ -868,6 +987,8 @@ class ServerSyncManager {
         'branchId':    _branchId,
         'data':        entryCopy,
         '_serverPush': true,
+        'isCatchUp':   true,
+        '_isReplay':   true,
       });
 
       if (presc != null && presc.isNotEmpty) {
@@ -876,6 +997,8 @@ class ServerSyncManager {
           'branchId':    _branchId,
           'data':        presc,
           '_serverPush': true,
+          'isCatchUp':   true,
+          '_isReplay':   true,
         });
       }
 
@@ -885,6 +1008,8 @@ class ServerSyncManager {
           'branchId':    _branchId,
           'data':        entryCopy,
           '_serverPush': true,
+          'isCatchUp':   true,
+          '_isReplay':   true,
         });
       }
 
@@ -932,8 +1057,11 @@ class ServerSyncManager {
         final serial = (item['serial'] ?? item['data']?['serial'] ?? '').toString();
         final patientId = (item['patientId'] ?? item['data']?['patientId'] ?? item['id'] ?? '').toString();
         final medicineId = (item['medicineId'] ?? '').toString();
+        final empId = (item['employeeId'] ?? item['data']?['employeeId'] ?? '').toString();
+        final docId = (item['docId'] ?? item['data']?['id'] ?? '').toString();
+        final dateKey = (item['dateKey'] ?? item['date'] ?? item['data']?['dateKey'] ?? item['data']?['date'] ?? '').toString();
 
-        final uniqueKey = '${type}_${serial}_${patientId}_${medicineId}';
+        final uniqueKey = '${type}_${serial}_${patientId}_${medicineId}_${empId}_${docId}_${dateKey}';
         if (uniqueKey.replaceAll('_', '').isEmpty) continue;
 
         if (uniqueLatest.containsKey(uniqueKey)) {
@@ -965,25 +1093,16 @@ class ServerSyncManager {
       final serial = (opCopy['serial'] ?? opCopy['data']?['serial'] ?? '').toString();
       final patientId = (opCopy['patientId'] ?? opCopy['data']?['patientId'] ?? opCopy['id'] ?? '').toString();
       final medicineId = (opCopy['medicineId'] ?? '').toString();
+      final empId = (opCopy['employeeId'] ?? opCopy['data']?['employeeId'] ?? '').toString();
+      final docId = (opCopy['docId'] ?? opCopy['data']?['id'] ?? '').toString();
+      final dateKey = (opCopy['dateKey'] ?? opCopy['date'] ?? opCopy['data']?['dateKey'] ?? opCopy['data']?['date'] ?? '').toString();
 
-      final targetUniqueKey = '${type}_${serial}_${patientId}_${medicineId}';
-      String key = 'ssync_${DateTime.now().microsecondsSinceEpoch}';
-
-      if (targetUniqueKey.replaceAll('_', '').isNotEmpty) {
-        for (final existingKey in box.keys) {
-          final raw = box.get(existingKey);
-          if (raw is Map) {
-            final eType = (raw['type'] ?? '').toString();
-            final eSerial = (raw['serial'] ?? raw['data']?['serial'] ?? '').toString();
-            final ePid = (raw['patientId'] ?? raw['data']?['patientId'] ?? raw['id'] ?? '').toString();
-            final eMed = (raw['medicineId'] ?? '').toString();
-            if ('${eType}_${eSerial}_${ePid}_${eMed}' == targetUniqueKey) {
-              key = existingKey.toString();
-              break;
-            }
-          }
-        }
-      }
+      final targetUniqueKey = '${type}_${serial}_${patientId}_${medicineId}_${empId}_${docId}_${dateKey}';
+      
+      // Deterministic key for instant O(1) deduplication without scanning the box
+      final String key = targetUniqueKey.replaceAll('_', '').isNotEmpty
+          ? 'ssync_${type}_${serial}_${patientId}_${medicineId}_${empId}_${docId}_${dateKey}'
+          : 'ssync_${DateTime.now().microsecondsSinceEpoch}';
 
       opCopy['createdAt'] = DateTime.now().toIso8601String();
       box.put(key, LocalStorageService.sanitize(opCopy));
@@ -999,41 +1118,52 @@ class ServerSyncManager {
     if (conn.every((r) => r == ConnectivityResult.none)) return;
 
     _uploading = true;
-    final box  = Hive.box(_serverQueueBox);
-    final keys = box.keys.toList();
+    try {
+      final box  = Hive.box(_serverQueueBox);
+      final keys = box.keys.take(100).toList();
 
-    for (final key in keys) {
-      if (!_running) break;
+      for (final key in keys) {
+        if (!_running) break;
 
-      final raw = box.get(key);
-      if (raw == null || raw is! Map) {
-        box.delete(key);
-        continue;
+        final raw = box.get(key);
+        if (raw == null || raw is! Map) {
+          box.delete(key);
+          continue;
+        }
+
+        final op       = Map<String, dynamic>.from(raw);
+        final attempts = (op['_attempts'] as int?) ?? 0;
+
+        // Token and prescription writes are durable until Firestore accepts
+        // them. Quota exhaustion must never remove a LAN-delivered record.
+        if (attempts >= 5) {
+          final type = op['type']?.toString() ?? '';
+          if (type == 'save_entry' || type == 'save_prescription' ||
+              type == 'update_serial_status') {
+            op['_attempts'] = 0;
+            await box.put(key, op);
+          } else {
+            _moveToFailedBox(key, op, reason: op['_err']?.toString() ?? 'max attempts');
+            box.delete(key);
+          }
+          continue;
+        }
+
+        try {
+          await _executeOp(op);
+          box.delete(key);
+        } catch (e) {
+          op['_attempts'] = attempts + 1;
+          op['_err']      =
+              e.toString().substring(0, e.toString().length.clamp(0, 200));
+          await box.put(key, op);
+        }
+
+        await Future.delayed(const Duration(milliseconds: 10));
       }
-
-      final op       = Map<String, dynamic>.from(raw);
-      final attempts = (op['_attempts'] as int?) ?? 0;
-
-      if (attempts >= 5) {
-        _moveToFailedBox(key, op, reason: op['_err']?.toString() ?? 'max attempts');
-        box.delete(key);
-        continue;
-      }
-
-      try {
-        await _executeOp(op);
-        box.delete(key);
-      } catch (e) {
-        op['_attempts'] = attempts + 1;
-        op['_err']      =
-            e.toString().substring(0, e.toString().length.clamp(0, 200));
-        await box.put(key, op);
-      }
-
-      await Future.delayed(const Duration(milliseconds: 150));
+    } finally {
+      _uploading = false;
     }
-
-    _uploading = false;
   }
 
   // ── [FAIL-BOX] Move op to dead-letter box ─────────────────────────────────
@@ -1129,18 +1259,28 @@ class ServerSyncManager {
         String? rawQT   = (op['queueType'] ?? data['queueType'])?.toString();
         String? dateKey = (op['dateKey']   ?? data['dateKey'])?.toString();
 
+        Map<String, dynamic>? local;
         if (rawQT == null || dateKey == null) {
-          final local = LocalStorageService.getLocalEntry(branchId, serial);
+          local = LocalStorageService.getLocalEntry(branchId, serial);
           rawQT   ??= local?['queueType']?.toString();
           dateKey ??= local?['dateKey']?.toString() ?? _todayKey();
         }
 
+        final upperSerial = serial.trim().toUpperCase();
+        cleanData['serial'] = upperSerial;
         final queueType = resolveQueueType(rawQT);
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: branchId,
+          dateKey: dateKey,
+          campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString() ?? local?['campId']?.toString() ?? local?['dispensaryId']?.toString(),
+          dispensaryTag: cleanData['dispensaryTag']?.toString() ?? local?['dispensaryTag']?.toString(),
+          serial: upperSerial,
+        );
 
         await _db
             .collection('branches').doc(branchId)
-            .collection('serials').doc(dateKey)
-            .collection(queueType).doc(serial)
+            .collection('serials').doc(campDocKey)
+            .collection(queueType).doc(upperSerial)
             .set(cleanData, SetOptions(merge: true));
         break;
 
@@ -1162,6 +1302,15 @@ class ServerSyncManager {
         await _db
             .collection('branches').doc(branchId)
             .collection('patients').doc(patientId)
+            .set(cleanData, SetOptions(merge: true));
+        break;
+
+      case 'workflow_request':
+        final requestId = op['requestId']?.toString() ?? cleanData['requestId']?.toString();
+        if (requestId == null || requestId.isEmpty) return;
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('edit_requests').doc(requestId)
             .set(cleanData, SetOptions(merge: true));
         break;
 
@@ -1388,6 +1537,21 @@ class ServerSyncManager {
             .set(cleanData, SetOptions(merge: true));
         break;
 
+      case 'save_employee':
+        final localId = op['localId']?.toString() ?? cleanData['localId']?.toString() ?? cleanData['id']?.toString();
+        final bId = op['branchId']?.toString() ?? cleanData['branchId']?.toString() ?? branchId;
+        if (localId == null || localId.isEmpty) return;
+        final fsData = Map<String, dynamic>.from(cleanData)..remove('syncStatus');
+        await _db.collection('branches').doc(bId).collection('employees').doc(localId).set(fsData, SetOptions(merge: true));
+        break;
+
+      case 'delete_employee':
+        final localId = op['localId']?.toString();
+        final bId = op['branchId']?.toString() ?? branchId;
+        if (localId == null || localId.isEmpty) return;
+        await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete();
+        break;
+
       default:
         debugPrint('[SSM] Unknown op type: $type');
     }
@@ -1395,19 +1559,31 @@ class ServerSyncManager {
 
   // ── Downloads ──────────────────────────────────────────────────────────────
 
-  Future<void> _downloadAllFromFirestore() async {
+    Future<void> _downloadAllFromFirestore() async {
     if (_branchId == null || !_running) return;
     final conn = await Connectivity().checkConnectivity();
     if (conn.every((r) => r == ConnectivityResult.none)) return;
 
-    // ── 30-minute cooldown guard (matches SyncService) ─────────────────────────
+    // Today's tokens & dispensary records are small and time-critical —
+    // ALWAYS refresh these, never gate behind the heavy-data cooldown below.
+    // Gating this was the root cause of tokens "disappearing" after a LAN
+    // disconnect: once connected, clients stop listening to Firestore
+    // directly and rely entirely on this server's local cache for catch-up.
+    // If that cache goes stale for up to 30 minutes, any token written to
+    // Firestore during that window was invisible to every other device.
+    await Future.wait([
+      _downloadTodayTokens(),
+      _downloadTodayDispensary(),
+    ]);
+
+    // ── 30-minute cooldown guard for the heavier, slower-changing data ────────
     final settings = Hive.box('app_settings');
     final ttlKey = 'ssm_last_download_$_branchId';
     final lastStr = settings.get(ttlKey) as String?;
     final last = lastStr != null ? DateTime.tryParse(lastStr) : null;
     final now = DateTime.now();
     if (last != null && now.difference(last) < const Duration(minutes: 30)) {
-      debugPrint('[SSM] Download cooldown active for $_branchId — skipping');
+      debugPrint('[SSM] Heavy-data download cooldown active for $_branchId — skipping');
       return;
     }
     await settings.put(ttlKey, now.toIso8601String());
@@ -1416,8 +1592,6 @@ class ServerSyncManager {
       _downloadPatients(),
       _downloadInventory(),
       _downloadPrescriptions(),
-      _downloadTodayTokens(),
-      _downloadTodayDispensary(),
       _downloadAttendance(),
       _downloadMadrassa(),
       _downloadFinance(),
@@ -1646,14 +1820,12 @@ class ServerSyncManager {
     if (days <= 1) return;
 
     final bId = _field(data, full, 'branchId') ?? _branchId;
-    final pId = data['patientCnic']?.toString() ??
-               data['cnic']?.toString() ??
-               data['patientId']?.toString();
+    final pId = LocalStorageService.resolveIndividualPatientId(data);
 
-    if (bId != null && pId != null && pId.trim().isNotEmpty) {
+    if (bId != null && pId.isNotEmpty) {
       LocalStorageService.saveMedicineRestriction(
         branchId: bId,
-        patientId: pId.trim(),
+        patientId: pId,
         daysCovered: days,
       );
       debugPrint('[SSM] 💊 Multi-day restriction applied: $pId ($days days)');

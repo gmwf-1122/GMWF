@@ -22,26 +22,28 @@ import 'package:intl/intl.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/zkteco_network_service.dart';
+import '../pages/madrassa/utils/madrassa_local_storage.dart';
 import 'realtime_events.dart';
 import 'realtime_manager.dart';
 
 class RealtimeRouter {
-  // ── [P3] Hive-backed dedup store ──────────────────────────────────────────
+  // ── [P3] Fast In-memory & Hive-backed dedup store ─────────────────────────
   static const _dedupBox = 'realtime_dedup_ids';
+  static final Set<String> _seenMessageIds = <String>{};
 
   /// Must be called once at app startup alongside other Hive.openBox() calls.
   static Future<void> init() async {
-    await Hive.openBox<String>(_dedupBox);
+    final box = await Hive.openBox<String>(_dedupBox);
     await RealtimeManager.initOutbox();
+    // Preload keys into in-memory set for O(1) instant checking
+    _seenMessageIds.addAll(box.values);
     _pruneExpired();
   }
 
   /// Removes dedup entries older than 24 hours.
-  /// Keys are formatted as "<timestampMs>_<messageId>" so comparison is
-  /// purely lexicographic — no value scanning required.
   static void _pruneExpired() {
     try {
-      final box    = Hive.box<String>(_dedupBox);
+      final box = Hive.box<String>(_dedupBox);
       if (box.isEmpty) return;
 
       final cutoffMs = DateTime.now()
@@ -56,6 +58,10 @@ class RealtimeRouter {
       }).toList();
 
       if (expired.isNotEmpty) {
+        for (final k in expired) {
+          final id = box.get(k);
+          if (id != null) _seenMessageIds.remove(id);
+        }
         box.deleteAll(expired);
         if (kDebugMode) {
           print('RealtimeRouter: pruned ${expired.length} expired dedup entries');
@@ -68,19 +74,6 @@ class RealtimeRouter {
 
   static DateTime _lastCleanup = DateTime.now();
 
-  // ── Queue-type resolver (mirrors SyncService) ─────────────────────────────
-  static String _resolveQueueType(String? raw) {
-    if (raw == null || raw.trim().isEmpty) return 'zakat';
-    final s = raw.toLowerCase().trim();
-    if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) {
-      return 'non-zakat';
-    }
-    if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
-    if (s == 'zakat') return 'zakat';
-    return 'zakat';
-  }
-
   // ── Main router ───────────────────────────────────────────────────────────
 
   static Future<void> routeMessage(Map<String, dynamic> message) async {
@@ -90,19 +83,25 @@ class RealtimeRouter {
       _lastCleanup = DateTime.now();
     }
 
-    // Generate a stable message ID (prefer server-assigned, fall back to
-    // clientId + timestamp composite which is good enough for same-session dedup)
+    // Generate a collision-resistant message ID
     final messageId = message['_messageId']?.toString() ??
-        '${message['_clientId'] ?? 'unknown'}_'
-        '${message['_timestamp'] ?? DateTime.now().millisecondsSinceEpoch}';
+        '${message['_clientId'] ?? 'client'}_'
+        '${message['_timestamp'] ?? DateTime.now().millisecondsSinceEpoch}_'
+        '${message['event_type'] ?? ''}_'
+        '${message['serial'] ?? ''}_'
+        '${DateTime.now().microsecondsSinceEpoch % 100000}';
 
-    // [P3] Check Hive dedup store
-    final box = Hive.box<String>(_dedupBox);
-    final alreadySeen = box.values.contains(messageId);
-    if (alreadySeen) {
+    // O(1) Instant In-memory set lookup
+    if (_seenMessageIds.contains(messageId)) {
       if (kDebugMode) print('⚠️ Duplicate message ignored: $messageId');
       return;
     }
+
+    // Record seen
+    _seenMessageIds.add(messageId);
+    final box = Hive.box<String>(_dedupBox);
+    final dedupKey = '${DateTime.now().millisecondsSinceEpoch}_$messageId';
+    await box.put(dedupKey, messageId);
 
     final data = message['data'] as Map<String, dynamic>? ?? message;
     final incomingVersion = (message['version'] is int)
@@ -125,11 +124,6 @@ class RealtimeRouter {
         if (kDebugMode) print('RealtimeRouter: Version check error: $e');
       }
     }
-
-    // [P3] Persist with timestamped key so TTL prune works by prefix
-    final dedupKey =
-        '${DateTime.now().millisecondsSinceEpoch}_$messageId';
-    await box.put(dedupKey, messageId);
 
     final type = message['event_type']?.toString() ?? '';
 
@@ -180,6 +174,14 @@ Serial: ${data['serial'] ?? 'N/A'}
         await _handleDispenseCompleted(data, message);
         break;
 
+      case RealtimeEvents.saveEmployee:
+        await _handleSaveEmployee(data, message);
+        break;
+
+      case RealtimeEvents.deleteEmployee:
+        await _handleDeleteEmployee(data, message);
+        break;
+
       // ── INVENTORY: stock addition or new medicine registration ──────────────
       case RealtimeEvents.saveStockItem:
         await _handleSaveStockItem(data, message);
@@ -198,7 +200,11 @@ Serial: ${data['serial'] ?? 'N/A'}
         break;
 
       // ── MADRASSA & SCHOOL EVENTS ───────────────────────────────────────────
+      case RealtimeEvents.saveMadrassaStudent:
       case RealtimeEvents.saveMadrassaAdmission:
+      case RealtimeEvents.saveMadrassaAttendance:
+      case RealtimeEvents.offboardMadrassaStudent:
+      case RealtimeEvents.deleteMadrassaStudent:
       case RealtimeEvents.saveMadrassaFee:
       case RealtimeEvents.saveMadrassaHifzProgress:
       case RealtimeEvents.saveExamResult:
@@ -252,6 +258,11 @@ Serial: ${data['serial'] ?? 'N/A'}
         await _handleTokenExceptionApproved(data, message);
         break;
 
+      case RealtimeEvents.workflowRequest:
+      case RealtimeEvents.workflowDecision:
+        await _handleWorkflowEvent(type, data);
+        break;
+
       // ── SUPERVISOR EVENTS ─────────────────────────────────────────────────
       case RealtimeEvents.saveSupervisorAction:
       case RealtimeEvents.approveEditRequest:
@@ -262,6 +273,8 @@ Serial: ${data['serial'] ?? 'N/A'}
       case 'welcome':
       case 'identify_request':
       case 'identified':
+      case 'ping':
+      case 'pong':
       case RealtimeEvents.clientCountUpdate:
         // ignore connection handshake / housekeeping messages
         break;
@@ -311,12 +324,14 @@ Serial: ${data['serial'] ?? 'N/A'}
       'patientName':  data['patientName'] ?? 'Unknown',
       'patientCnic':  data['patientCnic'] ?? data['cnic'] ?? '',
       'guardianCnic': data['guardianCnic'],
-      'createdAt':    data['createdAt'] ?? DateTime.now().toIso8601String(),
+      'createdAt':    data['createdAt'] ?? data['time'],
       'status':       data['status'] ?? 'waiting',
       'vitals':       data['vitals'] ?? {},
       'createdBy':    data['createdBy'] ?? '',
       'createdByName':data['createdByName'] ?? '',
       'dateKey':      data['dateKey'] ?? cleanDateKey,
+      if (data['session'] != null) 'session': data['session'],
+      if (data['shift'] != null) 'shift': data['shift'],
     };
 
     // Add any additional fields from data not already included
@@ -331,22 +346,6 @@ Serial: ${data['serial'] ?? 'N/A'}
 
     if (kDebugMode) print('✅ ENTRY SAVED → $uniqueKey');
 
-    // [P2] Enqueue for direct Firestore upload on non-server devices.
-    // Skip when the message originated from the server's own catch-up push
-    // to prevent the server device from double-enqueuing.
-    if (fullMessage['_serverPush'] != true) {
-      final dateKey   = (entryData['dateKey'] as String?) ?? cleanDateKey;
-      final queueType = _resolveQueueType(entryData['queueType']?.toString());
-      await LocalStorageService.enqueueSync({
-        'type':      'save_entry',
-        'branchId':  branchId,
-        'dateKey':   dateKey,
-        'queueType': queueType,
-        'serial':    serial,
-        'data':      entryData,
-      });
-      if (kDebugMode) print('[P2] Enqueued save_entry for direct upload: $serial');
-    }
   }
 
   static Future<void> _handleDeleteEntry(Map<String, dynamic> data) async {
@@ -420,23 +419,6 @@ Serial: ${data['serial'] ?? 'N/A'}
       }
     }
 
-    // [P2] Enqueue prescription + serial status patch for direct Firestore
-    // upload. queueType and dateKey are resolved by SyncService from the
-    // local entries box at upload time (same fallback path as P1 fix).
-    if (fullMessage['_serverPush'] != true && branchId.isNotEmpty) {
-      await LocalStorageService.enqueueSync({
-        'type':     'save_prescription',
-        'branchId': branchId,
-        'serial':   serial,
-        // queueType + dateKey intentionally omitted here — SyncService
-        // resolves them from Hive at upload time via the P1 fallback,
-        // which is safer than caching potentially-wrong values now.
-        'data':     data,
-      });
-      if (kDebugMode) {
-        print('[P2] Enqueued save_prescription for direct upload: $serial');
-      }
-    }
   }
 
   static Future<void> _handleDeletePrescription(Map<String, dynamic> data) async {
@@ -460,9 +442,23 @@ Serial: ${data['serial'] ?? 'N/A'}
       return;
     }
 
-    final key      = '$branchId-$serial';
-    final box      = Hive.box(LocalStorageService.entriesBox);
-    final existing = box.get(key);
+    final normBranch = branchId.toLowerCase().trim();
+    final normSerial = serial.toLowerCase().trim();
+    final key        = '$normBranch-$serial';
+    final box        = Hive.box(LocalStorageService.entriesBox);
+    dynamic targetKey = key;
+    dynamic existing = box.get(key);
+
+    if (existing == null) {
+      for (final k in box.keys) {
+        final kStr = k.toString().toLowerCase().trim();
+        if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+          targetKey = k;
+          existing = box.get(k);
+          break;
+        }
+      }
+    }
 
     if (existing != null) {
       final updated = Map<String, dynamic>.from(existing);
@@ -474,19 +470,79 @@ Serial: ${data['serial'] ?? 'N/A'}
       updated['completedAt']    =
           data['completedAt'] ?? DateTime.now().toIso8601String();
 
-      await box.put(key, updated);
+      await box.put(targetKey, updated);
 
       if (kDebugMode) {
         print('╔════════════════════════════════════════════════════════════╗');
         print('║ ✅ DISPENSE COMPLETED (ROUTER)                            ║');
         print('╠════════════════════════════════════════════════════════════╣');
         print('║ Serial: $serial');
-        print('║ Entry Key: $key');
+        print('║ Entry Key: $targetKey');
         print('║ Dispensed By: ${data['dispensedBy']}');
         print('╚════════════════════════════════════════════════════════════╝');
       }
     } else {
       if (kDebugMode) print('⚠️ Entry not found for dispense: $key');
+    }
+
+    // Also update dispensaryBox so all records screens reflect 'dispensed' instantly
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
+        final dBox = Hive.box(LocalStorageService.dispensaryBox);
+        for (final k in dBox.keys) {
+          final kStr = k.toString().toLowerCase().trim();
+          if (kStr.endsWith('_$normSerial') || kStr == normSerial || kStr.contains('-$normSerial')) {
+            final dVal = dBox.get(k);
+            if (dVal is Map) {
+              final updatedD = Map<String, dynamic>.from(dVal);
+              updatedD['dispenseStatus'] = 'dispensed';
+              updatedD['status'] = 'completed';
+              updatedD['dispensedAt'] = data['dispensedAt'] ?? DateTime.now().toIso8601String();
+              updatedD['dispensedBy'] = data['dispensedBy'];
+              await dBox.put(k, updatedD);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Deduct stock locally on peer PCs if medicines list was provided
+    final medicines = data['medicines'];
+    if (medicines is List && medicines.isNotEmpty && Hive.isBoxOpen(LocalStorageService.stockBox)) {
+      try {
+        final stockBox = Hive.box(LocalStorageService.stockBox);
+        final days = int.tryParse(data['daysOfMedicine']?.toString() ?? '1') ?? 1;
+        for (final m in medicines) {
+          if (m is! Map) continue;
+          final medId = (m['inventoryId'] ?? m['medicineId'] ?? m['id'] ?? '').toString().trim();
+          final perDayRaw = m['quantity'] ?? m['qty'] ?? 0;
+          final perDay = perDayRaw is num ? perDayRaw.toDouble() : double.tryParse(perDayRaw.toString()) ?? 0.0;
+          if (medId.isEmpty || perDay <= 0) continue;
+          final medName = (m['name'] ?? '').toString().toLowerCase().trim();
+          final isSyrup = (m['type']?.toString().toLowerCase().contains('syrup') == true) || medName.contains('syp') || medName.contains('syrup');
+          final multiplier = isSyrup ? 1.0 : days.toDouble();
+          final qtyDeduct = isSyrup ? 1.0 : perDay * multiplier;
+
+          dynamic stockKey = 'stock:$medId';
+          var item = stockBox.get(stockKey) ?? stockBox.get(medId);
+          if (item == null && medName.isNotEmpty) {
+            for (final sk in stockBox.keys) {
+              final sv = stockBox.get(sk);
+              if (sv is Map && (sv['name']?.toString().toLowerCase().trim() == medName)) {
+                item = sv;
+                stockKey = sk;
+                break;
+              }
+            }
+          }
+          if (item is Map) {
+            final uItem = Map<String, dynamic>.from(item);
+            final curQ = (uItem['quantity'] as num?)?.toDouble() ?? 0.0;
+            uItem['quantity'] = (curQ - qtyDeduct).clamp(0.0, double.infinity);
+            await stockBox.put(stockKey, uItem);
+          }
+        }
+      } catch (_) {}
     }
 
     // [P2] Enqueue serial status patch for direct Firestore upload.
@@ -525,15 +581,13 @@ Serial: ${data['serial'] ?? 'N/A'}
     final bId = (full['branchId']?.toString() ?? data['branchId']?.toString())
         ?.toLowerCase().trim();
     
-    // Fallback chain for patient identity
-    final pId = data['patientCnic']?.toString() ??
-               data['cnic']?.toString() ??
-               data['patientId']?.toString();
+    // Resolve individual patient identity (child vs adult)
+    final pId = LocalStorageService.resolveIndividualPatientId(data);
 
-    if (bId != null && bId.isNotEmpty && pId != null && pId.trim().isNotEmpty) {
+    if (bId != null && bId.isNotEmpty && pId.isNotEmpty) {
       LocalStorageService.saveMedicineRestriction(
         branchId:    bId,
-        patientId:   pId.trim(),
+        patientId:   pId,
         daysCovered: days,
       );
       if (kDebugMode) {
@@ -639,6 +693,16 @@ Serial: ${data['serial'] ?? 'N/A'}
           source: source,
         );
       }
+
+      final branchId = (data['branchId'] ?? '').toString();
+      if (branchId.isNotEmpty) {
+        await LocalStorageService.enqueueSync({
+          'type': type,
+          'branchId': branchId,
+          'data': LocalStorageService.sanitize(data),
+        });
+      }
+
       if (kDebugMode) print('✅ ATTENDANCE EVENT processed via LAN → $type ($key)');
     } catch (e) {
       if (kDebugMode) print('❌ _handleAttendanceEvent error: $e');
@@ -647,6 +711,42 @@ Serial: ${data['serial'] ?? 'N/A'}
 
   static Future<void> _handleMadrassaEvent(String type, Map<String, dynamic> data) async {
     try {
+      if (type == RealtimeEvents.saveMadrassaStudent || type == RealtimeEvents.saveMadrassaAdmission) {
+        final branchId = data['branchId']?.toString() ?? '';
+        final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
+        if (branchId.isNotEmpty && studentId.isNotEmpty) {
+          await MadrassaLocalStorage.cacheStudent(branchId, studentId, data);
+          if (kDebugMode) print('✅ MADRASSA STUDENT cached via LAN → $studentId');
+          return;
+        }
+      }
+      if (type == RealtimeEvents.saveMadrassaAttendance) {
+        final branchId = data['branchId']?.toString() ?? '';
+        final dateKey = data['date']?.toString() ?? data['dateKey']?.toString() ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+        if (branchId.isNotEmpty) {
+          await MadrassaLocalStorage.cacheDailyLog(branchId, dateKey, data);
+          if (kDebugMode) print('✅ MADRASSA ATTENDANCE cached via LAN → $dateKey');
+          return;
+        }
+      }
+      if (type == RealtimeEvents.offboardMadrassaStudent || type == RealtimeEvents.deleteMadrassaStudent) {
+        final branchId = data['branchId']?.toString() ?? '';
+        final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
+        final status = data['status']?.toString() ?? 'left';
+        if (branchId.isNotEmpty && studentId.isNotEmpty) {
+          final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId);
+          if (studentCache != null) {
+            studentCache['status'] = status;
+            studentCache['batch'] = status;
+            if (data['effectiveDate'] != null) {
+              studentCache['offboardedAt'] = data['effectiveDate'];
+            }
+            await MadrassaLocalStorage.cacheStudent(branchId, studentId, studentCache);
+          }
+          if (kDebugMode) print('✅ MADRASSA STUDENT offboarded via LAN → $studentId');
+          return;
+        }
+      }
       final boxName = type == RealtimeEvents.saveMadrassaFee ? 'madrassa_fees' : 'madrassa_box';
       final box = await LocalStorageService.openBoxSafe(boxName);
       final id = data['id']?.toString() ?? data['receiptNo']?.toString() ?? data['admissionNo']?.toString() ?? 'mad_${DateTime.now().microsecondsSinceEpoch}';
@@ -709,6 +809,25 @@ Serial: ${data['serial'] ?? 'N/A'}
       if (kDebugMode) print('✅ SUPERVISOR EVENT saved via LAN → $type ($id)');
     } catch (e) {
       if (kDebugMode) print('❌ _handleSupervisorEvent error: $e');
+    }
+  }
+
+  static Future<void> _handleWorkflowEvent(
+      String type, Map<String, dynamic> data) async {
+    try {
+      final box = await LocalStorageService.openBoxSafe('local_workflow_requests');
+      final requestId = (data['requestId'] ?? data['id'])?.toString();
+      if (requestId == null || requestId.isEmpty) return;
+      final existing = box.get(requestId);
+      final merged = <String, dynamic>{
+        if (existing is Map) ...Map<String, dynamic>.from(existing),
+        ...data,
+        'eventType': type,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      await box.put(requestId, LocalStorageService.sanitize(merged));
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleWorkflowEvent error: $e');
     }
   }
 
@@ -784,6 +903,70 @@ Serial: ${data['serial'] ?? 'N/A'}
           'pending_exception_$requestId',
           LocalStorageService.sanitize(localReq));
       if (kDebugMode) print('✅ TOKEN EXCEPTION REQUEST STORED LOCALLY → $requestId');
+    }
+  }
+
+  static Future<void> _handleSaveEmployee(
+    Map<String, dynamic> data,
+    Map<String, dynamic> fullMessage,
+  ) async {
+    final localId = data['localId']?.toString() ?? data['id']?.toString();
+    if (localId == null || localId.isEmpty) return;
+
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        await LocalStorageService.openBoxSafe(LocalStorageService.employeesBox);
+      }
+      final empBox = Hive.box(LocalStorageService.employeesBox);
+      final existing = empBox.get(localId);
+
+      final record = existing is Map
+          ? (Map<String, dynamic>.from(existing)..addAll(data))
+          : Map<String, dynamic>.from(data);
+      record['id'] = localId;
+      record['localId'] = localId;
+      record['syncStatus'] = 'synced';
+      await empBox.put(localId, LocalStorageService.sanitize(record));
+
+      final pin = (record['biometricPin'] ?? record['pin'])?.toString().trim() ?? '';
+      if (pin.isNotEmpty && Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+        final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+        final isTeacher = (record['role']?.toString().toLowerCase().contains('teacher') == true) ||
+            (record['department']?.toString().toLowerCase().contains('teacher') == true);
+        await credBox.put(localId, {
+          'id': localId,
+          'biometricPin': pin,
+          'entityId': localId,
+          'entityName': record['name']?.toString() ?? 'Employee',
+          'entityType': isTeacher ? 'teacher' : 'employee',
+          'branchId': record['branchId']?.toString() ?? 'karachi',
+          'enrolledAt': record['createdAt']?.toString() ?? DateTime.now().toIso8601String(),
+          'active': record['isActive'] != false,
+        });
+      }
+      if (kDebugMode) print('✅ EMPLOYEE SYNCED OVER LAN: ${record["name"]} ($localId)');
+    } catch (e) {
+      if (kDebugMode) print('❌ Error saving employee over LAN: $e');
+    }
+  }
+
+  static Future<void> _handleDeleteEmployee(
+    Map<String, dynamic> data,
+    Map<String, dynamic> fullMessage,
+  ) async {
+    final localId = data['localId']?.toString() ?? data['id']?.toString();
+    if (localId == null || localId.isEmpty) return;
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        await Hive.box(LocalStorageService.employeesBox).delete(localId);
+      }
+      if (Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+        await Hive.box(LocalStorageService.biometricCredentialsBox).delete(localId);
+      }
+      if (kDebugMode) print('✅ EMPLOYEE DELETED OVER LAN: $localId');
+    } catch (e) {
+      if (kDebugMode) print('❌ Error deleting employee over LAN: $e');
     }
   }
 }

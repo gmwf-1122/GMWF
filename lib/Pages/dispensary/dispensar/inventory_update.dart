@@ -71,8 +71,67 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   String? _selectedDocId;
   final _addQtyCtrl = TextEditingController(text: '1');
   bool _isSubmittingStock = false;
-  String _selectedCampFilter = 'all';
-  bool get _hasMultiCamps => CampSessionService.hasCampsForBranch(widget.branchId);
+  late String _currentBranchId;
+  String _selectedCampFilter = 'saddar';
+  String _selectedTypeFilter = 'All';
+
+  Map<String, dynamic> _getUserData() {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (uData is Map) return Map<String, dynamic>.from(uData);
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  bool get _isMultiBranchUser {
+    if (widget.isAdmin) return true;
+    final uData = _getUserData();
+    final role = (uData['role'] ?? uData['userRole'] ?? '').toString().toLowerCase();
+    if (role.contains('admin') || role.contains('director') || role.contains('supervisor') || role.contains('head') || role.contains('president') || role.contains('chairman') || role.contains('manager')) {
+      return true;
+    }
+    final branches = uData['accessibleBranches'] ?? uData['branches'];
+    if (branches is List && branches.length > 1) return true;
+    return false;
+  }
+
+  List<String> get _availableBranches {
+    final uData = _getUserData();
+    final branches = uData['accessibleBranches'] ?? uData['branches'];
+    if (branches is List && branches.isNotEmpty) {
+      final list = branches.map((e) => e.toString().toLowerCase().trim()).toSet().toList();
+      if (!list.contains(_currentBranchId.toLowerCase().trim())) {
+        list.add(_currentBranchId.toLowerCase().trim());
+      }
+      return list;
+    }
+    return [_currentBranchId.toLowerCase().trim()];
+  }
+
+  void _onBranchChanged(String newBranch) {
+    if (newBranch == _currentBranchId) return;
+    setState(() {
+      _currentBranchId = newBranch;
+      final active = CampSessionService.getActiveCamp(_currentBranchId);
+      _selectedCampFilter = (active != null && active.isNotEmpty && active != 'all') ? active : 'saddar';
+      _selectedMed = null;
+      _selectedDocId = null;
+    });
+    _loadAllMedicines();
+  }
+
+  String get _effectiveTargetCamp {
+    if (_selectedMed != null) {
+      final mCamp = (_selectedMed!['campId'] ?? _selectedMed!['dispensaryId'])?.toString().toLowerCase().trim();
+      if (mCamp != null && mCamp.isNotEmpty && mCamp != 'all') return mCamp;
+    }
+    if (_selectedCampFilter != 'all') return _selectedCampFilter;
+    return CampSessionService.getActiveCamp(_currentBranchId) ?? 'saddar';
+  }
+
+  bool get _hasMultiCamps => CampSessionService.hasCampsForBranch(_currentBranchId);
 
   // ── Register New Medicine state ───────────────────────────────────────────
   final _regFormKey = GlobalKey<FormState>();
@@ -186,6 +245,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   @override
   void initState() {
     super.initState();
+    _currentBranchId = widget.branchId;
+    final active = CampSessionService.getActiveCamp(_currentBranchId);
+    _selectedCampFilter = (active != null && active.isNotEmpty && active != 'all') ? active : 'saddar';
+
     _tabCtrl = TabController(length: 2, vsync: this);
     _fadeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 300));
@@ -195,6 +258,17 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
     _regNameCtrl.addListener(_onRegNameChanged);
     _loadAllMedicines();
+  }
+
+  @override
+  void didUpdateWidget(covariant InventoryUpdatePage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.branchId != widget.branchId) {
+      _currentBranchId = widget.branchId;
+      final active = CampSessionService.getActiveCamp(_currentBranchId);
+      _selectedCampFilter = (active != null && active.isNotEmpty && active != 'all') ? active : 'saddar';
+      _loadAllMedicines();
+    }
   }
 
   @override
@@ -397,6 +471,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         }
       }
 
+      final rawCamp = (originalMed['campId'] ?? originalMed['dispensaryId'] ?? CampSessionService.getActiveCamp()).toString().toLowerCase().trim();
+      final activeCamp = rawCamp.contains('kapay') ? 'saddar' : (rawCamp.isNotEmpty ? rawCamp : 'saddar');
+      final campLabel = CampSessionService.getCampLabel(activeCamp);
+
       final requestId = 'req_edit_${userInfo['uid'] ?? 'dispenser'}_${DateTime.now().millisecondsSinceEpoch}';
       await db
           .collection('branches')
@@ -411,6 +489,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'requestedAt': FieldValue.serverTimestamp(),
         'status': 'pending',
         'reason': updatedFields['reason'] ?? '',
+        'campId': activeCamp,
+        'dispensaryId': activeCamp,
+        'campName': campLabel,
+        'campLabel': campLabel,
+        'branchId': widget.branchId,
         'docId': originalMed['_docId'] ?? originalMed['id'],
         'originalData': {
           'name': originalMed['name'],
@@ -419,14 +502,23 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           'price': originalMed['price'],
           'expiryDate': originalMed['expiryDate'],
           'quantity': originalMed['quantity'],
+          'campId': activeCamp,
+          'dispensaryId': activeCamp,
+          'campName': campLabel,
         },
         'draftItems': [{
           ...updatedFields,
           'oldId': originalMed['_docId'] ?? originalMed['id'],
+          'campId': activeCamp,
+          'dispensaryId': activeCamp,
+          'campName': campLabel,
         }],
         'items': [{
           ...updatedFields,
           'oldId': originalMed['_docId'] ?? originalMed['id'],
+          'campId': activeCamp,
+          'dispensaryId': activeCamp,
+          'campName': campLabel,
         }],
       });
 
@@ -601,27 +693,41 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   Future<void> _loadAllMedicines() async {
     setState(() => _isSearching = true);
     try {
-      final activeCamp = CampSessionService.getActiveCamp()?.toLowerCase().trim();
-      final localItems = LocalStorageService.getAllLocalStockItems(branchId: widget.branchId, filterByCamp: true);
+      final localItems = LocalStorageService.getAllLocalStockItems(branchId: _currentBranchId, filterByCamp: false);
       final Map<String, Map<String, dynamic>> consolidated = {};
       final Set<String> processedDocIds = {};
 
       void processItem(Map<String, dynamic> d) {
-        final docId = d['_docId'] ?? d['id'] ?? d['docId'];
-        if (docId != null) {
+        final docId = (d['_docId'] ?? d['id'] ?? d['docId'])?.toString();
+        if (docId != null && docId.isNotEmpty) {
           if (processedDocIds.contains(docId)) return;
           processedDocIds.add(docId);
         }
 
-        final filterCamp = _selectedCampFilter != 'all' ? _selectedCampFilter.toLowerCase() : activeCamp;
-        if (filterCamp != null && filterCamp.isNotEmpty && filterCamp != 'all') {
-          final itemCamp = (d['dispensaryId'] ?? d['campId'])?.toString().toLowerCase().trim();
-          if (itemCamp != null && itemCamp.isNotEmpty && itemCamp != 'all' && itemCamp != filterCamp) {
-            return;
+        final filterCamp = _selectedCampFilter.toLowerCase().trim();
+        final itemCamp = (d['dispensaryId'] ?? d['campId'] ?? '').toString().toLowerCase().trim();
+        final docIdStr = (docId ?? '').toLowerCase();
+
+        if (filterCamp.isNotEmpty && filterCamp != 'all') {
+          bool matches = false;
+          if (filterCamp.contains('sadd')) {
+            matches = itemCamp.contains('sadd') || itemCamp.contains('kap') ||
+                      docIdStr.startsWith('saddar') || docIdStr.startsWith('kapay');
+          } else if (filterCamp.contains('haji')) {
+            matches = itemCamp.contains('haji') || docIdStr.startsWith('haji');
+          } else {
+            matches = (itemCamp == filterCamp);
           }
+          if (!matches) return;
         }
 
-        final key = '${d['name']}|${d['type']}|${d['dose']}';
+        // Filter by Type category if selected
+        final itemType = (d['type'] ?? '').toString();
+        if (_selectedTypeFilter != 'All' && itemType.toLowerCase() != _selectedTypeFilter.toLowerCase()) {
+          return;
+        }
+
+        final key = '${d['name']}|${d['type']}|${d['dose']}|$itemCamp';
         if (!consolidated.containsKey(key)) {
           consolidated[key] = {...d, '_docId': docId};
         } else {
@@ -637,10 +743,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       try {
         final snap = await FirebaseFirestore.instance
             .collection('branches')
-            .doc(widget.branchId)
+            .doc(_currentBranchId)
             .collection('inventory')
             .orderBy('name_lower')
-            .limit(200)
+            .limit(250)
             .get(const GetOptions(source: Source.serverAndCache));
 
         for (final doc in snap.docs) {
@@ -682,29 +788,44 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
     setState(() => _isSearching = true);
     try {
-      final activeCamp = CampSessionService.getActiveCamp()?.toLowerCase().trim();
       final snap = await FirebaseFirestore.instance
           .collection('branches')
-          .doc(widget.branchId)
+          .doc(_currentBranchId)
           .collection('inventory')
           .where('name_lower',
               isGreaterThanOrEqualTo: query.toLowerCase())
           .where('name_lower',
               isLessThanOrEqualTo: '${query.toLowerCase()}\uf8ff')
-          .limit(50)
+          .limit(60)
           .get();
 
       final Map<String, Map<String, dynamic>> seen = {};
+      final filterCamp = _selectedCampFilter.toLowerCase().trim();
+
       for (final doc in snap.docs) {
         final d = doc.data();
-        final filterCamp = _selectedCampFilter != 'all' ? _selectedCampFilter.toLowerCase() : activeCamp;
-        if (filterCamp != null && filterCamp.isNotEmpty && filterCamp != 'all') {
-          final itemCamp = (d['dispensaryId'] ?? d['campId'])?.toString().toLowerCase().trim();
-          if (itemCamp != null && itemCamp.isNotEmpty && itemCamp != 'all' && itemCamp != filterCamp) {
-            continue;
+        final itemCamp = (d['dispensaryId'] ?? d['campId'] ?? '').toString().toLowerCase().trim();
+        final docIdStr = doc.id.toLowerCase();
+
+        if (filterCamp.isNotEmpty && filterCamp != 'all') {
+          bool matches = false;
+          if (filterCamp.contains('sadd')) {
+            matches = itemCamp.contains('sadd') || itemCamp.contains('kap') ||
+                      docIdStr.startsWith('saddar') || docIdStr.startsWith('kapay');
+          } else if (filterCamp.contains('haji')) {
+            matches = itemCamp.contains('haji') || docIdStr.startsWith('haji');
+          } else {
+            matches = (itemCamp == filterCamp);
           }
+          if (!matches) continue;
         }
-        final key = '${d['name']}|${d['type']}|${d['dose']}';
+
+        final itemType = (d['type'] ?? '').toString();
+        if (_selectedTypeFilter != 'All' && itemType.toLowerCase() != _selectedTypeFilter.toLowerCase()) {
+          continue;
+        }
+
+        final key = '${d['name']}|${d['type']}|${d['dose']}|$itemCamp';
         if (!seen.containsKey(key)) {
           seen[key] = {...d, '_docId': doc.id};
         } else {
@@ -747,6 +868,13 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       _snack('Select a medicine from the list first', err: true);
       return;
     }
+
+    final targetCamp = _effectiveTargetCamp;
+    if (targetCamp == 'all') {
+      _snack('Please select a specific camp (Saddar or Haji Camp) above before adding stock.', err: true);
+      return;
+    }
+
     final qty = int.tryParse(_addQtyCtrl.text.trim()) ?? 0;
     if (qty < 1) {
       _snack('Enter a valid quantity (min 1)', err: true);
@@ -757,6 +885,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     try {
       final userInfo = await _getUserInfo();
       final medId = _selectedDocId!;
+      final campLabel = CampSessionService.getCampLabel(targetCamp);
 
       // STEP 1: Update local Hive instantly — local UI reflects immediately
       await LocalStorageService.updateLocalStockQuantity(medId, qty.toDouble());
@@ -768,7 +897,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
           'event_type': RealtimeEvents.saveStockItem,
           'data': {
             ...updatedMed,
-            '_quantityDelta':   qty,        // tells receiving device to increment
+            '_quantityDelta':   qty,
+            'branchId':         _currentBranchId,
+            'campId':           targetCamp,
+            'dispensaryId':     targetCamp,
+            'campName':         campLabel,
             'performedBy':      userInfo['uid'],
             'performedByName':  userInfo['username'],
           },
@@ -776,11 +909,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       }
 
       // STEP 3: Try Firestore directly (online devices see it via StreamBuilder).
-      //         If offline, catch and enqueue — SyncService will apply when back online.
       try {
         await FirebaseFirestore.instance
             .collection('branches')
-            .doc(widget.branchId)
+            .doc(_currentBranchId)
             .collection('inventory')
             .doc(medId)
             .update({'quantity': FieldValue.increment(qty)});
@@ -788,14 +920,17 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         // Log the action
         FirebaseFirestore.instance
             .collection('branches')
-            .doc(widget.branchId)
+            .doc(_currentBranchId)
             .collection('inventory_log')
             .add({
           'action': 'add_stock',
           'medicineName': _selectedMed!['name'],
           'medicineId': medId,
           'quantityAdded': qty,
-          'dispensaryId': CampSessionService.getActiveCamp(),
+          'branchId': _currentBranchId,
+          'dispensaryId': targetCamp,
+          'campId': targetCamp,
+          'campName': campLabel,
           'performedBy': userInfo['uid'],
           'performedByName': userInfo['username'],
           'timestamp': FieldValue.serverTimestamp(),
@@ -804,8 +939,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         // Offline — queue for Firestore sync when connectivity is restored
         await LocalStorageService.enqueueSync({
           'type': 'add_inventory_stock',
-          'branchId': widget.branchId,
-          'dispensaryId': CampSessionService.getActiveCamp(),
+          'branchId': _currentBranchId,
+          'dispensaryId': targetCamp,
+          'campId': targetCamp,
+          'campName': campLabel,
           'medicineId': medId,
           'medicineName': _selectedMed!['name'],
           'quantity': qty,
@@ -814,7 +951,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         });
       }
 
-      _snack('+$qty added to ${_selectedMed!['name']} successfully!');
+      _snack('+$qty added to ${_selectedMed!['name']} at $campLabel (${_currentBranchId.toUpperCase()})!');
       _clearSelection();
       _loadAllMedicines();
     } catch (e) {
@@ -1168,276 +1305,626 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // TAB 1 — Add Stock
+  // TAB 1 — Add Stock & Inventory Manager Redesign
   // ══════════════════════════════════════════════════════════════════════════
-  Widget _addStockTab() => Column(children: [
-        // ── Search bar ──────────────────────────────────────────────────────
-        Container(
-          color: _isDark ? const Color(0xFF1E293B) : _white,
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: TextField(
-            controller: _searchCtrl,
-            cursorColor: _teal,
-            style: TextStyle(color: _isDark ? Colors.white : _textDark, fontSize: 15),
-            onChanged: _searchMedicine,
-            decoration: InputDecoration(
-              prefixIcon: _isSearching
-                  ? Container(
-                      margin: const EdgeInsets.all(12),
-                      width: 18,
-                      height: 18,
-                      child: const CircularProgressIndicator(
-                          strokeWidth: 2, color: _teal))
-                  : const Icon(Icons.search_rounded,
-                      color: _teal, size: 20),
-              hintText: 'Search medicines...',
-              hintStyle:
-                  const TextStyle(color: _textLight, fontSize: 14),
-              suffixIcon: _searchCtrl.text.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded,
-                          color: _textLight, size: 18),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() {
-                          _selectedMed = null;
-                          _selectedDocId = null;
-                        });
-                        _loadAllMedicines();
-                      },
-                    )
-                  : null,
-              filled: true,
-              fillColor: _isDark ? const Color(0xFF1E293B) : _green50,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide.none),
-              enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: _border)),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide:
-                      const BorderSide(color: _teal, width: 1.5)),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 13),
-            ),
-          ),
+  Widget _buildContextBanner() {
+    final isDark = _isDark;
+    final totalCount = _searchResults.length;
+    final lowStockCount = _searchResults.where((m) => _isLowStock(_safeInt(m['quantity']), m['type']?.toString() ?? '')).length;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFCCFBF1),
+          width: 1,
         ),
-
-        // ── Selected medicine + qty panel ────────────────────────────────────
-        if (_selectedMed != null)
-          Container(
-            margin:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _isDark ? const Color(0xFF1E293B) : _white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: _isDark ? const Color(0xFF0F766E) : _teal.withValues(alpha: 0.4), width: 1.5),
-              boxShadow: [
-                BoxShadow(
-                    color: _isDark ? Colors.black26 : _shadow,
-                    blurRadius: 8,
-                    offset: const Offset(0, 3))
-              ],
-            ),
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Container(
-                  padding: const EdgeInsets.all(9),
-                  decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF0F766E).withValues(alpha: 0.25) : _green50,
-                      borderRadius: BorderRadius.circular(9)),
-                  child: Icon(_typeIcon(_selectedMed!['type'] ?? ''),
-                      color: _isDark ? const Color(0xFF2DD4BF) : _teal, size: 16),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black26 : _shadow,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.3) : const Color(0xFFE0F2FE),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                  Text(_selectedMed!['name'] ?? '',
+                child: Icon(Icons.inventory_2_rounded, size: 20, color: isDark ? const Color(0xFF38BDF8) : _teal),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Stock & Inventory Manager',
                       style: TextStyle(
-                          color: _isDark ? Colors.white : _tealDark,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15)),
-                  const SizedBox(height: 2),
-                  Wrap(spacing: 6, children: [
-                    _miniChip(_selectedMed!['type'] ?? '', _teal),
-                    if ((_selectedMed!['dose'] ?? '')
-                        .toString()
-                        .isNotEmpty)
-                      _miniChip(_selectedMed!['dose'], _textMid),
-                    _miniChip(
-                        'In stock: ${_selectedMed!['quantity'] ?? 0}',
-                        _green600),
-                  ]),
-                ])),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded,
-                      color: _textLight, size: 20),
-                  onPressed: _clearSelection,
-                  tooltip: 'Cancel',
-                ),
-              ]),
-              const SizedBox(height: 14),
-              Row(children: [
-                _qtyBtn(Icons.remove_rounded, () {
-                  final v = int.tryParse(_addQtyCtrl.text) ?? 1;
-                  if (v > 1) setState(() => _addQtyCtrl.text = '${v - 1}');
-                }),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _addQtyCtrl,
-                    textAlign: TextAlign.center,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly
-                    ],
-                    cursorColor: _isDark ? const Color(0xFF2DD4BF) : _teal,
-                    style: TextStyle(
-                        color: _isDark ? const Color(0xFF2DD4BF) : _teal,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: _isDark ? const Color(0xFF0F172A) : _green50,
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              BorderSide(color: _isDark ? const Color(0xFF334155) : _border)),
-                      enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide:
-                              BorderSide(color: _isDark ? const Color(0xFF334155) : _border)),
-                      focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide(
-                              color: _isDark ? const Color(0xFF2DD4BF) : _teal, width: 1.5)),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : _tealDark,
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                _qtyBtn(Icons.add_rounded, () {
-                  final v = int.tryParse(_addQtyCtrl.text) ?? 0;
-                  setState(() => _addQtyCtrl.text = '${v + 1}');
-                }),
-              ]),
-              const SizedBox(height: 14),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed:
-                      _isSubmittingStock ? null : _submitAddStock,
-                  icon: _isSubmittingStock
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.add_rounded,
-                          color: Colors.white),
-                  label: Text(
-                      _isSubmittingStock ? 'Adding...' : 'Add Stock',
-                      style: const TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _green600,
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    elevation: 2,
-                  ),
+                    Text(
+                      'Total: $totalCount items${lowStockCount > 0 ? ' • $lowStockCount low stock' : ''} • Search & adjust stock',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isDark ? Colors.white60 : _textLight,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ]),
-          ),
-
-        // ── Section header ───────────────────────────────────────────────────
-        if (_hasSearched && _searchResults.isNotEmpty)
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FFFE),
-            child: Row(children: [
-              Text(
-                _searchCtrl.text.isEmpty
-                    ? 'All Medicines (${_searchResults.length})'
-                    : 'Results (${_searchResults.length})',
-                style: const TextStyle(
-                    color: _teal,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13),
-              ),
-              const Spacer(),
-              if (_hasMultiCamps) ...[
+              // Branch Selection (or Badge)
+              if (_isMultiBranchUser && _availableBranches.length > 1) ...[
                 Container(
-                  height: 28,
+                  height: 34,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _border),
+                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
-                      value: _selectedCampFilter,
+                      value: _availableBranches.contains(_currentBranchId.toLowerCase().trim())
+                          ? _currentBranchId.toLowerCase().trim()
+                          : _availableBranches.first,
                       isDense: true,
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _textDark),
-                      items: const [
-                        DropdownMenuItem(value: 'all', child: Text('🏥 All Camps')),
-                        DropdownMenuItem(value: 'haji', child: Text('📍 Haji Camp')),
-                        DropdownMenuItem(value: 'saddar', child: Text('📍 Saddar')),
-                      ],
-                      onChanged: (v) {
-                        setState(() => _selectedCampFilter = v ?? 'all');
-                        _loadAllMedicines();
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFF38BDF8) : _tealDark,
+                      ),
+                      icon: Icon(Icons.arrow_drop_down_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                      items: _availableBranches.map((b) {
+                        return DropdownMenuItem(
+                          value: b,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.business_rounded, size: 14, color: _teal),
+                              const SizedBox(width: 5),
+                              Text(b.toUpperCase()),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (newBranch) {
+                        if (newBranch != null) _onBranchChanged(newBranch);
                       },
                     ),
                   ),
                 ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : const Color(0xFFE6FFFA),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF14B8A6).withValues(alpha: 0.4) : const Color(0xFF99F6E4)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.business_rounded, size: 13, color: _teal),
+                      const SizedBox(width: 5),
+                      Text(
+                        _currentBranchId.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: _teal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
-            ]),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Divider(height: 1),
+          const SizedBox(height: 10),
+
+          // Facility Camp Selector Row
+          Row(
+            children: [
+              Text(
+                'Target Camp:',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white70 : _textMid,
+                ),
+              ),
+              const SizedBox(width: 10),
+              if (_hasMultiCamps) ...[
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _campPillButton(
+                          label: 'Saddar Camp',
+                          campId: 'saddar',
+                          icon: Icons.location_on_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _campPillButton(
+                          label: 'Haji Camp',
+                          campId: 'haji_camp',
+                          icon: Icons.location_on_rounded,
+                        ),
+                        const SizedBox(width: 8),
+                        _campPillButton(
+                          label: 'All Camps',
+                          campId: 'all',
+                          icon: Icons.holiday_village_rounded,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ] else ...[
+                Text(
+                  'Main Facility',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? const Color(0xFF38BDF8) : _teal,
+                  ),
+                ),
+              ],
+            ],
           ),
 
-        // ── Persistent medicine list ─────────────────────────────────────────
-        Expanded(
-          child: _isSearching && !_hasSearched
-              ? const Center(
-                  child: CircularProgressIndicator(color: _teal))
-              : _searchResults.isEmpty && _hasSearched
-                  ? Center(
-                      child: Column(
+          // Ambiguity Warning if "All Camps" is selected
+          if (_selectedCampFilter == 'all' && _hasMultiCamps) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 14, color: Colors.amber.shade900),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Viewing consolidated inventory. To add stock, select either Saddar or Haji Camp to avoid misassignment.',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.amber.shade900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _campPillButton({
+    required String label,
+    required String campId,
+    required IconData icon,
+  }) {
+    final isSelected = (_selectedCampFilter == campId) ||
+        (campId == 'haji_camp' && _selectedCampFilter == 'haji');
+    final isDark = _isDark;
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selectedCampFilter = campId;
+          _selectedMed = null;
+          _selectedDocId = null;
+        });
+        _loadAllMedicines();
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? (campId == 'all'
+                  ? (isDark ? const Color(0xFF334155) : Colors.blueGrey.shade700)
+                  : (campId == 'saddar' ? const Color(0xFF00695C) : const Color(0xFF0284C7)))
+              : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected
+                ? Colors.transparent
+                : (isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1)),
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: (campId == 'saddar' ? const Color(0xFF00695C) : const Color(0xFF0284C7)).withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  )
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 13,
+              color: isSelected ? Colors.white : (isDark ? Colors.white70 : _textMid),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                color: isSelected ? Colors.white : (isDark ? Colors.white70 : _textDark),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedMedStockPanel() {
+    if (_selectedMed == null) return const SizedBox.shrink();
+    final isDark = _isDark;
+    final targetCampLabel = CampSessionService.getCampLabel(_effectiveTargetCamp);
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _teal, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: _teal.withValues(alpha: 0.18),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _teal.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(_typeIcon(_selectedMed!['type'] ?? ''), color: _teal, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _selectedMed!['name'] ?? '',
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : _tealDark,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Wrap(
+                      spacing: 6,
+                      children: [
+                        _miniChip(_selectedMed!['type'] ?? '', _teal),
+                        if ((_selectedMed!['dose'] ?? '').toString().isNotEmpty)
+                          _miniChip(_selectedMed!['dose'].toString(), _textMid),
+                        _miniChip('Current Stock: ${_selectedMed!['quantity'] ?? 0}', _green600),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, color: _textLight, size: 22),
+                onPressed: _clearSelection,
+                tooltip: 'Cancel',
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : const Color(0xFFF0FDF4),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: isDark ? const Color(0xFF14B8A6).withValues(alpha: 0.4) : const Color(0xFFBBF7D0)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.verified_rounded, size: 15, color: _green600),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Target Facility: $targetCampLabel (${_currentBranchId.toUpperCase()})',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: _green600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _qtyBtn(Icons.remove_rounded, () {
+                final v = int.tryParse(_addQtyCtrl.text) ?? 1;
+                if (v > 1) setState(() => _addQtyCtrl.text = '${v - 1}');
+              }),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextField(
+                  controller: _addQtyCtrl,
+                  textAlign: TextAlign.center,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  cursorColor: _teal,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : _teal,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 20,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Qty',
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: const BorderSide(color: _border),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              _qtyBtn(Icons.add_rounded, () {
+                final v = int.tryParse(_addQtyCtrl.text) ?? 0;
+                setState(() => _addQtyCtrl.text = '${v + 1}');
+              }),
+              const SizedBox(width: 10),
+              // Preset chips
+              ...[10, 50, 100].map((increment) {
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ActionChip(
+                    label: Text('+$increment'),
+                    labelStyle: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white70 : _tealDark,
+                    ),
+                    backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFE0F2FE),
+                    onPressed: () {
+                      final v = int.tryParse(_addQtyCtrl.text) ?? 0;
+                      setState(() => _addQtyCtrl.text = '${v + increment}');
+                    },
+                  ),
+                );
+              }),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 44,
+            child: ElevatedButton.icon(
+              onPressed: _isSubmittingStock ? null : _submitAddStock,
+              icon: _isSubmittingStock
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.add_task_rounded, color: Colors.white, size: 18),
+              label: Text(
+                _isSubmittingStock ? 'Adding Stock...' : 'Confirm & Add Stock to $targetCampLabel',
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _green600,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                elevation: 2,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addStockTab() => Column(
+        children: [
+          // ── Context Banner (Branch & Camp Switcher + Stats) ───────────────
+          _buildContextBanner(),
+
+          // ── Search & Filter Controls ──────────────────────────────────────
+          Container(
+            color: _isDark ? const Color(0xFF1E293B) : _white,
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: _searchCtrl,
+                  cursorColor: _teal,
+                  style: TextStyle(color: _isDark ? Colors.white : _textDark, fontSize: 14),
+                  onChanged: _searchMedicine,
+                  decoration: InputDecoration(
+                    prefixIcon: _isSearching
+                        ? Container(
+                            margin: const EdgeInsets.all(12),
+                            width: 18,
+                            height: 18,
+                            child: const CircularProgressIndicator(strokeWidth: 2, color: _teal))
+                        : const Icon(Icons.search_rounded, color: _teal, size: 20),
+                    hintText: 'Search by formula, brand name, or dose...',
+                    hintStyle: const TextStyle(color: _textLight, fontSize: 13),
+                    suffixIcon: _searchCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close_rounded, color: _textLight, size: 18),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() {
+                                _selectedMed = null;
+                                _selectedDocId = null;
+                              });
+                              _loadAllMedicines();
+                            },
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: _teal, width: 1.5),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // Type Filter Chips Row
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      'All',
+                      'Tablet',
+                      'Syrup',
+                      'Capsule',
+                      'Injection',
+                      'Infusion',
+                      'Syringe',
+                      'Others'
+                    ].map((t) {
+                      final isSel = _selectedTypeFilter == t;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: FilterChip(
+                          label: Text(t),
+                          selected: isSel,
+                          onSelected: (selected) {
+                            setState(() => _selectedTypeFilter = t);
+                            _loadAllMedicines();
+                          },
+                          backgroundColor: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                          selectedColor: _teal,
+                          checkmarkColor: Colors.white,
+                          labelStyle: TextStyle(
+                            fontSize: 11,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                            color: isSel ? Colors.white : (_isDark ? Colors.white70 : _textMid),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            side: BorderSide(
+                              color: isSel ? _teal : (_isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Selected medicine + qty panel ──────────────────────────────────
+          if (_selectedMed != null) _buildSelectedMedStockPanel(),
+
+          // ── Section header ─────────────────────────────────────────────────
+          if (_hasSearched && _searchResults.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FFFE),
+              child: Row(
+                children: [
+                  Text(
+                    _searchCtrl.text.isEmpty
+                        ? 'Available Medicines (${_searchResults.length})'
+                        : 'Search Results (${_searchResults.length})',
+                    style: const TextStyle(color: _teal, fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'Camp: ${CampSessionService.getCampLabel(_effectiveTargetCamp)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _isDark ? const Color(0xFF38BDF8) : _tealDark,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // ── Persistent medicine list ───────────────────────────────────────
+          Expanded(
+            child: _isSearching && !_hasSearched
+                ? const Center(child: CircularProgressIndicator(color: _teal))
+                : _searchResults.isEmpty && _hasSearched
+                    ? Center(
+                        child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                        Icon(Icons.search_off_rounded,
-                            size: 64, color: Colors.grey[300]),
-                        const SizedBox(height: 12),
-                        const Text('No medicines found',
-                            style: TextStyle(
-                                color: _textLight, fontSize: 15)),
-                      ]),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
-                      itemCount: _searchResults.length,
-                      itemBuilder: (ctx, i) {
-                        final med = _searchResults[i];
-                        final isSelected = _selectedMed != null &&
-                            _selectedMed!['_docId'] == med['_docId'];
-                        return _searchResultRow(med, isSelected);
-                      },
-                    ),
-        ),
-      ]);
+                            Icon(Icons.search_off_rounded, size: 64, color: Colors.grey[300]),
+                            const SizedBox(height: 12),
+                            const Text('No medicines found in this camp/filter',
+                                style: TextStyle(color: _textLight, fontSize: 15)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
+                        itemCount: _searchResults.length,
+                        itemBuilder: (ctx, i) {
+                          final med = _searchResults[i];
+                          final isSelected = _selectedMed != null &&
+                              _selectedMed!['_docId'] == med['_docId'];
+                          return _searchResultRow(med, isSelected);
+                        },
+                      ),
+          ),
+        ],
+      );
 
   Widget _searchResultRow(Map<String, dynamic> med, bool isSelected) {
     final isDark = _isDark;
@@ -1447,126 +1934,216 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     final expSoon = _isExpiringSoon(med['expiryDate']?.toString());
     final isWarning = lowStock || expSoon;
 
-    final rowBg = isDark 
-        ? (isSelected ? const Color(0xFF1E3A3A) : (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B)))
-        : (isSelected ? _green50 : (isWarning ? _red.withValues(alpha: 0.12) : _white));
+    final rawCamp = (med['campId'] ?? med['dispensaryId'] ?? '').toString().toLowerCase();
+    String campTag = 'Saddar Camp';
+    if (rawCamp.contains('haji')) {
+      campTag = 'Haji Camp';
+    } else if (rawCamp.contains('sadd') || rawCamp.contains('kap')) {
+      campTag = 'Saddar Camp';
+    } else if (_selectedCampFilter != 'all') {
+      campTag = CampSessionService.getCampLabel(_selectedCampFilter);
+    }
+
+    final rowBg = isDark
+        ? (isSelected ? const Color(0xFF1E3A3A) : const Color(0xFF1E293B))
+        : (isSelected ? const Color(0xFFF0FDF4) : Colors.white);
     final borderColor = isDark
-        ? (isSelected ? const Color(0xFF0F766E) : (isWarning ? const Color(0xFFFF6B6B) : const Color(0xFF334155)))
-        : (isSelected ? _teal : (isWarning ? _red : _green100));
+        ? (isSelected ? const Color(0xFF0F766E) : const Color(0xFF334155))
+        : (isSelected ? _teal : const Color(0xFFE2E8F0));
 
-    return GestureDetector(
-      onTap: () => _selectMedForStock(med),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: rowBg,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: rowBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: isSelected ? 2.0 : 1.0),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black12 : Colors.black.withValues(alpha: 0.04),
+            blurRadius: isSelected ? 6 : 3,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          border: Border(
-            top:    BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
-            right:  BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
-            bottom: BorderSide(color: borderColor, width: isSelected ? 2.0 : 1.0),
-            left:   BorderSide(color: isWarning ? (isDark ? const Color(0xFFFF6B6B) : _red) : borderColor, width: isWarning ? 6.0 : (isSelected ? 2.0 : 1.0)),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: isDark ? Colors.black26 : _shadow,
-              blurRadius: isSelected ? 8 : 4,
-              offset: const Offset(0, 2),
-            )
-          ],
-        ),
-        child: Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-                color: isSelected
-                    ? (isDark ? const Color(0xFF0F766E).withValues(alpha: 0.3) : _teal.withValues(alpha: 0.12))
-                    : (isDark ? const Color(0xFF334155) : _green50),
-                borderRadius: BorderRadius.circular(9)),
-            child: Icon(_typeIcon(type), color: isDark ? const Color(0xFF38BDF8) : _teal, size: 15),
-          ),
-          const SizedBox(width: 12),
-
-          // Name, type, dose
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-            Text(med['name'] ?? '',
-                style: TextStyle(
-                    color: isDark ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white) : (isWarning ? _red : _textDark),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14)),
-            const SizedBox(height: 4),
-            Wrap(spacing: 6, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: [
-              _miniChip(type, isDark ? const Color(0xFF38BDF8) : _teal),
-              if ((med['dose'] ?? '').toString().isNotEmpty)
-                _miniChip(med['dose'].toString(), isDark ? const Color(0xFF94A3B8) : _textMid),
-            ]),
-            if (isWarning)
-              _statusLabel(lowStock: lowStock, expSoon: expSoon),
-          ])),
-
-          // Right side: stock badge + edit button
-          Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
+          onTap: () => _selectMedForStock(med),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
               children: [
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: (lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600))
-                    .withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                    color: (lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600))
-                        .withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                if (lowStock) ...[
-                  Icon(Icons.warning_rounded,
-                      size: 11, color: isDark ? const Color(0xFFFF6B6B) : _red),
-                  const SizedBox(width: 3),
-                ],
-                Text('$qty',
-                    style: TextStyle(
-                        color: lowStock ? (isDark ? const Color(0xFFFF6B6B) : _red) : (isDark ? const Color(0xFF22C55E) : _green600),
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12)),
-              ]),
-            ),
-            const SizedBox(height: 6),
-            GestureDetector(
-              onTap: () => _showEditRequestSheet(med),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 9, vertical: 5),
-                decoration: BoxDecoration(
-                  color: _purple.withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: _purple.withValues(alpha: 0.3)),
+                // Type Icon Container
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF0F766E).withValues(alpha: 0.25)
+                        : (type == 'Syrup'
+                            ? Colors.amber.shade50
+                            : (type == 'Injection' ? Colors.purple.shade50 : _green50)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    _typeIcon(type),
+                    color: type == 'Syrup'
+                        ? Colors.amber.shade800
+                        : (type == 'Injection' ? Colors.purple.shade700 : _teal),
+                    size: 18,
+                  ),
                 ),
-                child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: const [
-                  Icon(Icons.edit_rounded,
-                      size: 12, color: _purple),
-                  SizedBox(width: 4),
-                  Text('Edit',
-                      style: TextStyle(
-                          color: _purple,
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold)),
-                ]),
-              ),
+                const SizedBox(width: 14),
+
+                // Name & Metadata
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        med['name'] ?? '',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : _textDark,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _miniChip(type, isDark ? const Color(0xFF38BDF8) : _teal),
+                          if ((med['dose'] ?? '').toString().isNotEmpty)
+                            _miniChip(med['dose'].toString(), isDark ? const Color(0xFF94A3B8) : _textMid),
+                          // Facility Camp Badge
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF0284C7).withValues(alpha: 0.2) : const Color(0xFFE0F2FE),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: isDark ? const Color(0xFF38BDF8).withValues(alpha: 0.4) : const Color(0xFFBAE6FD)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.location_on_rounded, size: 10, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  campTag,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isWarning) ...[
+                        const SizedBox(height: 4),
+                        _statusLabel(lowStock: lowStock, expSoon: expSoon),
+                      ],
+                    ],
+                  ),
+                ),
+
+                // Right Side: Stock Badge + Action Buttons
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    // Stock Count Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: qty == 0
+                            ? (isDark ? const Color(0xFF7F1D1D).withValues(alpha: 0.3) : const Color(0xFFFEE2E2))
+                            : (lowStock
+                                ? (isDark ? const Color(0xFF78350F).withValues(alpha: 0.3) : const Color(0xFFFEF3C7))
+                                : (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFDCFCE7))),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: qty == 0
+                              ? Colors.red.shade400
+                              : (lowStock ? Colors.amber.shade600 : Colors.green.shade400),
+                        ),
+                      ),
+                      child: Text(
+                        '$qty in stock',
+                        style: TextStyle(
+                          color: qty == 0
+                              ? Colors.red.shade700
+                              : (lowStock ? Colors.amber.shade900 : Colors.green.shade800),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Action buttons: [+ Add Stock] and [Edit]
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        InkWell(
+                          onTap: () => _selectMedForStock(med),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.3) : _green50,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: _teal.withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.add_circle_outline_rounded, size: 13, color: _teal),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Add Stock',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        InkWell(
+                          onTap: () => _showEditRequestSheet(med),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _purple.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: _purple.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.edit_rounded, size: 13, color: _purple),
+                                SizedBox(width: 4),
+                                Text(
+                                  'Edit',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _purple),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ]),
-        ]),
+          ),
+        ),
       ),
     );
   }

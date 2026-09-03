@@ -5,6 +5,7 @@
 //   • widgets/cook_dialog.dart   — food logging (cook / received / saved)
 //   • widgets/stock_dialogs.dart — inventory add / adjust
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -15,6 +16,8 @@ import 'widgets/cook_dialog.dart';
 import 'widgets/stock_dialogs.dart';
 import '../../widgets/global_module_wrapper.dart';
 import '../../services/auth_service.dart';
+import '../../services/local_storage_service.dart';
+import '../settings_page.dart';
 
 export 'widgets/cook_dialog.dart'
     show
@@ -401,6 +404,23 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     }
   }
 
+  void _openSettings() {
+    final uData = LocalStorageService.getActiveUserData();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(userData: Map<String, dynamic>.from(uData)),
+      ),
+    ).then((_) {
+      final refreshed = LocalStorageService.getActiveUserData();
+      if (refreshed['name'] != null || refreshed['username'] != null) {
+        setState(() {
+          _username = refreshed['name'] as String? ?? refreshed['username'] as String? ?? _username;
+        });
+      }
+    });
+  }
+
   // ── Build ────────────────────────────────────────────────────────────────
 
   @override
@@ -459,6 +479,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               serveToken: _serveToken,
               username:   _username,
               onLogout:   _logout,
+              onSettings: _openSettings,
             )
           : IndexedStack(
               index: _currentNav,
@@ -470,6 +491,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                   serveToken: _serveToken,
                   username:   _username,
                   onLogout:   _logout,
+                  onSettings: _openSettings,
                 ),
                 _HistoryTab(
                   branchId:   _branchId!,
@@ -477,6 +499,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                   displayFmt: _displayFmt,
                   username:   _username,
                   onLogout:   _logout,
+                  onSettings: _openSettings,
                 ),
               ],
             ),
@@ -562,6 +585,7 @@ class _TokensTab extends StatelessWidget {
   final CollectionReference<Map<String, dynamic>> tokensCol;
   final Function(String, int) serveToken;
   final VoidCallback onLogout;
+  final VoidCallback onSettings;
 
   const _TokensTab({
     required this.branchId,
@@ -570,6 +594,7 @@ class _TokensTab extends StatelessWidget {
     required this.serveToken,
     required this.username,
     required this.onLogout,
+    required this.onSettings,
   });
 
   @override
@@ -666,58 +691,80 @@ class _TokensTab extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
           child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(children: [
-                    if (Navigator.canPop(context)) ...[
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
-                        onPressed: () => Navigator.maybePop(context),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          'assets/logo/gmwf-1.webp',
-                          width: 54,
-                          height: 54,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) => const Icon(
-                            Icons.restaurant_rounded,
-                            color: Colors.white70,
-                            size: 28,
+                  Expanded(
+                    child: Row(
+                      children: [
+                        if (Navigator.canPop(context)) ...[
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                            onPressed: () => Navigator.maybePop(context),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.asset(
+                              'assets/logo/gmwf-1.webp',
+                              width: 44,
+                              height: 44,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, _, _) => const Icon(
+                                Icons.restaurant_rounded,
+                                color: Colors.white70,
+                                size: 28,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 10),
+                        _UserAvatar(userName: username, onTap: onSettings),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Active Tokens',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: -0.5,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                username,
+                                style: const TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      const Text('Active Tokens',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5)),
-                      Text(username,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700)),
-                    ]),
-                  ]),
-              _logoutBtn(onLogout),
-            ]),
-            const SizedBox(height: 16),
+                  ),
+                  const SizedBox(width: 8),
+                  _settingsBtn(onSettings),
+                ],
+              ),
+              const SizedBox(height: 16),
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
                   .collection('branches')
@@ -959,7 +1006,6 @@ class _CookingTab extends StatelessWidget {
                               fontWeight: FontWeight.w700)),
                     ]),
                   ]),
-                  _logoutBtn(onLogout),
                 ]),
                 const SizedBox(height: 14),
                 StreamBuilder<QuerySnapshot>(
@@ -1491,6 +1537,7 @@ class _HistoryTab extends StatefulWidget {
   final String branchId, username;
   final DateFormat dateFmt, displayFmt;
   final VoidCallback onLogout;
+  final VoidCallback onSettings;
 
   const _HistoryTab({
     required this.branchId,
@@ -1498,6 +1545,7 @@ class _HistoryTab extends StatefulWidget {
     required this.displayFmt,
     required this.username,
     required this.onLogout,
+    required this.onSettings,
   });
 
   @override
@@ -1613,6 +1661,8 @@ class _HistoryTabState extends State<_HistoryTab> {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    _UserAvatar(userName: widget.username, onTap: widget.onSettings),
+                    const SizedBox(width: 12),
                     Column(crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                       const Text('Daily History',
@@ -1628,7 +1678,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                               fontWeight: FontWeight.w700)),
                     ]),
                   ]),
-                  _logoutBtn(widget.onLogout),
+                  _settingsBtn(widget.onSettings),
                 ]),
                 const SizedBox(height: 16),
                 Container(
@@ -2127,18 +2177,19 @@ class _HistCookCard extends StatelessWidget {
 // SHARED HELPERS
 // ═══════════════════════════════════════════════════════════════════════════
 
-Widget _logoutBtn(VoidCallback onTap) => GestureDetector(
+Widget _settingsBtn(VoidCallback onTap) => GestureDetector(
       onTap: onTap,
       child: Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-            color: const Color(0xFFEF4444),
-            borderRadius: BorderRadius.circular(14)),
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.5),
+        ),
         child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.logout_rounded, color: Colors.white, size: 16),
-          SizedBox(width: 6),
-          Text('Logout',
+          Icon(Icons.settings_outlined, color: Colors.white, size: 16),
+          SizedBox(width: 5),
+          Text('Settings',
               style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
@@ -2146,3 +2197,65 @@ Widget _logoutBtn(VoidCallback onTap) => GestureDetector(
         ]),
       ),
     );
+
+class _UserAvatar extends StatelessWidget {
+  final String userName;
+  final VoidCallback onTap;
+  const _UserAvatar({required this.userName, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final userData = LocalStorageService.getActiveUserData();
+    final photoStr = (userData['profileImage'] ?? userData['photoUrl'] ?? userData['profilePictureUrl']) as String?;
+    ImageProvider? imageProvider;
+    if (photoStr != null && photoStr.isNotEmpty) {
+      if (photoStr.startsWith('http://') || photoStr.startsWith('https://')) {
+        imageProvider = NetworkImage(photoStr);
+      } else {
+        try {
+          final cleanBase64 = photoStr.contains(',') ? photoStr.split(',').last : photoStr;
+          imageProvider = MemoryImage(base64Decode(cleanBase64));
+        } catch (_) {}
+      }
+    }
+
+    final initial = userName.trim().isNotEmpty ? userName.trim()[0].toUpperCase() : 'K';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: ClipOval(
+          child: imageProvider != null
+              ? Image(image: imageProvider, fit: BoxFit.cover, errorBuilder: (_, _, _) => _fallback(initial))
+              : _fallback(initial),
+        ),
+      ),
+    );
+  }
+
+  Widget _fallback(String initial) => Container(
+        color: Colors.white.withValues(alpha: 0.20),
+        alignment: Alignment.center,
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+      );
+}

@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
+import 'package:lottie/lottie.dart';
 
 import '../models/module_registry.dart';
 import '../theme/app_theme.dart';
@@ -32,6 +33,13 @@ import '../services/auto_update_service.dart';
 import '../utils/formatters.dart';
 
 const String _kGlobalBranchId = 'all';
+
+bool _canAccessDataIntegrity(dynamic rawRole) {
+  final role = rawRole?.toString().toLowerCase().trim() ?? '';
+  return role.contains('chairman') ||
+      role.contains('global admin') ||
+      role == 'admin';
+}
 
 // ── Category filter enum ──────────────────────────────────────────────────────
 
@@ -142,10 +150,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   late Animation<double> _searchExpand;
   late Animation<double> _logoPulseAnim;
 
-  @override
-  void initState() {
-    super.initState();
-
+  void _loadAvailableModules() {
     final allModules = ModuleRegistry.getAvailableModules(_role);
     if (_role == 'ceo') {
       _availableModules = allModules
@@ -160,6 +165,19 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
           ? allModules.where((m) => !m.hideFromExecutives).toList()
           : allModules;
     }
+  }
+
+  @override
+  void didUpdateWidget(GlobalModularDashboard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _loadAvailableModules();
+    _recomputeFilteredModules();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvailableModules();
 
     // ── START SYNC SERVICE ────────────────────────────────────────────────────
     final branchId = (widget.userData['branchId'] as String? ?? '').trim();
@@ -190,10 +208,8 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
         CurvedAnimation(parent: _searchAnimCtrl, curve: Curves.easeOutCubic);
 
     _logoPulseCtrl = AnimationController(
-        vsync: this, duration: const Duration(seconds: 3));
-    _logoPulseAnim = Tween<double>(begin: 1.0, end: 1.07)
-        .animate(CurvedAnimation(parent: _logoPulseCtrl, curve: Curves.easeInOut));
-    _logoPulseCtrl.repeat(reverse: true);
+        vsync: this, duration: const Duration(milliseconds: 300));
+    _logoPulseAnim = const AlwaysStoppedAnimation<double>(1.0);
 
     // Staggered entrance
     _pageEntryCtrl.forward();
@@ -967,7 +983,7 @@ class _SidebarActions extends StatelessWidget {
             state.refresh();
           }),
         ),
-        if ((state.widget.userData['role']?.toString().toLowerCase().contains('chairman') ?? false))
+        if (_canAccessDataIntegrity(state.widget.userData['role']))
           _ActionTile(
             icon: Icons.cleaning_services_outlined,
             label: 'Data Integrity',
@@ -1060,42 +1076,39 @@ class _AnimatedEntry extends StatelessWidget {
 
 class _LogoPulse extends StatelessWidget {
   final Color accent;
-  final Animation<double> pulseAnim;
+  final Animation<double>? pulseAnim;
   final double size;
-  const _LogoPulse({required this.accent, required this.pulseAnim, this.size = 40});
+  const _LogoPulse({required this.accent, this.pulseAnim, this.size = 40});
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: pulseAnim,
-      child: Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Colors.white,
-              Color(0xFFF1F5F9),
-            ],
-          ),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.0),
-          boxShadow: [
-            BoxShadow(
-              color: accent.withValues(alpha: 0.35),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.white,
+            Color(0xFFF1F5F9),
           ],
         ),
-        padding: const EdgeInsets.all(4),
-        child: Image.asset(
-          'assets/logo/gmwf-1.webp',
-          cacheWidth: 200,
-          fit: BoxFit.contain,
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.0),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.35),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Image.asset(
+        'assets/logo/gmwf-1.webp',
+        cacheWidth: 200,
+        fit: BoxFit.contain,
       ),
     );
   }
@@ -2316,79 +2329,62 @@ Widget _buildProfileHeroCard({
                       ),
                     ),
 
-                    // Right Column on Desktop: Live Operations Snapshot Card
+                    // Right Column on Desktop: Seamless Dashboard Animation with In-Engine Theming
                     if (isDesktop)
-                      Container(
-                        margin: const EdgeInsets.only(left: 20),
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? const Color(0xFF1E293B).withValues(alpha: 0.55)
-                              : Colors.white.withValues(alpha: 0.92),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.12)
-                                : const Color(0xFF10B981).withValues(alpha: 0.35),
-                            width: 1.0,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.20 : 0.08),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
+                      Padding(
+                        padding: const EdgeInsets.only(left: 16, right: 8),
+                        child: Stack(
+                          alignment: Alignment.center,
                           children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
+                            // Subtle contextual ambient aura behind animation
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: Container(
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF10B981),
                                     shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: const Color(0xFF10B981).withValues(alpha: 0.7),
-                                        blurRadius: 6,
-                                      ),
-                                    ],
+                                    gradient: RadialGradient(
+                                      colors: [
+                                        (isDark
+                                                ? const Color(0xFF0EA5E9)
+                                                : const Color(0xFFF59E0B))
+                                            .withValues(alpha: isDark ? 0.18 : 0.10),
+                                        Colors.transparent,
+                                      ],
+                                      radius: 0.75,
+                                    ),
                                   ),
                                 ),
-                                const SizedBox(width: 7),
-                                Text(
-                                  'SYSTEM OPERATIONAL',
-                                  style: TextStyle(
-                                    color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.1,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Gujrat Central HQ',
-                              style: TextStyle(
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800,
                               ),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Cloud Sync Active • Biometrics Online',
-                              style: TextStyle(
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w500,
+                            SizedBox(
+                              width: 290,
+                              height: 220,
+                              child: ColorFiltered(
+                                colorFilter: isDark
+                                    ? const ColorFilter.matrix(<double>[
+                                        0.78, 0.00, 0.00, 0, -20, // Tones down harsh white base
+                                        0.00, 1.00, 0.10, 0,  15, // Amplifies emerald / teal data graphs
+                                        0.05, 0.12, 1.25, 0,  30, // Illuminates cyber cyan & sky accents
+                                        0.00, 0.00, 0.00, 1,   0,
+                                      ])
+                                    : const ColorFilter.matrix(<double>[
+                                        0.98, 0.00, 0.00, 0,   0,
+                                        0.00, 0.98, 0.02, 0,   2,
+                                        0.02, 0.04, 1.05, 0,   8,
+                                        0.00, 0.00, 0.00, 1,   0,
+                                      ]),
+                                child: Lottie.asset(
+                                  'assets/animations/dashboard.json',
+                                  fit: BoxFit.contain,
+                                  repeat: true,
+                                  errorBuilder: (context, error, stackTrace) => Icon(
+                                    Icons.dashboard_customize_rounded,
+                                    size: 64,
+                                    color: isDark
+                                        ? const Color(0xFF38BDF8)
+                                        : const Color(0xFF0284C7),
+                                  ),
+                                ),
                               ),
                             ),
                           ],

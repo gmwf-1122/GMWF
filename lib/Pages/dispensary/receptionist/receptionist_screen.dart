@@ -16,9 +16,11 @@ import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/widgets/clock_skew_warning_banner.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import '../user_settings_dialog.dart';
+import '../../../utils/notification_deduper.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
 
@@ -27,6 +29,7 @@ class ReceptionistScreen extends StatefulWidget {
   final String receptionistId;
   final String receptionistName;
   final bool isEmbedded;
+  final bool suppressPrescriptionNotifications;
 
   const ReceptionistScreen({
     super.key,
@@ -34,6 +37,7 @@ class ReceptionistScreen extends StatefulWidget {
     required this.receptionistId,
     required this.receptionistName,
     this.isEmbedded = false,
+    this.suppressPrescriptionNotifications = false,
   });
 
   @override
@@ -215,14 +219,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       }
 
       // PRESCRIPTION SAVED BY DOCTOR -> TRIGGER RECEPTIONIST TOAST
-      if (type == RealtimeEvents.savePrescription ||
-          type == 'prescription_created' ||
-          (type == RealtimeEvents.saveEntry &&
-              (data?['status'] == 'completed' || data?['prescriptions'] != null))) {
+      if (!widget.suppressPrescriptionNotifications &&
+          (type == RealtimeEvents.savePrescription ||
+              type == 'prescription_created' ||
+              (type == RealtimeEvents.saveEntry &&
+                  (data?['status'] == 'completed' || data?['prescriptions'] != null)))) {
         final eventBranch =
             data?['branchId'] as String? ?? event['branchId'] as String?;
         if (eventBranch == null || eventBranch == widget.branchId) {
-          _showPrescriptionNotification(data);
+          _showPrescriptionNotification(data, event);
         }
       }
 
@@ -237,30 +242,49 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     });
   }
 
-  String? _lastNotifiedSerial;
-  DateTime? _lastNotificationTime;
-
-  void _showPrescriptionNotification(Map<String, dynamic>? data) {
+  void _showPrescriptionNotification(Map<String, dynamic>? data, [Map<String, dynamic>? fullEvent]) {
     if (!mounted || data == null) return;
+
+    final isReplay = fullEvent?['_serverPush'] == true ||
+        fullEvent?['_resent'] == true ||
+        fullEvent?['isCatchUp'] == true ||
+        fullEvent?['_isReplay'] == true ||
+        data['_serverPush'] == true ||
+        data['_resent'] == true ||
+        data['isCatchUp'] == true ||
+        data['_isReplay'] == true;
+    if (isReplay) return;
 
     final serial =
         (data['serial'] ?? data['tokenNumber'] ?? '').toString().trim();
-    final now = DateTime.now();
+    if (serial.isEmpty) return;
 
-    // Prevent duplicate toast spam if doctor sends multiple events for the same prescription
-    if (serial.isNotEmpty &&
-        serial == _lastNotifiedSerial &&
-        _lastNotificationTime != null &&
-        now.difference(_lastNotificationTime!) < const Duration(seconds: 5)) {
+    final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final itemDateKey = (data['dateKey'] ?? fullEvent?['dateKey'])?.toString().trim();
+    final parts = serial.contains('-') ? serial.split('-') : <String>[];
+    final serialDk = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+        ? (parts.length > 1 ? parts[1] : '')
+        : (parts.isNotEmpty ? parts[0] : '');
+    final isToday = (itemDateKey == null || itemDateKey.isEmpty || itemDateKey == today) &&
+        (serialDk.length != 6 || serialDk == today);
+    if (!isToday) return;
+
+    if (data['dispenseStatus'] == 'dispensed') return;
+
+    final rawTime = data['completedAt'] ?? data['createdAt'] ?? data['timestamp'];
+    final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+    if (dt != null && DateTime.now().difference(dt).inMinutes > 3) return;
+
+    final branchKey = '${widget.branchId}_$serial';
+
+    if (!NotificationDeduper.shouldShow('receptionist_prescription_$branchKey', window: const Duration(minutes: 10))) {
       return;
     }
 
-    _lastNotifiedSerial = serial;
-    _lastNotificationTime = now;
-
     final patientName =
         (data['patientName'] ?? data['name'] ?? 'Patient').toString().trim();
-    final doctorName = (data['doctorName'] ?? 'Doctor').toString().trim();
+    final rawDoc = (data['doctorName'] ?? data['prescribedBy'] ?? data['updatedBy'] ?? data['performedBy'] ?? '').toString().trim();
+    final doctorName = rawDoc.isNotEmpty && rawDoc.toLowerCase() != 'unknown' ? rawDoc : 'Doctor';
     final serialSuffix = serial.contains('-') ? serial.split('-').last : serial;
     final tokenDisplay = serialSuffix.isNotEmpty ? '#$serialSuffix' : serial;
 
@@ -473,14 +497,20 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   }
 
   Future<void> _forceSync() async {
-    if (!_online || _isSyncing || !mounted) return;
+    if (_isSyncing || !mounted) return;
     setState(() => _isSyncing = true);
     try {
-      await SyncService().forceFullRefresh(widget.branchId);
-      await lss.LocalStorageService.downloadTodayTokens(widget.branchId);
+      // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
+      await RealtimeManager().forceFlushAndCatchUp();
+
+      // 2. If online, sync with cloud
+      if (_online) {
+        await SyncService().forceFullRefresh(widget.branchId);
+        await lss.LocalStorageService.downloadTodayTokens(widget.branchId);
+      }
       if (mounted) {
         Flushbar(
-          message: 'Full sync completed',
+          message: _online ? 'Full sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)',
           backgroundColor: Colors.green.shade700,
           duration: const Duration(seconds: 3),
         ).show(context);
@@ -784,16 +814,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (!matches) return false;
       }
 
-      // 6. Strict Shift Isolation
-      final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
-      if (eSession.isNotEmpty) {
-        if (eSession != activeShift) return false;
-      } else {
-        final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
-        if (rawTime != null) {
-          final dt = DateTime.tryParse(rawTime.toString());
-          if (dt != null && CampSessionService.getCurrentSession(dt) != activeShift) {
-            return false;
+      // 6. Shift Filter (Supports 'all', 'morning', 'evening', 'night')
+      if (_selectedSessionFilter != 'all') {
+        final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
+        if (eSession.isNotEmpty) {
+          if (eSession != _selectedSessionFilter) return false;
+        } else {
+          final rawTime = e['createdAt'] ?? e['time'] ?? e['timestamp'] ?? e['date'];
+          if (rawTime != null) {
+            final dt = DateTime.tryParse(rawTime.toString());
+            if (dt != null && CampSessionService.getCurrentSession(dt, widget.branchId) != _selectedSessionFilter) {
+              return false;
+            }
           }
         }
       }
@@ -818,6 +850,170 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     return uniqueBySerial.values.toList();
   }
+
+  Map<String, int> _getSessionCounts() {
+    final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final userData = _getUserData();
+    final scheduledCamps = CampSessionService.getMatchingScheduledCamps(userData);
+    final effectiveCamp = _hasMultiCamps
+        ? (scheduledCamps.isNotEmpty
+            ? scheduledCamps.first
+            : CampSessionService.getActiveCamp(widget.branchId))
+        : null;
+
+    final rawEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+    final myId = widget.receptionistId.trim().toLowerCase();
+    final myName = (_username ?? widget.receptionistName).trim().toLowerCase();
+
+    int all = 0, morning = 0, evening = 0, night = 0;
+
+    final Map<String, Map<String, dynamic>> uniqueBySerial = {};
+    for (final e in rawEntries) {
+      final dk = (e['dateKey'] as String?);
+      if (dk != today) continue;
+      final serial = (e['serial'] ?? e['id'])?.toString();
+      if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) continue;
+      final st = (e['status'] as String?)?.toLowerCase().trim();
+      final syncSt = (e['syncStatus'] as String?)?.toLowerCase().trim();
+      if (st == 'deleted' || syncSt == 'deleted') continue;
+      final name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
+      final cnic = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().trim();
+      if ((name.isEmpty || name == 'unknown patient' || name == 'unknown') && cnic.isEmpty) continue;
+
+      final cb = (e['createdBy'] ?? e['receptionistId'] ?? e['addedById'] ?? '').toString().trim().toLowerCase();
+      final cbn = (e['createdByName'] ?? e['receptionistName'] ?? e['performedBy'] ?? e['by'] ?? '').toString().trim().toLowerCase();
+
+      bool matchesUser = false;
+      if (myId.isNotEmpty && cb.isNotEmpty) {
+        if (cb == myId || cb.contains(myId) || myId.contains(cb)) matchesUser = true;
+      }
+      if (myName.isNotEmpty && cbn.isNotEmpty) {
+        if (cbn == myName || cbn.contains(myName) || myName.contains(cbn)) matchesUser = true;
+      }
+      if (!matchesUser) continue;
+
+      if (_hasMultiCamps && effectiveCamp != null && effectiveCamp.isNotEmpty && effectiveCamp != 'all') {
+        final matches = CampSessionService.matchesCamp(
+          selectedCamp: effectiveCamp,
+          dispensaryId: e['dispensaryId']?.toString(),
+          campId: e['campId']?.toString(),
+          dispensaryTag: e['dispensaryTag']?.toString(),
+          serial: serial,
+        );
+        if (!matches) continue;
+      }
+
+      final s = (e['serial'] ?? e['id'] ?? '').toString().trim().toUpperCase();
+      if (s.isNotEmpty) {
+        uniqueBySerial[s] = e;
+      }
+    }
+
+    all = uniqueBySerial.length;
+    for (final e in uniqueBySerial.values) {
+      final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
+      String resolved = eSession;
+      if (resolved.isEmpty) {
+        final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
+        if (rawTime != null) {
+          final dt = DateTime.tryParse(rawTime.toString());
+          if (dt != null) resolved = CampSessionService.getCurrentSession(dt);
+        }
+      }
+      if (resolved.contains('morn')) {
+        morning++;
+      } else if (resolved.contains('eve')) {
+        evening++;
+      } else if (resolved.contains('night')) {
+        night++;
+      }
+    }
+
+    return {'all': all, 'morning': morning, 'evening': evening, 'night': night};
+  }
+
+  Widget _buildShiftSelector(bool isMobile) {
+    final counts = _getSessionCounts();
+    final shifts = [
+      {'id': 'all', 'label': 'All Today', 'count': counts['all'] ?? 0},
+      {'id': 'morning', 'label': 'Morning', 'count': counts['morning'] ?? 0},
+      {'id': 'evening', 'label': 'Evening', 'count': counts['evening'] ?? 0},
+      {'id': 'night', 'label': 'Night', 'count': counts['night'] ?? 0},
+    ];
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: shifts.map((s) {
+          final isSelected = _selectedSessionFilter == s['id'];
+          final id = s['id'] as String;
+          final label = s['label'] as String;
+          final count = s['count'] as int;
+
+          return Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: InkWell(
+              onTap: () => setState(() => _selectedSessionFilter = id),
+              borderRadius: BorderRadius.circular(20),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? const Color(0xFF00875A)
+                      : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected
+                        ? const Color(0xFF00875A)
+                        : (_isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                        color: isSelected
+                            ? Colors.white
+                            : (_isDark ? Colors.white70 : Colors.black87),
+                      ),
+                    ),
+                    const SizedBox(width: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white.withValues(alpha: 0.25)
+                            : (_isDark ? const Color(0xFF1E293B) : Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: isSelected
+                              ? Colors.white
+                              : (_isDark ? const Color(0xFF38BDF8) : const Color(0xFF00796B)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+
 
   Widget _buildFilterDropdown({
     required String value,
@@ -871,7 +1067,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     int zakatAmount = 0, nonZakatAmount = 0;
 
     for (final e in todayEntries) {
-      final qt = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+      var qt = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+      if (_isKarachi && (qt == 'non-zakat' || qt.contains('non'))) {
+        qt = 'zakat';
+      }
       final days = _getDaysOfMedicine(e);
       switch (qt) {
         case 'zakat':
@@ -1102,25 +1301,25 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         final guardianCnic = (e['guardianCnic'] as String?)?.trim() ?? '';
         final queueTypeRaw =
             (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
+        final effectiveQueueType = (_isKarachi && (queueTypeRaw == 'non-zakat' || queueTypeRaw.contains('non')))
+            ? 'zakat'
+            : queueTypeRaw;
         final timestamp = DateTime.tryParse(e['createdAt'] as String? ?? '') ??
             DateTime.now();
         final days = _getDaysOfMedicine(e);
         int tokenAmount = 0;
-        if (queueTypeRaw == 'zakat') tokenAmount = 20 * days;
-        if (queueTypeRaw == 'non-zakat') tokenAmount = 100 * days;
+        if (effectiveQueueType == 'zakat') tokenAmount = 20 * days;
+        if (effectiveQueueType == 'non-zakat') tokenAmount = 100 * days;
         final hasExtraDays = days > 1 && tokenAmount > 0;
 
         // Category label & color
         Color badgeColor;
         String displayType;
         if (_isKarachi) {
-          if (queueTypeRaw == 'zakat') {
+          if (effectiveQueueType == 'zakat') {
             badgeColor = Colors.green.shade600;
             displayType = 'PKR 20';
-          } else if (queueTypeRaw == 'non-zakat') {
-            badgeColor = Colors.blue.shade600;
-            displayType = 'PKR 100';
-          } else if (queueTypeRaw == 'gmwf') {
+          } else if (effectiveQueueType == 'gmwf') {
             badgeColor = Colors.orange.shade600;
             displayType = 'GMWF';
           } else {
@@ -1370,19 +1569,22 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                 : Colors.grey.shade600,
                           ),
                         ),
-                        if (_selectedSessionFilter == 'all' && (e['session'] as String?)?.isNotEmpty == true) ...[
+                        if ((e['session'] as String?)?.isNotEmpty == true) ...[
                           Text('•',
                               style: TextStyle(
                                   fontSize: 9,
                                   color: Colors.grey.shade400)),
-                          Text(
-                            e['session'].toString(),
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: e['session'].toString().toLowerCase().contains('morn')
-                                  ? Colors.amber.shade700
-                                  : Colors.indigo.shade400,
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                            child: Text(
+                              e['session'].toString(),
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: e['session'].toString().toLowerCase().contains('morn')
+                                    ? Colors.amber.shade700
+                                    : Colors.indigo.shade400,
+                              ),
                             ),
                           ),
                         ],
@@ -1504,7 +1706,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
           ),
-          child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+          child: Column(
+            children: [
+              ClockSkewWarningBanner(branchId: widget.branchId),
+              Expanded(
+                child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+              ),
+            ],
+          ),
         );
 
         if (widget.isEmbedded) return body;
@@ -1792,7 +2001,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                               tooltip: 'Refresh token list',
                                             ),
                                           ]),
-                                          const SizedBox(height: 8),
+                                          const SizedBox(height: 10),
+                                          _buildShiftSelector(false),
+                                          const SizedBox(height: 6),
                                           Row(
                                             children: [
                                               Text('$todayCount total',

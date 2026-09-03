@@ -7,15 +7,18 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/local_storage_service.dart';
+import '../../services/user_theme_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import 'donations_shared.dart';
 import 'donations_dashboard.dart';
 import 'donors_registry.dart';
+import 'donation_boxes_screen.dart';
 import 'widgets/add_donation_wizard.dart';
 import '../../models/donation_models.dart';
 import '../../widgets/global_module_wrapper.dart';
-// Missing file
+import 'package:motion_tab_bar_v2/motion-tab-bar.dart';
+import 'package:motion_tab_bar_v2/motion-tab-controller.dart';
 
 const String kStatusPending = 'pending';
 
@@ -49,6 +52,7 @@ class DonationsScreen extends StatefulWidget {
   final UserRole role;
   final List<String> allBranchIds;
   final List<String> allBranchNames;
+  final bool isEmbedded;
 
   const DonationsScreen({
     super.key,
@@ -59,6 +63,7 @@ class DonationsScreen extends StatefulWidget {
     required this.role,
     this.allBranchIds   = const [],
     this.allBranchNames = const [],
+    this.isEmbedded     = false,
   });
 
   const DonationsScreen.embedded({
@@ -70,6 +75,7 @@ class DonationsScreen extends StatefulWidget {
     this.role           = UserRole.staff,
     this.allBranchIds   = const [],
     this.allBranchNames = const [],
+    this.isEmbedded     = true,
   });
 
   factory DonationsScreen.withStringRole({
@@ -94,7 +100,9 @@ class DonationsScreen extends StatefulWidget {
 }
 
 class _DonationsScreenState extends State<DonationsScreen> with TickerProviderStateMixin {
-  late TabController _mobileTabController;
+  MotionTabBarController? _motionTabController;
+  TabController? _mobileTabController;
+  int _selectedDesktopTab = 0;
   DonationCategory _selectedCategory = DonationCategory.all;
   late String _viewingBranchId;
   late String _viewingBranchName;
@@ -103,10 +111,30 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
   List<({String id, String name})> _fetchedBranches = [];
   bool _fetchingBranches = false;
 
+  void _initControllers() {
+    if (_motionTabController == null) {
+      _motionTabController = MotionTabBarController(
+        initialIndex: _selectedDesktopTab,
+        length: 3,
+        vsync: this,
+      );
+      _mobileTabController = _motionTabController;
+      _mobileTabController?.addListener(_onTabChanged);
+    }
+  }
+
+  void _onTabChanged() {
+    if (_mobileTabController != null && !_mobileTabController!.indexIsChanging) {
+      if (mounted) {
+        setState(() => _selectedDesktopTab = _mobileTabController!.index);
+      }
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _mobileTabController = TabController(length: 2, vsync: this);
+    _initControllers();
 
     final isGlobal = widget.branchId.isEmpty ||
         widget.branchId == 'global';
@@ -171,18 +199,17 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     }
   }
 
-  @override
-  void dispose() {
-    _mobileTabController.dispose();
-    super.dispose();
-  }
+
 
   String get _today => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
-  CollectionReference get _col => FirebaseFirestore.instance
-      .collection('branches')
-      .doc(_viewingBranchId)
-      .collection('donations');
+  dynamic get _col {
+    if (_viewingBranchId == 'all') return 'all';
+    return FirebaseFirestore.instance
+        .collection('branches')
+        .doc(_viewingBranchId)
+        .collection('donations');
+  }
 
   Future<String> _nextReceiptNumber() async {
     try { return await LocalStorageService.nextReceiptNumber(_viewingBranchId); }
@@ -190,52 +217,52 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
   }
 
   List<({String id, String name})> get _branchOptions {
-    final extras = <({String id, String name})>[];
-    
-    if (widget.role.canSeeAllBranches) {
-      extras.add((id: 'all', name: 'All Branches (Consolidated)'));
+    if (_fetchedBranches.isNotEmpty) {
+      return [
+        (id: 'all', name: 'All Branches (Consolidated)'),
+        ..._fetchedBranches,
+      ];
     }
-
-    for (int i = 0; i < widget.allBranchIds.length; i++) {
-      final bid   = widget.allBranchIds[i];
-      if (bid.isEmpty || bid == 'all') continue;
-      
-      final bname = i < widget.allBranchNames.length
-          ? widget.allBranchNames[i] : bid;
-      if (bid != widget.branchId && bid != 'all') extras.add((id: bid, name: bname));
+    if (widget.allBranchIds.isNotEmpty) {
+      return [
+        (id: 'all', name: 'All Branches (Consolidated)'),
+        ...List.generate(widget.allBranchIds.length, (i) {
+          final id   = widget.allBranchIds[i];
+          final name = i < widget.allBranchNames.length
+              ? widget.allBranchNames[i]
+              : resolveBranchName(id);
+          return (id: id, name: name);
+        }),
+      ];
     }
-    
-    // If own branch is valid, put it first. Otherwise just return extras.
-    if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
-      final own = (id: widget.branchId, name: widget.branchName);
-      return [own, ...extras];
-    }
-    return extras;
+    return [
+      (id: widget.branchId, name: widget.branchName.isNotEmpty ? widget.branchName : resolveBranchName(widget.branchId)),
+    ];
   }
 
   String get _effectiveUsername {
-    if (widget.username.trim().isNotEmpty) return widget.username.trim();
+    if (widget.username.isNotEmpty && widget.username != 'Staff' && widget.username != 'User') {
+      return widget.username;
+    }
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final uData = Hive.box('app_settings').get('user_data');
         if (uData is Map) {
-          final name = uData['displayName'] ?? uData['username'] ?? uData['name'];
-          if (name != null && name.toString().trim().isNotEmpty) {
-            return name.toString().trim();
-          }
+          final n = (uData['name'] ?? uData['username'] ?? uData['fullName'])?.toString();
+          if (n != null && n.trim().isNotEmpty) return n;
         }
       }
     } catch (_) {}
-    return FirebaseAuth.instance.currentUser?.displayName ??
-           FirebaseAuth.instance.currentUser?.email?.split('@').first ??
-           'Branch Manager';
+    return widget.username.isNotEmpty ? widget.username : 'Staff';
   }
 
   String get _effectiveBranchName {
-    if (_viewingBranchName.isNotEmpty && _viewingBranchName != 'Loading...' && _viewingBranchName != 'Select...') {
+    if (_viewingBranchName.isNotEmpty && _viewingBranchName != 'Loading...') {
       return _viewingBranchName;
     }
-    if (widget.branchName.isNotEmpty) return widget.branchName;
+    if (widget.branchName.isNotEmpty && widget.branchName != 'Loading...') {
+      return widget.branchName;
+    }
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final uData = Hive.box('app_settings').get('user_data');
@@ -256,116 +283,333 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
       setState(() { _viewingBranchId = id; _viewingBranchName = name; });
 
   @override
+  void dispose() {
+    _mobileTabController?.removeListener(_onTabChanged);
+    _motionTabController?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    _initControllers();
+    return ValueListenableBuilder<Box>(
+      valueListenable: UserThemeService.listenable(),
+      builder: (context, _, child) {
+        final t = RoleThemeScope.dataOf(context);
+        final isMobile = MediaQuery.of(context).size.width < 850;
 
-    final displayUser = _effectiveUsername;
-    final displayBranch = _effectiveBranchName;
+        final displayUser = _effectiveUsername;
+        final displayBranch = _effectiveBranchName;
 
-    if (widget.branchId.isEmpty) {
-      return Scaffold(
-        backgroundColor: t.bg,
-        body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.domain_disabled_rounded, size: 48, color: t.textTertiary),
-          const SizedBox(height: 12),
-          Text('No branch selected',
-              style: DS.subheading(color: t.textSecondary)),
-        ])),
-      );
-    }
+        if (widget.branchId.isEmpty) {
+          return Scaffold(
+            backgroundColor: t.bg,
+            body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.domain_disabled_rounded, size: 48, color: t.textTertiary),
+              const SizedBox(height: 12),
+              Text('No branch selected',
+                  style: DS.subheading(color: t.textSecondary)),
+            ])),
+          );
+        }
 
-    if (isMobile) {
-      return DefaultTabController(
-        length: 2,
-        child: Scaffold(
-          backgroundColor: t.bg,
-          appBar: AppBar(
-            backgroundColor: DonDS.headerTop,
-            elevation: 0,
-            title: Row(
-              children: [
-                Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  padding: const EdgeInsets.all(3),
-                  child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(displayBranch, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 14)),
-                      Text(displayUser, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 11, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              if (_canSwitchBranch)
-                IconButton(
-                  icon: const Icon(Icons.swap_horiz_rounded, color: Colors.white),
-                  onPressed: () => _Header.showBranchPicker(context, _branchOptions, _viewingBranchId, _switchBranch, t),
-                ),
-            ],
-            bottom: TabBar(
-              controller: _mobileTabController,
-              labelColor: DonDS.tealLight,
-              unselectedLabelColor: Colors.white60,
-              indicatorColor: DonDS.tealLight,
-              indicatorWeight: 3,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13),
-              tabs: const [
-                Tab(text: "Donations"),
-                Tab(text: "Donors"),
-              ],
-            ),
+        final views = [
+          _donationsTab(),
+          DonorRegistryWidget(
+            branchId: _viewingBranchId,
+            branchName: displayBranch,
           ),
-          body: TabBarView(
-            controller: _mobileTabController,
+          DonationBoxesWidget(
+            branchId: _viewingBranchId,
+            branchName: displayBranch,
+            username: displayUser,
+            role: widget.role,
+          ),
+        ];
+
+        if (widget.isEmbedded) {
+          return Scaffold(
+            backgroundColor: t.bg,
+            body: _donationsTab(),
+          );
+        }
+
+        return Scaffold(
+          backgroundColor: t.bg,
+          body: Column(
             children: [
-              _donationsTab(),
-              DonorRegistryWidget(
-                branchId: _viewingBranchId,
-                branchName: displayBranch,
+              // ── Unified Header matching branches.dart ──
+              _buildBranchesStyleHeader(context, t, isMobile, displayBranch, displayUser),
+
+              // ── Tab Views Stack ──
+              Expanded(
+                child: isMobile
+                    ? TabBarView(
+                        controller: _mobileTabController,
+                        children: views,
+                      )
+                    : IndexedStack(
+                        index: _selectedDesktopTab,
+                        children: views,
+                      ),
               ),
             ],
           ),
-          floatingActionButton: FloatingActionButton(
-            backgroundColor: DonDS.teal,
-            onPressed: _onAddTap,
-            child: const Icon(Icons.add_rounded, color: Colors.white, size: 30),
-          ),
-        ),
-      );
-    }
-
-    return Scaffold(
-      backgroundColor: t.bg,
-      body: Column(children: [
-        // ── Primary Header ────────────────────────────────────────────────
-        _Header(
-          branchName:      displayBranch,
-          username:        displayUser,
-          role:            widget.role,
-          canSwitchBranch: _canSwitchBranch,
-          branchOptions:   _branchOptions,
-          currentBranchId: _viewingBranchId,
-          onBranchSwitch:  _switchBranch,
-        ),
-
-        // ── Main Content Area ───────────────────────────────────────────
-        Expanded(
-          child: _donationsTab(),
-        ),
-      ]),
+          bottomNavigationBar: (!widget.isEmbedded && isMobile)
+              ? MotionTabBar(
+                  controller: _motionTabController,
+                  initialSelectedTab: "Donations",
+                  labels: const ["Donations", "Donors", "Boxes"],
+                  icons: const [Icons.receipt_long_rounded, Icons.people_alt_rounded, Icons.inventory_2_rounded],
+                  tabSize: 50,
+                  tabBarHeight: 58,
+                  textStyle: TextStyle(
+                    fontSize: 12,
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  tabIconColor: t.textSecondary,
+                  tabIconSize: 26.0,
+                  tabIconSelectedSize: 24.0,
+                  tabSelectedColor: t.accent,
+                  tabIconSelectedColor: Colors.white,
+                  tabBarColor: t.bgCard,
+                  onTabItemSelected: (int value) {
+                    setState(() {
+                      _selectedDesktopTab = value;
+                      _motionTabController?.index = value;
+                    });
+                  },
+                )
+              : null,
+        );
+      },
     );
   }
+
+  Widget _buildBranchesStyleHeader(
+    BuildContext context,
+    RoleThemeData t,
+    bool isMobile,
+    String displayBranch,
+    String displayUser,
+  ) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 16 : 24,
+        vertical: isMobile ? 12 : 16,
+      ),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule, width: 1.5)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: isMobile ? 36 : 42,
+                height: isMobile ? 36 : 42,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2)),
+                  ],
+                ),
+                padding: const EdgeInsets.all(4),
+                child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            "$displayBranch Donations",
+                            style: TextStyle(
+                              fontSize: isMobile ? 18 : 22,
+                              fontWeight: FontWeight.w800,
+                              color: t.textPrimary,
+                              letterSpacing: -0.5,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (_canSwitchBranch) ...[
+                          const SizedBox(width: 6),
+                          PopupMenuButton<String>(
+                            icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textSecondary),
+                            tooltip: 'Switch Branch',
+                            onSelected: (bId) {
+                              final opt = _branchOptions.firstWhere(
+                                (o) => o.id == bId,
+                                orElse: () => _branchOptions.first,
+                              );
+                              _switchBranch(opt.id, opt.name);
+                            },
+                            itemBuilder: (ctx) => _branchOptions.map((b) => PopupMenuItem(
+                              value: b.id,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.store_rounded,
+                                    size: 16,
+                                    color: b.id == _viewingBranchId ? t.accent : t.textSecondary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    b.name,
+                                    style: TextStyle(
+                                      fontWeight: b.id == _viewingBranchId ? FontWeight.bold : FontWeight.normal,
+                                      color: b.id == _viewingBranchId ? t.accent : t.textPrimary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )).toList(),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      "Monitor collections, donor records, and donation boxes.",
+                      style: TextStyle(fontSize: 12, color: t.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (!isMobile) ...[
+                const SizedBox(width: 16),
+                _buildHeaderTabPills(t),
+                const SizedBox(width: 16),
+                ElevatedButton.icon(
+                  onPressed: _onAddTap,
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('New Receipt', style: TextStyle(fontWeight: FontWeight.w700)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: t.accent,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _RolePill(role: widget.role),
+              ],
+            ],
+          ),
+          if (isMobile) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: _onAddTap,
+                    icon: const Icon(Icons.add_rounded, size: 18),
+                    label: const Text('New Receipt', style: TextStyle(fontWeight: FontWeight.w700)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: t.accent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _RolePill(role: widget.role),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderTabPills(RoleThemeData t) {
+    final tabs = [
+      (label: 'Donations Ledger', icon: Icons.receipt_long_rounded),
+      (label: 'Donors Directory', icon: Icons.people_alt_rounded),
+      (label: 'Donation Boxes', icon: Icons.inventory_2_rounded),
+    ];
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: t.isDarkCanvas ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.bgRule),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(tabs.length, (idx) {
+          final tab = tabs[idx];
+          final isSelected = _selectedDesktopTab == idx;
+          return InkWell(
+            onTap: () => setState(() {
+              _selectedDesktopTab = idx;
+              _mobileTabController?.animateTo(idx);
+            }),
+            borderRadius: BorderRadius.circular(8),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSelected ? t.accent : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: t.accent.withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ]
+                    : [],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    tab.icon,
+                    size: 16,
+                    color: isSelected ? Colors.white : t.textSecondary,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    tab.label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                      color: isSelected ? Colors.white : t.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+
 
   Widget _donationsTab() => DashboardTab(
     branchId:          _viewingBranchId,
@@ -416,6 +660,8 @@ class _Header extends StatelessWidget {
   final bool     canSwitchBranch;
   final List<({String id, String name})> branchOptions;
   final void Function(String id, String name) onBranchSwitch;
+  final int      selectedTabIndex;
+  final void Function(int index)? onTabSelected;
 
   const _Header({
     required this.branchName,
@@ -425,6 +671,8 @@ class _Header extends StatelessWidget {
     required this.branchOptions,
     required this.currentBranchId,
     required this.onBranchSwitch,
+    this.selectedTabIndex = 0,
+    this.onTabSelected,
   });
 
   static void showBranchPicker(
@@ -456,6 +704,12 @@ class _Header extends StatelessWidget {
     final rc = role.roleColor;
 
     final bool showRolePill = username.toLowerCase().trim() != role.displayLabel.toLowerCase().trim();
+
+    final tabs = [
+      (label: 'Donations', icon: Icons.receipt_long_rounded),
+      (label: 'Donors', icon: Icons.people_alt_rounded),
+      (label: 'Donation Boxes', icon: Icons.inventory_2_rounded),
+    ];
 
     return Container(
       padding: EdgeInsets.fromLTRB(24, MediaQuery.of(context).padding.top + 16, 24, 16),
@@ -508,17 +762,76 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
+
+          // ── Desktop Navigation Pills ──
+          if (onTabSelected != null) ...[
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: t.isDarkCanvas ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: t.bgRule),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(tabs.length, (idx) {
+                  final tab = tabs[idx];
+                  final isSelected = selectedTabIndex == idx;
+                  return GestureDetector(
+                    onTap: () => onTabSelected!(idx),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? t.accent : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: t.accent.withValues(alpha: 0.3),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ]
+                            : [],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            tab.icon,
+                            size: 16,
+                            color: isSelected ? Colors.white : t.textSecondary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            tab.label,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                              color: isSelected ? Colors.white : t.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+            const SizedBox(width: 16),
+          ],
+
           if (canSwitchBranch) ...[
-            const SizedBox(width: 12),
             _BranchPicker(
               branchName: branchName,
               canSwitchBranch: canSwitchBranch,
               onTap: () => showBranchPicker(context, branchOptions, currentBranchId, onBranchSwitch, t),
               t: t,
             ),
+            const SizedBox(width: 12),
           ],
           if (showRolePill) ...[
-            const SizedBox(width: 12),
             _RolePill(role: role),
           ],
         ],

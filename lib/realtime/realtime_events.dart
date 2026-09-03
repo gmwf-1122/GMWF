@@ -29,6 +29,10 @@ class RealtimeEvents {
   static const String saveBranch = 'save_branch';
   static const String deleteBranch = 'delete_branch';
 
+  // ---- Employee & Staff Events ----
+  static const String saveEmployee = 'save_employee';
+  static const String deleteEmployee = 'delete_employee';
+
   // ---- Additional events ----
   static const String tokenCreated = 'token_created';
   static const String tokenUpdated = 'token_updated';
@@ -38,6 +42,11 @@ class RealtimeEvents {
   static const String tokenExceptionRequest = 'token_exception_request';
   static const String tokenExceptionApproved = 'token_exception_approved';
 
+  // Offline-first workflow requests are persisted and synchronized by the
+  // LAN server rather than written directly by client screens.
+  static const String workflowRequest = 'workflow_request';
+  static const String workflowDecision = 'workflow_decision';
+
   // ---- Attendance Events ----
   static const String saveBiometricLog = 'save_biometric_log';
   static const String saveEmployeeAttendance = 'save_employee_attendance';
@@ -46,6 +55,10 @@ class RealtimeEvents {
 
   // ---- Madrassa & School Events ----
   static const String saveMadrassaAdmission = 'save_madrassa_admission';
+  static const String saveMadrassaStudent = 'save_madrassa_student';
+  static const String saveMadrassaAttendance = 'save_madrassa_attendance';
+  static const String deleteMadrassaStudent = 'delete_madrassa_student';
+  static const String offboardMadrassaStudent = 'offboard_madrassa_student';
   static const String saveMadrassaFee = 'save_madrassa_fee';
   static const String saveMadrassaHifzProgress = 'save_madrassa_hifz_progress';
   static const String saveExamResult = 'save_exam_result';

@@ -1174,7 +1174,7 @@ class _PayrollTabState extends State<PayrollTab> {
                   return;
                 }
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
 
                   await FinanceLocalStorage.voidLedgerEntry(
                     branchId: widget.branchId,
@@ -1292,7 +1292,7 @@ class _PayrollTabState extends State<PayrollTab> {
                       return;
                     }
                     try {
-                      final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                      final curUser = LocalStorageService.getActiveUsername();
                       await FinanceLoansStorage.createLoan(
                         branchId: widget.branchId,
                         employeeId: employeeId,
@@ -1418,7 +1418,7 @@ class _PayrollTabState extends State<PayrollTab> {
                       return;
                     }
                     try {
-                      final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                      final curUser = LocalStorageService.getActiveUsername();
                       await FinanceLoansStorage.recordPayment(
                         loanId: selectedLoanId,
                         amount: amt,
@@ -1901,7 +1901,7 @@ class _PayrollTabState extends State<PayrollTab> {
                         if (confirm != true) return;
 
                         try {
-                          final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                          final curUser = LocalStorageService.getActiveUsername();
 
                           final ledgerData = {
                             'employeeId': employeeId,

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../constants/colors.dart';
+import '../../../theme/role_theme_provider.dart';
 import '../donations_shared.dart';
 
 class DashboardEmptyState extends StatelessWidget {
@@ -28,6 +29,7 @@ class DashboardEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(40),

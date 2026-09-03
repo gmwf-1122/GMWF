@@ -6,12 +6,11 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
-import '../../services/finance_loans_storage.dart';
-import '../../services/local_storage_service.dart';
-import '../../services/permission_service.dart';
 import 'finance_report_helper.dart';
 import 'employee_form_sheet.dart';
 import 'shared_widgets.dart';
+import 'offboard_dialog.dart';
+import '../../services/staff_patient_link_service.dart';
 
 class EmployeeDetailPage extends StatefulWidget {
   final String employeeId;
@@ -45,154 +44,18 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
     super.dispose();
   }
 
-  void _showOffboardDialog(BuildContext context, Map<String, dynamic> emp) {
-    DateTime exitDate = DateTime.now();
-    String reason = 'Resigned';
-    final notesCtrl = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (dCtx) {
-        final t = RoleThemeScope.dataOf(context);
-        return StatefulBuilder(
-          builder: (dialogCtx, setDS) {
-            return AlertDialog(
-              backgroundColor: t.bgCard,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: Row(
-                children: [
-                  const Icon(Icons.person_off_outlined, color: Colors.redAccent),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Offboard ${emp['name'] ?? 'Employee'}',
-                      style: TextStyle(color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Are you sure you want to offboard this employee? Salary calculations and active status will be terminated.',
-                    style: TextStyle(color: t.textSecondary, fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  // Exit Date Picker
-                  Text('Exit Date', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: dialogCtx,
-                        initialDate: exitDate,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-                      if (picked != null) {
-                        setDS(() => exitDate = picked);
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: t.bgCardAlt,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: t.bgRule),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(DateFormat('dd MMM yyyy').format(exitDate), style: TextStyle(color: t.textPrimary, fontSize: 13)),
-                          Icon(Icons.calendar_today_outlined, size: 16, color: t.accent),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Offboarding Reason
-                  Text('Offboard Reason', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<String>(
-                    value: reason,
-                    dropdownColor: t.bgCard,
-                    style: TextStyle(color: t.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: t.bgCardAlt,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'Resigned', child: Text('Resigned')),
-                      DropdownMenuItem(value: 'Terminated', child: Text('Terminated')),
-                      DropdownMenuItem(value: 'Contract Ended', child: Text('Contract Ended')),
-                      DropdownMenuItem(value: 'Retired', child: Text('Retired')),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) setDS(() => reason = val);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Notes / Remarks
-                  Text('Offboarding Remarks (Optional)', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: notesCtrl,
-                    style: TextStyle(color: t.textPrimary, fontSize: 13),
-                    maxLines: 2,
-                    decoration: InputDecoration(
-                      hintText: 'Enter reason or exit notes...',
-                      hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
-                      filled: true,
-                      fillColor: t.bgCardAlt,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dCtx),
-                  child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.redAccent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () async {
-                    Navigator.pop(dCtx);
-                    await FinanceLocalStorage.syncBiDirectionalOffboarding(
-                      employeeId: widget.employeeId,
-                      performedBy: widget.userRole,
-                    );
-                    if (mounted) {
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
-                      );
-                    }
-                  },
-                  child: const Text('Confirm Offboard'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+  void _showOffboardDialog(BuildContext context, Map<String, dynamic> emp) async {
+    final result = await OffboardDialog.show(
+      context,
+      employeeData: emp,
+      performedBy: widget.userRole,
     );
+    if (result == true && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
+      );
+    }
   }
 
   @override
@@ -276,6 +139,17 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                   onPressed: () => _showOffboardDialog(context, emp),
                 ),
               ],
+              IconButton(
+                icon: const Icon(Icons.medical_services_outlined, color: Colors.teal),
+                tooltip: 'Medical History',
+                onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
+                  context,
+                  name: name,
+                  cnic: emp['cnic']?.toString(),
+                  branchId: emp['branchId']?.toString(),
+                  role: role,
+                ),
+              ),
               IconButton(
                 icon: Icon(Icons.picture_as_pdf_outlined, color: t.accent),
                 tooltip: 'Export Profile PDF',

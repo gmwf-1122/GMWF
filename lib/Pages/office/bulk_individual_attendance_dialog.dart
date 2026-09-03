@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/sync_service.dart';
+import '../../services/local_storage_service.dart';
 
 class BulkIndividualAttendanceDialog {
   static void open({
@@ -102,7 +103,7 @@ class BulkIndividualAttendanceDialog {
                 });
 
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
                   final emp = employees.firstWhere((e) => e['localId']?.toString() == selectedEmployeeId);
                   final empId = emp['localId']?.toString() ?? '';
                   final dept = emp['department']?.toString() ?? '';

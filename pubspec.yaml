@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.4.0
+version: 1.4.4
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -80,6 +80,7 @@ dependencies:
   collection: any
   flutter_native_splash: any
   arabic_reshaper: ^0.0.1
+  motion_tab_bar_v2: ^0.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -91,20 +92,24 @@ dev_dependencies:
 
 
 flutter_native_splash:
-  color: "#F1F8E9"
-  image: assets/logo/gmwf_splash.png
+  color: "#FFFFFF"
+  image: assets/logo/gmwf-1.png
   android: true
   ios: true
   web: true
   fullscreen: true
+  color_dark: "#041C16"
+  image_dark: assets/logo/gmwf-1.png
   
   # Ensure the logo is centered and not stretched
   android_gravity: center
   ios_content_mode: center
   
   android_12:
-    image: assets/logo/gmwf_splash.png
-    icon_background_color: "#F1F8E9"
+    image: assets/logo/gmwf-1.png
+    icon_background_color: "#FFFFFF"
+    image_dark: assets/logo/gmwf-1.png
+    icon_background_color_dark: "#041C16"
 
 flutter_launcher_icons:
   android: true
@@ -126,16 +131,11 @@ flutter:
         - asset: assets/fonts/Amiri-Regular.ttf
 
   assets:
-    - assets/icons/eye_close.webp
-    - assets/icons/eye_open.webp
-    - assets/icons/WA.webp
-    - assets/logo/agmp.webp
-    - assets/logo/gmwf_splash.webp
-    - assets/logo/gmwf-1.webp
-    - assets/logo/twt_logo.webp
+    - assets/icons/
+    - assets/logo/
     - assets/images/
+    - assets/animations/
     - assets/qr/
-    - assets/fonts/NooriNastaliq.ttf
-    - assets/fonts/Amiri-Regular.ttf
+    - assets/fonts/
     - assets/Banks Logos/
 

@@ -26,6 +26,7 @@ import 'dispensar/dispensar_screen.dart';
 import 'dispensar/inventory.dart';
 import 'doctor/doctor_screen.dart';
 import 'package:gmwf/pages/login_page.dart';
+import 'package:gmwf/utils/formatters.dart';
 
 class HybridDispensaryScreen extends StatefulWidget {
   final String branchId;
@@ -89,7 +90,9 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     }
   }
 
-  void _parseRole() {
+  void _parseRole([String? effectiveName]) {
+    final name = effectiveName ?? _resolvedName ?? widget.userName;
+    _tabs.clear();
     final r = widget.role.toLowerCase().trim();
     if (r.contains('doc') || r.contains('doctor')) {
       _tabs.add({
@@ -98,20 +101,22 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         'widget': DoctorScreen(
           branchId: widget.branchId,
           doctorId: widget.userId,
-          doctorName: widget.userName,
+          doctorName: name,
           isEmbedded: true,
         ),
       });
     }
     if (r.contains('rec') || r.contains('receptionist')) {
+      final suppressPrescriptionNotifications = r.contains('doc') || r.contains('doctor');
       _tabs.add({
         'title': 'Receptionist',
         'icon': Icons.support_agent_rounded,
         'widget': ReceptionistScreen(
           branchId: widget.branchId,
           receptionistId: widget.userId,
-          receptionistName: widget.userName,
+          receptionistName: name,
           isEmbedded: true,
+          suppressPrescriptionNotifications: suppressPrescriptionNotifications,
         ),
       });
     }
@@ -122,7 +127,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         'widget': DispensarScreen(
           branchId: widget.branchId,
           dispenserId: widget.userId,
-          dispenserName: widget.userName,
+          dispenserName: name,
           isEmbedded: true,
         ),
       });
@@ -138,6 +143,30 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         ),
       });
     }
+    if (_tabs.isEmpty) {
+      _tabs.add({
+        'title': 'Desk',
+        'icon': Icons.support_agent_rounded,
+        'widget': ReceptionistScreen(
+          branchId: widget.branchId,
+          receptionistId: widget.userId,
+          receptionistName: name,
+          isEmbedded: true,
+        ),
+      });
+    }
+
+    try {
+      final oldIndex = _tabController.index;
+      if (_tabController.length != _tabs.length) {
+        _tabController.dispose();
+        _tabController = TabController(
+          length: _tabs.length,
+          initialIndex: oldIndex.clamp(0, _tabs.length - 1),
+          vsync: this,
+        );
+      }
+    } catch (_) {}
   }
 
   void _listenConnectivity() {
@@ -158,14 +187,39 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     // 1. Try local cache
     try {
       final local = LocalStorageService.getLocalUserByUid(widget.userId);
-      name = (local?['username'] as String?)?.trim();
-      if (name?.isEmpty == true) name = null;
+      if (local != null) {
+        final n = resolveUserDisplayName(local);
+        if (n.isNotEmpty && n != 'User' && n != 'Doctor') name = n;
+      }
     } catch (_) {}
 
-    // 2. Fall back to widget param
-    name ??= widget.userName.trim().isNotEmpty ? widget.userName.trim() : null;
+    // 2. Check app_settings cache
+    if (name == null || name == 'User' || name == 'Doctor') {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          final uData = box.get('user_data') ?? box.get('currentUser');
+          if (uData is Map) {
+            final n = resolveUserDisplayName(Map<String, dynamic>.from(uData));
+            if (n.isNotEmpty && n != 'User' && n != 'Doctor') name = n;
+          }
+        }
+      } catch (_) {}
+    }
 
-    if (mounted) setState(() => _resolvedName = name);
+    // 3. Fall back to widget param
+    if (name == null || name == 'User' || name == 'Doctor') {
+      if (widget.userName.trim().isNotEmpty && widget.userName.trim().toLowerCase() != 'user') {
+        name = widget.userName.trim();
+      }
+    }
+
+    if (mounted && name != null && name.isNotEmpty) {
+      setState(() {
+        _resolvedName = name;
+        _parseRole(name);
+      });
+    }
 
     // Start connection
     ConnectionManager().start(
@@ -177,25 +231,20 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       RealtimeManager().updateUsername(name);
     }
 
-    // 3. Fetch from Firestore for authoritative user profile and cache it
+    // 4. Fetch from Firestore for authoritative user profile and cache it
     try {
       final userData = await AuthService().getUserByUid(widget.userId);
       if (userData != null && Hive.isBoxOpen('app_settings')) {
         await Hive.box('app_settings').put('user_data', userData);
         await Hive.box('app_settings').put('currentUser', userData);
       }
-      final firestoreName =
-          (userData?['username'] as String?)?.trim() ??
-          (userData?['name'] as String?)?.trim();
-      if (mounted) {
+      final firestoreName = resolveUserDisplayName(userData);
+      if (mounted && firestoreName.isNotEmpty && firestoreName != 'User' && firestoreName != 'Doctor') {
         setState(() {
-          if (firestoreName != null && firestoreName.isNotEmpty) {
-            _resolvedName = firestoreName;
-          }
+          _resolvedName = firestoreName;
+          _parseRole(firestoreName);
         });
-        if (firestoreName != null && firestoreName.isNotEmpty) {
-          RealtimeManager().updateUsername(firestoreName);
-        }
+        RealtimeManager().updateUsername(firestoreName);
       }
     } catch (e) {
       debugPrint('[HybridScreen] Could not fetch name from Firestore: $e');
@@ -231,13 +280,19 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
   }
 
   Future<void> _forceSync() async {
-    if (!_online || _isSyncing || !mounted) return;
+    if (_isSyncing || !mounted) return;
     setState(() => _isSyncing = true);
     try {
-      await SyncService().forceFullRefresh(widget.branchId);
+      // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
+      await RealtimeManager().forceFlushAndCatchUp();
+
+      // 2. If online, sync with cloud
+      if (_online) {
+        await SyncService().forceFullRefresh(widget.branchId);
+      }
       if (mounted) {
         Flushbar(
-          message: 'Full sync completed',
+          message: _online ? 'Full sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)',
           backgroundColor: Colors.green.shade700,
           duration: const Duration(seconds: 2),
         ).show(context);
@@ -458,8 +513,9 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       body: AnimatedBuilder(
         animation: _tabController,
         builder: (context, _) {
+          final safeIndex = _tabs.isEmpty ? 0 : _tabController.index.clamp(0, _tabs.length - 1);
           return IndexedStack(
-            index: _tabController.index,
+            index: safeIndex,
             children: _tabs.map((t) => t['widget'] as Widget).toList(),
           );
         },

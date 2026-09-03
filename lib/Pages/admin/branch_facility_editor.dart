@@ -3,9 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import '../../theme/app_theme.dart';
-import '../../theme/role_theme_provider.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/camp_session_service.dart';
 
 class BranchFacilityEditorDialog extends StatefulWidget {
   final String branchId;
@@ -14,6 +13,7 @@ class BranchFacilityEditorDialog extends StatefulWidget {
   final List<Map<String, dynamic>> initialDasterkhwaans;
   final List<Map<String, dynamic>> initialMadrassas;
   final List<Map<String, dynamic>> initialSchools;
+  final Map<String, dynamic>? initialSessionsConfig;
 
   const BranchFacilityEditorDialog({
     super.key,
@@ -23,6 +23,7 @@ class BranchFacilityEditorDialog extends StatefulWidget {
     this.initialDasterkhwaans = const [],
     this.initialMadrassas = const [],
     this.initialSchools = const [],
+    this.initialSessionsConfig,
   });
 
   static Future<bool?> show(
@@ -33,6 +34,7 @@ class BranchFacilityEditorDialog extends StatefulWidget {
     List<Map<String, dynamic>> initialDasterkhwaans = const [],
     List<Map<String, dynamic>> initialMadrassas = const [],
     List<Map<String, dynamic>> initialSchools = const [],
+    Map<String, dynamic>? initialSessionsConfig,
   }) {
     return showDialog<bool>(
       context: context,
@@ -44,6 +46,7 @@ class BranchFacilityEditorDialog extends StatefulWidget {
         initialDasterkhwaans: initialDasterkhwaans,
         initialMadrassas: initialMadrassas,
         initialSchools: initialSchools,
+        initialSessionsConfig: initialSessionsConfig,
       ),
     );
   }
@@ -61,10 +64,13 @@ class _BranchFacilityEditorDialogState
   late TextEditingController _madrassaInputCtrl;
   late TextEditingController _schoolInputCtrl;
 
-  late List<Map<String, String>> _dispensaries;
-  late List<Map<String, String>> _dasterkhwaans;
-  late List<Map<String, String>> _madrassas;
-  late List<Map<String, String>> _schools;
+  late List<Map<String, dynamic>> _dispensaries;
+  late List<Map<String, dynamic>> _dasterkhwaans;
+  late List<Map<String, dynamic>> _madrassas;
+  late List<Map<String, dynamic>> _schools;
+  late Map<String, dynamic> _sessionsConfig;
+  late bool _madrassaFeeEnabled;
+  late bool _allowVitalsToken;
   bool _isSaving = false;
 
   @override
@@ -78,21 +84,104 @@ class _BranchFacilityEditorDialogState
 
     final defaults = LocalStorageService.getDefaultBranchFacilities(widget.branchId);
 
+    // Initialize Sessions Config with Department-Level Separation
+    final initSess = widget.initialSessionsConfig ?? {};
+    final defaultDisp = CampSessionService.getDefaultSessionConfig(widget.branchId, 'dispensary');
+    final defaultDast = CampSessionService.getDefaultSessionConfig(widget.branchId, 'dasterkhwaan');
+    final defaultMad  = CampSessionService.getDefaultSessionConfig(widget.branchId, 'madrassa');
+    final defaultSch  = CampSessionService.getDefaultSessionConfig(widget.branchId, 'school');
+
+    // Dispensary Config
+    final rawDisp = initSess['dispensary'] is Map ? initSess['dispensary'] as Map : initSess;
+    _allowVitalsToken = rawDisp['allowVitalsToken'] ?? initSess['allowVitalsToken'] ?? widget.initialSessionsConfig?['allowVitalsToken'] ?? LocalStorageService.isVitalsTokenAllowed(widget.branchId);
+
+    final dispConfig = {
+      'morning': Map<String, dynamic>.from(rawDisp['morning'] ?? defaultDisp['morning'] ?? {'enabled': true, 'openTime': '08:00', 'closeTime': '14:00'}),
+      'evening': Map<String, dynamic>.from(rawDisp['evening'] ?? defaultDisp['evening'] ?? {'enabled': true, 'openTime': '16:00', 'closeTime': '22:00'}),
+      'night':   Map<String, dynamic>.from(rawDisp['night']   ?? defaultDisp['night']   ?? {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'}),
+      'allowVitalsToken': _allowVitalsToken,
+    };
+
+    // Dasterkhwaan Config (Morning/Breakfast, Lunch, Dinner, Night)
+    final rawDast = initSess['dasterkhwaan'] is Map ? initSess['dasterkhwaan'] as Map : {};
+    final dastConfig = {
+      'morning': Map<String, dynamic>.from(rawDast['morning'] ?? defaultDast['morning'] ?? {'enabled': true, 'openTime': '06:00', 'closeTime': '10:00'}),
+      'lunch':   Map<String, dynamic>.from(rawDast['lunch']   ?? defaultDast['lunch']   ?? {'enabled': true, 'openTime': '12:00', 'closeTime': '16:00'}),
+      'dinner':  Map<String, dynamic>.from(rawDast['dinner']  ?? defaultDast['dinner']  ?? {'enabled': true, 'openTime': '18:00', 'closeTime': '22:00'}),
+      'night':   Map<String, dynamic>.from(rawDast['night']   ?? defaultDast['night']   ?? {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'}),
+    };
+
+    // Madrassa Config & Fee Factor
+    final rawMad = initSess['madrassa'] is Map ? initSess['madrassa'] as Map : {};
+    _madrassaFeeEnabled = rawMad['enableFees'] ?? initSess['madrassaFeeEnabled'] ?? LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+
+    final madConfig = {
+      'morning': Map<String, dynamic>.from(rawMad['morning'] ?? defaultMad['morning'] ?? {'enabled': true, 'openTime': '06:00', 'closeTime': '12:00'}),
+      'evening': Map<String, dynamic>.from(rawMad['evening'] ?? defaultMad['evening'] ?? {'enabled': true, 'openTime': '14:00', 'closeTime': '18:00'}),
+      'night':   Map<String, dynamic>.from(rawMad['night']   ?? defaultMad['night']   ?? {'enabled': false, 'openTime': '19:00', 'closeTime': '22:00'}),
+      'enableFees': _madrassaFeeEnabled,
+    };
+
+    // School Config
+    final rawSch = initSess['school'] is Map ? initSess['school'] as Map : {};
+    final schConfig = {
+      'morning': Map<String, dynamic>.from(rawSch['morning'] ?? defaultSch['morning'] ?? {'enabled': true, 'openTime': '07:30', 'closeTime': '13:30'}),
+      'evening': Map<String, dynamic>.from(rawSch['evening'] ?? defaultSch['evening'] ?? {'enabled': false, 'openTime': '14:00', 'closeTime': '18:00'}),
+      'night':   Map<String, dynamic>.from(rawSch['night']   ?? defaultSch['night']   ?? {'enabled': false, 'openTime': '18:30', 'closeTime': '21:30'}),
+    };
+
+    _sessionsConfig = {
+      'dispensary': dispConfig,
+      'dasterkhwaan': dastConfig,
+      'madrassa': madConfig,
+      'school': schConfig,
+      'madrassaFeeEnabled': _madrassaFeeEnabled,
+      'allowVitalsToken': _allowVitalsToken,
+      // Backward-compatible top-level keys
+      'morning': dispConfig['morning']!,
+      'evening': dispConfig['evening']!,
+      'night': dispConfig['night']!,
+    };
+
     _dispensaries = widget.initialDispensaries.isNotEmpty
-        ? widget.initialDispensaries.map((d) => {'id': (d['id'] ?? '').toString(), 'name': (d['name'] ?? '').toString()}).toList()
-        : (defaults['dispensaries'] ?? []);
+        ? widget.initialDispensaries.map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList()
+        : (defaults['dispensaries'] ?? []).map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList();
 
     _dasterkhwaans = widget.initialDasterkhwaans.isNotEmpty
-        ? widget.initialDasterkhwaans.map((d) => {'id': (d['id'] ?? '').toString(), 'name': (d['name'] ?? '').toString()}).toList()
-        : (defaults['dasterkhwaans'] ?? []);
+        ? widget.initialDasterkhwaans.map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'lunch', 'dinner'])).toList()
+        : (defaults['dasterkhwaans'] ?? []).map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'lunch', 'dinner'])).toList();
 
     _madrassas = widget.initialMadrassas.isNotEmpty
-        ? widget.initialMadrassas.map((d) => {'id': (d['id'] ?? '').toString(), 'name': (d['name'] ?? '').toString()}).toList()
-        : (defaults['madrassas'] ?? []);
+        ? widget.initialMadrassas.map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList()
+        : (defaults['madrassas'] ?? []).map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList();
 
     _schools = widget.initialSchools.isNotEmpty
-        ? widget.initialSchools.map((d) => {'id': (d['id'] ?? '').toString(), 'name': (d['name'] ?? '').toString()}).toList()
-        : (defaults['schools'] ?? []);
+        ? widget.initialSchools.map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList()
+        : (defaults['schools'] ?? []).map((d) => _normalizeFacility(d, defaultSessions: ['morning', 'evening'])).toList();
+  }
+
+  Map<String, dynamic> _normalizeFacility(Map d, {required List<String> defaultSessions}) {
+    final m = Map<String, dynamic>.from(d);
+    final rawSessions = m['sessions'];
+    List<String> sessions = [];
+    if (rawSessions is List) {
+      sessions = rawSessions.map((e) => e.toString().toLowerCase().trim()).where((e) => e.isNotEmpty).toList();
+    }
+    if (sessions.isEmpty) {
+      sessions = List<String>.from(defaultSessions);
+    }
+    final rawTimings = m['sessionTimings'];
+    Map<String, dynamic> sessionTimings = {};
+    if (rawTimings is Map) {
+      sessionTimings = Map<String, dynamic>.from(rawTimings);
+    }
+
+    return {
+      'id': (m['id'] ?? '').toString(),
+      'name': (m['name'] ?? m['id'] ?? '').toString(),
+      'sessions': sessions,
+      'sessionTimings': sessionTimings,
+    };
   }
 
   @override
@@ -111,7 +200,12 @@ class _BranchFacilityEditorDialogState
     final id = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     if (_dispensaries.any((d) => d['id'] == id)) return;
     setState(() {
-      _dispensaries.add({'id': id, 'name': text});
+      _dispensaries.add({
+        'id': id,
+        'name': text,
+        'sessions': ['morning', 'evening'],
+        'sessionTimings': <String, dynamic>{},
+      });
       _dispensaryInputCtrl.clear();
     });
   }
@@ -122,7 +216,12 @@ class _BranchFacilityEditorDialogState
     final id = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     if (_dasterkhwaans.any((d) => d['id'] == id)) return;
     setState(() {
-      _dasterkhwaans.add({'id': id, 'name': text});
+      _dasterkhwaans.add({
+        'id': id,
+        'name': text,
+        'sessions': ['morning', 'lunch', 'dinner'],
+        'sessionTimings': <String, dynamic>{},
+      });
       _dasterkhwaanInputCtrl.clear();
     });
   }
@@ -133,7 +232,12 @@ class _BranchFacilityEditorDialogState
     final id = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     if (_madrassas.any((d) => d['id'] == id)) return;
     setState(() {
-      _madrassas.add({'id': id, 'name': text});
+      _madrassas.add({
+        'id': id,
+        'name': text,
+        'sessions': ['morning', 'evening'],
+        'sessionTimings': <String, dynamic>{},
+      });
       _madrassaInputCtrl.clear();
     });
   }
@@ -144,9 +248,114 @@ class _BranchFacilityEditorDialogState
     final id = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     if (_schools.any((d) => d['id'] == id)) return;
     setState(() {
-      _schools.add({'id': id, 'name': text});
+      _schools.add({
+        'id': id,
+        'name': text,
+        'sessions': ['morning'],
+        'sessionTimings': <String, dynamic>{},
+      });
       _schoolInputCtrl.clear();
     });
+  }
+
+  void _toggleSession(Map<String, dynamic> facility, String sessionKey) {
+    setState(() {
+      final sessions = List<String>.from(facility['sessions'] as List);
+      if (sessions.contains(sessionKey)) {
+        if (sessions.length > 1) {
+          sessions.remove(sessionKey);
+        }
+      } else {
+        sessions.add(sessionKey);
+      }
+      facility['sessions'] = sessions;
+    });
+  }
+
+  String _formatTimeStr(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return '--:--';
+    final parts = timeStr.split(':');
+    if (parts.length >= 2) {
+      int h = int.tryParse(parts[0]) ?? 0;
+      int m = int.tryParse(parts[1]) ?? 0;
+      final period = h >= 12 ? 'PM' : 'AM';
+      final displayH = h == 0 ? 12 : (h > 12 ? h - 12 : h);
+      final displayM = m.toString().padLeft(2, '0');
+      return '$displayH:$displayM $period';
+    }
+    return timeStr;
+  }
+
+  Future<void> _pickDeptTime(BuildContext context, String deptKey, String sessionKey, String timeKey) async {
+    final deptMap = _sessionsConfig[deptKey] as Map<String, dynamic>? ?? {};
+    final sessMap = deptMap[sessionKey] as Map<String, dynamic>? ?? {};
+    final currentStr = sessMap[timeKey]?.toString() ?? (timeKey == 'openTime' ? '08:00' : '14:00');
+    final parts = currentStr.split(':');
+    final initial = TimeOfDay(
+      hour: parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 8) : 8,
+      minute: parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0,
+    );
+
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+
+    if (picked != null) {
+      final hh = picked.hour.toString().padLeft(2, '0');
+      final mm = picked.minute.toString().padLeft(2, '0');
+      setState(() {
+        if (_sessionsConfig[deptKey] is Map) {
+          final sMap = (_sessionsConfig[deptKey] as Map)[sessionKey];
+          if (sMap is Map) {
+            sMap[timeKey] = '$hh:$mm';
+          }
+        }
+        // Mirror to top-level if dispensary
+        if (deptKey == 'dispensary') {
+          if (_sessionsConfig[sessionKey] is Map) {
+            (_sessionsConfig[sessionKey] as Map)[timeKey] = '$hh:$mm';
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _pickFacilityCustomTime(
+    BuildContext context,
+    Map<String, dynamic> facility,
+    String sessionKey,
+    String timeKey,
+    String fallbackTime,
+  ) async {
+    final timings = facility['sessionTimings'] as Map<String, dynamic>? ?? {};
+    final sessTiming = timings[sessionKey] as Map<String, dynamic>? ?? {};
+    final currentStr = sessTiming[timeKey]?.toString() ?? fallbackTime;
+    final parts = currentStr.split(':');
+    final initial = TimeOfDay(
+      hour: parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 8) : 8,
+      minute: parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0,
+    );
+
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+    );
+
+    if (picked != null) {
+      final hh = picked.hour.toString().padLeft(2, '0');
+      final mm = picked.minute.toString().padLeft(2, '0');
+      setState(() {
+        if (facility['sessionTimings'] is! Map) {
+          facility['sessionTimings'] = <String, dynamic>{};
+        }
+        final fTimings = facility['sessionTimings'] as Map<String, dynamic>;
+        if (fTimings[sessionKey] is! Map) {
+          fTimings[sessionKey] = <String, dynamic>{};
+        }
+        (fTimings[sessionKey] as Map<String, dynamic>)[timeKey] = '$hh:$mm';
+      });
+    }
   }
 
   Future<void> _saveBranchData() async {
@@ -161,8 +370,21 @@ class _BranchFacilityEditorDialogState
     setState(() => _isSaving = true);
 
     try {
+      if (_sessionsConfig['dispensary'] is Map) {
+        (_sessionsConfig['dispensary'] as Map)['allowVitalsToken'] = _allowVitalsToken;
+      }
+      _sessionsConfig['allowVitalsToken'] = _allowVitalsToken;
+
+      if (_sessionsConfig['madrassa'] is Map) {
+        (_sessionsConfig['madrassa'] as Map)['enableFees'] = _madrassaFeeEnabled;
+      }
+      _sessionsConfig['madrassaFeeEnabled'] = _madrassaFeeEnabled;
+
       final docData = <String, dynamic>{
         'name': newName,
+        'sessionsConfig': _sessionsConfig,
+        'madrassaFeeEnabled': _madrassaFeeEnabled,
+        'allowVitalsToken': _allowVitalsToken,
         'dispensaries': _dispensaries,
         'dasterkhwaans': _dasterkhwaans,
         'madrassas': _madrassas,
@@ -180,12 +402,23 @@ class _BranchFacilityEditorDialogState
           .doc(widget.branchId)
           .set(docData, SetOptions(merge: true));
 
+      // Sync to Madrassa Config in Firestore
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('madrassa_config')
+          .doc('current')
+          .set({'enableFees': _madrassaFeeEnabled}, SetOptions(merge: true));
+
       // 2. Local Hive Box Update
       if (Hive.isBoxOpen('local_branches')) {
         final box = Hive.box('local_branches');
         await box.put('branch:${widget.branchId}', {
           'id': widget.branchId,
           'name': newName,
+          'sessionsConfig': _sessionsConfig,
+          'madrassaFeeEnabled': _madrassaFeeEnabled,
+          'allowVitalsToken': _allowVitalsToken,
           'dispensaries': _dispensaries,
           'dasterkhwaans': _dasterkhwaans,
           'madrassas': _madrassas,
@@ -213,29 +446,37 @@ class _BranchFacilityEditorDialogState
 
   @override
   Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgDialog = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
+    final subtextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final inputBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
+    const teal = Color(0xFF00695C);
 
     return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      backgroundColor: t.bgCard,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      backgroundColor: bgDialog,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 580),
-        padding: const EdgeInsets.all(24),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
+        constraints: const BoxConstraints(maxWidth: 820, maxHeight: 920),
+        child: Column(
+          children: [
+            // Header
+            Container(
+              padding: const EdgeInsets.fromLTRB(24, 20, 20, 18),
+              decoration: BoxDecoration(
+                border: Border(bottom: BorderSide(color: borderColor)),
+              ),
+              child: Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: t.accent.withValues(alpha: 0.12),
+                      color: teal.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(Icons.settings_rounded, color: t.accent, size: 24),
+                    child: const Icon(Icons.hub_rounded, color: teal, size: 24),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -243,18 +484,19 @@ class _BranchFacilityEditorDialogState
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Configure Branch Facilities',
+                          'Branch Facilities & Operational Schedules',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: t.textPrimary,
+                            color: textColor,
                           ),
                         ),
+                        const SizedBox(height: 2),
                         Text(
-                          'ID: ${widget.branchId} • Dispensaries: ${_dispensaries.length} | Dasterkhwaans: ${_dasterkhwaans.length}',
+                          'Configure separate operational timings, shift windows & facilities for ${widget.currentBranchName} (${widget.branchId})',
                           style: TextStyle(
                             fontSize: 12,
-                            color: t.textTertiary,
+                            color: subtextColor,
                           ),
                         ),
                       ],
@@ -262,159 +504,834 @@ class _BranchFacilityEditorDialogState
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: Icon(Icons.close_rounded, color: t.textTertiary),
+                    icon: Icon(Icons.close_rounded, color: subtextColor),
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Divider(color: t.bgRule, height: 1),
-              const SizedBox(height: 16),
+            ),
 
-              // Branch Name Field
-              Text('Branch Name', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.textSecondary)),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _nameController,
-                style: TextStyle(color: t.textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.store_rounded, color: t.textTertiary, size: 20),
-                  filled: true,
-                  fillColor: t.bgCardAlt,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+            // Form Body
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Branch Name
+                    Text(
+                      'Branch Name',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _nameController,
+                      style: TextStyle(color: textColor, fontSize: 14, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        prefixIcon: Icon(Icons.store_rounded, color: subtextColor, size: 20),
+                        filled: true,
+                        fillColor: inputBg,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Section 1: Dispensary Camps & Separate Shift Timings ──
+                    _buildFacilityCard(
+                      deptKey: 'dispensary',
+                      title: 'Dispensary Camps / Desks (${_dispensaries.length})',
+                      subtitle: 'Medical clinical consultations, patient registration & medicine dispensing',
+                      icon: Icons.local_hospital_rounded,
+                      color: const Color(0xFF0D9488),
+                      ctrl: _dispensaryInputCtrl,
+                      hint: 'e.g. Saddar Dispensary, Haji Camp',
+                      onAdd: _addDispensary,
+                      items: _dispensaries,
+                      sessionOptions: const [
+                        {'key': 'morning', 'label': '☀️ Morning', 'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
+                        {'key': 'evening', 'label': '🌅 Evening', 'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
+                        {'key': 'night',   'label': '🌙 Night',   'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                      ],
+                      onDelete: (id) => setState(() => _dispensaries.removeWhere((i) => i['id'] == id)),
+                      isDark: isDark,
+                      textColor: textColor,
+                      subtextColor: subtextColor,
+                      borderColor: borderColor,
+                      inputBg: inputBg,
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Section 2: Dasterkhwaan Meal Desks & Separate Shift Timings ──
+                    _buildFacilityCard(
+                      deptKey: 'dasterkhwaan',
+                      title: 'Dasterkhwaan Meal Units & Desks (${_dasterkhwaans.length})',
+                      subtitle: 'Kitchen food distribution, breakfast, lunch, dinner & special meal shifts',
+                      icon: Icons.restaurant_rounded,
+                      color: const Color(0xFFEA580C),
+                      ctrl: _dasterkhwaanInputCtrl,
+                      hint: 'e.g. Unit 1 - Main Dasterkhwaan, Camp 2 Desks',
+                      onAdd: _addDasterkhwaan,
+                      items: _dasterkhwaans,
+                      sessionOptions: const [
+                        {'key': 'morning', 'label': '☀️ Morning / Breakfast', 'icon': Icons.free_breakfast_rounded, 'color': Color(0xFFF59E0B)},
+                        {'key': 'lunch',   'label': '🍲 Lunch / Afternoon',   'icon': Icons.lunch_dining_rounded,   'color': Color(0xFF10B981)},
+                        {'key': 'dinner',  'label': '🍛 Dinner / Evening',    'icon': Icons.dinner_dining_rounded,  'color': Color(0xFF3B82F6)},
+                        {'key': 'night',   'label': '🌙 Night / Sehri',       'icon': Icons.dark_mode_rounded,      'color': Color(0xFF8B5CF6)},
+                      ],
+                      onDelete: (id) => setState(() => _dasterkhwaans.removeWhere((i) => i['id'] == id)),
+                      isDark: isDark,
+                      textColor: textColor,
+                      subtextColor: subtextColor,
+                      borderColor: borderColor,
+                      inputBg: inputBg,
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Section 3: Madrassa Campuses & Separate Shift Timings ──
+                    _buildFacilityCard(
+                      deptKey: 'madrassa',
+                      title: 'Madrassa Campuses (${_madrassas.length})',
+                      subtitle: 'Quranic education, student attendance, Hifz & Nazra classes',
+                      icon: Icons.menu_book_rounded,
+                      color: const Color(0xFF059669),
+                      ctrl: _madrassaInputCtrl,
+                      hint: 'e.g. Main Madrassa, Hifz Section',
+                      onAdd: _addMadrassa,
+                      items: _madrassas,
+                      sessionOptions: const [
+                        {'key': 'morning', 'label': '☀️ Morning / Day', 'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
+                        {'key': 'evening', 'label': '🌅 Evening',       'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
+                        {'key': 'night',   'label': '🌙 Night',         'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                      ],
+                      onDelete: (id) => setState(() => _madrassas.removeWhere((i) => i['id'] == id)),
+                      isDark: isDark,
+                      textColor: textColor,
+                      subtextColor: subtextColor,
+                      borderColor: borderColor,
+                      inputBg: inputBg,
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Section 4: School Wings & Separate Shift Timings ──
+                    _buildFacilityCard(
+                      deptKey: 'school',
+                      title: 'School Wings / Campus (${_schools.length})',
+                      subtitle: 'Taleem-o-Tarbiyat academic classes, faculty & student schedules',
+                      icon: Icons.school_rounded,
+                      color: const Color(0xFF4F46E5),
+                      ctrl: _schoolInputCtrl,
+                      hint: 'e.g. Primary Wing, Girls Section',
+                      onAdd: _addSchool,
+                      items: _schools,
+                      sessionOptions: const [
+                        {'key': 'morning', 'label': '☀️ Morning / Day Shift',        'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
+                        {'key': 'evening', 'label': '🌅 Evening / Afternoon Shift',  'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
+                        {'key': 'night',   'label': '🌙 Night Shift',                'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                      ],
+                      onDelete: (id) => setState(() => _schools.removeWhere((i) => i['id'] == id)),
+                      isDark: isDark,
+                      textColor: textColor,
+                      subtextColor: subtextColor,
+                      borderColor: borderColor,
+                      inputBg: inputBg,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 18),
+            ),
 
-              // ── Section 1: Sub-Dispensaries ──────────────────────────────
-              _buildSectionHeader('Dispensary Facilities (${_dispensaries.length})', Icons.local_hospital_outlined, t.accent),
-              const SizedBox(height: 8),
-              _buildInputRow(_dispensaryInputCtrl, 'e.g. Saddar Dispensary', _addDispensary, t.accent, t),
-              const SizedBox(height: 8),
-              _buildChips(_dispensaries, t.accent, (id) => setState(() => _dispensaries.removeWhere((i) => i['id'] == id)), t),
-
-              const SizedBox(height: 18),
-
-              // ── Section 2: Sub-Dasterkhwaans ─────────────────────────────
-              _buildSectionHeader('Dasterkhwaan Facilities (${_dasterkhwaans.length})', Icons.restaurant_outlined, Colors.orange),
-              const SizedBox(height: 8),
-              _buildInputRow(_dasterkhwaanInputCtrl, 'e.g. Unit 1 - Main Dasterkhwaan', _addDasterkhwaan, Colors.orange.shade700, t),
-              const SizedBox(height: 8),
-              _buildChips(_dasterkhwaans, Colors.orange, (id) => setState(() => _dasterkhwaans.removeWhere((i) => i['id'] == id)), t),
-
-              const SizedBox(height: 18),
-
-              // ── Section 3: Sub-Madrassas ────────────────────────────────
-              _buildSectionHeader('Madrassa Facilities (${_madrassas.length})', Icons.menu_book_rounded, Colors.teal),
-              const SizedBox(height: 8),
-              _buildInputRow(_madrassaInputCtrl, 'e.g. Main Madrassa', _addMadrassa, Colors.teal, t),
-              const SizedBox(height: 8),
-              _buildChips(_madrassas, Colors.teal, (id) => setState(() => _madrassas.removeWhere((i) => i['id'] == id)), t),
-
-              const SizedBox(height: 18),
-
-              // ── Section 4: Sub-Schools ─────────────────────────────────
-              _buildSectionHeader('School Facilities (${_schools.length})', Icons.school_rounded, Colors.indigo),
-              const SizedBox(height: 8),
-              _buildInputRow(_schoolInputCtrl, 'e.g. Model Primary School', _addSchool, Colors.indigo, t),
-              const SizedBox(height: 8),
-              _buildChips(_schools, Colors.indigo, (id) => setState(() => _schools.removeWhere((i) => i['id'] == id)), t),
-
-              const SizedBox(height: 24),
-              Divider(color: t.bgRule, height: 1),
-              const SizedBox(height: 18),
-
-              // Action buttons
-              Row(
+            // Footer Actions
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: borderColor)),
+              ),
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
                     onPressed: _isSaving ? null : () => Navigator.pop(context),
-                    child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+                    child: Text('Cancel', style: TextStyle(color: subtextColor, fontWeight: FontWeight.w600)),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   ElevatedButton.icon(
                     onPressed: _isSaving ? null : _saveBranchData,
                     icon: _isSaving
                         ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.save_rounded, size: 18),
-                    label: Text(_isSaving ? 'Saving...' : 'Save Facility Configuration'),
+                        : const Icon(Icons.check_circle_rounded, size: 18),
+                    label: Text(_isSaving ? 'Saving Configurations...' : 'Save & Sync All Schedules'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: t.accent,
+                      backgroundColor: teal,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      elevation: 1,
                     ),
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title, IconData icon, Color color) {
-    return Row(
-      children: [
-        Icon(icon, color: color, size: 18),
-        const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
+  Widget _buildFacilityCard({
+    required String deptKey,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required TextEditingController ctrl,
+    required String hint,
+    required VoidCallback onAdd,
+    required List<Map<String, dynamic>> items,
+    required List<Map<String, dynamic>> sessionOptions,
+    required Function(String id) onDelete,
+    required bool isDark,
+    required Color textColor,
+    required Color subtextColor,
+    required Color borderColor,
+    required Color inputBg,
+  }) {
+    final deptConf = _sessionsConfig[deptKey] as Map<String, dynamic>? ?? {};
 
-  Widget _buildInputRow(TextEditingController ctrl, String hint, VoidCallback onAdd, Color btnColor, RoleThemeData t) {
-    return Row(
-      children: [
-        Expanded(
-          child: TextField(
-            controller: ctrl,
-            style: TextStyle(color: t.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: hint,
-              hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
-              filled: true,
-              fillColor: t.bgCardAlt,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Department Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(fontSize: 11, color: subtextColor),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // ── Department Dedicated Shift Timings & Allowance Panel ──
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.25)),
             ),
-            onSubmitted: (_) => onAdd(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.schedule_rounded, size: 16, color: color),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Operational Hours & Shift Timings',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        'Department Specific',
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                ...sessionOptions.map((opt) {
+                  final sKey = opt['key'] as String;
+                  final sLabel = opt['label'] as String;
+                  final sIcon = opt['icon'] as IconData? ?? Icons.schedule_rounded;
+                  final sColor = opt['color'] as Color? ?? color;
+
+                  final sConf = deptConf[sKey] as Map<String, dynamic>? ?? {
+                    'enabled': sKey != 'night',
+                    'openTime': '08:00',
+                    'closeTime': '14:00',
+                  };
+                  final isEnabled = sConf['enabled'] == true;
+                  final openTime = sConf['openTime']?.toString() ?? '08:00';
+                  final closeTime = sConf['closeTime']?.toString() ?? '14:00';
+
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isEnabled ? sColor.withValues(alpha: 0.35) : borderColor,
+                        width: isEnabled ? 1.0 : 0.6,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(sIcon, size: 16, color: sColor),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: Text(
+                            sLabel,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : textColor,
+                            ),
+                          ),
+                        ),
+
+                        // Allowed Switch
+                        Transform.scale(
+                          scale: 0.75,
+                          child: Switch(
+                            value: isEnabled,
+                            activeTrackColor: sColor.withValues(alpha: 0.5),
+                            activeThumbColor: sColor,
+                            onChanged: (val) {
+                              setState(() {
+                                if (deptConf[sKey] is! Map) {
+                                  deptConf[sKey] = <String, dynamic>{};
+                                }
+                                (deptConf[sKey] as Map)['enabled'] = val;
+                                if (deptKey == 'dispensary') {
+                                  if (_sessionsConfig[sKey] is Map) {
+                                    (_sessionsConfig[sKey] as Map)['enabled'] = val;
+                                  }
+                                }
+                              });
+                            },
+                          ),
+                        ),
+
+                        if (isEnabled) ...[
+                          const SizedBox(width: 8),
+                          // Open Time Picker
+                          InkWell(
+                            onTap: () => _pickDeptTime(context, deptKey, sKey, 'openTime'),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: borderColor),
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'Open: ${_formatTimeStr(openTime)}',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit_calendar_rounded, size: 12, color: sColor),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text('-', style: TextStyle(color: subtextColor, fontWeight: FontWeight.bold)),
+                          const SizedBox(width: 6),
+
+                          // Close Time Picker
+                          InkWell(
+                            onTap: () => _pickDeptTime(context, deptKey, sKey, 'closeTime'),
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: borderColor),
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'Close: ${_formatTimeStr(closeTime)}',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textColor),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.edit_calendar_rounded, size: 12, color: sColor),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          const SizedBox(width: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'DISALLOWED / CLOSED',
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        ElevatedButton.icon(
-          onPressed: onAdd,
-          icon: const Icon(Icons.add_rounded, size: 16),
-          label: const Text('Add'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: btnColor,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+
+          if (deptKey == 'dispensary') ...[
+            const SizedBox(height: 14),
+            _buildVitalsTokenToggle(
+              isDark: isDark,
+              borderColor: borderColor,
+              subtextColor: subtextColor,
+            ),
+          ],
+
+          if (deptKey == 'madrassa') ...[
+            const SizedBox(height: 14),
+            _buildMadrassaMoneyFactorToggle(
+              isDark: isDark,
+              borderColor: borderColor,
+              subtextColor: subtextColor,
+            ),
+          ],
+
+          const SizedBox(height: 16),
+
+          // ── Registered Facility Desks & Individual Schedule Overrides ──
+          Text(
+            'Registered Units & Sub-Facility Desks',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textColor),
           ),
-        ),
-      ],
+          const SizedBox(height: 8),
+
+          // Input Row
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: ctrl,
+                  style: TextStyle(color: textColor, fontSize: 13),
+                  decoration: InputDecoration(
+                    hintText: hint,
+                    hintStyle: TextStyle(color: subtextColor, fontSize: 12),
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
+                  ),
+                  onSubmitted: (_) => onAdd(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: onAdd,
+                icon: const Icon(Icons.add_rounded, size: 16),
+                label: const Text('Add Desk/Unit'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: color,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Facility Items List
+          if (items.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                'No units or desks registered for this department yet.',
+                style: TextStyle(fontSize: 12, color: subtextColor, fontStyle: FontStyle.italic),
+              ),
+            )
+          else
+            ...items.map((facility) {
+              final id = facility['id']?.toString() ?? '';
+              final name = facility['name']?.toString() ?? id;
+              final activeSessions = (facility['sessions'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+              final customTimings = facility['sessionTimings'] as Map<String, dynamic>? ?? {};
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: color.withValues(alpha: 0.3)),
+                          ),
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : color,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'ID: $id',
+                          style: TextStyle(fontSize: 11, color: subtextColor),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                          tooltip: 'Remove unit',
+                          onPressed: () => onDelete(id),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            'Active Sessions: ',
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: subtextColor),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: sessionOptions.map((opt) {
+                              final sKey = opt['key'] as String;
+                              final sLabel = opt['label'] as String;
+                              final isSelected = activeSessions.contains(sKey);
+
+                              // Effective timing for this session
+                              final deptSessConf = deptConf[sKey] as Map<String, dynamic>? ?? {};
+                              final defaultOpen = deptSessConf['openTime']?.toString() ?? '08:00';
+                              final defaultClose = deptSessConf['closeTime']?.toString() ?? '14:00';
+
+                              final customSess = customTimings[sKey] as Map<String, dynamic>? ?? {};
+                              final effOpen = customSess['openTime']?.toString() ?? defaultOpen;
+                              final effClose = customSess['closeTime']?.toString() ?? defaultClose;
+
+                              return FilterChip(
+                                label: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(sLabel),
+                                    if (isSelected) ...[
+                                      const SizedBox(width: 6),
+                                      InkWell(
+                                        onTap: () async {
+                                          await _pickFacilityCustomTime(context, facility, sKey, 'openTime', defaultOpen);
+                                          if (mounted) {
+                                            await _pickFacilityCustomTime(context, facility, sKey, 'closeTime', defaultClose);
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: color.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                '${_formatTimeStr(effOpen)} - ${_formatTimeStr(effClose)}',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isDark ? Colors.white70 : color,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 3),
+                                              Icon(Icons.edit_rounded, size: 10, color: isDark ? Colors.white70 : color),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                selected: isSelected,
+                                selectedColor: color.withValues(alpha: 0.25),
+                                checkmarkColor: isDark ? Colors.white : color,
+                                labelStyle: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                  color: isSelected
+                                      ? (isDark ? Colors.white : color)
+                                      : subtextColor,
+                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                side: BorderSide(
+                                  color: isSelected ? color : borderColor,
+                                  width: isSelected ? 1.2 : 0.8,
+                                ),
+                                backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                                onSelected: (_) => _toggleSession(facility, sKey),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 
-  Widget _buildChips(List<Map<String, String>> items, Color color, Function(String id) onDelete, RoleThemeData t) {
-    if (items.isEmpty) {
-      return Text('No sub-facilities added', style: TextStyle(fontSize: 11, color: t.textTertiary, fontStyle: FontStyle.italic));
-    }
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: items.map((item) {
-        return Chip(
-          backgroundColor: color.withValues(alpha: 0.12),
-          side: BorderSide(color: color.withValues(alpha: 0.3)),
-          label: Text(item['name']!, style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600)),
-          deleteIcon: const Icon(Icons.cancel_rounded, size: 16),
-          deleteIconColor: Colors.redAccent,
-          onDeleted: () => onDelete(item['id']!),
-        );
-      }).toList(),
+  Widget _buildVitalsTokenToggle({
+    required bool isDark,
+    required Color borderColor,
+    required Color subtextColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _allowVitalsToken
+            ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
+            : (isDark ? const Color(0xFF450A0A).withValues(alpha: 0.35) : const Color(0xFFFEF2F2)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _allowVitalsToken ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _allowVitalsToken ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              _allowVitalsToken ? Icons.monitor_heart : Icons.heart_broken_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Vitals-Only Token Issuance (Receptionist)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _allowVitalsToken
+                            ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                            : const Color(0xFFEF4444).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _allowVitalsToken ? 'ALLOWED 🟢' : 'DISALLOWED 🔴',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: _allowVitalsToken ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _allowVitalsToken
+                      ? 'Allow vitals token: Receptionist can issue dedicated Vitals-Only inspection tokens in addition to regular tokens.'
+                      : 'Disallow vitals token: The vitals token button will be hidden from the receptionist screen. Only regular visit tokens can be issued.',
+                  style: TextStyle(fontSize: 11, color: subtextColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: _allowVitalsToken,
+            activeColor: const Color(0xFF10B981),
+            inactiveThumbColor: Colors.red.shade400,
+            inactiveTrackColor: Colors.red.shade100,
+            onChanged: (val) {
+              setState(() {
+                _allowVitalsToken = val;
+                if (_sessionsConfig['dispensary'] is Map) {
+                  (_sessionsConfig['dispensary'] as Map)['allowVitalsToken'] = val;
+                }
+                _sessionsConfig['allowVitalsToken'] = val;
+              });
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMadrassaMoneyFactorToggle({
+    required bool isDark,
+    required Color borderColor,
+    required Color subtextColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _madrassaFeeEnabled
+            ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
+            : (isDark ? const Color(0xFF451A03).withValues(alpha: 0.35) : const Color(0xFFFFFBEB)),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: _madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              _madrassaFeeEnabled ? Icons.payments_rounded : Icons.money_off_rounded,
+              color: Colors.white,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'Madrassa Financial System & Fees (Money Factor)',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: _madrassaFeeEnabled ? const Color(0xFF10B981).withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _madrassaFeeEnabled ? 'FEES ACTIVE' : 'FREE / NO FEES',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: _madrassaFeeEnabled ? const Color(0xFF059669) : const Color(0xFFD97706),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _madrassaFeeEnabled
+                      ? 'Keep money factor active: Student monthly dues, base tuition, fee deduction rewards, and payment cards operate as standard across Parent, Teacher, and Principal screens.'
+                      : 'Remove money factor: All student fees, monthly dues, discounts, and payment records are completely stopped and hidden across Parent, Teacher, and Principal screens (100% Free / Non-Fee Facility).',
+                  style: TextStyle(fontSize: 11, color: subtextColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            value: _madrassaFeeEnabled,
+            activeColor: const Color(0xFF10B981),
+            onChanged: (val) {
+              setState(() {
+                _madrassaFeeEnabled = val;
+                if (_sessionsConfig['madrassa'] is Map) {
+                  (_sessionsConfig['madrassa'] as Map)['enableFees'] = val;
+                }
+              });
+            },
+          ),
+        ],
+      ),
     );
   }
 }

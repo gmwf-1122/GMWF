@@ -5,16 +5,19 @@
 // dashboard_widgets.dart don't need full rewrites — this only reads their
 // public API (BranchStats, DS, fmtNum, fmtPKR, RoleThemeData).
 
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lottie/lottie.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../models/module_registry.dart';
 import '../services/home_dashboard_service.dart';
 import 'dashboard_widgets.dart';
+import '../pages/branches.dart';
 import '../pages/office/finance_page.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -23,6 +26,8 @@ import '../pages/school/utils/school_local_storage.dart';
 import '../pages/school/school_dashboard.dart';
 import '../pages/users.dart';
 import '../providers/branches_providers.dart';
+import 'app_skeleton.dart';
+import 'firestore_quota_monitor_widget.dart';
 
 // ════════════════════════════════════════════════════════════════════════
 // 1. Compact stat tile w/ "vs yesterday" delta
@@ -135,7 +140,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                     : (isDark
                         ? Colors.white.withValues(alpha: 0.14)
                         : Colors.white.withValues(alpha: 0.65)),
-                width: _hov ? 1.4 : 1.0,
+                width: 1.0,
               ),
             ),
             child: Stack(
@@ -530,7 +535,8 @@ class HomeBranchRow {
   final String name;
   final BranchStats today;
   final BranchStats yesterday;
-  const HomeBranchRow({required this.id, required this.name, required this.today, required this.yesterday});
+  final int weeklyPatients;
+  const HomeBranchRow({required this.id, required this.name, required this.today, required this.yesterday, this.weeklyPatients = 0});
 }
 
 class HomeBranchPerformanceTable extends StatelessWidget {
@@ -1064,15 +1070,21 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFF59E0B).withValues(alpha: _hov ? (isDark ? 0.40 : 0.28) : (isDark ? 0.22 : 0.12)),
-                blurRadius: _hov ? 28 : 18,
-                spreadRadius: _hov ? 2 : 0,
-                offset: Offset(0, _hov ? 10 : 5),
+                color: const Color(0xFFF59E0B).withValues(
+                  alpha: _hov
+                      ? (isDark ? 0.35 : 0.22)
+                      : (isDark ? 0.18 : 0.12),
+                ),
+                blurRadius: _hov ? 24 : 14,
+                spreadRadius: _hov ? 1 : 0,
+                offset: Offset(0, _hov ? 8 : 4),
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
+                color: isDark
+                    ? Colors.black.withValues(alpha: 0.45)
+                    : const Color(0xFF0F172A).withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
@@ -1089,23 +1101,21 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                     end: Alignment.bottomRight,
                     colors: isDark
                         ? [
-                            const Color(0xFF451A03).withValues(alpha: 0.90),
-                            const Color(0xFF1E293B).withValues(alpha: 0.92),
-                            const Color(0xFF0F172A).withValues(alpha: 0.96),
+                            const Color(0xFF1E293B).withValues(alpha: 0.95),
+                            const Color(0xFF0F172A).withValues(alpha: 0.98),
                           ]
                         : [
                             const Color(0xFFFFFBEB).withValues(alpha: 0.98),
-                            const Color(0xFFFEF3C7).withValues(alpha: 0.92),
                             Colors.white.withValues(alpha: 0.98),
                           ],
                   ),
                   border: Border.all(
                     color: _hov
-                        ? const Color(0xFFF59E0B).withValues(alpha: 0.70)
+                        ? const Color(0xFFF59E0B).withValues(alpha: 0.85)
                         : (isDark
-                            ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
-                            : const Color(0xFFF59E0B).withValues(alpha: 0.40)),
-                    width: _hov ? 1.5 : 1.0,
+                            ? const Color(0xFFF59E0B).withValues(alpha: 0.38)
+                            : const Color(0xFFF59E0B).withValues(alpha: 0.50)),
+                    width: _hov ? 1.5 : 1.2,
                   ),
                 ),
                 child: Stack(
@@ -1122,7 +1132,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
                               colors: [
-                                const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.22),
+                                const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.30 : 0.18),
                                 const Color(0xFFF59E0B).withValues(alpha: 0.0),
                               ],
                             ),
@@ -1145,12 +1155,19 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                   Row(
                                     children: [
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
                                           gradient: const LinearGradient(
                                             colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
                                           ),
                                           borderRadius: BorderRadius.circular(12),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: const Color(0xFFF59E0B).withValues(alpha: 0.30),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
                                         ),
                                         child: const Row(
                                           mainAxisSize: MainAxisSize.min,
@@ -1188,45 +1205,38 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            // Floating 3D Golden trophy badge
+                            // Floating 3D Golden trophy badge (themed glass pedestal)
                             AnimatedRotation(
                               turns: _hov ? 0.04 : 0,
                               duration: const Duration(milliseconds: 260),
                               curve: Curves.easeOutBack,
                               child: Container(
-                                padding: const EdgeInsets.all(10),
+                                width: 52,
+                                height: 52,
+                                padding: const EdgeInsets.all(4),
                                 decoration: BoxDecoration(
-                                  gradient: const LinearGradient(
-                                    colors: [Color(0xFFFFFBEB), Color(0xFFFEF3C7)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  ),
+                                  color: isDark
+                                      ? const Color(0xFF0F172A).withValues(alpha: 0.85)
+                                      : const Color(0xFFFFFBEB),
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: const Color(0xFFF59E0B).withValues(alpha: 0.55),
+                                    color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.55 : 0.70),
                                     width: 1.5,
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
-                                      blurRadius: 12,
-                                      offset: const Offset(0, 4),
+                                      color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.25),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
                                     ),
                                   ],
                                 ),
-                                child: ShaderMask(
-                                  shaderCallback: (bounds) => const LinearGradient(
-                                    colors: [
-                                      Color(0xFFFFF176),
-                                      Color(0xFFF59E0B),
-                                      Color(0xFFB45309),
-                                    ],
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                  ).createShader(bounds),
-                                  child: const Icon(
+                                child: Lottie.asset(
+                                  'assets/animations/Trophy.json',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => const Icon(
                                     Icons.emoji_events_rounded,
-                                    color: Colors.white,
+                                    color: Color(0xFFF59E0B),
                                     size: 28,
                                   ),
                                 ),
@@ -1241,7 +1251,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                             gradient: LinearGradient(
                               colors: [
                                 Colors.transparent,
-                                isDark ? Colors.white.withValues(alpha: 0.18) : const Color(0xFFF59E0B).withValues(alpha: 0.25),
+                                isDark ? Colors.white.withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.30),
                                 Colors.transparent,
                               ],
                             ),
@@ -1254,18 +1264,18 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
                               _metricRow(Icons.payments_rounded, 'Revenue', fmtPKR(widget.revenue), isDark, valueColor: const Color(0xFF10B981)),
-                              _metricRow(Icons.volunteer_activism_rounded, 'Donations', fmtPKR(widget.donations), isDark),
-                              _metricRow(Icons.people_alt_rounded, 'Patients', widget.patients.toString(), isDark),
+                              _metricRow(Icons.volunteer_activism_rounded, 'Donations', fmtPKR(widget.donations), isDark, valueColor: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
+                              _metricRow(Icons.people_alt_rounded, 'Patients', widget.patients.toString(), isDark, valueColor: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
                               _metricRow(
-                                isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
+                                isUp ? Icons.trending_up_rounded : (hasGrowth ? Icons.trending_down_rounded : Icons.trending_up_rounded),
                                 'Growth',
                                 hasGrowth
                                     ? '${isUp ? '+' : ''}${widget.growthPct!.toStringAsFixed(0)}% vs yesterday'
-                                    : 'No prev. data',
+                                    : (widget.revenue > 0 || widget.patients > 0 ? '+100% (Active Today)' : 'Steady (0%)'),
                                 isDark,
                                 valueColor: hasGrowth
                                     ? (isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444))
-                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                    : (widget.revenue > 0 || widget.patients > 0 ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
                               ),
                             ],
                           ),
@@ -1286,17 +1296,17 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
       decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.90),
+        color: isDark ? const Color(0xFF0F172A).withValues(alpha: 0.60) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFFDE68A).withValues(alpha: 0.75),
-          width: 0.8,
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFFDE68A).withValues(alpha: 0.85),
+          width: 0.9,
         ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.06),
+                  color: const Color(0xFF0F172A).withValues(alpha: 0.03),
                   blurRadius: 4,
                   offset: const Offset(0, 1.5),
                 ),
@@ -1906,7 +1916,7 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
             children: [
               Icon(Icons.show_chart_rounded, size: 28, color: DS.neutral.withValues(alpha: 0.5)),
               const SizedBox(height: 8),
-              const Text('Weekly Revenue & Token Trend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: DS.neutral)),
+              const Text('Monthly Revenue & Token Trend', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: DS.neutral)),
               const SizedBox(height: 4),
               Text('Syncing trend data...', style: TextStyle(fontSize: 11, color: DS.neutral.withValues(alpha: 0.6))),
             ],
@@ -1952,10 +1962,10 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Weekly Progress Trends',
+                    Text('Monthly Progress Trends',
                         style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                     const SizedBox(height: 2),
-                    const Text('Metrics for the last 5 weeks',
+                    const Text('Metrics for the last 5 months',
                         style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w500)),
                   ],
                 ),
@@ -1968,7 +1978,7 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'Week ending ${DateFormat('d MMM').format(pt.date)}',
+                          DateFormat('MMM yyyy').format(pt.date),
                           style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 4),
@@ -2310,6 +2320,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
           name: branchName,
           today: r.today,
           yesterday: r.yesterday,
+          weeklyPatients: r.weeklyPatients,
         );
       } else {
         final existing = branchMap[branchKey]!;
@@ -2318,6 +2329,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
           name: branchName,
           today: combineBranchStats([existing.today, r.today]),
           yesterday: combineBranchStats([existing.yesterday, r.yesterday]),
+          weeklyPatients: existing.weeklyPatients + r.weeklyPatients,
         );
       }
     }
@@ -2343,7 +2355,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Patients by Branch (Today)',
+          Text('Patients by Branch (Last 7 Days)',
               style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           if (sortedRows.isEmpty)
@@ -2360,7 +2372,9 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
                   final row = sortedRows[i];
-                  final val = row.today.tokens;
+                    final val = row.weeklyPatients > 0
+                      ? row.weeklyPatients
+                      : row.today.tokens;
                   final double pct = val / maxTokens;
                   
                   return Row(
@@ -2598,14 +2612,14 @@ class QuickActionsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final List<Map<String, dynamic>> targetActions = [
-      {'id': 'branches', 'label': 'Branches Summary', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
+      {'id': 'branches', 'label': 'Branches', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
       {'id': 'employee_attendance', 'label': 'Staff Attendance', 'icon': Icons.badge_outlined, 'color': const Color(0xFF6366F1)},
       {'id': 'madrassa_attendance', 'label': 'Madrassa Attend.', 'icon': Icons.how_to_reg_rounded, 'color': const Color(0xFFEC4899)},
       {'id': 'madrassa_students', 'label': 'Madrassa Students', 'icon': Icons.groups_rounded, 'color': const Color(0xFF14B8A6)},
       {'id': 'school_attendance', 'label': 'School Students', 'icon': Icons.school_rounded, 'color': const Color(0xFF10B981)},
       {'id': 'school_teacher_attendance', 'label': 'School Faculty', 'icon': Icons.co_present_rounded, 'color': const Color(0xFF8B5CF6)},
       {'id': 'office_boy', 'label': 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': const Color(0xFFF59E0B)},
-      {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhawaan Stock', 'icon': Icons.inventory_2_outlined, 'color': const Color(0xFFD97706)},
+      {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhwaan', 'icon': Icons.inventory_2_outlined, 'color': const Color(0xFFD97706)},
       {'id': 'inventory', 'label': 'Med Inventory', 'icon': Icons.medication_liquid_rounded, 'color': const Color(0xFF0284C7)},
       {'id': 'finance', 'label': 'Finance & HR', 'icon': Icons.monetization_on_rounded, 'color': const Color(0xFFEF4444)},
       {'id': 'donations', 'label': 'Add Donation', 'icon': Icons.volunteer_activism_rounded, 'color': const Color(0xFF059669)},
@@ -2639,10 +2653,13 @@ class QuickActionsRow extends StatelessWidget {
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final crossAxisCount = MediaQuery.of(context).size.width > 900 ? 6 : (MediaQuery.of(context).size.width > 600 ? 4 : 3);
+          final w = constraints.maxWidth;
+          final crossAxisCount = (w / 95).floor().clamp(2, 6);
           final rowCount = (activeActions.length / crossAxisCount).ceil();
-          final availableHeight = constraints.maxHeight - 36;
-          final calcExtent = ((availableHeight - (rowCount - 1) * 8) / rowCount).clamp(54.0, 84.0);
+          final availableHeight = constraints.maxHeight - 38;
+          final calcExtent = (rowCount > 0 && availableHeight > 0)
+              ? ((availableHeight - (rowCount - 1) * 8) / rowCount).clamp(62.0, 95.0)
+              : 72.0;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -2744,27 +2761,39 @@ class QuickActionsRow extends StatelessWidget {
 
                     return InkWell(
                       onTap: () => onOpenModule(module),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                         decoration: BoxDecoration(
-                          color: color.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: color.withValues(alpha: 0.15)),
+                          color: isDark ? color.withValues(alpha: 0.12) : color.withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isDark ? color.withValues(alpha: 0.3) : color.withValues(alpha: 0.22),
+                            width: 1.2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.05),
+                              blurRadius: 4,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
                         ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(action['icon'] as IconData, color: color, size: 22),
                             const SizedBox(height: 4),
-                            Flexible(
-                              child: Text(
-                                action['label'] as String,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: color, fontSize: 10.5, fontWeight: FontWeight.w800, height: 1.1),
+                            Text(
+                              action['label'] as String,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: isDark ? (Color.lerp(color, Colors.white, 0.25) ?? color) : color,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                height: 1.15,
                               ),
                             ),
                           ],
@@ -2783,8 +2812,509 @@ class QuickActionsRow extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// 8b. Branch Manager Appreciation Trophy Banner (Rank #1, #2, #3)
+// ════════════════════════════════════════════════════════════════════════
+
+class BranchManagerTrophyBanner extends StatefulWidget {
+  final int rank; // 1 = Top, 2 = 2nd Best, 3 = 3rd Best
+  final String branchName;
+  final bool isDark;
+  final VoidCallback onDismiss;
+
+  const BranchManagerTrophyBanner({
+    super.key,
+    required this.rank,
+    required this.branchName,
+    required this.isDark,
+    required this.onDismiss,
+  });
+
+  @override
+  State<BranchManagerTrophyBanner> createState() => _BranchManagerTrophyBannerState();
+}
+
+class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _animCtrl;
+  late Animation<double> _fadeAnim;
+  late Animation<Offset> _slideAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    _fadeAnim = CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut);
+    _slideAnim = Tween<Offset>(begin: const Offset(0, -0.15), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
+
+    _animCtrl.forward();
+  }
+
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  void _handleManualClose() {
+    _animCtrl.reverse().then((_) {
+      if (mounted) widget.onDismiss();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rank = widget.rank;
+    final isTop = rank == 1;
+    final isSecond = rank == 2;
+
+    final title = isTop
+        ? '🏆 Congratulations! You were the #1 TOP BRANCH Yesterday!'
+        : (isSecond
+            ? '🥈 Outstanding Achievement! #2 Best Branch Yesterday!'
+            : '🥉 Great Work! #3 Top Performing Branch Yesterday!');
+
+    final subtitle = isTop
+        ? 'Amazing performance by ${widget.branchName}! Your branch served the most patients & impact.'
+        : (isSecond
+            ? 'Exceptional effort by ${widget.branchName}, ranking 2nd overall across all branches!'
+            : 'Proud of ${widget.branchName} team for securing a top-3 spot in yesterday\'s performance!');
+
+    final goldColor = isTop
+        ? const Color(0xFFF59E0B)
+        : (isSecond ? const Color(0xFF60A5FA) : const Color(0xFFFB923C));
+
+    final bannerBg = widget.isDark
+        ? const Color(0xFF1E293B)
+        : (isTop ? const Color(0xFFFFFBEB) : const Color(0xFFF8FAFC));
+
+    final bannerBorder = isTop
+        ? const Color(0xFFF59E0B)
+        : (isSecond ? const Color(0xFF93C5FD) : const Color(0xFFFDBA74));
+
+    return FadeTransition(
+      opacity: _fadeAnim,
+      child: SlideTransition(
+        position: _slideAnim,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: bannerBg,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: bannerBorder.withValues(alpha: 0.7), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: goldColor.withValues(alpha: widget.isDark ? 0.22 : 0.12),
+                blurRadius: 18,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Trophy Animation with Gold (#1), Silver (#2), Bronze (#3) Color Matrix
+              SizedBox(
+                width: 58,
+                height: 58,
+                child: isTop
+                    ? Lottie.asset(
+                        'assets/animations/Trophy.json',
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Icon(
+                          Icons.emoji_events_rounded,
+                          size: 38,
+                          color: goldColor,
+                        ),
+                      )
+                    : (isSecond
+                        ? ColorFiltered(
+                            colorFilter: const ColorFilter.matrix(<double>[
+                              0.33, 0.33, 0.33, 0, 50,
+                              0.33, 0.33, 0.33, 0, 55,
+                              0.33, 0.33, 0.33, 0, 70,
+                              0,    0,    0,    1, 0,
+                            ]),
+                            child: Lottie.asset(
+                              'assets/animations/Trophy.json',
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Icon(
+                                Icons.workspace_premium_rounded,
+                                size: 38,
+                                color: goldColor,
+                              ),
+                            ),
+                          )
+                        : ColorFiltered(
+                            colorFilter: const ColorFilter.matrix(<double>[
+                              0.85, 0.20, 0.00, 0, 40,
+                              0.40, 0.35, 0.00, 0, 10,
+                              0.10, 0.10, 0.30, 0, 0,
+                              0,    0,    0,    1, 0,
+                            ]),
+                            child: Lottie.asset(
+                              'assets/animations/Trophy.json',
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Icon(
+                                Icons.military_tech_rounded,
+                                size: 38,
+                                color: goldColor,
+                              ),
+                            ),
+                          )),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w900,
+                        color: goldColor,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: widget.isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.close_rounded, size: 18),
+                color: widget.isDark ? Colors.white54 : Colors.grey.shade600,
+                tooltip: 'Close',
+                onPressed: _handleManualClose,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// 8c. Celebratory Startup Appreciation Modal Dialog
+// ════════════════════════════════════════════════════════════════════════
+
+class AppreciationTrophyDialog extends StatelessWidget {
+  final int rank;
+  final String branchName;
+  final bool isDark;
+
+  const AppreciationTrophyDialog({
+    super.key,
+    required this.rank,
+    required this.branchName,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isTop = rank == 1;
+    final isSecond = rank == 2;
+
+    final title = isTop
+        ? '🏆 Congratulations!'
+        : (isSecond ? '🥈 Outstanding Achievement!' : '🥉 Great Work!');
+
+    final heading = isTop
+        ? '#1 TOP PERFORMING BRANCH'
+        : (isSecond ? '#2 OUTSTANDING SILVER BRANCH' : '#3 BRONZE PERFORMING BRANCH');
+
+    final message = isTop
+        ? 'Congratulations to the entire $branchName team for delivering exceptional community care and ranking #1 across all GMWF branches yesterday!'
+        : (isSecond
+            ? 'Exceptional effort by $branchName, securing the 2nd highest performance rank across all branches yesterday! Keep up the tremendous work!'
+            : 'Fantastic dedication by $branchName team for securing a spot in the top 3 performing branches yesterday!');
+
+    // Separate, distinct theme colors per position:
+    // Rank 1: Rich Golden Amber
+    // Rank 2: Silver / Sky Blue
+    // Rank 3: Warm Bronze / Copper
+    final primaryColor = isTop
+        ? const Color(0xFFF59E0B)
+        : (isSecond ? const Color(0xFF0284C7) : const Color(0xFFEA580C));
+
+    final badgeBg = isTop
+        ? const Color(0xFFFEF3C7)
+        : (isSecond ? const Color(0xFFE0F2FE) : const Color(0xFFFFEDD5));
+
+    final cardBg = isDark
+        ? (isTop ? const Color(0xFF1E293B) : (isSecond ? const Color(0xFF0F172A) : const Color(0xFF1C1917)))
+        : (isTop ? const Color(0xFFFFFBEB) : (isSecond ? const Color(0xFFF0F9FF) : const Color(0xFFFFF7ED)));
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: EdgeInsets.zero,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => Navigator.of(context).pop(),
+        child: SizedBox(
+          width: MediaQuery.of(context).size.width,
+          height: MediaQuery.of(context).size.height,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 1. Main Appreciation Dialog Modal Card
+              GestureDetector(
+                onTap: () {}, // Prevent taps on modal card from dismissing
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  margin: const EdgeInsets.symmetric(horizontal: 24),
+                  padding: const EdgeInsets.all(26),
+                  decoration: BoxDecoration(
+                    color: cardBg,
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(
+                      color: primaryColor.withValues(alpha: isDark ? 0.55 : 0.70),
+                      width: 2.2,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: primaryColor.withValues(alpha: isDark ? 0.40 : 0.25),
+                        blurRadius: 36,
+                        spreadRadius: 3,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Trophy Animation - Radiant Gold (#1), Platinum Silver (#2), Rich Bronze (#3)
+                      SizedBox(
+                        width: 130,
+                        height: 130,
+                        child: isTop
+                            ? Lottie.asset(
+                                'assets/animations/Trophy.json',
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => Icon(
+                                  Icons.emoji_events_rounded,
+                                  size: 80,
+                                  color: primaryColor,
+                                ),
+                              )
+                            : (isSecond
+                                ? ColorFiltered(
+                                    colorFilter: const ColorFilter.matrix(<double>[
+                                      0.33, 0.33, 0.33, 0, 50,
+                                      0.33, 0.33, 0.33, 0, 55,
+                                      0.33, 0.33, 0.33, 0, 70,
+                                      0,    0,    0,    1, 0,
+                                    ]),
+                                    child: Lottie.asset(
+                                      'assets/animations/Trophy.json',
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Icon(
+                                        Icons.workspace_premium_rounded,
+                                        size: 80,
+                                        color: primaryColor,
+                                      ),
+                                    ),
+                                  )
+                                : ColorFiltered(
+                                    colorFilter: const ColorFilter.matrix(<double>[
+                                      0.85, 0.20, 0.00, 0, 40,
+                                      0.40, 0.35, 0.00, 0, 10,
+                                      0.10, 0.10, 0.30, 0, 0,
+                                      0,    0,    0,    1, 0,
+                                    ]),
+                                    child: Lottie.asset(
+                                      'assets/animations/Trophy.json',
+                                      fit: BoxFit.contain,
+                                      errorBuilder: (_, __, ___) => Icon(
+                                        Icons.military_tech_rounded,
+                                        size: 80,
+                                        color: primaryColor,
+                                      ),
+                                    ),
+                                  )),
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4.5),
+                        decoration: BoxDecoration(
+                          color: isDark ? primaryColor.withValues(alpha: 0.18) : badgeBg,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: primaryColor.withValues(alpha: 0.45)),
+                        ),
+                        child: Text(
+                          heading,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                            color: primaryColor,
+                            letterSpacing: 0.8,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          letterSpacing: -0.5,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        branchName,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: primaryColor,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        message,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.celebration_rounded, size: 18, color: Colors.white),
+                          label: const Text(
+                            'View Performance',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                            elevation: 4,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 2. Party celebration animation ON TOP OF THE DIALOG — sized to fit elegantly around modal
+              if (isTop)
+                IgnorePointer(
+                  child: SizedBox(
+                    width: 520,
+                    height: 520,
+                    child: Lottie.asset(
+                      'assets/animations/party_celebration.json',
+                      fit: BoxFit.contain,
+                      repeat: true,
+                      errorBuilder: (_, __, ___) => Lottie.asset(
+                        'assets/animations/Party  Celebration.json',
+                        fit: BoxFit.contain,
+                        repeat: true,
+                        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // 9. Snapshot Dashboard Data Model and Loader
 // ════════════════════════════════════════════════════════════════════════
+
+Map<String, int> _computeLocalDashboardAuxCounts() {
+  final todayDateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+  int empPresentCount = 0;
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+      final box = Hive.box(LocalStorageService.attendanceBox);
+      for (final val in box.values) {
+        if (val is Map) {
+          final d = val['date']?.toString();
+          if (d == todayDateKey) {
+            final status = val['status']?.toString().toLowerCase();
+            if (status == 'present' || status == 'late' || status == 'overtime') {
+              empPresentCount++;
+            }
+          }
+        }
+      }
+    }
+  } catch (_) {}
+
+  int studentPresentCount = 0;
+  int teacherPresentCount = 0;
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.schoolLogsBox)) {
+      studentPresentCount = SchoolLocalStorage.getPresentStudentsCount('all', todayDateKey);
+      teacherPresentCount = SchoolLocalStorage.getPresentTeachersCount('all', todayDateKey);
+    }
+  } catch (_) {}
+
+  int onlineUsersCount = 1;
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+      final uBox = Hive.box(LocalStorageService.usersBox);
+      int count = 0;
+      final now = DateTime.now();
+      for (final u in uBox.values) {
+        if (u is Map) {
+          final isOnline = u['isOnline'] == true;
+          final rawDate = u['lastOnlineAt'] ?? u['lastLoginAt'] ?? u['updatedAt'] ?? u['lastSeen'];
+          bool recent = false;
+          if (rawDate is String && rawDate.isNotEmpty) {
+            final dt = DateTime.tryParse(rawDate);
+            if (dt != null && now.difference(dt).inMinutes <= 15) recent = true;
+          } else if (rawDate != null && rawDate.runtimeType.toString().contains('Timestamp')) {
+            try {
+              final dt = (rawDate as dynamic).toDate() as DateTime;
+              if (now.difference(dt).inMinutes <= 15) recent = true;
+            } catch (_) {}
+          }
+          if (isOnline || recent) count++;
+        }
+      }
+      if (count > 0) onlineUsersCount = count;
+    }
+  } catch (_) {}
+
+  return {
+    'emp': empPresentCount,
+    'students': studentPresentCount,
+    'teachers': teacherPresentCount,
+    'online': onlineUsersCount,
+  };
+}
 
 class SnapshotDashboardData {
   final BranchStats todayCombined;
@@ -2792,6 +3322,10 @@ class SnapshotDashboardData {
   final List<HomeBranchRow> branchRows;
   final List<HomeLineChartPoint> chartPoints;
   final List<RecentActivity> recentActivities;
+  final int empPresentCount;
+  final int studentPresentCount;
+  final int teacherPresentCount;
+  final int onlineUsersCount;
 
   SnapshotDashboardData({
     required this.todayCombined,
@@ -2799,6 +3333,10 @@ class SnapshotDashboardData {
     required this.branchRows,
     required this.chartPoints,
     required this.recentActivities,
+    this.empPresentCount = 0,
+    this.studentPresentCount = 0,
+    this.teacherPresentCount = 0,
+    this.onlineUsersCount = 1,
   });
 }
 
@@ -2845,6 +3383,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     
     // 2. Fetch today-vs-yesterday per branch
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
+    final weeklyPatients = await fetchWeeklyPatientCounts(branchIds);
     
     // 3. Build branch/camp rows for table
     final List<HomeBranchRow> branchRows = [];
@@ -2878,6 +3417,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           name: 'Karachi — Haji Camp Dispensary',
           today: hajiToday,
           yesterday: value.yesterday,
+          weeklyPatients: 0,
         ));
 
         branchRows.add(HomeBranchRow(
@@ -2885,6 +3425,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           name: 'Karachi — Saddar Dispensary',
           today: saddarToday,
           yesterday: value.yesterday,
+          weeklyPatients: weeklyPatients['karachi'] ?? 0,
         ));
 
         todayStatsList.add(hajiToday);
@@ -2896,6 +3437,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           name: bName,
           today: value.today,
           yesterday: value.yesterday,
+          weeklyPatients: weeklyPatients[bId] ?? 0,
         ));
         todayStatsList.add(value.today);
       }
@@ -2907,17 +3449,22 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     final yesterdayCombined = combineBranchStats(yesterdayStatsList);
     
     // 4. Fetch 7-day chart points
-    final chartPoints = await fetchChartPoints(branchIds, weeks: 5);
+    final chartPoints = await fetchChartPoints(branchIds, months: 5);
     
     // 5. Fetch recent activity (cross-branch)
     final recentActivities = await RecentActivityService.getRecentActivityAsync(limit: 15);
     
+    final auxCounts = _computeLocalDashboardAuxCounts();
     return SnapshotDashboardData(
       todayCombined: todayCombined,
       yesterdayCombined: yesterdayCombined,
       branchRows: branchRows,
       chartPoints: chartPoints,
       recentActivities: recentActivities,
+      empPresentCount: auxCounts['emp'] ?? 0,
+      studentPresentCount: auxCounts['students'] ?? 0,
+      teacherPresentCount: auxCounts['teachers'] ?? 0,
+      onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
     // Branch-locked role
@@ -2926,6 +3473,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     // 1. Fetch today vs yesterday stats for this single branch
     final todayStats = await fetchBranchStats(branchId);
     final yesterdayStats = await fetchHistoricalDayStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
+    final weeklyPatients = await fetchWeeklyPatientCounts([branchId]);
     
     // 2. Build branchRows for single branch/camps
     final List<HomeBranchRow> branchRows = [];
@@ -2943,6 +3491,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           donations: 0,
         ),
         yesterday: yesterdayStats,
+        weeklyPatients: 0,
       ));
 
       branchRows.add(HomeBranchRow(
@@ -2957,6 +3506,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           donations: todayStats.donations,
         ),
         yesterday: yesterdayStats,
+        weeklyPatients: weeklyPatients[branchId] ?? 0,
       ));
     } else {
       final bName = RecentActivityService.resolveBranchName(branchId);
@@ -2965,11 +3515,12 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
         name: bName,
         today: todayStats,
         yesterday: yesterdayStats,
+        weeklyPatients: weeklyPatients[branchId] ?? 0,
       ));
     }
     
     // 3. Fetch 7-day chart points
-    final chartPoints = await fetchChartPoints([branchId], weeks: 5);
+    final chartPoints = await fetchChartPoints([branchId], months: 5);
     
     // 4. Fetch recent activity (branch-locked)
     final recentActivities = await RecentActivityService.getRecentActivityAsync(branchId: branchId, limit: 15);
@@ -3124,21 +3675,27 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
 
     final todayCombined = combineBranchStats(todayStatsList);
     final yesterdayCombined = combineBranchStats(yesterdayStatsList);
-    final chartPoints = await fetchLocalChartPoints(branchIds, weeks: 5);
+    final chartPoints = await fetchLocalChartPoints(branchIds, months: 5);
     final recentActivities = RecentActivityService.getRecentActivity(limit: 15);
 
+    final auxCounts = _computeLocalDashboardAuxCounts();
     return SnapshotDashboardData(
       todayCombined: todayCombined,
       yesterdayCombined: yesterdayCombined,
       branchRows: branchRows,
       chartPoints: chartPoints,
       recentActivities: recentActivities,
+      empPresentCount: auxCounts['emp'] ?? 0,
+      studentPresentCount: auxCounts['students'] ?? 0,
+      teacherPresentCount: auxCounts['teachers'] ?? 0,
+      onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
     final branchId = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ? userBranchId : 'karachi';
 
     final todayStats = await fetchLocalBranchStats(branchId, DateTime.now());
     final yesterdayStats = await fetchLocalBranchStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
+    final weeklyPatients = await fetchWeeklyPatientCounts([branchId]);
 
     final List<HomeBranchRow> branchRows = [];
     if (branchId == 'karachi') {
@@ -3155,6 +3712,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
           donations: todayStats.donations,
         ),
         yesterday: yesterdayStats,
+        weeklyPatients: weeklyPatients[branchId] ?? 0,
       ));
       branchRows.add(HomeBranchRow(
         id: 'karachi_haji',
@@ -3168,6 +3726,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
           donations: 0,
         ),
         yesterday: yesterdayStats,
+        weeklyPatients: 0,
       ));
     } else {
       branchRows.add(HomeBranchRow(
@@ -3175,31 +3734,34 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
         name: RecentActivityService.resolveBranchName(branchId),
         today: todayStats,
         yesterday: yesterdayStats,
+        weeklyPatients: weeklyPatients[branchId] ?? 0,
       ));
     }
 
-    final chartPoints = await fetchLocalChartPoints([branchId], weeks: 5);
+    final chartPoints = await fetchLocalChartPoints([branchId], months: 5);
     final recentActivities = RecentActivityService.getRecentActivity(
       branchId: (branchId == 'all' || branchId == 'global') ? null : branchId,
       limit: 15,
     );
 
+    final auxCounts = _computeLocalDashboardAuxCounts();
     return SnapshotDashboardData(
       todayCombined: todayStats,
       yesterdayCombined: yesterdayStats,
       branchRows: branchRows,
       chartPoints: chartPoints,
       recentActivities: recentActivities,
+      empPresentCount: auxCounts['emp'] ?? 0,
+      studentPresentCount: auxCounts['students'] ?? 0,
+      teacherPresentCount: auxCounts['teachers'] ?? 0,
+      onlineUsersCount: auxCounts['online'] ?? 1,
     );
   }
 }
 
 final snapshotDashboardDataProvider = FutureProvider.family<SnapshotDashboardData, _DashboardUserKey>((ref, key) async {
-  try {
-    return await fetchSnapshotDashboardData(key.userData).timeout(const Duration(milliseconds: 3500));
-  } catch (e) {
-    return buildLocalSnapshotDashboardData(key.userData);
-  }
+  // Blazing fast instantaneous local snapshot data in 0-5ms on startup and restart
+  return await buildLocalSnapshotDashboardData(key.userData);
 });
 
 class HomeSnapshotDashboard extends ConsumerStatefulWidget {
@@ -3227,11 +3789,139 @@ class HomeSnapshotDashboard extends ConsumerStatefulWidget {
 class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
   _DashboardUserKey get _userKey => _DashboardUserKey.fromMap(widget.userData);
   late Future<SnapshotDashboardData> _localFuture;
+  static SnapshotDashboardData? _lastGlobalSnapshotData;
+  static final Set<String> _shownAppreciationSessionKeys = {};
+  bool _isTrophyDismissed = false;
+  bool _isAppreciationDialogShowing = false;
 
   @override
   void initState() {
     super.initState();
     _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+    _checkAndShowImmediateStartupAppreciation();
+  }
+
+  void _checkAndShowImmediateStartupAppreciation() {
+    final userKey = '${widget.userData['id'] ?? widget.userData['userId'] ?? widget.userData['username'] ?? widget.userData['branchId'] ?? 'user'}_${DateFormat('yyyyMMdd').format(DateTime.now())}';
+    if (_shownAppreciationSessionKeys.contains(userKey)) return;
+
+    final role = (widget.userData['role'] ?? widget.userData['userRole'] ?? '').toString().toLowerCase();
+    final isBranchManager = role.contains('branch') || role.contains('manager') || role.contains('admin') || role.contains('coordinator');
+    final userBranchId = (widget.userData['branchId'] ?? widget.userData['branch'] ?? widget.userData['assignedBranch'] ?? widget.userData['branch_id'] ?? '').toString().toLowerCase().trim();
+    final userName = (widget.userData['name'] ?? widget.userData['username'] ?? widget.userData['fullName'] ?? '').toString().toLowerCase().trim();
+
+    // 1. Fetch yesterday's branch rankings immediately from local stats (does not wait for heavy charts/snapshots)
+    fetchTodayVsYesterdayPerBranch(['karachi', 'gujrat', 'sialkot', 'jalalpur_jattan', 'rawalpindi']).then((statsMap) {
+      if (!mounted || _shownAppreciationSessionKeys.contains(userKey)) return;
+
+      final qualifying = statsMap.entries
+        .map((e) {
+          final aYest = e.value.yesterday;
+          final aPats = aYest.zakat + aYest.nonZakat + aYest.gmwf;
+          final aScore = aYest.donations + aYest.dispensaryRevenue + aPats * 100;
+          return MapEntry(e.key, aScore);
+        })
+        .where((e) => e.value > 0) // STRICTLY REQUIRES ACTIVITY YESTERDAY
+        .toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+
+      if (qualifying.isEmpty) return;
+
+      int userBranchRank = 0;
+      String userBranchName = '';
+
+      for (int i = 0; i < min(3, qualifying.length); i++) {
+        final bId = qualifying[i].key.toLowerCase().trim();
+        final match = (userBranchId.isNotEmpty && (bId == userBranchId || bId.contains(userBranchId) || userBranchId.contains(bId))) ||
+            (userName.contains('kapaya') && (bId.contains('karachi') || bId.contains('saddar') || bId.contains('kapaya')));
+        if (match) {
+          userBranchRank = i + 1;
+          userBranchName = RecentActivityService.resolveBranchName(bId);
+          break;
+        }
+      }
+
+      if (isBranchManager && userBranchRank > 0 && !_shownAppreciationSessionKeys.contains(userKey)) {
+        _shownAppreciationSessionKeys.add(userKey);
+        _isAppreciationDialogShowing = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: true,
+              builder: (ctx) => AppreciationTrophyDialog(
+                rank: userBranchRank,
+                branchName: userBranchName,
+                isDark: widget.t.isDarkCanvas,
+              ),
+            ).then((_) {
+              if (mounted) {
+                setState(() {
+                  _isAppreciationDialogShowing = false;
+                });
+              }
+            });
+          }
+        });
+      }
+    }).catchError((_) {});
+
+    // 2. Fallback check when _localFuture finishes if first fetch was pending
+    _localFuture.then((data) {
+      if (!mounted || _shownAppreciationSessionKeys.contains(userKey)) return;
+      int userBranchRank = 0;
+      String userBranchName = '';
+
+      if (data.branchRows.isNotEmpty) {
+        final qualifyingRows = data.branchRows.where((r) {
+          final aPats = r.yesterday.zakat + r.yesterday.nonZakat + r.yesterday.gmwf;
+          final aScore = r.yesterday.donations + r.yesterday.dispensaryRevenue + aPats * 100;
+          return aScore > 0;
+        }).toList()
+          ..sort((a, b) {
+            final aPats = a.yesterday.zakat + a.yesterday.nonZakat + a.yesterday.gmwf;
+            final bPats = b.yesterday.zakat + b.yesterday.nonZakat + b.yesterday.gmwf;
+            final aScore = a.yesterday.donations + a.yesterday.dispensaryRevenue + aPats * 100;
+            final bScore = b.yesterday.donations + b.yesterday.dispensaryRevenue + bPats * 100;
+            return bScore.compareTo(aScore);
+          });
+
+        for (int i = 0; i < min(3, qualifyingRows.length); i++) {
+          final r = qualifyingRows[i];
+          final normId = r.id.toLowerCase().trim();
+          if ((userBranchId.isNotEmpty && (normId == userBranchId || normId.contains(userBranchId) || userBranchId.contains(normId))) ||
+              (userName.contains('kapaya') && (normId.contains('karachi') || normId.contains('saddar') || normId.contains('kapaya')))) {
+            userBranchRank = i + 1;
+            userBranchName = r.name;
+            break;
+          }
+        }
+      }
+
+      if (isBranchManager && userBranchRank > 0 && !_shownAppreciationSessionKeys.contains(userKey)) {
+        _shownAppreciationSessionKeys.add(userKey);
+        _isAppreciationDialogShowing = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: true,
+              builder: (ctx) => AppreciationTrophyDialog(
+                rank: userBranchRank,
+                branchName: userBranchName,
+                isDark: widget.t.isDarkCanvas,
+              ),
+            ).then((_) {
+              if (mounted) {
+                setState(() {
+                  _isAppreciationDialogShowing = false;
+                });
+              }
+            });
+          }
+        });
+      }
+    }).catchError((_) {});
   }
 
   @override
@@ -3239,6 +3929,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.userData != widget.userData) {
       _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+      _checkAndShowImmediateStartupAppreciation();
     }
   }
 
@@ -3257,135 +3948,159 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
     final asyncData = ref.watch(snapshotDashboardDataProvider(_userKey));
 
     return asyncData.when(
-      loading: () => FutureBuilder<SnapshotDashboardData>(
-        future: _localFuture,
-        builder: (context, snapshot) {
-          final data = snapshot.data;
-          if (data != null) {
-            return _buildBodyWithData(data, hPad: hPad);
-          }
-          return _buildLoadingSkeleton(hPad, isDark);
-        },
-      ),
-      error: (err, stack) => FutureBuilder<SnapshotDashboardData>(
-        future: _localFuture,
-        builder: (context, snapshot) {
-          final data = snapshot.data;
-          if (data != null) {
-            return _buildBodyWithData(data, hPad: hPad);
-          }
-          return Padding(
-            padding: EdgeInsets.all(hPad),
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline_rounded, size: 40, color: Colors.redAccent),
-                  const SizedBox(height: 12),
-                  Text('Failed to load snapshot dashboard: $err',
-                      style: const TextStyle(color: DS.neutral, fontSize: 13), textAlign: TextAlign.center),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: _refresh,
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Retry'),
-                  ),
-                ],
+      loading: () {
+        if (_lastGlobalSnapshotData != null) {
+          return _buildBodyWithData(_lastGlobalSnapshotData!, hPad: hPad);
+        }
+        return FutureBuilder<SnapshotDashboardData>(
+          future: _localFuture,
+          builder: (context, snapshot) {
+            final data = snapshot.data;
+            if (data != null) {
+              _lastGlobalSnapshotData = data;
+              return _buildBodyWithData(data, hPad: hPad);
+            }
+            return _buildLoadingSkeleton(hPad, isDark);
+          },
+        );
+      },
+      error: (err, stack) {
+        if (_lastGlobalSnapshotData != null) {
+          return _buildBodyWithData(_lastGlobalSnapshotData!, hPad: hPad);
+        }
+        return FutureBuilder<SnapshotDashboardData>(
+          future: _localFuture,
+          builder: (context, snapshot) {
+            final data = snapshot.data;
+            if (data != null) {
+              _lastGlobalSnapshotData = data;
+              return _buildBodyWithData(data, hPad: hPad);
+            }
+            return Padding(
+              padding: EdgeInsets.all(hPad),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded, size: 40, color: Colors.redAccent),
+                    const SizedBox(height: 12),
+                    Text('Failed to load snapshot dashboard: $err',
+                        style: const TextStyle(color: DS.neutral, fontSize: 13), textAlign: TextAlign.center),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh_rounded, size: 16),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
-      ),
-      data: (data) => _buildBodyWithData(data, hPad: hPad),
+            );
+          },
+        );
+      },
+      data: (data) {
+        _lastGlobalSnapshotData = data;
+        return _buildBodyWithData(data, hPad: hPad);
+      },
     );
   }
 
   Widget _buildLoadingSkeleton(double hPad, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 180,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withValues(alpha: 0.10) : Colors.black.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(6),
+    return AppSkeleton(
+      isDark: isDark,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 180,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
                 ),
-              ),
-              const Spacer(),
-              SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(widget.t.accent),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Skeleton stat tiles row
-          SizedBox(
-            height: 110,
-            child: Row(
-              children: List.generate(
-                widget.isDesktop ? 5 : 2,
-                (index) => Expanded(
-                  child: Container(
-                    margin: EdgeInsets.only(right: index == (widget.isDesktop ? 4 : 1) ? 0 : 12),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.6) : Colors.white.withValues(alpha: 0.8),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                        color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Skeleton stat tiles row
+            SizedBox(
+              height: 110,
+              child: Row(
+                children: List.generate(
+                  widget.isDesktop ? 5 : 2,
+                  (index) => Expanded(
+                    child: Container(
+                      margin: EdgeInsets.only(right: index == (widget.isDesktop ? 4 : 1) ? 0 : 12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                              Container(
+                                width: 44,
+                                height: 16,
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const Spacer(),
+                          Container(
+                            width: 60,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            width: 80,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 20),
-          // Skeleton main chart/card area
-          Container(
-            height: 280,
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.7),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
-                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+            const SizedBox(height: 20),
+            // Skeleton main chart/card area
+            Container(
+              height: 260,
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(24),
               ),
             ),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      valueColor: AlwaysStoppedAnimation<Color>(widget.t.accent),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    'Loading live snapshot metrics...',
-                    style: TextStyle(
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -3476,120 +4191,15 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           widget.onOpenModule(module);
         }
 
-        final donationsTile = HomeStatTile(
-          label: 'Donations Today',
-          value: fmtNum(today.donations),
-          prefix: 'Rs ',
-          icon: Icons.volunteer_activism_rounded,
-          color: const Color(0xFF10B981),
-          deltaPct: yesterday.donations == 0 ? null : ((today.donations - yesterday.donations) / yesterday.donations) * 100,
-          onTap: () => tryOpenModule('donations'),
-        );
-
-        final patientsTile = HomeStatTile(
-          label: 'Patients Today',
-          value: fmtNum(today.zakat + today.nonZakat + today.gmwf),
-          icon: Icons.people_alt_rounded,
-          color: const Color(0xFF8B5CF6),
-          deltaPct: (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf) == 0 
-              ? null 
-              : (((today.zakat + today.nonZakat + today.gmwf) - (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) / 
-                 (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) * 100,
-          onTap: () => tryOpenModule('patients_list'),
-        );
-
-
-
-        // overallRevTile removed per request
-
-        final madrassaTile = HomeStatTile(
-          label: 'Madrassa Attendance',
-          value: fmtNum(today.prescribed),
-          icon: Icons.menu_book_rounded,
-          color: const Color(0xFF0D9488),
-          deltaPct: yesterday.prescribed == 0 ? null : ((today.prescribed - yesterday.prescribed) / yesterday.prescribed) * 100,
-          onTap: () => tryOpenModule('madrassa_attendance'),
-        );
-
-        final todayDateKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        int empPresentCount = 0;
-        try {
-          if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
-            final box = Hive.box(LocalStorageService.attendanceBox);
-            for (final key in box.keys) {
-              final keyStr = key.toString();
-              if (keyStr.endsWith('_$todayDateKey') || keyStr.endsWith(todayDateKey)) {
-                final val = box.get(key);
-                if (val is Map) {
-                  final status = val['status']?.toString().toLowerCase();
-                  if (status == 'present' || status == 'late' || status == 'overtime') {
-                    empPresentCount++;
-                  }
-                }
-              }
-            }
-          }
-        } catch (_) {}
-
-        final employeeAttendanceTile = HomeStatTile(
-          label: 'Employee Attendance',
-          value: fmtNum(empPresentCount),
-          icon: Icons.co_present_rounded,
-          color: const Color(0xFF3F82F6),
-          onTap: () => tryOpenModule('employee_attendance'),
-        );
-
-        final studentPresentCount = SchoolLocalStorage.getPresentStudentsCount('all', todayDateKey);
-        final teacherPresentCount = SchoolLocalStorage.getPresentTeachersCount('all', todayDateKey);
-
-        final schoolStudentsTile = HomeStatTile(
-          label: 'School Students',
-          value: fmtNum(studentPresentCount),
-          icon: Icons.school_rounded,
-          color: const Color(0xFF10B981),
-          onTap: () => tryOpenModule('school_attendance'),
-        );
-
-        final schoolTeachersTile = HomeStatTile(
-          label: 'School Teachers',
-          value: fmtNum(teacherPresentCount),
-          icon: Icons.record_voice_over_rounded,
-          color: const Color(0xFF8B5CF6),
-          onTap: () => tryOpenModule('school_teacher_attendance'),
-        );
-
-        int onlineUsersCount = 1;
-        try {
-          if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
-            final uBox = Hive.box(LocalStorageService.usersBox);
-            int count = 0;
-            for (final u in uBox.values) {
-              if (u is Map) {
-                final isOnline = u['isOnline'] == true;
-                final rawDate = u['lastOnlineAt'] ?? u['lastLoginAt'] ?? u['updatedAt'];
-                bool recent = false;
-                if (rawDate is String && rawDate.isNotEmpty) {
-                  final dt = DateTime.tryParse(rawDate);
-                  if (dt != null && DateTime.now().difference(dt).inMinutes <= 15) recent = true;
-                }
-                if (isOnline || recent) count++;
-              }
-            }
-            if (count > 0) onlineUsersCount = count;
-          }
-        } catch (_) {}
-
-        final onlineUsersTile = HomeStatTile(
-          label: 'Online Users',
-          value: fmtNum(onlineUsersCount),
-          icon: Icons.wifi_tethering_rounded,
-          color: const Color(0xFF06B6D4),
-          onTap: () => tryOpenModule('users'),
-        );
-
         final userRoleStr = (widget.userData['role'] as String? ?? '').toLowerCase().trim();
         final isBranchManager = userRoleStr == 'branch manager' || userRoleStr == 'branch_manager' || userRoleStr.contains('branch manager');
         final userBranchId = (widget.userData['branchId'] as String? ?? '').toLowerCase().trim();
+        final isExecutive = userRoleStr == 'chairman' ||
+            userRoleStr == 'ceo' ||
+            userRoleStr == 'hq manager' ||
+            userRoleStr == 'hq_manager' ||
+            userRoleStr == 'super_admin' ||
+            userRoleStr == 'admin';
 
         // Display all branches and camps, sorting active ones to the top
         final sortedBranchRows = List<HomeBranchRow>.from(data.branchRows)
@@ -3614,13 +4224,125 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         }
 
         final topRow = sortedBranchRows.isNotEmpty ? sortedBranchRows.first : null;
+        final topBranchId = topRow?.id ?? bestBranch?.id ?? (userBranchId.isNotEmpty ? userBranchId : 'karachi');
+
+        void openBranchInBranchesModule(String rawBranchId) {
+          String target = rawBranchId.toLowerCase().trim();
+          if (target.startsWith('karachi')) {
+            target = 'karachi';
+          }
+
+          final bool isAllowed = isExecutive ||
+              (userBranchId.isNotEmpty &&
+                  (userBranchId == target ||
+                      userBranchId.startsWith(target) ||
+                      target.startsWith(userBranchId)));
+
+          if (!isAllowed) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('⚠️ Access restricted to your assigned branch (${RecentActivityService.resolveBranchName(userBranchId)}).'),
+                backgroundColor: Colors.orange.shade800,
+                behavior: SnackBarBehavior.floating,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+            return;
+          }
+
+          ref.read(selectedBranchTabIdProvider.notifier).state = target;
+
+          final branchName = RecentActivityService.resolveBranchName(target);
+          final branchesModule = AppModule(
+            id: 'branches',
+            title: 'Branches – $branchName',
+            description: 'View performance and dispensary details for $branchName',
+            icon: Icons.store_rounded,
+            category: ModuleCategory.office,
+            builder: (context, data) => Branches(
+              branchId: isExecutive ? null : (userBranchId.isNotEmpty ? userBranchId : target),
+              initialBranchId: target,
+              isManager: false,
+            ),
+          );
+
+          widget.onOpenModule(branchesModule);
+        }
+
+        final donationsTile = HomeStatTile(
+          label: 'Donations Today',
+          value: fmtNum(today.donations),
+          prefix: 'Rs ',
+          icon: Icons.volunteer_activism_rounded,
+          color: const Color(0xFF10B981),
+          deltaPct: yesterday.donations == 0 ? null : ((today.donations - yesterday.donations) / yesterday.donations) * 100,
+          onTap: () => tryOpenModule('donations'),
+        );
+
+        final patientsTile = HomeStatTile(
+          label: 'Patients Today',
+          value: fmtNum(today.zakat + today.nonZakat + today.gmwf),
+          icon: Icons.people_alt_rounded,
+          color: const Color(0xFF8B5CF6),
+          deltaPct: (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf) == 0 
+              ? null 
+              : (((today.zakat + today.nonZakat + today.gmwf) - (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) / 
+                 (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) * 100,
+          onTap: () {
+            final myBranchOrTop = (userBranchId.isNotEmpty && userBranchId != 'all') ? userBranchId : topBranchId;
+            openBranchInBranchesModule(myBranchOrTop);
+          },
+        );
+
+        // overallRevTile removed per request
+
+        final madrassaTile = HomeStatTile(
+          label: 'Madrassa Attendance',
+          value: fmtNum(today.prescribed),
+          icon: Icons.menu_book_rounded,
+          color: const Color(0xFF0D9488),
+          deltaPct: yesterday.prescribed == 0 ? null : ((today.prescribed - yesterday.prescribed) / yesterday.prescribed) * 100,
+          onTap: () => tryOpenModule('madrassa_attendance'),
+        );
+
+        final employeeAttendanceTile = HomeStatTile(
+          label: 'Employee Attendance',
+          value: fmtNum(data.empPresentCount),
+          icon: Icons.co_present_rounded,
+          color: const Color(0xFF3F82F6),
+          onTap: () => tryOpenModule('employee_attendance'),
+        );
+
+        final schoolStudentsTile = HomeStatTile(
+          label: 'School Students',
+          value: fmtNum(data.studentPresentCount),
+          icon: Icons.school_rounded,
+          color: const Color(0xFF10B981),
+          onTap: () => tryOpenModule('school_attendance'),
+        );
+
+        final schoolTeachersTile = HomeStatTile(
+          label: 'School Teachers',
+          value: fmtNum(data.teacherPresentCount),
+          icon: Icons.record_voice_over_rounded,
+          color: const Color(0xFF8B5CF6),
+          onTap: () => tryOpenModule('school_teacher_attendance'),
+        );
+
+        final onlineUsersTile = HomeStatTile(
+          label: 'Online Users',
+          value: fmtNum(data.onlineUsersCount),
+          icon: Icons.wifi_tethering_rounded,
+          color: const Color(0xFF06B6D4),
+          onTap: () => tryOpenModule('users'),
+        );
 
         final activeBranchTile = HomeStatTile(
           label: isBranchManager ? 'Top Camp Today' : 'Top Branch Today',
           value: topRow != null ? topRow.name : RecentActivityService.resolveBranchName(userBranchId.isNotEmpty ? userBranchId : 'Karachi'),
           icon: Icons.emoji_events_rounded,
           color: const Color(0xFF0D9488),
-          onTap: () => tryOpenModule('branches'),
+          onTap: () => openBranchInBranchesModule(topBranchId),
         );
 
         final branchesSummaryTile = HomeStatTile(
@@ -3628,7 +4350,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           value: topRow != null ? topRow.name : (bestBranch != null ? bestBranch.name : 'Karachi'),
           icon: Icons.emoji_events_rounded,
           color: const Color(0xFF0D9488),
-          onTap: () => tryOpenModule('branches'),
+          onTap: () => openBranchInBranchesModule(topBranchId),
         );
 
         final dasterkhwaanTokensTile = HomeStatTile(
@@ -3698,7 +4420,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                   child: HomeBranchPerformanceTable(
                     t: widget.t,
                     rows: sortedBranchRows,
-                    onTapBranch: (bId) => _navigateToBranch(bId),
+                    onTapBranch: (bId) => openBranchInBranchesModule(bId),
                   ),
                 ),
               ),
@@ -3711,19 +4433,19 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                       branchName: bestBranch.name,
                       revenue: bestBranch.today.dispensaryRevenue,
                       donations: bestBranch.today.donations,
-                    patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
-                    growthPct: bestBranch.yesterday.dispensaryRevenue == 0
-                        ? null
-                        : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
-                                bestBranch.yesterday.dispensaryRevenue) *
-                            100,
-                    onTap: () => _navigateToBranch(bestBranch!.id),
-                    t: widget.t,
-                    title: isBranchManager ? 'Top Camp Today' : 'Best Branch Today',
+                      patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
+                      growthPct: (bestBranch.yesterday.dispensaryRevenue > 0)
+                          ? (((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
+                                  bestBranch.yesterday.dispensaryRevenue) *
+                              100)
+                          : ((bestBranch.today.dispensaryRevenue > 0 || (bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf) > 0) ? 100.0 : null),
+                      onTap: () => openBranchInBranchesModule(bestBranch!.id),
+                      t: widget.t,
+                      title: isBranchManager ? 'Top Camp Today' : 'Best Branch Today',
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
             ],
           ),
         );
@@ -3746,6 +4468,63 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           ),
         );
 
+        // Calculate yesterday's top branches to check if the current user/branch was rank 1, 2, or 3
+        final userName = (widget.userData['name'] ?? widget.userData['username'] ?? widget.userData['fullName'] ?? '').toString().toLowerCase().trim();
+        int userBranchRank = 0;
+        String userBranchName = '';
+        if (data.branchRows.isNotEmpty) {
+          final qualifyingRows = data.branchRows.where((r) {
+            final aPats = r.yesterday.zakat + r.yesterday.nonZakat + r.yesterday.gmwf;
+            final aScore = r.yesterday.donations + r.yesterday.dispensaryRevenue + aPats * 100;
+            return aScore > 0;
+          }).toList()
+            ..sort((a, b) {
+              final aPats = a.yesterday.zakat + a.yesterday.nonZakat + a.yesterday.gmwf;
+              final bPats = b.yesterday.zakat + b.yesterday.nonZakat + b.yesterday.gmwf;
+              final aScore = a.yesterday.donations + a.yesterday.dispensaryRevenue + aPats * 100;
+              final bScore = b.yesterday.donations + b.yesterday.dispensaryRevenue + bPats * 100;
+              return bScore.compareTo(aScore);
+            });
+
+          for (int i = 0; i < min(3, qualifyingRows.length); i++) {
+            final r = qualifyingRows[i];
+            final normId = r.id.toLowerCase().trim();
+            if ((userBranchId.isNotEmpty && (normId == userBranchId || normId.contains(userBranchId) || userBranchId.contains(normId))) ||
+                (userName.contains('kapaya') && (normId.contains('karachi') || normId.contains('saddar') || normId.contains('kapaya')))) {
+              userBranchRank = i + 1;
+              userBranchName = r.name;
+              break;
+            }
+          }
+        }
+
+        final apprecUserKey = '${widget.userData['id'] ?? widget.userData['userId'] ?? widget.userData['username'] ?? widget.userData['branchId'] ?? 'user'}_${DateFormat('yyyyMMdd').format(DateTime.now())}';
+
+        // Show celebratory popup modal dialog once per session on startup for top branches
+        if (isBranchManager && userBranchRank > 0 && !_shownAppreciationSessionKeys.contains(apprecUserKey)) {
+          _shownAppreciationSessionKeys.add(apprecUserKey);
+          _isAppreciationDialogShowing = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              showDialog(
+                context: context,
+                barrierDismissible: true,
+                builder: (ctx) => AppreciationTrophyDialog(
+                  rank: userBranchRank,
+                  branchName: userBranchName,
+                  isDark: widget.t.isDarkCanvas,
+                ),
+              ).then((_) {
+                if (mounted) {
+                  setState(() {
+                    _isAppreciationDialogShowing = false;
+                  });
+                }
+              });
+            }
+          });
+        }
+
         final roleStr = (widget.userData['role'] ?? widget.userData['userRole'] ?? '').toString().toLowerCase();
         final isGlobalExecutive = roleStr.contains('ceo') || roleStr.contains('chairman') || roleStr.contains('hq') || roleStr.contains('global');
 
@@ -3754,6 +4533,15 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (isBranchManager && userBranchRank > 0 && !_isTrophyDismissed && !_isAppreciationDialogShowing)
+                BranchManagerTrophyBanner(
+                  rank: userBranchRank,
+                  branchName: userBranchName,
+                  isDark: widget.t.isDarkCanvas,
+                  onDismiss: () {
+                    if (mounted) setState(() => _isTrophyDismissed = true);
+                  },
+                ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -3770,6 +4558,8 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               ),
               if (widget.isDesktop) ...[
                 HomeStatTileRow(tiles: statTiles),
+                const SizedBox(height: DS.s3),
+                const FirestoreQuotaMonitorWidget(),
                 const SizedBox(height: DS.s3),
                 row3,
                 const SizedBox(height: DS.s3),
@@ -3796,6 +4586,8 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 const SizedBox(height: DS.s2),
                 HomeStatTileRow(tiles: statTiles),
                 const SizedBox(height: DS.s2),
+                const FirestoreQuotaMonitorWidget(),
+                const SizedBox(height: DS.s2),
                 if (!isGlobalExecutive) ...[
                   KarachiCampSnapshotWidget(t: widget.t),
                   const SizedBox(height: DS.s2),
@@ -3806,11 +4598,11 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                     revenue: bestBranch.today.dispensaryRevenue,
                     donations: bestBranch.today.donations,
                     patients: bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf,
-                    growthPct: bestBranch.yesterday.dispensaryRevenue == 0
-                        ? null
-                        : ((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
+                    growthPct: (bestBranch.yesterday.dispensaryRevenue > 0)
+                        ? (((bestBranch.today.dispensaryRevenue - bestBranch.yesterday.dispensaryRevenue) /
                                 bestBranch.yesterday.dispensaryRevenue) *
-                            100,
+                            100)
+                        : ((bestBranch.today.dispensaryRevenue > 0 || (bestBranch.today.zakat + bestBranch.today.nonZakat + bestBranch.today.gmwf) > 0) ? 100.0 : null),
                     onTap: () => _navigateToBranch(bestBranch!.id),
                     t: widget.t,
                     title: isBranchManager ? 'Top Camp Today' : 'Best Branch Today',
@@ -4221,4 +5013,4 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
       ),
     );
   }
-}
+}

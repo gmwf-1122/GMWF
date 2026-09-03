@@ -48,13 +48,22 @@ class _PatientFormState extends State<PatientForm> {
   bool _isLoadingPrescription = true;
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
   int? _selectedSyringeCount;
+  String? _selectedSyringeHiveKey;
   int? _selectedNeedleCount;
 
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
+
   // ─── Queue-type normaliser ────────────────────────────────────────────────
-  static String _normaliseQueueType(String? raw) {
+  String _normaliseQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
-        s == 'non_zakat' || s.startsWith('non')) return 'non-zakat';
+        s == 'non_zakat' || s.startsWith('non')) {
+      if (_isKarachi) return 'zakat';
+      return 'non-zakat';
+    }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     return 'zakat';
   }
@@ -243,7 +252,17 @@ class _PatientFormState extends State<PatientForm> {
     }
   }
 
-  // ─── Prescription loader ──────────────────────────────────────────────────
+  @override
+  void didUpdateWidget(covariant PatientForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.queueEntry != widget.queueEntry || oldWidget.branchId != widget.branchId) {
+      _selectedSyringeCount = null;
+      _selectedSyringeHiveKey = null;
+      _selectedNeedleCount = null;
+      _loadPrescription();
+    }
+  }
+
   // ─── Prescription loader ──────────────────────────────────────────────────
   Future<void> _loadPrescription() async {
     if (!mounted) return;
@@ -363,8 +382,11 @@ class _PatientFormState extends State<PatientForm> {
             entriesBox.get('$normBranch-${normSerial.toUpperCase()}') ??
             entriesBox.get(normSerial);
         if (directEntry is Map && directEntry['prescription'] is Map) {
-          final emb = directEntry['prescription'];
-          if (emb is Map && emb.isNotEmpty) return Map<String, dynamic>.from(emb);
+          final emb = Map<String, dynamic>.from(directEntry['prescription'] as Map);
+          emb['doctorName'] ??= directEntry['doctorName'] ?? directEntry['prescribedBy'];
+          emb['doctorId'] ??= directEntry['doctorId'];
+          emb['prescribedBy'] ??= directEntry['prescribedBy'] ?? directEntry['doctorName'];
+          if (emb.isNotEmpty) return emb;
         }
       }
     } catch (_) {}
@@ -593,46 +615,119 @@ class _PatientFormState extends State<PatientForm> {
       // Fire and forget Firestore update so it doesn't block UI loop
       final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString();
       final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
+
+      // If LAN server is connected, ServerSyncManager handles inventory deduction via WebSocket broadcast
+      if (RealtimeManager().isConnected) {
+        debugPrint('[PatientForm] LAN connected — server handles cloud inventory deduction for $medicineId');
+        continue;
+      }
+
       final invCol = CampSessionService.getCampInventoryPath(
         branchId: branchId,
         campId: patientCampId,
         serial: patientSerial,
       );
 
-      Future<void> updateFirestore() async {
-        try {
-          final conn = await Connectivity().checkConnectivity();
-          final online = !conn.contains(ConnectivityResult.none);
-          if (online) {
-            final docRef = FirebaseFirestore.instance
-                .collection('branches').doc(branchId)
-                .collection(invCol).doc(medicineId);
-            await FirebaseFirestore.instance.runTransaction((transaction) async {
-              final snapshot = await transaction.get(docRef);
-              if (snapshot.exists) {
-                final q = snapshot.data()?['quantity'];
-                final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-                final updated = (current - qtyNum).clamp(0.0, double.infinity);
-                transaction.update(docRef, {'quantity': updated});
-              }
-            });
-            debugPrint('[PatientForm] ✅ Firestore $invCol $medicineId -= $qtyNum');
-            return;
-          }
-        } catch (e) {
-          debugPrint('[PatientForm] Firestore inventory update failed: $e');
-        }
-        // If offline or failed, enqueue sync
-        await LocalStorageService.enqueueSync({
-          'type': 'update_inventory', 'branchId': branchId,
-          'inventoryId': medicineId, 'delta': -qtyNum,
-          'campId': patientCampId,
-          'serial': patientSerial,
-        });
-      }
-      updateFirestore();
+      // Enqueue sync for background processing without UI lag
+      LocalStorageService.enqueueSync({
+        'type': 'update_inventory',
+        'branchId': branchId,
+        'inventoryId': medicineId,
+        'delta': -qtyNum,
+        'campId': patientCampId,
+        'serial': patientSerial,
+      });
 
     }
+  }
+
+  List<Map<String, dynamic>> _getAvailableSyringeStockItems() {
+    final stockBox = Hive.box(LocalStorageService.stockBox);
+    final List<Map<String, dynamic>> list = [];
+    final normBranch = widget.branchId.toLowerCase().trim();
+
+    // Resolve target camp strictly for this patient / active session
+    var activeCamp = widget.queueEntry['campId']?.toString() ??
+        widget.queueEntry['dispensaryId']?.toString() ??
+        _data['campId']?.toString() ??
+        _data['dispensaryId']?.toString() ??
+        CampSessionService.getActiveCamp(widget.branchId);
+
+    if (activeCamp == null || activeCamp.isEmpty || activeCamp == 'all') {
+      activeCamp = CampSessionService.getActiveCamp(widget.branchId) ?? 'haji_camp';
+    }
+
+    for (final key in stockBox.keys) {
+      final val = stockBox.get(key);
+      if (val is Map) {
+        final m = Map<String, dynamic>.from(val);
+
+        // Branch filter
+        final b = (m['branchId'] ?? '').toString().toLowerCase().trim();
+        if (b.isNotEmpty && normBranch.isNotEmpty && b != normBranch && !b.contains(normBranch) && !normBranch.contains(b)) {
+          continue;
+        }
+
+        // Strict Camp isolation
+        if (CampSessionService.hasCampsForBranch(widget.branchId)) {
+          if (activeCamp.isNotEmpty && activeCamp != 'all') {
+            final matches = CampSessionService.matchesCamp(
+              selectedCamp: activeCamp,
+              dispensaryId: m['dispensaryId']?.toString(),
+              campId: m['campId']?.toString(),
+              dispensaryTag: m['dispensaryTag']?.toString(),
+              serial: (m['barcode'] ?? m['code'] ?? m['id'] ?? key)?.toString(),
+            );
+            if (!matches) continue;
+          }
+        }
+
+        final type = (m['type'] ?? m['dosageForm'] ?? '').toString().toLowerCase();
+        final name = (m['name'] ?? '').toString().toLowerCase();
+        final isSyringe = type.contains('syringe') || type == 'syr' || type == 'syr.' || name.contains('syringe');
+        if (isSyringe) {
+          final q = m['quantity'] ?? m['stock'] ?? 0;
+          final stockQty = q is num ? q.toDouble() : double.tryParse(q.toString()) ?? 0.0;
+          if (stockQty > 0) {
+            m['hiveKey'] = key.toString();
+            list.add(m);
+          }
+        }
+      }
+    }
+    final Map<String, Map<String, dynamic>> uniqueItems = {};
+    for (final item in list) {
+      final id = (item['id'] ?? item['medicineId'] ?? item['name'])?.toString().toLowerCase().trim() ?? '';
+      if (!uniqueItems.containsKey(id)) {
+        uniqueItems[id] = item;
+      }
+    }
+
+    final result = uniqueItems.values.toList();
+    result.sort((a, b) {
+      final na = (a['name'] ?? '').toString();
+      final nb = (b['name'] ?? '').toString();
+      final matchA = RegExp(r'(\d+)\s*(cc|ml)', caseSensitive: false).firstMatch(na);
+      final matchB = RegExp(r'(\d+)\s*(cc|ml)', caseSensitive: false).firstMatch(nb);
+      if (matchA != null && matchB != null) {
+        final numA = int.tryParse(matchA.group(1)!) ?? 0;
+        final numB = int.tryParse(matchB.group(1)!) ?? 0;
+        return numA.compareTo(numB);
+      }
+      return na.compareTo(nb);
+    });
+    return result;
+  }
+
+  static String _formatSyringeLabel(Map<String, dynamic> item) {
+    final name = (item['name'] ?? '').toString();
+    final dose = (item['dose'] ?? '').toString();
+    final ccMatch = RegExp(r'(\d+)\s*(cc|ml)', caseSensitive: false).firstMatch('$name $dose');
+    if (ccMatch != null) {
+      return '${ccMatch.group(1)} cc';
+    }
+    final clean = name.replaceAll(RegExp(r'Disposable|Syringe', caseSensitive: false), '').trim();
+    return clean.isNotEmpty ? clean : name;
   }
 
   Future<void> _deductSyringeIfNeeded(
@@ -649,29 +744,47 @@ class _PatientFormState extends State<PatientForm> {
     if (totalSyringesToDeduct > 0.0) {
       try {
         final stockBox = Hive.box(LocalStorageService.stockBox);
-        String? syringeKey;
+        String? syringeKey = _selectedSyringeHiveKey;
         Map<String, dynamic>? syringeMap;
-        
-        for (final key in stockBox.keys) {
-          final val = stockBox.get(key);
+
+        if (syringeKey != null) {
+          final val = stockBox.get(syringeKey);
           if (val is Map) {
-            final type = (val['type'] ?? '').toString().toLowerCase();
-            if (type.contains('syringe')) {
-              syringeKey = key.toString();
-              syringeMap = Map<String, dynamic>.from(val);
-              break;
+            syringeMap = Map<String, dynamic>.from(val);
+          }
+        }
+
+        // Fallback if not specifically selected or not found
+        if (syringeMap == null) {
+          final available = _getAvailableSyringeStockItems();
+          if (available.isNotEmpty) {
+            syringeKey = available.first['hiveKey'];
+            syringeMap = available.first;
+          } else {
+            for (final key in stockBox.keys) {
+              final val = stockBox.get(key);
+              if (val is Map) {
+                final type = (val['type'] ?? '').toString().toLowerCase();
+                final name = (val['name'] ?? '').toString().toLowerCase();
+                if (type.contains('syringe') || name.contains('syringe')) {
+                  syringeKey = key.toString();
+                  syringeMap = Map<String, dynamic>.from(val);
+                  break;
+                }
+              }
             }
           }
         }
-        
+
         if (syringeKey != null && syringeMap != null) {
-          final q = syringeMap['quantity'];
+          final q = syringeMap['quantity'] ?? syringeMap['stock'] ?? 0;
           final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
           syringeMap['quantity'] = (current - totalSyringesToDeduct).clamp(0.0, double.infinity);
+          syringeMap['stock'] = syringeMap['quantity'];
           await stockBox.put(syringeKey, syringeMap);
           debugPrint('[PatientForm] Auto-deducted $totalSyringesToDeduct Syringe ($syringeKey) from Hive: $current → ${syringeMap['quantity']}');
-          
-          final rawSyringeId = syringeKey.replaceFirst('stock:', '');
+
+          final rawSyringeId = (syringeMap['id'] ?? syringeMap['medicineId'] ?? syringeKey.replaceFirst('stock:', '')).toString();
           Future<void> updateSyringeFirestore() async {
             try {
               final conn = await Connectivity().checkConnectivity();
@@ -683,10 +796,10 @@ class _PatientFormState extends State<PatientForm> {
                 await FirebaseFirestore.instance.runTransaction((transaction) async {
                   final snapshot = await transaction.get(docRef);
                   if (snapshot.exists) {
-                    final q = snapshot.data()?['quantity'];
-                    final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-                    final updated = (current - totalSyringesToDeduct).clamp(0.0, double.infinity);
-                    transaction.update(docRef, {'quantity': updated});
+                    final sq = snapshot.data()?['quantity'] ?? snapshot.data()?['stock'];
+                    final scurrent = sq is num ? sq.toDouble() : double.tryParse(sq?.toString() ?? '') ?? 0.0;
+                    final updated = (scurrent - totalSyringesToDeduct).clamp(0.0, double.infinity);
+                    transaction.update(docRef, {'quantity': updated, 'stock': updated});
                   }
                 });
                 debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore $invCol');
@@ -883,28 +996,30 @@ class _PatientFormState extends State<PatientForm> {
     final totalSyringesToDeduct = _getEffectiveSyringeCount(allPrescriptions).toDouble();
 
     if (totalSyringesToDeduct > 0.0) {
-      Map<String, dynamic>? syringeMap;
-      
-      for (final key in stockBox.keys) {
-        final val = stockBox.get(key);
-        if (val is Map) {
-          final type = (val['type'] ?? '').toString().toLowerCase();
-          if (type.contains('syringe')) {
+      final availableSyringes = _getAvailableSyringeStockItems();
+      if (availableSyringes.isEmpty) {
+        insufficientMeds.add('Syringe (Required: ${totalSyringesToDeduct.toInt()}, Stock: 0)');
+      } else {
+        if (_selectedSyringeHiveKey == null) {
+          _selectedSyringeHiveKey = availableSyringes.first['hiveKey'];
+        }
+        Map<String, dynamic>? syringeMap;
+        if (_selectedSyringeHiveKey != null) {
+          final val = stockBox.get(_selectedSyringeHiveKey);
+          if (val is Map) {
             syringeMap = Map<String, dynamic>.from(val);
-            break;
           }
         }
-      }
-      
-      double currentSyringes = 0.0;
-      if (syringeMap != null) {
-        final q = syringeMap['quantity'];
-        currentSyringes = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-      }
-      
-      if (currentSyringes < totalSyringesToDeduct) {
-        final name = syringeMap != null ? (syringeMap['name'] ?? 'Syringe') : 'Syringe';
-        insufficientMeds.add('$name (Required: ${totalSyringesToDeduct.toInt()}, Stock: ${currentSyringes.toInt()})');
+        syringeMap ??= availableSyringes.first;
+
+        final q = syringeMap['quantity'] ?? syringeMap['stock'] ?? 0;
+        final currentSyringes = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+
+        if (currentSyringes < totalSyringesToDeduct) {
+          final label = _formatSyringeLabel(syringeMap);
+          final name = syringeMap['name'] ?? 'Syringe $label';
+          insufficientMeds.add('$name (Required: ${totalSyringesToDeduct.toInt()}, Stock: ${currentSyringes.toInt()})');
+        }
       }
     }
 
@@ -1038,12 +1153,22 @@ class _PatientFormState extends State<PatientForm> {
         'branchId': widget.branchId,
         'daysOfMedicine': days,
       };
+
+      // 1. Update local entries box immediately (preserve existing prescription data)
       final entryKey = '${widget.branchId}-$serial';
-      final currentEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
-      if (currentEntry != null) {
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      final currentEntry = entriesBox.get(entryKey) ?? entriesBox.get(serial);
+      if (currentEntry != null && currentEntry is Map) {
         final updated = Map<String, dynamic>.from(currentEntry)..addAll(minimalUpdate);
-        await Hive.box(LocalStorageService.entriesBox).put(entryKey, updated);
+        await entriesBox.put(entryKey, updated);
+        await entriesBox.put(serial, updated);
+      } else {
+        await entriesBox.put(entryKey, minimalUpdate);
+        await entriesBox.put(serial, minimalUpdate);
       }
+      await LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+
+      // 2. Save dispensary record locally
       final dispensaryRecord = {
         ...Map<String, dynamic>.from(widget.queueEntry),
         ...Map<String, dynamic>.from(_data),
@@ -1067,71 +1192,90 @@ class _PatientFormState extends State<PatientForm> {
       };
       await Hive.box(LocalStorageService.dispensaryBox)
           .put('${widget.branchId}_${dateKey}_$serial', dispensaryRecord);
+
       final allPrescriptions = (_data['prescriptions'] as List?) ?? [];
       final medicines = allPrescriptions
           .where((m) => m is Map &&
               (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
           .toList();
-      if (medicines.isNotEmpty) {
-        await _deductInventoryLocally(widget.branchId, serial, medicines, days);
-      }
-      await _deductSyringeIfNeeded(widget.branchId, serial, allPrescriptions);
-      await _deductNeedleIfNeeded(widget.branchId, serial, allPrescriptions);
-      RealtimeManager().sendMessage(RealtimeEvents.payload(
-        type: 'dispense_completed',
-        data: {
-          'branchId': widget.branchId,
-          'serial': serial,
-          'dateKey': dateKey,
-          ...minimalUpdate,
-          if (medicines.isNotEmpty) 'medicines': medicines,
-        },
-      ));
-      Future<void> saveToFirestore() async {
+
+      // 3. Mark UI state complete immediately (Instant feedback)
+      if (mounted) {
+        setState(() {
+          _isDispensed = true;
+          _isDispensing = false;
+        });
         try {
-          final branchRef = FirebaseFirestore.instance
-              .collection('branches').doc(widget.branchId);
-          await branchRef.collection('dispensary').doc(dateKey)
-              .collection(dateKey).doc(serial)
-              .set(dispensaryRecord, SetOptions(merge: true));
-          await branchRef.collection('serials').doc(dateKey)
-              .collection(queueType).doc(serial)
-              .set(minimalUpdate, SetOptions(merge: true));
-        } catch (e) {
-          await LocalStorageService.enqueueSync({
-            'type': 'save_dispensary_record', 'branchId': widget.branchId,
-            'dateKey': dateKey, 'serial': serial, 'data': dispensaryRecord,
-          });
-        }
-      }
-      saveToFirestore();
-      await LocalStorageService.enqueueSync({
-        'type': 'update_serial_status', 'branchId': widget.branchId,
-        'dateKey': dateKey, 'queueType': queueType, 'serial': serial,
-        'data': minimalUpdate,
-      });
-      SyncService().triggerUpload();
-      if (mounted) setState(() => _isDispensed = true);
-      try {
-        if (mounted) {
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
               content: Text(days > 1
                   ? 'Dispensed $days-day supply successfully'
                   : 'Dispensed successfully'),
               backgroundColor: Colors.green));
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
       widget.onDispensed?.call();
+
+      // 4. Run inventory deduction, LAN broadcast & Firestore sync asynchronously in background
+      unawaited(() async {
+        try {
+          if (medicines.isNotEmpty) {
+            await _deductInventoryLocally(widget.branchId, serial, medicines, days);
+          }
+          await _deductSyringeIfNeeded(widget.branchId, serial, allPrescriptions);
+          await _deductNeedleIfNeeded(widget.branchId, serial, allPrescriptions);
+
+          try {
+            RealtimeManager().sendMessage(RealtimeEvents.payload(
+              type: 'dispense_completed',
+              data: {
+                'branchId': widget.branchId,
+                'serial': serial,
+                'dateKey': dateKey,
+                ...minimalUpdate,
+                if (medicines.isNotEmpty) 'medicines': medicines,
+              },
+            ));
+          } catch (_) {}
+
+          final upperSerial = serial.trim().toUpperCase();
+          final campDocKey = CampSessionService.getCampDateDocId(
+            branchId: widget.branchId,
+            dateKey: dateKey,
+            campId: widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? _data['campId']?.toString() ?? _data['dispensaryId']?.toString(),
+            dispensaryTag: widget.queueEntry['dispensaryTag']?.toString() ?? _data['dispensaryTag']?.toString(),
+            serial: upperSerial,
+          );
+
+          try {
+            final branchRef = FirebaseFirestore.instance
+                .collection('branches').doc(widget.branchId);
+            await branchRef.collection('serials').doc(campDocKey)
+                .collection(queueType).doc(upperSerial)
+                .set(minimalUpdate, SetOptions(merge: true));
+          } catch (e) {
+            await LocalStorageService.enqueueSync({
+              'type': 'update_serial_status',
+              'branchId': widget.branchId,
+              'dateKey': dateKey,
+              'queueType': queueType,
+              'serial': upperSerial,
+              'data': minimalUpdate,
+            });
+          }
+          SyncService().triggerUpload();
+        } catch (e) {
+          debugPrint('[PatientForm] Background async dispense sync error: $e');
+        }
+      }());
     } catch (e) {
       debugPrint('[PatientForm] Dispense error: $e');
       if (mounted) {
+        setState(() => _isDispensing = false);
         try {
           ScaffoldMessenger.maybeOf(context)?.showSnackBar(
               SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: Colors.red));
         } catch (_) {}
       }
-    } finally {
-      if (mounted) setState(() => _isDispensing = false);
     }
   }
 
@@ -1346,7 +1490,9 @@ class _PatientFormState extends State<PatientForm> {
     final suggested  = _suggestedDays;
     final queueType  = _resolvedQueueType;
 
-    const prices = {'zakat': 20, 'non-zakat': 100, 'gmwf': 0};
+    final prices = _isKarachi
+        ? const {'zakat': 20, 'non-zakat': 20, 'gmwf': 0}
+        : const {'zakat': 20, 'non-zakat': 100, 'gmwf': 0};
     final rate = prices[queueType] ?? 0;
 
     final refundDays = suggested - prescribed;
@@ -1489,6 +1635,10 @@ class _PatientFormState extends State<PatientForm> {
     final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return const SizedBox.shrink();
     final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 3);
+    final availableSyringes = _getAvailableSyringeStockItems();
+    if (_selectedSyringeHiveKey == null && availableSyringes.isNotEmpty) {
+      _selectedSyringeHiveKey = availableSyringes.first['hiveKey'];
+    }
 
     return Container(
       margin: EdgeInsets.only(top: isMobile ? 12 : 16),
@@ -1498,75 +1648,201 @@ class _PatientFormState extends State<PatientForm> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: isDark ? const Color(0xFF2DD4BF).withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.2)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(Icons.vaccines_rounded, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 22 : 26),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.vaccines_rounded, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 22 : 26),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Syringes To Dispense',
+                      style: TextStyle(
+                        color: t.textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: isMobile ? 14 : 16,
+                      ),
+                    ),
+                    Text(
+                      'Auto-calculated: $autoCount syringe${autoCount > 1 ? 's' : ''} (Max 3)',
+                      style: TextStyle(
+                        color: t.textSecondary,
+                        fontSize: isMobile ? 11 : 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    onPressed: effectiveCount > 0
+                        ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 3))
+                        : null,
+                    icon: const Icon(Icons.remove_circle_outline),
+                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    iconSize: isMobile ? 24 : 28,
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      '$effectiveCount',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: isMobile ? 15 : 18,
+                        color: t.textPrimary,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: effectiveCount < 3
+                        ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 3))
+                        : null,
+                    icon: const Icon(Icons.add_circle_outline),
+                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    iconSize: isMobile ? 24 : 28,
+                  ),
+                ],
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+
+          // Available CC Options Selector
+          if (availableSyringes.isEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF450A0A) : Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: isDark ? Colors.red.shade800 : Colors.red.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade600),
+                  const SizedBox(width: 6),
+                  Text(
+                    'No Syringes in Stock in local inventory',
+                    style: TextStyle(fontSize: 11.5, color: isDark ? Colors.red.shade200 : Colors.red.shade800, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Row(
               children: [
                 Text(
-                  'Syringes To Dispense',
+                  'Select Syringe Capacity (CC):',
                   style: TextStyle(
                     color: t.textPrimary,
                     fontWeight: FontWeight.bold,
-                    fontSize: isMobile ? 14 : 16,
+                    fontSize: isMobile ? 12 : 13,
                   ),
                 ),
+                const SizedBox(width: 6),
                 Text(
-                  'Auto-calculated: $autoCount syringe${autoCount > 1 ? 's' : ''} (Max 3)',
+                  '(In-stock options)',
                   style: TextStyle(
-                    color: t.textSecondary,
-                    fontSize: isMobile ? 11 : 12,
+                    color: t.textTertiary,
+                    fontSize: isMobile ? 10 : 11,
                   ),
                 ),
               ],
             ),
-          ),
-          Row(
-            children: [
-              IconButton(
-                onPressed: effectiveCount > 0
-                    ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 3))
-                    : null,
-                icon: const Icon(Icons.remove_circle_outline),
-                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
-                iconSize: isMobile ? 24 : 28,
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
-                ),
-                child: Text(
-                  '$effectiveCount',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    fontSize: isMobile ? 15 : 18,
-                    color: t.textPrimary,
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: availableSyringes.map((syr) {
+                final isSelected = _selectedSyringeHiveKey == syr['hiveKey'];
+                final label = _formatSyringeLabel(syr);
+                final stockQty = (syr['quantity'] is num) ? syr['quantity'].toInt() : int.tryParse(syr['quantity']?.toString() ?? '') ?? 0;
+                return InkWell(
+                  onTap: () => setState(() => _selectedSyringeHiveKey = syr['hiveKey']),
+                  borderRadius: BorderRadius.circular(10),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? (isDark ? const Color(0xFF0D9488) : t.accent)
+                          : (isDark ? const Color(0xFF0F172A) : Colors.white),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected
+                            ? (isDark ? const Color(0xFF2DD4BF) : t.accent)
+                            : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                        width: isSelected ? 1.6 : 1.0,
+                      ),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: t.accent.withValues(alpha: 0.25),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              )
+                            ]
+                          : [],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.colorize_rounded,
+                          size: 14,
+                          color: isSelected ? Colors.white : (isDark ? const Color(0xFF2DD4BF) : t.accent),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                            fontSize: isMobile ? 12 : 13,
+                            color: isSelected ? Colors.white : t.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.white.withValues(alpha: 0.25)
+                                : (isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Stock: $stockQty',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.grey.shade700),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ),
-              IconButton(
-                onPressed: effectiveCount < 3
-                    ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 3))
-                    : null,
-                icon: const Icon(Icons.add_circle_outline),
-                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
-                iconSize: isMobile ? 24 : 28,
-              ),
-            ],
-          ),
+                );
+              }).toList(),
+            ),
+          ],
         ],
       ),
     );
@@ -1753,14 +2029,38 @@ class _PatientFormState extends State<PatientForm> {
         _data['patientPhone'] ??
         _data['contact'] ??
         _data['mobile'] ??
+        _data['cell'] ??
+        _data['whatsapp'] ??
         _data['guardianPhone'] ??
         widget.queueEntry['phone'] ??
         widget.queueEntry['contact'] ??
+        widget.queueEntry['mobile'] ??
+        widget.queueEntry['cell'] ??
+        widget.queueEntry['whatsapp'] ??
+        widget.queueEntry['guardianPhone'] ??
         widget.queueEntry['patientPhone'];
 
-    if (rawPhone == null) return null;
-    final str = rawPhone.toString().trim();
-    return str.isEmpty ? null : str;
+    if (rawPhone != null && rawPhone.toString().trim().isNotEmpty) {
+      return rawPhone.toString().trim();
+    }
+
+    // Try finding patient from LocalStorageService by CNIC
+    final cnic = _data['cnic'] ?? _data['patientCnic'] ?? widget.queueEntry['cnic'] ?? widget.queueEntry['patientCnic'];
+    if (cnic != null && cnic.toString().trim().isNotEmpty) {
+      try {
+        final list = LocalStorageService.searchPatientsByCnicOrGuardian(
+          cnic.toString().trim(),
+          branchId: widget.branchId,
+        );
+        if (list.isNotEmpty) {
+          final pPhone = list.first['phone'] ?? list.first['guardianPhone'] ?? list.first['contact'];
+          if (pPhone != null && pPhone.toString().trim().isNotEmpty) {
+            return pPhone.toString().trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
   }
 
   String _getResolvedPatientName() {
@@ -1845,6 +2145,16 @@ class _PatientFormState extends State<PatientForm> {
         phoneNumber: phone,
         text: 'Assalam-o-Alaikum $patientName,\n\nThank you for your visit (Serial #$pid). Here is your PDF receipt from Gulzar Madina Free Dispensary:\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ',
       );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📋 WhatsApp opened & PDF copied to clipboard! Press Ctrl+V in WhatsApp to attach.'),
+            backgroundColor: Color(0xFF00695C),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1972,6 +2282,7 @@ class _PatientFormState extends State<PatientForm> {
       final patientName = _getResolvedPatientName();
       final pid = _resolvedSerial.isNotEmpty ? _resolvedSerial : 'slip';
       final fileName = 'Report_${patientName.replaceAll(RegExp(r'\s+'), '_')}_$pid.pdf';
+      final phone = _getPatientPhone();
 
       final savedPath = await FileActionHelper.getTempFilePath(fileName, pdfBytes);
 
@@ -1982,6 +2293,8 @@ class _PatientFormState extends State<PatientForm> {
           bytes: pdfBytes,
           fileName: fileName,
           title: 'Patient Report Ready',
+          phoneNumber: phone,
+          shareText: 'Assalam-o-Alaikum $patientName,\n\nThank you for your visit (Serial #$pid). Here is your PDF report from Gulzar Madina Free Dispensary:\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ',
         );
       }
     } catch (e) {
@@ -2760,12 +3073,14 @@ class _PatientPrintOptionsSheet extends StatefulWidget {
   final String branchName;
   final String serial;
   final String queueType;
+  final String? branchId;
 
   const _PatientPrintOptionsSheet({
     required this.data,
     required this.branchName,
     required this.serial,
     required this.queueType,
+    this.branchId,
   });
 
   @override
@@ -2775,6 +3090,44 @@ class _PatientPrintOptionsSheet extends StatefulWidget {
 class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
   bool _isGenerating = false;
   String _loadingMessage = '';
+
+  String _getResolvedPatientName() {
+    return widget.data['patientName'] ??
+        widget.data['name'] ??
+        widget.data['fullName'] ??
+        'Patient';
+  }
+
+  String? _getPatientPhone() {
+    final rawPhone = widget.data['phone'] ??
+        widget.data['patientPhone'] ??
+        widget.data['guardianPhone'] ??
+        widget.data['contact'] ??
+        widget.data['mobile'] ??
+        widget.data['cell'] ??
+        widget.data['whatsapp'];
+    if (rawPhone != null && rawPhone.toString().trim().isNotEmpty) {
+      return rawPhone.toString().trim();
+    }
+
+    final cnic = widget.data['cnic'] ?? widget.data['patientCnic'];
+    if (cnic != null && cnic.toString().trim().isNotEmpty) {
+      try {
+        final bId = widget.branchId ?? widget.data['branchId']?.toString();
+        final list = LocalStorageService.searchPatientsByCnicOrGuardian(
+          cnic.toString().trim(),
+          branchId: bId,
+        );
+        if (list.isNotEmpty) {
+          final pPhone = list.first['phone'] ?? list.first['guardianPhone'] ?? list.first['contact'];
+          if (pPhone != null && pPhone.toString().trim().isNotEmpty) {
+            return pPhone.toString().trim();
+          }
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
 
   void _showLoading(String msg) {
     setState(() {
@@ -2833,18 +3186,25 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       if (mounted) _hideLoading();
     }
 
-    if (pdfBytes != null) {
-      await Printing.sharePdf(
+    if (pdfBytes != null && mounted) {
+      final pid = widget.serial.isNotEmpty ? widget.serial : 'unknown';
+      final fileName = 'Slip_$pid.pdf';
+      final phone = _getPatientPhone();
+      final savedPath = await FileActionHelper.getTempFilePath(fileName, pdfBytes);
+      await FileActionHelper.showFileOptions(
+        context,
+        filePath: savedPath,
         bytes: pdfBytes,
-        filename: 'Slip_${widget.serial.isNotEmpty ? widget.serial : 'unknown'}.pdf',
+        fileName: fileName,
+        title: 'Prescription Slip Ready',
+        phoneNumber: phone,
       );
     }
   }
 
   Future<void> _handleWhatsAppShare() async {
-    final patientName = widget.data['patientName'] ?? widget.data['name'] ?? 'Patient';
-    final rawPhone = widget.data['phone'] ?? widget.data['contact'] ?? widget.data['patientPhone'] ?? widget.data['mobile'];
-    final phone = rawPhone != null ? rawPhone.toString().trim() : null;
+    final patientName = _getResolvedPatientName();
+    final phone = _getPatientPhone();
 
     _showLoading('Generating & attaching WhatsApp PDF...');
     Uint8List? pdfBytes;
@@ -2876,6 +3236,16 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
         phoneNumber: phone,
         text: 'Assalam-o-Alaikum $patientName,\n\nThank you for your visit (Serial #$pid). Here is your PDF receipt from Gulzar Madina Free Dispensary:\n\nاَللّٰهُمَّ يَا شَافِيَ الْأَمْرَاضِ',
       );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📋 WhatsApp opened & PDF copied to clipboard! Press Ctrl+V in WhatsApp to attach.'),
+            backgroundColor: Color(0xFF00695C),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 

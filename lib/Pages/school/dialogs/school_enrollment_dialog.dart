@@ -759,7 +759,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Image.asset(
-                'assets/logo/twt_logo.webp',
+                'assets/logo/twt.webp',
                 height: 48,
                 width: 48,
                 fit: BoxFit.contain,

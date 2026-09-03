@@ -29,7 +29,7 @@ class SchoolAdmissionPdfService {
     // Load School Logo
     pw.ImageProvider? logoImage;
     try {
-      final logoData = await rootBundle.load('assets/logo/twt_logo.webp');
+      final logoData = await rootBundle.load('assets/logo/twt.webp');
       logoImage = pw.MemoryImage(logoData.buffer.asUint8List());
     } catch (_) {
       try {

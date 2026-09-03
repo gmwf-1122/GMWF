@@ -10,6 +10,7 @@
 //   Previously the method only called enqueueSync(), which was silently
 //   dropped because SyncService had no 'save_patient' handler.
 
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -24,6 +25,7 @@ import 'sync_service.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
 import 'serials_service.dart';
+import 'camp_session_service.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -94,49 +96,8 @@ class FirestoreService {
     await LocalStorageService.saveLocalPatient(data);
     Logger().d('[FirestoreService] ✅ Hive write: $patientId');
 
-    // STEP 2 — Try direct Firestore write (fast path when online)
-    bool wroteDirectly = false;
-    try {
-      final fsData = Map<String, dynamic>.from(data);
-      if (fsData['dob'] is String) {
-        try {
-          fsData['dob'] = Timestamp.fromDate(DateTime.parse(fsData['dob'] as String));
-        } catch (_) {}
-      }
-      fsData.remove('syncStatus');
-      fsData.remove('hiveKey');
-
-      await _db
-          .collection('branches')
-          .doc(branchId)
-          .collection('patients')
-          .doc(patientId)
-          .set(fsData, SetOptions(merge: true))
-          .timeout(const Duration(seconds: 5));
-
-      // Mark confirmed-synced so SyncService backfill skips this patient
-      await Hive.box('app_flags').put('patient_synced_$patientId', true);
-
-      wroteDirectly = true;
-      print('[FirestoreService] ✅ Direct Firestore write: $patientId');
-    } catch (e) {
-      Logger().d('[FirestoreService] Direct write failed ($e) → queuing for retry');
-    }
-
-    // STEP 3 — Queue for retry if direct write failed (offline / timeout)
-    if (!wroteDirectly) {
-      final sanitized = LocalStorageService.sanitize(data);
-      await LocalStorageService.enqueueSync({
-        'type':      'save_patient',
-        'branchId':  branchId,
-        'patientId': patientId,
-        'data':      sanitized,
-      });
-      Logger().d('[FirestoreService] 📥 Queued for sync: $patientId' ' | queue: ${Hive.box(LocalStorageService.syncBox).length}');
-
-    }
-
-    // STEP 4 — LAN broadcast so same-network devices get it instantly
+    // STEP 2 — LAN/WebSocket: deliver locally before touching Firestore.
+    // Firestore quota or internet failures must not delay other LAN users.
     try {
       RealtimeManager().sendMessage(
         RealtimeEvents.payload(
@@ -152,7 +113,44 @@ class FirestoreService {
       Logger().d('[FirestoreService] LAN broadcast failed: $e');
     }
 
-    // STEP 5 — Flush queue in background (no-op if already running / offline)
+    // STEP 3 — Enqueue for sync immediately (0ms durable write)
+    final sanitized = LocalStorageService.sanitize(data);
+    await LocalStorageService.enqueueSync({
+      'type':      'save_patient',
+      'branchId':  branchId,
+      'patientId': patientId,
+      'data':      sanitized,
+    });
+    Logger().d('[FirestoreService] 📥 Enqueued for sync: $patientId');
+
+    // STEP 4 — Fast background push to Firestore (un-awaited, never blocks UI thread)
+    unawaited(() async {
+      try {
+        final fsData = Map<String, dynamic>.from(data);
+        if (fsData['dob'] is String) {
+          try {
+            fsData['dob'] = Timestamp.fromDate(DateTime.parse(fsData['dob'] as String));
+          } catch (_) {}
+        }
+        fsData.remove('syncStatus');
+        fsData.remove('hiveKey');
+
+        await _db
+            .collection('branches')
+            .doc(branchId)
+            .collection('patients')
+            .doc(patientId)
+            .set(fsData, SetOptions(merge: true))
+            .timeout(const Duration(seconds: 4));
+
+        await Hive.box('app_flags').put('patient_synced_$patientId', true);
+        print('[FirestoreService] ✅ Direct Firestore write complete: $patientId');
+      } catch (e) {
+        Logger().d('[FirestoreService] Direct write deferred to queue ($e)');
+      }
+    }());
+
+    // STEP 5 — Flush queue in background (no-op if offline)
     SyncService().triggerUpload();
     Logger().d('[FirestoreService] triggerUpload called after savePatient');
   }
@@ -415,6 +413,43 @@ class FirestoreService {
     Logger().d('Saving prescription locally → ID: $id');
 
     await LocalStorageService.saveLocalPrescription(sanitized);
+
+    try {
+      final patientCnic = (sanitized['patientCnic'] ?? sanitized['cnic'] ?? sanitized['patientCNIC'] ?? 'unknown_$id').toString().trim().replaceAll('-', '').replaceAll(' ', '');
+      final serial = id.trim().toUpperCase();
+      final queueType = (sanitized['queueType'] ?? 'zakat').toString();
+      final dateKey = (sanitized['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
+      final campDocKey = CampSessionService.getCampDateDocId(
+        branchId: branchId,
+        dateKey: dateKey,
+        campId: sanitized['campId']?.toString() ?? sanitized['dispensaryId']?.toString(),
+        dispensaryTag: sanitized['dispensaryTag']?.toString(),
+        serial: serial,
+      );
+
+      final prescriptionDoc = _db
+          .collection('branches')
+          .doc(branchId)
+          .collection('prescriptions')
+          .doc(patientCnic)
+          .collection('prescriptions')
+          .doc(serial);
+
+      await prescriptionDoc.set(sanitized, SetOptions(merge: true));
+      await _db
+          .collection('branches')
+          .doc(branchId)
+          .collection('serials')
+          .doc(campDocKey)
+          .collection(queueType)
+          .doc(serial)
+          .set({
+            'status': 'completed',
+            'completedAt': sanitized['completedAt'] ?? DateTime.now().toUtc().toIso8601String(),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      Logger().d('Direct prescription write failed ($e) → queue fallback');
+    }
 
     RealtimeManager().sendMessage(
       RealtimeEvents.payload(

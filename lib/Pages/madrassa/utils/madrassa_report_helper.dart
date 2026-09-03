@@ -330,7 +330,7 @@ class MadrassaReportHelper {
                           ),
                           child: pw.Text(
                             'Status: Active (${DateFormat('yyyy-MM-dd').format(DateTime.now())})',
-                            style: const pw.TextStyle(
+                            style: pw.TextStyle(
                               fontSize: 9,
                               color: PdfColors.teal100,
                               fontStyle: pw.FontStyle.italic,
@@ -357,16 +357,25 @@ class MadrassaReportHelper {
         build: (pw.Context context) {
           // Column layout (index reference for cellAlignments/columnWidths/decoration):
           // 0 #  1 Student  2 Roll  3 Days  4 P  5 L  6 A  7 Uniform  8 Sabak  9 Sabki  10 Manzil
-          // 11 Att.Rs  12 Uni.Rs  13 Msg  14 Msg.Rs  15 PTM  16 Total Rs  17 Due
-          const int dueColIndex = 17;
+          // [If fees enabled: 11 Att.Rs  12 Uni.Rs  13 Msg  14 Msg.Rs  15 PTM  16 Total Rs  17 Due]
+          // [If fees disabled: 11 Msg  12 PTM]
+          final bool isFeeEnabled = config.enableFees;
+          final headers = [
+            '#', 'Student', 'Roll', 'Days', 'P', 'L', 'A', 'Uniform',
+            'Sabak', 'Sabki', 'Manzil',
+            if (isFeeEnabled) 'Att. Rs',
+            if (isFeeEnabled) 'Uni. Rs',
+            'Msg',
+            if (isFeeEnabled) 'Msg. Rs',
+            'PTM',
+            if (isFeeEnabled) 'Total Rs',
+            if (isFeeEnabled) 'Due',
+          ];
+          final int dueColIndex = isFeeEnabled ? (headers.length - 1) : -1;
 
           return [
             pw.TableHelper.fromTextArray(
-              headers: const [
-                '#', 'Student', 'Roll', 'Days', 'P', 'L', 'A', 'Uniform',
-                'Sabak', 'Sabki', 'Manzil',
-                'Att. Rs', 'Uni. Rs', 'Msg', 'Msg. Rs', 'PTM', 'Total Rs', 'Due'
-              ],
+              headers: headers,
               data: List.generate(rows.length, (i) {
                 final row = rows[i];
                 final fee = row['fee'] as Map<String, dynamic>;
@@ -411,13 +420,13 @@ class MadrassaReportHelper {
                   sabakText,
                   sabkiText,
                   manzilText,
-                  ((fee['attSavings'] as num).toStringAsFixed(0)),
-                  ((fee['uniSavings'] as num).toStringAsFixed(0)),
+                  if (isFeeEnabled) ((fee['attSavings'] as num).toStringAsFixed(0)),
+                  if (isFeeEnabled) ((fee['uniSavings'] as num).toStringAsFixed(0)),
                   '${fee['message']}/${fee['activeWorkingDays']}',
-                  ((fee['msgSavings'] as num).toStringAsFixed(0)),
+                  if (isFeeEnabled) ((fee['msgSavings'] as num).toStringAsFixed(0)),
                   fee['ptm'] ? 'Joined' : 'Missed',
-                  ((fee['totalSavings'] as num).toStringAsFixed(0)),
-                  ((fee['amountDue'] as num).toStringAsFixed(0)),
+                  if (isFeeEnabled) ((fee['totalSavings'] as num).toStringAsFixed(0)),
+                  if (isFeeEnabled) ((fee['amountDue'] as num).toStringAsFixed(0)),
                 ];
               }),
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5, color: PdfColors.white, letterSpacing: 0.3),
@@ -426,46 +435,46 @@ class MadrassaReportHelper {
               headerPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 9),
               cellAlignment: pw.Alignment.center,
               cellAlignments: {
-                0: pw.Alignment.center,
-                1: pw.Alignment.centerLeft,
-                2: pw.Alignment.center,
-                3: pw.Alignment.center,
-                4: pw.Alignment.center,
-                5: pw.Alignment.center,
-                6: pw.Alignment.center,
-                7: pw.Alignment.center,
-                8: pw.Alignment.center,
-                9: pw.Alignment.center,
-                10: pw.Alignment.center,
-                11: pw.Alignment.center,
-                12: pw.Alignment.center,
-                13: pw.Alignment.center,
-                14: pw.Alignment.center,
-                15: pw.Alignment.center,
-                16: pw.Alignment.center,
-                17: pw.Alignment.center,
+                for (int col = 0; col < headers.length; col++)
+                  col: (col == 1 ? pw.Alignment.centerLeft : pw.Alignment.center),
               },
               cellPadding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-              columnWidths: {
-                0: const pw.FixedColumnWidth(28),
-                1: const pw.FlexColumnWidth(3),
-                2: const pw.FixedColumnWidth(30),
-                3: const pw.FixedColumnWidth(40),
-                4: const pw.FixedColumnWidth(34),
-                5: const pw.FixedColumnWidth(34),
-                6: const pw.FixedColumnWidth(34),
-                7: const pw.FixedColumnWidth(48),
-                8: const pw.FixedColumnWidth(42),
-                9: const pw.FixedColumnWidth(42),
-                10: const pw.FixedColumnWidth(42),
-                11: const pw.FixedColumnWidth(40),
-                12: const pw.FixedColumnWidth(40),
-                13: const pw.FixedColumnWidth(42),
-                14: const pw.FixedColumnWidth(44),
-                15: const pw.FixedColumnWidth(54),
-                16: const pw.FixedColumnWidth(50),
-                17: const pw.FixedColumnWidth(46),
-              },
+              columnWidths: isFeeEnabled
+                  ? {
+                      0: const pw.FixedColumnWidth(28),
+                      1: const pw.FlexColumnWidth(3),
+                      2: const pw.FixedColumnWidth(30),
+                      3: const pw.FixedColumnWidth(40),
+                      4: const pw.FixedColumnWidth(34),
+                      5: const pw.FixedColumnWidth(34),
+                      6: const pw.FixedColumnWidth(34),
+                      7: const pw.FixedColumnWidth(48),
+                      8: const pw.FixedColumnWidth(42),
+                      9: const pw.FixedColumnWidth(42),
+                      10: const pw.FixedColumnWidth(42),
+                      11: const pw.FixedColumnWidth(40),
+                      12: const pw.FixedColumnWidth(40),
+                      13: const pw.FixedColumnWidth(42),
+                      14: const pw.FixedColumnWidth(44),
+                      15: const pw.FixedColumnWidth(54),
+                      16: const pw.FixedColumnWidth(50),
+                      17: const pw.FixedColumnWidth(46),
+                    }
+                  : {
+                      0: const pw.FixedColumnWidth(30),
+                      1: const pw.FlexColumnWidth(3),
+                      2: const pw.FixedColumnWidth(36),
+                      3: const pw.FixedColumnWidth(48),
+                      4: const pw.FixedColumnWidth(40),
+                      5: const pw.FixedColumnWidth(40),
+                      6: const pw.FixedColumnWidth(40),
+                      7: const pw.FixedColumnWidth(56),
+                      8: const pw.FixedColumnWidth(50),
+                      9: const pw.FixedColumnWidth(50),
+                      10: const pw.FixedColumnWidth(50),
+                      11: const pw.FixedColumnWidth(48),
+                      12: const pw.FixedColumnWidth(58),
+                    },
               // Full grid lines (horizontal AND vertical) so the dense,
               // wide table is easy to track across both rows and columns,
               // plus a slightly bolder border framing the whole table.
@@ -520,11 +529,13 @@ class MadrassaReportHelper {
                   _totalChip('Present', '$totalPresent'),
                   _totalChip('Leave', '$totalLeave'),
                   _totalChip('Absent', '$totalAbsent'),
-                  _totalChip('Att. Savings', totalAtt.toStringAsFixed(0)),
-                  _totalChip('Uni. Savings', totalUni.toStringAsFixed(0)),
-                  _totalChip('Msg Savings', totalMsg.toStringAsFixed(0)),
-                  _totalChip('Total Savings', totalSavings.toStringAsFixed(0)),
-                  _totalChip('GRAND TOTAL DUE', totalDue.toStringAsFixed(0), emphasize: true),
+                  if (isFeeEnabled) ...[
+                    _totalChip('Att. Savings', totalAtt.toStringAsFixed(0)),
+                    _totalChip('Uni. Savings', totalUni.toStringAsFixed(0)),
+                    _totalChip('Msg Savings', totalMsg.toStringAsFixed(0)),
+                    _totalChip('Total Savings', totalSavings.toStringAsFixed(0)),
+                    _totalChip('GRAND TOTAL DUE', totalDue.toStringAsFixed(0), emphasize: true),
+                  ],
                 ],
               ),
             ),
@@ -635,12 +646,18 @@ class MadrassaReportHelper {
     }
 
     const int headerRow = 4;
+    final bool isFeeEnabled = config.enableFees;
     final headers = [
       '#', 'Student Name', 'Roll Number', 'Total Days', 'Present', 'Leave', 'Absent',
       'Uniform Days',
       'Sabak (Lines)', 'Cumulative Lines', 'Latest Sabki Para', 'Latest Sabki Ratio',
       'Latest Manzil Para', 'Latest Manzil Ratio',
-      'Att. Savings', 'Uni. Savings', 'Msg Replied', 'PTM Joined', 'Total Savings', 'Amount Due'
+      if (isFeeEnabled) 'Att. Savings',
+      if (isFeeEnabled) 'Uni. Savings',
+      'Msg Replied',
+      'PTM Joined',
+      if (isFeeEnabled) 'Total Savings',
+      if (isFeeEnabled) 'Amount Due',
     ];
     
     for (int i = 0; i < headers.length; i++) {
@@ -699,22 +716,24 @@ class MadrassaReportHelper {
         TextCellValue(formatRatio(sabkiRatio)),
         IntCellValue(manzilPara),
         TextCellValue(formatRatio(manzilRatio)),
-        DoubleCellValue((fee['attSavings'] as num).toDouble().roundToDouble()),
-        DoubleCellValue((fee['uniSavings'] as num).toDouble().roundToDouble()),
+        if (isFeeEnabled) DoubleCellValue((fee['attSavings'] as num).toDouble().roundToDouble()),
+        if (isFeeEnabled) DoubleCellValue((fee['uniSavings'] as num).toDouble().roundToDouble()),
         TextCellValue(fee['message'] > 0 ? 'Yes' : 'No'),
         TextCellValue(fee['ptm'] ? 'Joined' : 'Missed'),
-        DoubleCellValue((fee['totalSavings'] as num).toDouble().roundToDouble()),
-        DoubleCellValue(amountDue.roundToDouble()),
+        if (isFeeEnabled) DoubleCellValue((fee['totalSavings'] as num).toDouble().roundToDouble()),
+        if (isFeeEnabled) DoubleCellValue(amountDue.roundToDouble()),
       ]);
     }
 
     // Add totals row
-    sheet.appendRow([]);
-    final totalRow = sheet.maxRows;
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 18, rowIndex: totalRow)).value = TextCellValue('GRAND TOTAL:');
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 18, rowIndex: totalRow)).cellStyle = CellStyle(bold: true);
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 19, rowIndex: totalRow)).value = DoubleCellValue(totalAmountDue.roundToDouble());
-    sheet.cell(CellIndex.indexByColumnRow(columnIndex: 19, rowIndex: totalRow)).cellStyle = CellStyle(bold: true, fontColorHex: ExcelColor.fromHexString('#D32F2F'));
+    if (isFeeEnabled) {
+      sheet.appendRow([]);
+      final totalRow = sheet.maxRows;
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: headers.length - 2, rowIndex: totalRow)).value = TextCellValue('GRAND TOTAL:');
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: headers.length - 2, rowIndex: totalRow)).cellStyle = CellStyle(bold: true);
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: headers.length - 1, rowIndex: totalRow)).value = DoubleCellValue(totalAmountDue.roundToDouble());
+      sheet.cell(CellIndex.indexByColumnRow(columnIndex: headers.length - 1, rowIndex: totalRow)).cellStyle = CellStyle(bold: true, fontColorHex: ExcelColor.fromHexString('#D32F2F'));
+    }
 
     final fileBytes = excel.save();
     if (fileBytes != null) {
@@ -923,7 +942,7 @@ class MadrassaReportHelper {
                             padding: const pw.EdgeInsets.only(top: 4),
                             child: pw.Text(
                               'Compiled till ${DateFormat('dd MMM yyyy').format(DateTime.now())}',
-                              style: const pw.TextStyle(fontSize: 8, color: PdfColors.teal100, fontStyle: pw.FontStyle.italic),
+                              style: pw.TextStyle(fontSize: 8, color: PdfColors.teal100, fontStyle: pw.FontStyle.italic),
                             ),
                           ),
                       ],
@@ -1059,50 +1078,51 @@ class MadrassaReportHelper {
                 ],
               ),
             ),
-            pw.SizedBox(height: 12),
-
-            // ── Financial summary ───────────────────────────────────────
-            _sectionHeader('FINANCIAL SUMMARY'),
-            pw.SizedBox(height: 6),
-            pw.Container(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 12),
-              decoration: pw.BoxDecoration(
-                color: PdfColors.white,
-                borderRadius: pw.BorderRadius.circular(8),
-                border: pw.Border.all(color: const PdfColor.fromInt(0xFFE2E8F0)),
+            if (config.enableFees) ...[
+              pw.SizedBox(height: 12),
+              // ── Financial summary ───────────────────────────────────────
+              _sectionHeader('FINANCIAL SUMMARY'),
+              pw.SizedBox(height: 6),
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 12),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.white,
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: const PdfColor.fromInt(0xFFE2E8F0)),
+                ),
+                child: pw.Column(
+                  children: [
+                    _row('Base Fee', 'Rs. ${config.baseFee.toStringAsFixed(0)}'),
+                    if (config.baseFee - fee['proRatedBaseFee'] > 0.5)
+                      _row(
+                        'Holiday Adjustment (${fee['activeWorkingDays']}/${workingDays} days)',
+                        '- Rs. ${(config.baseFee - fee['proRatedBaseFee']).toStringAsFixed(0)}',
+                      ),
+                    _row('Attendance Savings (${fee['present'] + fee['leave']}/${fee['activeWorkingDays']} present/leave)', '- Rs. ${fee['attSavings'].toStringAsFixed(0)}'),
+                    _row('Uniform Savings (${fee['uniform']}/${fee['activeWorkingDays']} clean)', '- Rs. ${fee['uniSavings'].toStringAsFixed(0)}'),
+                    _row('Message Savings (${fee['message']}/${fee['activeWorkingDays']} replied)', '- Rs. ${fee['msgSavings'].toStringAsFixed(0)}'),
+                    _row('PTM Savings (${fee['ptm'] ? 'Attended' : 'Missed'})', '- Rs. ${fee['ptmSavings'].toStringAsFixed(0)}', isLast: true),
+                  ],
+                ),
               ),
-              child: pw.Column(
-                children: [
-                  _row('Base Fee', 'Rs. ${config.baseFee.toStringAsFixed(0)}'),
-                  if (config.baseFee - fee['proRatedBaseFee'] > 0.5)
-                    _row(
-                      'Holiday Adjustment (${fee['activeWorkingDays']}/${workingDays} days)',
-                      '- Rs. ${(config.baseFee - fee['proRatedBaseFee']).toStringAsFixed(0)}',
-                    ),
-                  _row('Attendance Savings (${fee['present'] + fee['leave']}/${fee['activeWorkingDays']} present/leave)', '- Rs. ${fee['attSavings'].toStringAsFixed(0)}'),
-                  _row('Uniform Savings (${fee['uniform']}/${fee['activeWorkingDays']} clean)', '- Rs. ${fee['uniSavings'].toStringAsFixed(0)}'),
-                  _row('Message Savings (${fee['message']}/${fee['activeWorkingDays']} replied)', '- Rs. ${fee['msgSavings'].toStringAsFixed(0)}'),
-                  _row('PTM Savings (${fee['ptm'] ? 'Attended' : 'Missed'})', '- Rs. ${fee['ptmSavings'].toStringAsFixed(0)}', isLast: true),
-                ],
+              pw.SizedBox(height: 8),
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: pw.BoxDecoration(
+                  color: const PdfColor.fromInt(0xFFE0F2F1),
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 0.75),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('TOTAL AMOUNT DUE', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF0F766E))),
+                    pw.Text('Rs. ${due.toStringAsFixed(0)}', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                  ],
+                ),
               ),
-            ),
-            pw.SizedBox(height: 8),
-            pw.Container(
-              width: double.infinity,
-              padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: pw.BoxDecoration(
-                color: const PdfColor.fromInt(0xFFE0F2F1),
-                borderRadius: pw.BorderRadius.circular(8),
-                border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 0.75),
-              ),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('TOTAL AMOUNT DUE', style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF0F766E))),
-                  pw.Text('Rs. ${due.toStringAsFixed(0)}', style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
-                ],
-              ),
-            ),
+            ],
             // Attendance & Compliance Details section removed from the PDF
             // per request — it's still available in the Excel export via
             // getAttendanceDetails(), just not rendered here anymore.
@@ -1280,32 +1300,34 @@ class MadrassaReportHelper {
     addStat('Weekly Pace', '${paceWeekly.toStringAsFixed(1)} lines/week');
     addStat('Est. Completion Time', estCompletionStr);
     
-    r++; // Spacer
+    if (config.enableFees) {
+      r++; // Spacer
 
-    // Financial Header
-    var finHeader = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r));
-    finHeader.value = TextCellValue('FINANCIAL SUMMARY');
-    finHeader.cellStyle = headerStyle;
-    sheet.merge(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r), CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r));
-    r++;
-
-    void addFin(String label, double val, {bool isTotal = false}) {
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue(label);
-      if (isTotal) sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).cellStyle = labelStyle;
-      
-      var valCell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r));
-      valCell.value = DoubleCellValue(val.roundToDouble());
-      if (isTotal) valCell.cellStyle = totalStyle;
+      // Financial Header
+      var finHeader = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r));
+      finHeader.value = TextCellValue('FINANCIAL SUMMARY');
+      finHeader.cellStyle = headerStyle;
+      sheet.merge(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r), CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r));
       r++;
-    }
 
-    addFin('Base Fee', config.baseFee.toDouble());
-    addFin('Attendance Savings', (fee['attSavings'] as num).toDouble());
-    addFin('Uniform Savings', (fee['uniSavings'] as num).toDouble());
-    addFin('Message Savings', (fee['msgSavings'] as num).toDouble());
-    addFin('PTM Savings', (fee['ptmSavings'] as num).toDouble());
-    r++;
-    addFin('TOTAL AMOUNT DUE', (fee['amountDue'] as num).toDouble(), isTotal: true);
+      void addFin(String label, double val, {bool isTotal = false}) {
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).value = TextCellValue(label);
+        if (isTotal) sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).cellStyle = labelStyle;
+        
+        var valCell = sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: r));
+        valCell.value = DoubleCellValue(val.roundToDouble());
+        if (isTotal) valCell.cellStyle = totalStyle;
+        r++;
+      }
+
+      addFin('Base Fee', config.baseFee.toDouble());
+      addFin('Attendance Savings', (fee['attSavings'] as num).toDouble());
+      addFin('Uniform Savings', (fee['uniSavings'] as num).toDouble());
+      addFin('Message Savings', (fee['msgSavings'] as num).toDouble());
+      addFin('PTM Savings', (fee['ptmSavings'] as num).toDouble());
+      r++;
+      addFin('TOTAL AMOUNT DUE', (fee['amountDue'] as num).toDouble(), isTotal: true);
+    }
 
     r++; // Spacer
 

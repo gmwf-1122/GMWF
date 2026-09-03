@@ -4,6 +4,9 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import '../../../services/local_storage_service.dart';
+import '../../../realtime/realtime_manager.dart';
+import '../../../realtime/realtime_events.dart';
+import '../../../services/zkteco_network_service.dart';
 
 class MadrassaLocalStorage {
   static const String studentsBox = LocalStorageService.madrassaStudentsBox;
@@ -53,8 +56,250 @@ class MadrassaLocalStorage {
   static Future<void> cacheStudent(String branchId, String studentId, Map<String, dynamic> data) async {
     final key = _studentKey(branchId, studentId);
     final box = _getStudentsBox();
-    await box.put(key, _sanitize(data));
+    final rawExisting = box.get(key);
+    final merged = <String, dynamic>{
+      if (rawExisting is Map) ...Map<String, dynamic>.from(rawExisting),
+      ...data,
+    };
+    await box.put(key, _sanitize(merged));
     await box.flush();
+  }
+
+  /// Saves student locally in Hive immediately, writes to disk, routes over LAN WebSocket,
+  /// enqueues for offline Firestore sync, and attempts background cloud write.
+  static Future<String> saveStudentLocalAndSync({
+    required String branchId,
+    required String studentId,
+    required Map<String, dynamic> data,
+    bool isNew = false,
+  }) async {
+    final effectiveStudentId = studentId.isNotEmpty 
+        ? studentId 
+        : 'madrassa_std_${DateTime.now().millisecondsSinceEpoch}';
+    final effectiveBranchId = branchId.toLowerCase().trim();
+
+    final cleanData = Map<String, dynamic>.from(data);
+    cleanData['id'] = effectiveStudentId;
+    cleanData['branchId'] = effectiveBranchId;
+    cleanData['lastUpdatedAt'] = DateTime.now().toIso8601String();
+
+    // 1. Immediately cache in Hive and flush to disk
+    await cacheStudent(effectiveBranchId, effectiveStudentId, cleanData);
+
+    // 2. Assign PIN in ZKTeco Biometrics if entered
+    final pin = cleanData['biometricPin']?.toString().trim();
+    if (pin != null && pin.isNotEmpty) {
+      try {
+        await ZkTecoNetworkService.assignPinToEntity(
+          entityId: effectiveStudentId,
+          entityName: cleanData['name']?.toString() ?? '',
+          entityType: 'madrassa_student',
+          branchId: effectiveBranchId,
+          customPin: pin,
+        );
+      } catch (e) {
+        debugPrint('[MadrassaLocalStorage] PIN assign error: $e');
+      }
+    }
+
+    // 3. Broadcast to LAN WebSocket
+    try {
+      final payload = RealtimeEvents.payload(
+        type: RealtimeEvents.saveMadrassaStudent,
+        data: {
+          ...cleanData,
+          'studentId': effectiveStudentId,
+        },
+        branchId: effectiveBranchId,
+      );
+      RealtimeManager().sendMessage(payload);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
+    }
+
+    // 4. Enqueue into LocalStorageService.syncBox for Firestore sync
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'save_madrassa_student',
+        'branchId': effectiveBranchId,
+        'studentId': effectiveStudentId,
+        'data': cleanData,
+        'isNew': isNew,
+      });
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
+    }
+
+    // 5. Background direct write to Firestore if connection permits
+    try {
+      final fsData = Map<String, dynamic>.from(cleanData);
+      if (fsData['joinDate'] is String) {
+        final parsed = DateTime.tryParse(fsData['joinDate'] as String);
+        if (parsed != null) fsData['joinDate'] = Timestamp.fromDate(parsed);
+      }
+      fsData['lastUpdatedAt'] = FieldValue.serverTimestamp();
+
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(effectiveBranchId)
+          .collection('madrassa_students')
+          .doc(effectiveStudentId)
+          .set(fsData, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Direct Firestore write offline/delayed: $e');
+    }
+
+    return effectiveStudentId;
+  }
+
+  /// Offboards a student: updates Hive immediately, unenrolls biometric PIN,
+  /// revokes linked app login access, broadcasts via LAN and enqueues to Firestore.
+  static Future<void> deleteOrOffboardStudentLocalAndSync({
+    required String branchId,
+    required String studentId,
+    required String status,
+    String? reason,
+    DateTime? effectiveDate,
+  }) async {
+    final effectiveBranchId = branchId.toLowerCase().trim();
+    final student = getStudentCached(effectiveBranchId, studentId) ?? {};
+    final now = DateTime.now();
+
+    student['status'] = status;
+    student['batch'] = status;
+    student['offboardedAt'] = (effectiveDate ?? now).toIso8601String();
+    student['lastUpdatedAt'] = now.toIso8601String();
+
+    final auditList = List<Map<String, dynamic>>.from(
+      (student['auditLog'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+    );
+    auditList.add({
+      'status': status,
+      'type': 'offboarding',
+      'date': (effectiveDate ?? now).toIso8601String(),
+      'reason': reason ?? 'Student offboarded ($status)',
+    });
+    student['auditLog'] = auditList;
+
+    // 1. Immediately update Hive cache and flush
+    await cacheStudent(effectiveBranchId, studentId, student);
+
+    // 2. Unenroll biometric PIN from device
+    try {
+      await ZkTecoNetworkService.deleteBiometricCredential(studentId, branchId: effectiveBranchId);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] deleteBiometricCredential error: $e');
+    }
+
+    // 3. Revoke App Access for student/guardian user account
+    try {
+      final guardianCnic = (student['guardianCnic'] ?? '').toString().trim();
+      final studentCnic = (student['studentCnic'] ?? '').toString().trim();
+      final phone = (student['contactPhone'] ?? student['phone'] ?? '').toString().trim();
+
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final usersBox = Hive.box(LocalStorageService.usersBox);
+        for (final k in usersBox.keys) {
+          final u = usersBox.get(k);
+          if (u is Map) {
+            final uCnic = (u['cnic'] ?? '').toString().trim();
+            final uPhone = (u['phone'] ?? '').toString().trim();
+            final uStudentIds = List<String>.from(u['studentIds'] ?? []);
+
+            final matches = (guardianCnic.isNotEmpty && uCnic == guardianCnic) ||
+                (studentCnic.isNotEmpty && uCnic == studentCnic) ||
+                (phone.isNotEmpty && uPhone == phone) ||
+                uStudentIds.contains(studentId);
+
+            if (matches) {
+              final updatedUser = Map<String, dynamic>.from(u);
+              uStudentIds.remove(studentId);
+              updatedUser['studentIds'] = uStudentIds;
+              if (uStudentIds.isEmpty) {
+                updatedUser['isActive'] = false;
+                updatedUser['accountStatus'] = 'offboarded';
+                updatedUser['isReadOnly'] = true;
+                updatedUser['status'] = 'offboarded';
+              }
+              await usersBox.put(k, updatedUser);
+
+              final uid = u['uid']?.toString() ?? k.toString();
+              await FirebaseFirestore.instance.collection('users').doc(uid).set(
+                {
+                  'studentIds': FieldValue.arrayRemove([studentId]),
+                  if (uStudentIds.isEmpty) ...{
+                    'isActive': false,
+                    'accountStatus': 'offboarded',
+                    'isReadOnly': true,
+                    'status': 'offboarded',
+                  }
+                },
+                SetOptions(merge: true),
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Revoke app access error: $e');
+    }
+
+    // 4. Broadcast to LAN WebSocket
+    try {
+      final payload = RealtimeEvents.payload(
+        type: RealtimeEvents.offboardMadrassaStudent,
+        data: {
+          'branchId': effectiveBranchId,
+          'studentId': studentId,
+          'status': status,
+          'reason': reason,
+          'effectiveDate': (effectiveDate ?? now).toIso8601String(),
+        },
+        branchId: effectiveBranchId,
+      );
+      RealtimeManager().sendMessage(payload);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
+    }
+
+    // 5. Enqueue for Firestore sync
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'delete_madrassa_student',
+        'branchId': effectiveBranchId,
+        'studentId': studentId,
+        'status': status,
+        'reason': reason,
+        'effectiveDate': (effectiveDate ?? now).toIso8601String(),
+        'data': student,
+      });
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
+    }
+
+    // 6. Direct Firestore sync
+    try {
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(effectiveBranchId)
+          .collection('madrassa_students')
+          .doc(studentId)
+          .set({
+            'status': status,
+            'batch': status,
+            'lastUpdatedAt': FieldValue.serverTimestamp(),
+            'auditLog': FieldValue.arrayUnion([
+              {
+                'status': status,
+                'type': 'offboarding',
+                'date': Timestamp.fromDate(effectiveDate ?? now),
+                'reason': reason ?? 'Student offboarded ($status)',
+              }
+            ]),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Direct Firestore offboard error: $e');
+    }
   }
 
   static Map<String, dynamic>? getStudentCached(String branchId, String studentId) {
@@ -191,6 +436,16 @@ class MadrassaLocalStorage {
     final raw = box.get(key);
     if (raw == null) return null;
     return Map<String, dynamic>.from(raw as Map);
+  }
+
+  static Map<String, dynamic>? getDailyLogCached(String branchId, String dateKey) =>
+      getLogCached(branchId, dateKey);
+
+  static Future<void> cacheDailyLog(String branchId, String dateKey, Map<String, dynamic> data) async {
+    final key = _logKey(branchId, dateKey);
+    final box = _getLogsBox();
+    await box.put(key, _sanitize(data));
+    await box.flush();
   }
 
   // This one already watches a specific key, but still add distinct() so a

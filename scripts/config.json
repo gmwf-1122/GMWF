@@ -8,37 +8,43 @@
             "name": "Office HQ Main Gate Scanner",
             "ip": "192.168.1.150",
             "port": 4370,
-            "location": "Office/Dasterkhwaan"
+            "location": "Office/Dasterkhwaan",
+            "branch": "karachi"
         },
         {
             "name": "Dispensary Medical Scanner",
             "ip": "192.168.1.151",
             "port": 4370,
-            "location": "Dispensary"
+            "location": "Dispensary",
+            "branch": "karachi"
         },
         {
             "name": "Madrassa Gate Scanner",
             "ip": "192.168.1.152",
             "port": 4370,
-            "location": "Madrassa"
+            "location": "Madrassa",
+            "branch": "karachi"
         },
         {
             "name": "GMWF Model School Scanner",
             "ip": "192.168.1.153",
             "port": 4370,
-            "location": "School"
+            "location": "School",
+            "branch": "karachi"
         },
         {
             "name": "Dasterkhwaan Kitchen Scanner",
             "ip": "192.168.1.154",
             "port": 4370,
-            "location": "Dasterkhwaan Kitchen"
+            "location": "Dasterkhwaan Kitchen",
+            "branch": "karachi"
         },
         {
             "name": "Auxiliary Staff Scanner",
             "ip": "192.168.1.155",
             "port": 4370,
-            "location": "Office/Dasterkhwaan"
+            "location": "Office/Dasterkhwaan",
+            "branch": "karachi"
         }
     ]
 }

@@ -45,17 +45,8 @@ class _LoansTabState extends State<LoansTab> {
   Map<String, dynamic>? _selectedLoan;
 
   bool get _isBranchScopedUser {
-    if (widget.branchId.isNotEmpty && widget.branchId != 'all') return true;
-    if (Hive.isBoxOpen('local_users')) {
-      final curUser = Hive.box('local_users').values.firstOrNull;
-      if (curUser is Map) {
-        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
-        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
-          return true;
-        }
-      }
-    }
-    return false;
+    final role = LocalStorageService.getActiveUserRole();
+    return role == 'branch manager' || role == 'supervisor' || role == 'bm';
   }
 
   @override
@@ -785,7 +776,7 @@ class _LoansTabState extends State<LoansTab> {
                           'repaymentType': repaymentType,
                           'usualInstallmentMinor': isFixed ? _parsePaisa(installmentCtrl.text) : 0,
                           'reason': reasonCtrl.text,
-                          'requestedBy': Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'Manager',
+                          'requestedBy': LocalStorageService.getActiveUsername(),
                           'createdAt': DateTime.now().toUtc().toIso8601String(),
                         }
                       });
@@ -801,7 +792,7 @@ class _LoansTabState extends State<LoansTab> {
                         usualInstallment: isFixed ? _parsePaisa(installmentCtrl.text) / 100 : 0.0,
                         reason: reasonCtrl.text,
                         dateIssued: selectedDate,
-                        performedBy: Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'System',
+                        performedBy: LocalStorageService.getActiveUsername(),
                       );
                       showCustomSnackBar(context, 'Loan successfully issued.');
                     }
@@ -868,7 +859,7 @@ class _LoansTabState extends State<LoansTab> {
                   return;
                 }
 
-                final performedBy = Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'System';
+                final performedBy = LocalStorageService.getActiveUsername();
 
                 try {
                   if (access == FinanceAccess.requestOnly) {
@@ -949,11 +940,11 @@ class _LoansTabState extends State<LoansTab> {
                 final amt = (payment['amountMinor'] as num?)?.toInt() ?? 0;
                 final limit = 10000 * 100; // PKR 10,000 in paisa
                 
-                final userRole = (Hive.box('local_users').values.firstOrNull?['role']?.toString() ?? 'staff').toLowerCase();
-                final bool isGlobalUser = userRole == 'admin' || userRole == 'hq manager' || userRole == 'ceo' || userRole == 'chairman';
+                final userRole = LocalStorageService.getActiveUserRole();
+                final bool isGlobalUser = userRole == 'admin' || userRole == 'hq manager' || userRole == 'manager' || userRole == 'ceo' || userRole == 'chairman';
                 final isOverLimit = amt > limit && !isGlobalUser;
 
-                final performedBy = Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'System';
+                final performedBy = LocalStorageService.getActiveUsername();
 
                 try {
                   if (isOverLimit) {
@@ -1030,7 +1021,7 @@ class _LoansTabState extends State<LoansTab> {
                   return;
                 }
 
-                final performedBy = Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'System';
+                final performedBy = LocalStorageService.getActiveUsername();
 
                 try {
                   // Write-off requires Owner approval, queue as a request

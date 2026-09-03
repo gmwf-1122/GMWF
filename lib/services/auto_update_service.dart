@@ -33,9 +33,9 @@ class UpdateInfo {
 
 class AutoUpdateService {
   /// Default fallback version of the GMWF application if PackageInfo is unavailable.
-  static const String currentVersion = '1.4.0';
+  static const String currentVersion = '1.4.4';
   static const int protocolVersion = 2;
-  static const String minSupportedVersion = '1.4.0';
+  static const String minSupportedVersion = '1.4.4';
 
   /// Default GitHub repository configuration for auto-updates.
   static const String defaultRepoOwner = 'gmwf-1122';
@@ -62,8 +62,11 @@ class AutoUpdateService {
   /// Returns 1 if v2 > v1 (update available), -1 if v1 > v2, 0 if equal.
   static int compareVersions(String v1, String v2) {
     try {
-      final parts1 = v1.replaceAll(RegExp(r'[^\d.]'), '').split('.').map(int.parse).toList();
-      final parts2 = v2.replaceAll(RegExp(r'[^\d.]'), '').split('.').map(int.parse).toList();
+      final cleanV1 = v1.split('+').first.split('-').first.replaceAll(RegExp(r'^[vV]'), '').trim();
+      final cleanV2 = v2.split('+').first.split('-').first.replaceAll(RegExp(r'^[vV]'), '').trim();
+
+      final parts1 = cleanV1.split('.').where((s) => s.isNotEmpty).map((s) => int.tryParse(s) ?? 0).toList();
+      final parts2 = cleanV2.split('.').where((s) => s.isNotEmpty).map((s) => int.tryParse(s) ?? 0).toList();
 
       final maxLength = parts1.length > parts2.length ? parts1.length : parts2.length;
       for (int i = 0; i < maxLength; i++) {
@@ -78,7 +81,7 @@ class AutoUpdateService {
     return 0;
   }
 
-  /// Primary update check method: checks GitHub Releases first, then Firestore fallback.
+  /// Primary update check method: checks GitHub Releases first, then Firestore fallback, then raw GitHub repository fallback.
   static Future<UpdateInfo?> checkForUpdates({
     String? repoOwner,
     String? repoName,
@@ -92,19 +95,83 @@ class AutoUpdateService {
     final owner = repoOwner ?? defaultRepoOwner;
     final name = repoName ?? defaultRepoName;
 
-    // 1. Try checking GitHub Releases (gmwf-1122/GMWF)
-    final ghInfo = await checkGitHubReleases(
-      repoOwner: owner,
-      repoName: name,
-      personalAccessToken: personalAccessToken,
-    );
+    try {
+      // 1. Try checking GitHub Releases (gmwf-1122/GMWF)
+      final ghInfo = await checkGitHubReleases(
+        repoOwner: owner,
+        repoName: name,
+        personalAccessToken: personalAccessToken,
+      );
 
-    if (ghInfo != null) {
-      return ghInfo;
+      if (ghInfo != null && ghInfo.hasUpdate) {
+        return ghInfo;
+      }
+
+      // 2. Fallback to Firestore app_config/version
+      final fsInfo = await checkFirestoreVersion();
+      if (fsInfo != null && fsInfo.hasUpdate) {
+        return fsInfo;
+      }
+
+      // 3. Fallback to Raw GitHub pubspec repository check (immune to GitHub API 60 req/hr rate limits)
+      final rawInfo = await checkRawGitHubFallback(
+        repoOwner: owner,
+        repoName: name,
+      );
+      if (rawInfo != null && rawInfo.hasUpdate) {
+        return rawInfo;
+      }
+
+      // If checks succeeded but no update was available, return the latest release info (hasUpdate == false)
+      return ghInfo ?? fsInfo ?? rawInfo;
+    } catch (e) {
+      debugPrint('[AutoUpdateService] General checkForUpdates error: $e');
+      return null;
     }
+  }
 
-    // 2. Fallback to Firestore app_config/version
-    return checkFirestoreVersion();
+  /// Tier 3 fallback: Checks raw GitHub repository files when GitHub API is rate limited (HTTP 403) and Firestore is offline.
+  static Future<UpdateInfo?> checkRawGitHubFallback({
+    required String repoOwner,
+    required String repoName,
+  }) async {
+    try {
+      final url = Uri.parse('https://raw.githubusercontent.com/$repoOwner/$repoName/main/pubspec.yaml');
+      final response = await http.get(url).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final content = response.body;
+        final match = RegExp(r'version:\s*([\d.]+)(?:\+(\d+))?').firstMatch(content);
+        if (match != null) {
+          final rawVer = match.group(1)?.trim() ?? '';
+          if (rawVer.isNotEmpty) {
+            final installedVer = await getAppVersion();
+            if (compareVersions(installedVer, rawVer) > 0) {
+              final cleanTag = rawVer.startsWith('v') ? rawVer : 'v$rawVer';
+              String downloadUrl = '';
+              if (defaultTargetPlatform == TargetPlatform.windows) {
+                downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag-x64.exe';
+              } else if (defaultTargetPlatform == TargetPlatform.android) {
+                downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/app-arm64-v8a-release.apk';
+              } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+                downloadUrl = 'https://github.com/$repoOwner/$repoName/releases/download/$cleanTag/GMWF-$cleanTag.dmg';
+              }
+
+              return UpdateInfo(
+                latestVersion: rawVer,
+                minRequiredVersion: installedVer,
+                downloadUrl: downloadUrl,
+                releaseNotes: 'Performance improvements, stability updates, and feature enhancements.',
+                forceUpdate: false,
+                hasUpdate: downloadUrl.isNotEmpty,
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[AutoUpdateService] Raw GitHub fallback check error: $e');
+    }
+    return null;
   }
 
   /// Checks Firestore `app_config/version` for available updates with platform-specific fallback.
@@ -201,9 +268,20 @@ class AutoUpdateService {
                 supportedAbis = androidInfo.supportedAbis;
               } catch (_) {}
 
-              Map<String, dynamic>? selectedApk;
+              // 1. First look for universal APK (GMWF-*.apk or app-release.apk without split ABI tags)
+              Map<String, dynamic>? selectedApk = apkAssets.firstWhere(
+                (a) {
+                  final name = (a['name'] ?? '').toString().toLowerCase();
+                  return (!name.contains('arm') && !name.contains('x86') && !name.contains('v7a') && !name.contains('v8a')) ||
+                      name.contains('universal') ||
+                      name == 'app-release.apk' ||
+                      name.startsWith('gmwf-');
+                },
+                orElse: () => null,
+              );
 
-              if (supportedAbis.isNotEmpty) {
+              // 2. If no universal APK, match device supported ABIs
+              if (selectedApk == null && supportedAbis.isNotEmpty) {
                 for (final abi in supportedAbis) {
                   final abiClean = abi.toLowerCase();
                   final match = apkAssets.firstWhere(
@@ -223,14 +301,8 @@ class AutoUpdateService {
                 }
               }
 
-              // Fallback to universal APK or first non-32bit APK if no exact ABI match
-              selectedApk ??= apkAssets.firstWhere(
-                (a) {
-                  final name = (a['name'] ?? '').toString().toLowerCase();
-                  return !name.contains('-32bit') && !name.contains('x86') && !name.contains('v7a');
-                },
-                orElse: () => apkAssets.first,
-              );
+              // 3. Fallback to first available APK
+              selectedApk ??= apkAssets.first;
 
               downloadUrl = (selectedApk?['browser_download_url'] ?? selectedApk?['url'] ?? '').toString();
             }
@@ -368,6 +440,11 @@ class AutoUpdateService {
       final contentLength = response.contentLength;
       int receivedBytes = 0;
       final file = File(targetFilePath);
+      if (await file.exists()) {
+        try {
+          await file.delete();
+        } catch (_) {}
+      }
       final sink = file.openWrite();
 
       await response.forEach((chunk) {
@@ -389,6 +466,16 @@ class AutoUpdateService {
       await sink.flush();
       await sink.close();
       httpClient.close();
+
+      // Integrity Check: Reject empty or tiny HTML error responses
+      final fileSize = await file.length();
+      if (fileSize < 1024 * 500) {
+        onProgress(0.0, 'Download Failed: File size is invalid ($fileSize bytes). Please try again or download via browser.');
+        try {
+          await file.delete();
+        } catch (_) {}
+        return null;
+      }
 
       return file;
     } on SocketException catch (e) {
@@ -435,7 +522,20 @@ class AutoUpdateService {
     }
 
     final tempDir = await getTemporaryDirectory();
-    final filePath = path.join(tempDir.path, fileName);
+    String filePath = path.join(tempDir.path, fileName);
+
+    // Safeguard: If previous installer is still locked by OS or antivirus, use timestamped file
+    try {
+      final existing = File(filePath);
+      if (await existing.exists()) {
+        await existing.delete();
+      }
+    } catch (_) {
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final ext = path.extension(fileName);
+      final base = path.basenameWithoutExtension(fileName);
+      filePath = path.join(tempDir.path, '${base}_$ts$ext');
+    }
 
     final downloadedFile = await _downloadFileWithHttpClient(
       effectiveUrl,
@@ -456,8 +556,12 @@ class AutoUpdateService {
         bool processStarted = false;
         String winErr = '';
         try {
-          // Launch Inno Setup silent installer
-          await Process.start(filePath, ['/verysilent', '/suppressmsgboxes', '/norestart', '/sp-']);
+          // Launch detached so setup window appears and requests UAC elevation without locking the app
+          await Process.start(
+            filePath,
+            ['/sp-'],
+            mode: ProcessStartMode.detached,
+          );
           processStarted = true;
         } catch (e) {
           winErr = e.toString();
@@ -468,11 +572,10 @@ class AutoUpdateService {
         }
 
         if (processStarted) {
-          onProgress(1.0, 'Installer launched! Closing app to complete update...');
-          await Future.delayed(const Duration(seconds: 2));
-          exit(0);
+          onProgress(1.0, 'Installer launched! Please complete the setup window to finish updating.');
+          return true;
         } else {
-          onProgress(0.0, 'Windows Installation Failed: $winErr. Windows SmartScreen or Antivirus blocked execution.');
+          onProgress(0.0, 'Windows Installation Failed: $winErr. Please run the setup manually.');
           return false;
         }
       } else if (defaultTargetPlatform == TargetPlatform.android) {
@@ -496,7 +599,7 @@ class AutoUpdateService {
           onProgress(0.0, 'File Error: Downloaded APK file was not found at $filePath.');
           return false;
         } else {
-          onProgress(0.0, 'Installation Failed: ${result.message} (Error Code: ${result.type}).');
+          onProgress(0.0, 'Installation prompt could not open automatically: ${result.message}. Opening direct download...');
           try {
             final uri = Uri.parse(effectiveUrl);
             await launchUrl(uri, mode: LaunchMode.externalApplication);

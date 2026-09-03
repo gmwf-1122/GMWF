@@ -18,7 +18,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'dart:async';
 
 import '../config/constants.dart';
-import '../services/camp_session_service.dart';
+import '../services/python_runner_service.dart';
 
 class LanServer {
   HttpServer? _server;
@@ -126,6 +126,15 @@ class LanServer {
 
       _startUdpBroadcast(ipShown);
       _startDedupPurgeTimer();
+
+      if (!kIsWeb) {
+        if (!PythonRunnerService.instance.isRunning) {
+          unawaited(PythonRunnerService.instance.initAutoStart().catchError((e) {
+            if (kDebugMode) print('[LanServer] Auto-start Python daemon warning: $e');
+            return false;
+          }));
+        }
+      }
 
     } catch (e) {
       print('╔════════════════════════════════════════════════════════════╗');
@@ -239,8 +248,19 @@ class LanServer {
 
     try {
       final data      = jsonDecode(message) as Map<String, dynamic>;
-      final eventType = data['event_type'] as String?;
+      final eventType = (data['event_type'] ?? data['type']) as String?;
       _messagesReceived++;
+
+      // ── Ping / Pong keep-alive inside JSON payload ────────────────────────
+      if (eventType == 'ping' || data['type'] == 'ping') {
+        socket.add(jsonEncode({
+          'type': 'pong',
+          'event_type': 'pong',
+          'serverEpoch': DateTime.now().millisecondsSinceEpoch,
+        }));
+        return;
+      }
+      if (eventType == 'pong' || data['type'] == 'pong') return;
 
       // ── Auth handshake ───────────────────────────────────────────────────
       if (eventType == 'auth_handshake' || data['type'] == 'auth_handshake') {
@@ -440,13 +460,13 @@ class LanServer {
             : null) ??
         senderBranch;
 
+    // [FP-3 FIX] Single, clear branch resolution — route to all peers in
+    // the same branch as the message (or the sender if message has no branch).
+    final targetBranch = messageBranch.isNotEmpty ? messageBranch : senderBranch;
+
     final messageJson = jsonEncode(message);
     int sentCount = 0;
-
-    final inner = (message['data'] is Map)
-        ? Map<String, dynamic>.from(message['data'] as Map)
-        : message;
-    final serial = (inner['serial'] ?? inner['id'])?.toString().trim();
+    int failedCount = 0;
 
     for (final client in List<WebSocket>.from(_clients)) {
       if (client == sender) continue;
@@ -456,16 +476,8 @@ class LanServer {
       if (info == null || info['identified'] != true) continue;
 
       final clientBranch = (info['branchId'] as String?)?.toLowerCase().trim() ?? '';
-      if (messageBranch.isNotEmpty && clientBranch.isNotEmpty && clientBranch != messageBranch) {
+      if (targetBranch.isNotEmpty && clientBranch.isNotEmpty && clientBranch != targetBranch) {
         continue;
-      }
-      if (clientBranch != messageBranch && clientBranch != senderBranch) {
-        continue;
-      }
-      if (serial != null && serial.isNotEmpty) {
-        if (!CampSessionService.isSerialMatchingBranch(serial, clientBranch)) {
-          continue;
-        }
       }
 
       try {
@@ -473,12 +485,24 @@ class LanServer {
         sentCount++;
         _messagesSent++;
       } catch (e) {
-        print('❌ ERROR routing to ${client.hashCode}: $e');
+        failedCount++;
+        final clientSocketId = client.hashCode.toString();
+        print('❌ ERROR routing to $clientSocketId (${info['role']}): $e');
+        // [FP-4 FIX] Mark client as potentially stale; catch-up will recover
+        // messages for this client when it reconnects.
       }
     }
 
+    // [FP-5 FIX] Enhanced zero-delivery logging with serial info for diagnostics
     if (sentCount == 0 && message['event_type'] != 'identify') {
-      print('⚠️ "${message['event_type']}" not delivered to any peer');
+      final eventType = message['event_type'] ?? 'unknown';
+      final serial = message['data'] is Map
+          ? (message['data']['serial'] ?? '').toString()
+          : (message['serial'] ?? '').toString();
+      final serialInfo = serial.isNotEmpty ? ' serial=$serial' : '';
+      print('⚠️ "$eventType"$serialInfo not delivered to any peer '
+          '(${_clientInfo.length} connected, ${failedCount > 0 ? "$failedCount failed" : "no matching peers"}) '
+          '— catch-up will recover on next connect');
     }
   }
 
@@ -588,6 +612,11 @@ class LanServer {
       print('[LanServer] Error closing server socket: $e');
     }
     _server = null;
+    if (!kIsWeb && PythonRunnerService.instance.isRunning) {
+      try {
+        await PythonRunnerService.instance.stopProcess();
+      } catch (_) {}
+    }
     print('[LanServer] Fully stopped');
   }
 

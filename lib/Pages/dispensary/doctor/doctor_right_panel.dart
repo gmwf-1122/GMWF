@@ -13,6 +13,7 @@ import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/prescription_template_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 
@@ -96,10 +97,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   static const Color _dosePillBorder = Color(0xFF5DCAA5);
   static const Color _dosePillText   = Color(0xFF0F6E56);
 
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
+
   // Base price per day per queue type
-  static const Map<String, int> _baseDayPrice = {
+  Map<String, int> get _baseDayPrice => {
     'zakat':     20,
-    'non-zakat': 100,
+    'non-zakat': _isKarachi ? 20 : 100,
     'gmwf':      0,
   };
 
@@ -116,6 +122,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   List<String> get _currentQuickList => widget.isPhysiotherapist ? _quickPhysiotherapies : _quickLabTests;
 
   final Set<String> _selectedQuickTests = {};
+
+  List<Map<String, dynamic>> _prescriptionTemplates = [];
 
   late final List<FocusNode> _tabOrder = [
     _complaintFocus,
@@ -140,6 +148,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   void initState() {
     super.initState();
     _loadInventory();
+    _loadPrescriptionTemplates();
 
     final quickList = _currentQuickList;
     for (final lab in widget.labResults) {
@@ -187,6 +196,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final s = widget.serialId.toUpperCase();
     if (s.contains('-SADD-') || s.contains('-SADDAR-') || s.contains('-SAD-') || s.contains('-KAP-')) return 'saddar';
     if (s.contains('-HAJI-') || s.contains('-HC-')) return 'haji_camp';
+
+    if (CampSessionService.hasCampsForBranch(widget.branchId)) {
+      final available = CampSessionService.getAvailableCampOptions();
+      if (available.isNotEmpty) return available.first['id'];
+    }
     return null;
   }
 
@@ -220,6 +234,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final mId = (data['id'] ?? data['medicineId'])?.toString();
       if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
       _loadInventory();
+      return;
+    } else if (type == 'save_prescription_template' || type == 'delete_prescription_template') {
+      _loadPrescriptionTemplates();
       return;
     }
 
@@ -264,7 +281,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         final d = data['daysOfMedicine'];
         if (d is int && d >= 1 && d <= 3) _daysOfMedicine = d;
       });
-      if (mounted) {
+      final isReplay = event['_serverPush'] == true ||
+          event['_resent'] == true ||
+          event['isCatchUp'] == true ||
+          event['_isReplay'] == true ||
+          data['_serverPush'] == true ||
+          data['_resent'] == true ||
+          data['isCatchUp'] == true ||
+          data['_isReplay'] == true;
+      if (!isReplay && mounted) {
         Flushbar(
           message: 'Prescription updated in realtime',
           backgroundColor: Colors.blue.shade700,
@@ -280,17 +305,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     return type.contains('syringe') || type == 'syr' || type == 'syr.' || name.contains('syringe');
   }
 
-  Future<void> _loadInventory() async {
-    final effCamp = _getEffectiveCamp();
+  Future<void> _loadInventory([String? overrideCamp]) async {
+    final effCamp = overrideCamp ?? _getEffectiveCamp() ?? CampSessionService.getActiveCamp(widget.branchId);
+    final hasCamps = CampSessionService.hasCampsForBranch(widget.branchId);
+    final bool shouldFilterByCamp = hasCamps && effCamp != null && effCamp.isNotEmpty && effCamp != 'all';
 
     // 1. Get physical local stock items strictly for this branch and camp
     var localItems = LocalStorageService.getAllLocalStockItems(
       branchId: widget.branchId,
-      dispensaryId: effCamp,
-      filterByCamp: effCamp != null && effCamp.isNotEmpty && effCamp != 'all',
+      dispensaryId: shouldFilterByCamp ? effCamp : null,
+      filterByCamp: shouldFilterByCamp,
     ).where((m) => !_isSyringeItem(m)).toList();
 
-    if (localItems.isEmpty && (effCamp == null || effCamp == 'all')) {
+    if (localItems.isEmpty && !shouldFilterByCamp && (effCamp == null || effCamp == 'all')) {
       localItems = LocalStorageService.getAllLocalStockItems(
         branchId: widget.branchId,
         filterByCamp: false,
@@ -339,15 +366,33 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
       final entriesBox = Hive.box(LocalStorageService.entriesBox);
       final mySerial   = widget.serialId.trim().toLowerCase();
+      // PERF FIX: prescriptionsBox accumulates every prescription ever
+      // written locally. Scanning the whole box on every dialog-open and
+      // every save is what caused the doctor-panel freeze — only TODAY's
+      // prescriptions can possibly still be "reserved" (unreleased) stock,
+      // so skip everything else using the cheap date prefix on the serial
+      // before doing any Map/lookup work.
+      final todayKey = CampSessionService.resolveShiftAndDateKey(null, widget.branchId).dateKey;
 
       for (final key in prescBox.keys) {
         final raw = prescBox.get(key);
         if (raw is! Map) continue;
+
+        final prescSerialRaw = (raw['serial'] ?? raw['id'] ?? '').toString();
+        if (prescSerialRaw.isEmpty) continue;
+
+        final parts = prescSerialRaw.split('-');
+        final effectiveDatePrefix = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+            ? (parts.length > 1 ? parts[1] : '')
+            : (parts.isNotEmpty ? parts[0] : '');
+        if (effectiveDatePrefix.isNotEmpty && effectiveDatePrefix != todayKey) {
+          continue;
+        }
+
         final presc = Map<String, dynamic>.from(raw);
 
         // Skip the current patient — their session is handled in _getAvailableStock
-        final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
-            .toString().trim().toLowerCase();
+        final prescSerial = prescSerialRaw.trim().toLowerCase();
         if (prescSerial == mySerial) continue;
 
         // Check if already dispensed — look up in entriesBox
@@ -375,8 +420,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
           final medQty = med['quantity'];
           final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
-          // For multi-day prescriptions, account for the multiplier
-          // (injections/drips are always × 1)
           final days = (presc['daysOfMedicine'] as int?) ?? 1;
           final type = (med['type'] ?? '').toString().toLowerCase();
           final isInj = type.contains('injection') || type.contains('inj') ||
@@ -525,7 +568,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   }
 
   Future<void> _showMedicineSelectionDialog() async {
-    await _loadInventory();
+    final availableCampOptions = CampSessionService.getAvailableCampOptions();
+    final userAssigned = CampSessionService.getAssignedCampsFromHive();
+    final bool hasMultipleCamps = CampSessionService.hasCampsForBranch(widget.branchId) &&
+        (availableCampOptions.length > 1 && userAssigned.length != 1);
+    String dialogCamp = _getEffectiveCamp() ?? (availableCampOptions.isNotEmpty ? availableCampOptions.first['id']! : 'haji_camp');
+
+    await _loadInventory(dialogCamp);
     if (!mounted) return;
 
     final queryCtrl = TextEditingController();
@@ -687,16 +736,56 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Text(
-                                  'Select Prescription Medicine',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 0.2,
-                                  ),
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        'Select Prescription Medicine',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 17,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.2,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (hasMultipleCamps) ...[
+                                      const SizedBox(width: 10),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.25),
+                                          borderRadius: BorderRadius.circular(14),
+                                          border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.8),
+                                        ),
+                                        child: DropdownButtonHideUnderline(
+                                          child: DropdownButton<String>(
+                                            value: dialogCamp,
+                                            dropdownColor: const Color(0xFF004D40),
+                                            icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 16),
+                                            isDense: true,
+                                            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                                            items: availableCampOptions.map((opt) {
+                                              return DropdownMenuItem<String>(
+                                                value: opt['id'],
+                                                child: Text('📍 ${opt['label']}'),
+                                              );
+                                            }).toList(),
+                                            onChanged: (newCamp) async {
+                                              if (newCamp != null && newCamp != dialogCamp) {
+                                                dialogCamp = newCamp;
+                                                await _loadInventory(newCamp);
+                                                setDialogState(() {});
+                                              }
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
-                                const SizedBox(height: 2),
+                                const SizedBox(height: 3),
                                 Row(
                                   children: [
                                     Container(
@@ -731,6 +820,24 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                         ),
                                       ),
                                     ),
+                                    if (!hasMultipleCamps && CampSessionService.hasCampsForBranch(widget.branchId)) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.22),
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: Text(
+                                          CampSessionService.getCampLabel(dialogCamp),
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ],
@@ -741,7 +848,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             tooltip: 'Refresh & Sync Inventory',
                             onPressed: () async {
                               await LocalStorageService.downloadInventory(widget.branchId);
-                              await _loadInventory();
+                              await _loadInventory(dialogCamp);
                               setDialogState(() {});
                             },
                           ),
@@ -844,9 +951,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                         child: Text(
                                           kw,
                                           style: TextStyle(
-                                            fontSize: 11,
+                                            fontSize: 11.5,
                                             fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                                            color: isActive ? (isDark ? const Color(0xFF2DD4BF) : _teal) : (isDark ? const Color(0xFFCBD5E1) : Colors.grey.shade700),
+                                            color: isActive ? _teal : (isDark ? const Color(0xFFCBD5E1) : Colors.grey.shade800),
                                           ),
                                         ),
                                       ),
@@ -1011,37 +1118,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     _addMedicineDialog(inventoryMed: m);
                                   },
                                   child: Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                                    margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                     decoration: BoxDecoration(
                                       color: itemBg,
-                                      borderRadius: BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.circular(14),
                                       border: Border.all(color: itemBorder, width: isOutOfStock || isLowStock ? 1.2 : 0.8),
                                     ),
                                     child: Row(
                                       children: [
-                                        // Left Icon Avatar
-                                        Container(
-                                          width: 42,
-                                          height: 42,
-                                          decoration: BoxDecoration(
-                                            color: isOutOfStock ? Colors.red.shade100 : typeColors.bg,
-                                            borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(
-                                              color: isOutOfStock ? Colors.red.shade300 : typeColors.border,
-                                              width: 0.8,
-                                            ),
-                                          ),
-                                          alignment: Alignment.center,
-                                          child: FaIcon(
-                                            _getMedicineIcon(m),
-                                            color: isOutOfStock ? Colors.red.shade700 : typeColors.text,
-                                            size: 18,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-
-                                        // Medicine Info
+                                        // Medicine Info with unified single-bubble Icon+Type before name
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1049,11 +1135,45 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             children: [
                                               Row(
                                                 children: [
+                                                  // Unified Icon + Type Single Bubble (Enlarged & Positioned First)
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                                                    decoration: BoxDecoration(
+                                                      color: isOutOfStock ? Colors.grey.shade100 : typeColors.bg,
+                                                      border: Border.all(
+                                                        color: isOutOfStock ? Colors.grey.shade300 : typeColors.border,
+                                                        width: 0.9,
+                                                      ),
+                                                      borderRadius: BorderRadius.circular(20),
+                                                    ),
+                                                    child: Row(
+                                                      mainAxisSize: MainAxisSize.min,
+                                                      children: [
+                                                        FaIcon(
+                                                          _getMedicineIcon(m),
+                                                          color: isOutOfStock ? Colors.grey.shade600 : typeColors.text,
+                                                          size: 13,
+                                                        ),
+                                                        const SizedBox(width: 6),
+                                                        Text(
+                                                          medType,
+                                                          style: TextStyle(
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.bold,
+                                                            color: isOutOfStock ? Colors.grey.shade600 : typeColors.text,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 10),
+
+                                                  // Medicine Name
                                                   Flexible(
                                                     child: Text(
                                                       medicineName,
                                                       style: TextStyle(
-                                                        fontSize: 14.5,
+                                                        fontSize: 15,
                                                         fontWeight: FontWeight.bold,
                                                         color: isOutOfStock
                                                             ? (isDark ? const Color(0xFFFCA5A5) : Colors.red.shade900)
@@ -1062,39 +1182,23 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                       overflow: TextOverflow.ellipsis,
                                                     ),
                                                   ),
-                                                  const SizedBox(width: 8),
-                                                  Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
-                                                    decoration: BoxDecoration(
-                                                      color: typeColors.bg,
-                                                      border: Border.all(color: typeColors.border, width: 0.6),
-                                                      borderRadius: BorderRadius.circular(8),
-                                                    ),
-                                                    child: Text(
-                                                      medType,
-                                                      style: TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.w700,
-                                                        color: typeColors.text,
-                                                      ),
-                                                    ),
-                                                  ),
+
                                                   if (dose.isNotEmpty) ...[
-                                                    const SizedBox(width: 5),
+                                                    const SizedBox(width: 8),
                                                     Container(
-                                                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
+                                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                                                       decoration: BoxDecoration(
                                                         color: _dosePillBg,
                                                         border: Border.all(
                                                           color: _dosePillBorder,
-                                                          width: 0.6,
+                                                          width: 0.8,
                                                         ),
-                                                        borderRadius: BorderRadius.circular(8),
+                                                        borderRadius: BorderRadius.circular(20),
                                                       ),
                                                       child: Text(
                                                         dose,
                                                         style: const TextStyle(
-                                                          fontSize: 10,
+                                                          fontSize: 11.5,
                                                           fontWeight: FontWeight.w600,
                                                           color: _dosePillText,
                                                         ),
@@ -1104,7 +1208,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 ],
                                               ),
                                               if (formula.isNotEmpty && formula.toLowerCase() != medicineName.toLowerCase()) ...[
-                                                const SizedBox(height: 3),
+                                                const SizedBox(height: 4),
                                                 Row(
                                                   children: [
                                                     Icon(Icons.biotech_rounded, size: 13, color: Colors.teal.shade700),
@@ -1685,6 +1789,996 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     );
   }
 
+  // ── Prescription Templates Management ─────────────────────────────────────
+  Future<void> _loadPrescriptionTemplates() async {
+    try {
+      final tpls = await PrescriptionTemplateService.loadTemplates(widget.branchId, doctorId: widget.doctorId);
+      if (mounted) {
+        setState(() {
+          _prescriptionTemplates = tpls;
+        });
+      }
+    } catch (e) {
+      debugPrint('[DoctorRightPanel] _loadPrescriptionTemplates error: $e');
+    }
+  }
+
+  Map<String, dynamic>? _findMatchingInventoryItem(String searchName) {
+    if (_allInventory.isEmpty) return null;
+    final clean = searchName.trim().toLowerCase();
+    if (clean.isEmpty) return null;
+
+    // 1. Exact Name or Formula match
+    for (final inv in _allInventory) {
+      final invName = (inv['name'] ?? '').toString().trim().toLowerCase();
+      final invFormula = (inv['formula'] ?? '').toString().trim().toLowerCase();
+      if (invName == clean || (invFormula.isNotEmpty && invFormula == clean)) {
+        return inv;
+      }
+    }
+
+    // 2. Contains match
+    for (final inv in _allInventory) {
+      final invName = (inv['name'] ?? '').toString().trim().toLowerCase();
+      final invFormula = (inv['formula'] ?? '').toString().trim().toLowerCase();
+      if (invName.contains(clean) || clean.contains(invName) ||
+          (invFormula.isNotEmpty && (invFormula.contains(clean) || clean.contains(invFormula)))) {
+        return inv;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _applyPrescriptionTemplate(Map<String, dynamic> template) async {
+    await _loadInventory();
+    await _buildReservedQuantities();
+
+    final meds = (template['medicines'] as List<dynamic>?) ?? [];
+    final List<Map<String, dynamic>> resolvedMeds = [];
+    final List<Map<String, dynamic>> outOfStockMeds = [];
+    final List<Map<String, dynamic>> lowStockMeds = [];
+
+    for (final raw in meds) {
+      final tplMed = Map<String, dynamic>.from(raw as Map);
+      final rawName = tplMed['name']?.toString() ?? '';
+      final invMatch = _findMatchingInventoryItem(rawName);
+
+      int availableStock = 999;
+      String? inventoryId;
+      String medName = rawName;
+      String medType = tplMed['type'] ?? 'Tablet';
+
+      if (invMatch != null) {
+        inventoryId = invMatch['id']?.toString();
+        medName = invMatch['name'] ?? rawName;
+        medType = _getMedicineType(invMatch);
+        availableStock = _getAvailableStock(invMatch);
+      }
+
+      final timing = tplMed['timing'] ?? tplMed['dose'] ?? '1+1+1';
+      final digits = timing.toString().replaceAll('+', '');
+      final m = int.tryParse(digits.isNotEmpty ? digits[0] : '0') ?? 0;
+      final e = digits.length > 1 ? int.tryParse(digits[1]) ?? 0 : 0;
+      final n = digits.length > 2 ? int.tryParse(digits[2]) ?? 0 : 0;
+      final sum = m + e + n;
+      final perDayQty = (tplMed['quantity'] is num)
+          ? (tplMed['quantity'] as num).toInt()
+          : (sum > 0 ? sum : 1);
+
+      final isInj = _isInjectionOrDrip({'type': medType, 'name': medName});
+      final totalNeeded = isInj ? perDayQty : perDayQty * (template['defaultDays'] as int? ?? 1);
+
+      final medEntry = {
+        'name': medName,
+        'quantity': perDayQty,
+        'timing': timing,
+        'meal': tplMed['instructions'] ?? tplMed['meal'] ?? 'After Meal',
+        'dosage': tplMed['dosage'] ?? '',
+        'type': medType,
+        'inventoryId': inventoryId,
+      };
+
+      if (invMatch != null && availableStock <= 0) {
+        outOfStockMeds.add({'med': medEntry, 'stock': availableStock, 'match': invMatch});
+      } else if (invMatch != null && availableStock < totalNeeded) {
+        lowStockMeds.add({'med': medEntry, 'stock': availableStock, 'match': invMatch});
+        resolvedMeds.add(medEntry);
+      } else {
+        resolvedMeds.add(medEntry);
+      }
+    }
+
+    if (outOfStockMeds.isNotEmpty) {
+      _showTemplateStockWarningDialog(
+        template: template,
+        outOfStockList: outOfStockMeds,
+        lowStockList: lowStockMeds,
+        resolvedMeds: resolvedMeds,
+      );
+    } else {
+      _finalizeTemplateApplication(template, resolvedMeds);
+    }
+  }
+
+  void _showTemplateStockWarningDialog({
+    required Map<String, dynamic> template,
+    required List<Map<String, dynamic>> outOfStockList,
+    required List<Map<String, dynamic>> lowStockList,
+    required List<Map<String, dynamic>> resolvedMeds,
+  }) {
+    final isDark = _isDark;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF78350F) : Colors.amber.shade100,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.inventory_2_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Inventory Stock Verification',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                    Text('Real-time audit for "${template['name']}"',
+                        style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'The following medicines in this template have inventory stock alerts:',
+                  style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87),
+                ),
+                const SizedBox(height: 12),
+                ...outOfStockList.map((item) {
+                  final med = item['med'] as Map<String, dynamic>;
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: isDark ? const Color(0xFFEF4444) : Colors.red.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.cancel, color: Colors.red, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${med['name']} (${med['type']})',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? const Color(0xFFFCA5A5) : Colors.red.shade900)),
+                              const Text('Status: 0 In Stock (Unavailable in dispensary)', style: TextStyle(fontSize: 11, color: Colors.redAccent)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+                if (lowStockList.isNotEmpty) ...[
+                  ...lowStockList.map((item) {
+                    final med = item['med'] as Map<String, dynamic>;
+                    final stock = item['stock'];
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: isDark ? const Color(0xFFF97316) : Colors.amber.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${med['name']} (${med['type']})',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? const Color(0xFFFDE68A) : Colors.amber.shade900)),
+                                Text('Low Stock: Only $stock units left in dispensary',
+                                    style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFFFCD34D) : Colors.amber.shade800)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.filter_alt_off_rounded, size: 16),
+              label: const Text('Apply In-Stock Only'),
+              style: OutlinedButton.styleFrom(foregroundColor: isDark ? const Color(0xFFF97316) : Colors.orange.shade900),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _finalizeTemplateApplication(template, resolvedMeds);
+              },
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.done_all_rounded, size: 16),
+              label: const Text('Apply Anyway (Custom)'),
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Convert out-of-stock medicines to Custom (no inventoryId = external purchase)
+                final customMeds = outOfStockList.map((e) {
+                  final med = Map<String, dynamic>.from(e['med'] as Map);
+                  med.remove('inventoryId');  // Strip inventory link → becomes Custom
+                  return med;
+                }).toList();
+                final allCombined = [...resolvedMeds, ...customMeds];
+                _finalizeTemplateApplication(template, allCombined);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _finalizeTemplateApplication(Map<String, dynamic> template, List<Map<String, dynamic>> meds) {
+    setState(() {
+      widget.complaintController.text = template['complaint']?.toString() ?? '';
+      widget.diagnosisController.text = template['diagnosis']?.toString() ?? '';
+      
+      final days = (template['defaultDays'] as int?) ?? 1;
+      _daysOfMedicine = (days >= 1 && days <= 3) ? days : 1;
+
+      widget.prescriptions
+        ..clear()
+        ..addAll(meds);
+
+      // Force 1 day if any injection is in template
+      if (widget.prescriptions.any(_isInjectionOrDrip)) {
+        _daysOfMedicine = 1;
+      }
+
+      // Add template lab tests
+      final tplLabs = (template['labResults'] as List<dynamic>?) ?? [];
+      widget.labResults.clear();
+      _selectedQuickTests.clear();
+      for (final raw in tplLabs) {
+        if (raw is Map) {
+          final lMap = Map<String, dynamic>.from(raw);
+          widget.labResults.add(lMap);
+          final n = lMap['name']?.toString() ?? '';
+          if (_currentQuickList.contains(n)) _selectedQuickTests.add(n);
+        }
+      }
+    });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚡ Applied "${template['name']}" — ${meds.length} medicine(s) loaded'),
+          backgroundColor: _teal,
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _deleteTemplate(String templateId, String templateName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        title: Row(
+          children: [
+            const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 24),
+            const SizedBox(width: 8),
+            Text('Delete Template', style: TextStyle(color: _isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete the "$templateName" template?',
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await PrescriptionTemplateService.deleteTemplate(widget.branchId, templateId, doctorId: widget.doctorId);
+      await _loadPrescriptionTemplates();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🗑️ Deleted "$templateName"'),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditTemplateDialog(Map<String, dynamic> template) async {
+    final titleCtrl = TextEditingController(text: template['name'] ?? '');
+    final complaintCtrl = TextEditingController(text: template['complaint'] ?? '');
+    final diagnosisCtrl = TextEditingController(text: template['diagnosis'] ?? '');
+    String selectedCategory = template['category'] ?? 'General';
+    int defaultDays = (template['defaultDays'] as int?) ?? 1;
+    final isDark = _isDark;
+
+    List<Map<String, dynamic>> tempMeds = List<Map<String, dynamic>>.from(
+      (template['medicines'] as List<dynamic>?)?.map((e) => Map<String, dynamic>.from(e as Map)) ?? [],
+    );
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Row(
+            children: [
+              const Icon(Icons.edit_note_rounded, color: _teal, size: 24),
+              const SizedBox(width: 8),
+              Text('Edit Prescription Template',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Template Title:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: titleCtrl,
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<String>(
+                    value: selectedCategory,
+                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    items: ['General', 'Respiratory', 'Gastro', 'Cardio', 'Pediatric', 'ENT', 'Ortho', 'Infectious']
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? Colors.white : Colors.black87))))
+                        .toList(),
+                    onChanged: (v) => setDlgState(() => selectedCategory = v ?? 'General'),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Patient Condition / Complaints:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: complaintCtrl,
+                    maxLines: 2,
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Diagnosis:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: diagnosisCtrl,
+                    maxLines: 2,
+                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Default Duration (Days):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                      Row(
+                        children: [1, 2, 3].map((d) {
+                          return Padding(
+                            padding: const EdgeInsets.only(left: 6),
+                            child: ChoiceChip(
+                              label: Text('$d Day${d > 1 ? "s" : ""}'),
+                              selected: defaultDays == d,
+                              onSelected: (_) => setDlgState(() => defaultDays = d),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Medicines in Template (${tempMeds.length}):',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF5EEAD4) : _teal)),
+                      TextButton.icon(
+                        icon: const Icon(Icons.sync, size: 14),
+                        label: const Text('Update with Current Form', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          setDlgState(() {
+                            tempMeds = List<Map<String, dynamic>>.from(widget.prescriptions);
+                            complaintCtrl.text = widget.complaintController.text;
+                            diagnosisCtrl.text = widget.diagnosisController.text;
+                            defaultDays = _daysOfMedicine;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ...tempMeds.map((m) {
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              '${m['name']} (${m['timing'] ?? m['dose'] ?? '1+1+1'}) • ${m['meal'] ?? m['instructions'] ?? ''}',
+                              style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white : Colors.black87),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                            onPressed: () => setDlgState(() => tempMeds.remove(m)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _deleteTemplate(template['id'], template['name']);
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete Template'),
+            ),
+            const Spacer(),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              onPressed: () async {
+                final newName = titleCtrl.text.trim();
+                if (newName.isEmpty) return;
+
+                final updated = Map<String, dynamic>.from(template);
+                updated['name'] = newName;
+                updated['category'] = selectedCategory;
+                updated['complaint'] = complaintCtrl.text.trim();
+                updated['diagnosis'] = diagnosisCtrl.text.trim();
+                updated['defaultDays'] = defaultDays;
+                updated['medicines'] = tempMeds;
+
+                await PrescriptionTemplateService.saveTemplate(widget.branchId, updated, doctorId: widget.doctorId);
+                await _loadPrescriptionTemplates();
+                if (ctx.mounted) Navigator.pop(ctx);
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✏️ Updated "$newName" template'),
+                      backgroundColor: _teal,
+                      duration: const Duration(seconds: 3),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Save Changes'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showManageTemplatesDialog() async {
+    final isDark = _isDark;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Row(
+            children: [
+              const Icon(Icons.tune_rounded, color: _teal, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Manage Prescription Presets',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                    Text('${_prescriptionTemplates.length} custom preset(s) saved',
+                        style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white60 : Colors.grey.shade600)),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_rounded, color: _teal),
+                tooltip: 'Create New from Current Form',
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _showSaveCurrentAsTemplateDialog();
+                },
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 520,
+            height: 400,
+            child: _prescriptionTemplates.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? Colors.white38 : Colors.grey.shade400),
+                        const SizedBox(height: 10),
+                        Text('No templates added yet',
+                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                        const SizedBox(height: 4),
+                        Text('Fill a prescription and click "Save as Preset"',
+                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey)),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _prescriptionTemplates.length,
+                    itemBuilder: (context, idx) {
+                      final tpl = _prescriptionTemplates[idx];
+                      final medCount = (tpl['medicines'] as List?)?.length ?? 0;
+                      final labCount = (tpl['labResults'] as List?)?.length ?? 0;
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF134E4A) : _dosePillBg,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(Icons.medical_services_rounded, color: isDark ? const Color(0xFF2DD4BF) : _teal, size: 18),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(tpl['name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: isDark ? Colors.white : Colors.black87)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${tpl['category'] ?? 'General'} • $medCount Meds • $labCount Labs • ${tpl['defaultDays'] ?? 1} Day(s)',
+                                    style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
+                              tooltip: 'Apply to Current Patient',
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _applyPrescriptionTemplate(tpl);
+                              },
+                            ),
+                            IconButton(
+                              icon: Icon(Icons.edit_outlined, color: isDark ? Colors.white70 : Colors.grey.shade700, size: 18),
+                              tooltip: 'Edit Template',
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _showEditTemplateDialog(tpl);
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              tooltip: 'Delete Template',
+                              onPressed: () async {
+                                await PrescriptionTemplateService.deleteTemplate(widget.branchId, tpl['id']);
+                                await _loadPrescriptionTemplates();
+                                setDlgState(() {});
+                              },
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showSaveCurrentAsTemplateDialog() async {
+    final complaint = widget.complaintController.text.trim();
+    final diagnosis = widget.diagnosisController.text.trim();
+
+    if (_prescriptionTemplates.length >= 5) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('⚠️ Maximum limit reached (5 disease presets). Please edit or delete an existing preset.'),
+          backgroundColor: Colors.amber.shade800,
+          duration: const Duration(seconds: 4),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (complaint.isEmpty && diagnosis.isEmpty && widget.prescriptions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please fill Diagnosis or Medicines first to save as a Template!'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final titleCtrl = TextEditingController(text: diagnosis.isNotEmpty ? diagnosis : 'Prescription Preset');
+    String selectedCategory = 'General';
+    final isDark = _isDark;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          title: Row(
+            children: [
+              const Icon(Icons.bookmark_add_rounded, color: _teal, size: 24),
+              const SizedBox(width: 8),
+              Text('Save As Reusable Template',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+            ],
+          ),
+          content: SizedBox(
+            width: 440,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Template Name / Title:',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: titleCtrl,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. Acute URTI (Adult)',
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text('Category:',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  value: selectedCategory,
+                  dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  items: ['General', 'Respiratory', 'Gastro', 'Cardio', 'Pediatric', 'ENT', 'Ortho']
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? Colors.white : Colors.black87))))
+                      .toList(),
+                  onChanged: (v) => setDlgState(() => selectedCategory = v ?? 'General'),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF134E4A) : _dosePillBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : _dosePillBorder, width: 0.6),
+                  ),
+                  child: Text(
+                    'Includes: ${widget.prescriptions.length} Medicine(s) • ${widget.labResults.length} Lab Test(s) • Day: $_daysOfMedicine',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF5EEAD4) : _teal),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              onPressed: () async {
+                final name = titleCtrl.text.trim();
+                if (name.isEmpty) return;
+
+                final newTpl = {
+                  'id': 'tpl_${DateTime.now().millisecondsSinceEpoch}',
+                  'name': name,
+                  'category': selectedCategory,
+                  'complaint': complaint,
+                  'diagnosis': diagnosis,
+                  'defaultDays': _daysOfMedicine,
+                  'medicines': List<Map<String, dynamic>>.from(widget.prescriptions),
+                  'labResults': List<Map<String, dynamic>>.from(widget.labResults),
+                };
+
+                try {
+                  await PrescriptionTemplateService.saveTemplate(widget.branchId, newTpl, doctorId: widget.doctorId);
+                  await _loadPrescriptionTemplates();
+                  if (ctx.mounted) Navigator.pop(ctx);
+
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('⭐ Saved "$name" to your Presets library!'),
+                        backgroundColor: _teal,
+                        duration: const Duration(seconds: 3),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(
+                      SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: Colors.red),
+                    );
+                  }
+                }
+              },
+              child: const Text('Save Template'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickTemplatesBar(bool compact, bool isDark) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? const Color(0xFF334155) : const Color(0xFFA7F3D0),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black26 : Colors.teal.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.bolt, color: Color(0xFFF59E0B), size: 18),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Disease Presets (Templates)',
+                  style: TextStyle(
+                    fontSize: compact ? 12.5 : 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                  ),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _showManageTemplatesDialog,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                  margin: const EdgeInsets.only(right: 6),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF475569) : Colors.grey.shade300, width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tune_rounded, size: 13, color: isDark ? Colors.white70 : Colors.grey.shade700),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Manage',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white70 : Colors.grey.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _showSaveCurrentAsTemplateDialog,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : _teal, width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.bookmark_add_outlined, size: 13, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Save as Preset',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_prescriptionTemplates.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 14, color: isDark ? Colors.white54 : Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'No presets created yet. Fill diagnosis & medicines, then click "Save as Preset" above.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isDark ? Colors.white60 : Colors.grey.shade700,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _prescriptionTemplates.map((tpl) {
+                  final name = tpl['name']?.toString() ?? 'Preset';
+                  final iconName = tpl['icon']?.toString();
+                  final iconData = PrescriptionTemplateService.getIcon(iconName);
+
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ActionChip(
+                      avatar: FaIcon(iconData, size: 12, color: Colors.white),
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          InkWell(
+                            onTap: () => _showEditTemplateDialog(tpl),
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 2),
+                              child: Icon(Icons.more_vert, size: 13, color: Colors.white70),
+                            ),
+                          ),
+                        ],
+                      ),
+                      backgroundColor: isDark ? const Color(0xFF0F766E) : _teal,
+                      elevation: 1,
+                      pressElevation: 3,
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onPressed: () => _applyPrescriptionTemplate(tpl),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   // ── Days-of-medicine selector ──────────────────────────────────────────────
   Widget _buildDaysSelector(bool compact) {
     final pricePerDay = _baseDayPrice[widget.queueType] ?? 0;
@@ -2244,6 +3338,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         'extraCharge':     extraCharge,
         'completedAt':     nowIso,
         'updatedAt':       nowIso,
+        'doctorId':        doctorId,
+        'doctorName':      doctorName,
+        'prescribedBy':    doctorName,
+        'updatedBy':       doctorName,
         'isPhysiotherapist': widget.isPhysiotherapist,
       };
 
@@ -2252,7 +3350,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         'serial':          serialClean,
         'patientCnic':     patientCnic,
         'cnic':            patientCnic,
-        'patientId':       patientData['patientId']?.toString() ?? patientData['id']?.toString(),
+        'patientId':       LocalStorageService.resolveIndividualPatientId(patientData),
         'guardianCnic':    patientData['guardianCnic']?.toString(),
         'patientName':     resolvedPatientName,
         'name':            resolvedPatientName,
@@ -2288,8 +3386,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
       // Save medicine restriction for multi-day prescriptions
       if (days > 1) {
-        final pId = patientData['patientId']?.toString().trim() ?? 
-                    patientData['id']?.toString().trim() ?? '';
+        final pId = LocalStorageService.resolveIndividualPatientId(patientData);
         
         if (pId.isNotEmpty) {
           await LocalStorageService.saveMedicineRestriction(
@@ -2401,17 +3498,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             .catchError((_) {});
       }
 
-      // 4. LAN broadcast
+      // 4. LAN broadcast — send clinical prescription update ONLY (do not re-broadcast receptionist entry fields)
       try {
         RealtimeManager().sendMessage(RealtimeEvents.payload(
           type: RealtimeEvents.savePrescription,
           branchId: widget.branchId,
           data: fullPrescriptionData,
-        ));
-        RealtimeManager().sendMessage(RealtimeEvents.payload(
-          type: RealtimeEvents.saveEntry,
-          branchId: widget.branchId,
-          data: Map<String, dynamic>.from(finalUpdated),
         ));
       } catch (e) {
         debugPrint('[DoctorPanel] Broadcast failed: $e');
@@ -2507,6 +3599,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     String dateKey, String queueType, String serial, String patientCnic,
     Map<String, dynamic> fullData, Map<String, dynamic> medicalData,
   ) async {
+    // [DEDUP] If connected to LAN server, the prescription already traveled
+    // via WebSocket → Server SSM → Firestore. Skip direct write.
+    final lanConnected = RealtimeManager().isConnected;
+    if (lanConnected) {
+      debugPrint('[DoctorPanel] LAN connected — server will sync prescription $serial');
+      return;
+    }
+
     try {
       final result   = await Connectivity().checkConnectivity();
       final isOnline = !result.contains(ConnectivityResult.none);
@@ -2514,15 +3614,17 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (isOnline) {
         final branchRef = FirebaseFirestore.instance.collection('branches').doc(widget.branchId);
 
-        if (patientCnic.isNotEmpty && !patientCnic.startsWith('unknown_')) {
-          await branchRef
-              .collection('prescriptions').doc(patientCnic)
-              .collection('prescriptions').doc(serial)
-              .set(fullData, SetOptions(merge: true));
-        }
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: widget.branchId,
+          dateKey: dateKey,
+          campId: fullData['campId']?.toString() ?? fullData['dispensaryId']?.toString(),
+          dispensaryTag: fullData['dispensaryTag']?.toString(),
+          serial: serial,
+        );
 
+        // Single canonical write: updates the serial doc with clinical details + status
         await branchRef
-            .collection('serials').doc(dateKey)
+            .collection('serials').doc(campDocKey)
             .collection(queueType).doc(serial)
             .set({
               'status':          'completed',
@@ -2549,14 +3651,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   ) async {
     try {
       await LocalStorageService.enqueueSync({
-        'type': 'save_prescription', 'branchId': widget.branchId,
-        'dateKey': dateKey, 'queueType': queueType,
-        'serial': serial, 'patientCnic': patientCnic, 'data': fullData,
-      });
-      await LocalStorageService.enqueueSync({
-        'type': 'update_serial_status', 'branchId': widget.branchId,
-        'dateKey': dateKey, 'queueType': queueType, 'serial': serial,
+        'type': 'save_prescription',
+        'branchId': widget.branchId,
+        'dateKey': dateKey,
+        'queueType': queueType,
+        'serial': serial,
         'data': {
+          'serial':          serial,
           'status':          'completed',
           'completedAt':     fullData['completedAt'],
           'doctorName':      fullData['doctorName'],
@@ -2565,6 +3666,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           'extraCharge':     fullData['extraCharge'],
           'prescription':    medicalData,
           'dispenseStatus':  'pending',
+          'campId':          fullData['campId']?.toString() ?? fullData['dispensaryId']?.toString(),
+          'dispensaryTag':   fullData['dispensaryTag']?.toString(),
         },
       });
       SyncService().triggerUpload();
@@ -2644,6 +3747,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   ]),
                 ),
               ],
+
+              // ── Quick Disease Presets / Templates ─────────────────────
+              _buildQuickTemplatesBar(compact, isDark),
+
               // ── Patient condition ─────────────────────────────────────
               Row(children: [
                 Icon(Icons.description, color: _teal, size: compact ? 18 : 22),

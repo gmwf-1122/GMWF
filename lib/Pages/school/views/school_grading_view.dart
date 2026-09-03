@@ -445,86 +445,104 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     required double highestScore,
     required double passRate,
   }) {
+    final isMobile = MediaQuery.of(context).size.width < 750;
     final avgColor = SchoolTheme.getLetterGradeColor(
       classAvg >= 90 ? 'A+' : (classAvg >= 80 ? 'A' : (classAvg >= 70 ? 'B' : (classAvg >= 60 ? 'C' : 'F'))),
     );
+
+    final tiles = [
+      _buildKPITileContent(
+        label: 'Class Average',
+        value: '${classAvg.toStringAsFixed(1)}%',
+        valueColor: avgColor,
+        icon: Icons.insights_rounded,
+      ),
+      _buildKPITileContent(
+        label: 'Graded',
+        value: '$gradedCount / $totalStudents',
+        valueColor: SchoolTheme.primary,
+        icon: Icons.how_to_reg_rounded,
+      ),
+      _buildKPITileContent(
+        label: 'Highest Score',
+        value: '${highestScore.toStringAsFixed(1)}%',
+        valueColor: SchoolTheme.accent,
+        icon: Icons.emoji_events_rounded,
+      ),
+      _buildKPITileContent(
+        label: 'Pass Rate',
+        value: '${passRate.toStringAsFixed(1)}%',
+        valueColor: passRate >= 70 ? SchoolTheme.accent : SchoolTheme.statusLeave,
+        icon: Icons.grade_rounded,
+      ),
+    ];
+
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        color: const Color(0xFFF8FAFC),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth = (constraints.maxWidth - 10) / 2;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: tiles.map((t) => SizedBox(width: cardWidth, child: t)).toList(),
+            );
+          },
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: const Color(0xFFF8FAFC),
       child: Row(
-        children: [
-          _buildKPITile(
-            label: 'Class Average',
-            value: '${classAvg.toStringAsFixed(1)}%',
-            valueColor: avgColor,
-            icon: Icons.insights_rounded,
-          ),
-          const SizedBox(width: 12),
-          _buildKPITile(
-            label: 'Graded',
-            value: '$gradedCount / $totalStudents',
-            valueColor: SchoolTheme.primary,
-            icon: Icons.how_to_reg_rounded,
-          ),
-          const SizedBox(width: 12),
-          _buildKPITile(
-            label: 'Highest Score',
-            value: '${highestScore.toStringAsFixed(1)}%',
-            valueColor: SchoolTheme.accent,
-            icon: Icons.emoji_events_rounded,
-          ),
-          const SizedBox(width: 12),
-          _buildKPITile(
-            label: 'Pass Rate',
-            value: '${passRate.toStringAsFixed(1)}%',
-            valueColor: passRate >= 70 ? SchoolTheme.accent : SchoolTheme.statusLeave,
-            icon: Icons.grade_rounded,
-          ),
-        ],
+        children: tiles.map((t) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: t))).toList(),
       ),
     );
   }
 
-  Widget _buildKPITile({
+  Widget _buildKPITileContent({
     required String label,
     required String value,
     required Color valueColor,
     required IconData icon,
   }) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: SchoolTheme.radius12,
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: valueColor.withValues(alpha: 0.1),
-                borderRadius: SchoolTheme.radius8,
-              ),
-              child: Icon(icon, color: valueColor, size: 18),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: SchoolTheme.radius12,
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: valueColor.withValues(alpha: 0.1),
+              borderRadius: SchoolTheme.radius8,
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  Text(
-                    value,
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: valueColor),
-                  ),
-                ],
-              ),
+            child: Icon(icon, color: valueColor, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)), overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: valueColor),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

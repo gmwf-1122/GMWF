@@ -12,7 +12,7 @@ class SchoolAuditLogView extends StatelessWidget {
   const SchoolAuditLogView({
     super.key,
     required this.branchId,
-  });
+  }); 
 
   @override
   Widget build(BuildContext context) {

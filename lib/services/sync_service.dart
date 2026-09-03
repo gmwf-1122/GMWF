@@ -12,6 +12,7 @@ import 'package:gmwf/services/finance_local_storage.dart';
 import 'package:gmwf/services/finance_loans_storage.dart';
 import 'package:gmwf/services/finance_expenses_storage.dart';
 import 'package:gmwf/services/permission_service.dart';
+import 'package:gmwf/services/quota_service.dart';
 import 'package:collection/collection.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gmwf/services/serials_service.dart';
@@ -154,8 +155,12 @@ class SyncService {
       if (remainingQueue == 0) {
         try {
           final branchesToSync = <String>{};
-          if (_currentBranchId != null) branchesToSync.add(_currentBranchId!);
-          if (_authorizedBranches.isNotEmpty) branchesToSync.addAll(_authorizedBranches);
+          final activeB = (_currentBranchId ?? '').toLowerCase().trim();
+          if (activeB.isNotEmpty && activeB != 'all' && activeB != 'global') {
+            branchesToSync.add(activeB);
+          } else if (_authorizedBranches.isNotEmpty) {
+            branchesToSync.addAll(_authorizedBranches);
+          }
 
           final settings = Hive.box('app_settings');
           for (final bId in branchesToSync) {
@@ -167,6 +172,7 @@ class SyncService {
             if (force || lastRefresh == null || now.difference(lastRefresh) > const Duration(hours: 2)) {
               await settings.put('last_refresh_$bId', now.toIso8601String());
               await _refreshDataForBranch(bId);
+              await Future.delayed(const Duration(milliseconds: 50));
             } else {
               Logger().d("[SyncService] Skipping automatic refresh for branch $bId (2-hour cooldown active)");
             }
@@ -184,6 +190,8 @@ class SyncService {
       await LocalStorageService.downloadInventory(branchId);
       await LocalStorageService.refreshPrescriptions(branchId);
       await LocalStorageService.downloadMedicineRestrictions(branchId);
+      // [FIX-4.1] Periodic attendance download (participates in FinanceLocalStorage internal TTL guard)
+      await FinanceLocalStorage.downloadAttendance(branchId);
 
       final role = _currentUserRole;
 
@@ -284,19 +292,24 @@ class SyncService {
         final attempts = (action['attempts'] as int?) ?? 0;
 
         if (attempts >= 5) {
+          action['lastFailureLoggedAt'] = DateTime.now().toIso8601String();
+          await _flagPersistentSyncFailure(key, action, type);
+          
           final retryForeverTypes = {
             'save_patient', 'save_entry', 'save_prescription', 'update_serial_status', 'save_dispensary_charge',
             'save_donation', 'update_donation', 'delete_donation', 'save_bank_slip',
             'update_inventory', 'add_inventory_stock', 'register_medicine',
             'save_token_exception_request', 'approve_token_exception',
+            'save_biometric_log', 'save_employee_attendance', 'save_faculty_attendance', 'save_student_attendance',
+            'save_madrassa_admission', 'save_madrassa_fee', 'save_madrassa_logs', 'save_exam_result',
+            'save_expense', 'save_loan', 'save_finance_entry', 'save_donor', 'save_donation_collection',
           };
           if (retryForeverTypes.contains(type)) {
             action['attempts'] = 0;
-            action['lastFailureLoggedAt'] = DateTime.now().toIso8601String();
             await queueBox.put(key, action);
-            await _flagPersistentSyncFailure(key, action, type);
             continue;
           } else {
+            // Dead-letter preserved in sync_failures before removing from hot queue
             await queueBox.delete(key);
             continue;
           }
@@ -325,7 +338,7 @@ class SyncService {
             final dateKey = (action['dateKey'] ?? action['datePart'] ?? data['dateKey'])?.toString();
             final serial  = (action['serial'] ?? data['serial'])?.toString();
             if (dateKey == null || serial == null) throw Exception('Missing dateKey/serial');
-            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
+            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString(), branchId: branchId);
 
             if (data['isTempSerial'] == true || action['isTempSerial'] == true) {
               final dispTag = (data['dispensaryTag'] ?? CampSessionService.getDispensaryKeyword(data['dispensaryId'])).toString();
@@ -366,10 +379,8 @@ class SyncService {
             if (rawSerial == null) throw Exception('Missing serial');
             final serial = rawSerial.trim().toUpperCase();
             data['serial'] = serial;
-            final patientCnic = (data['patientCnic'] ?? data['cnic'] ?? data['patientCNIC'] ?? 'unknown_$serial').toString().trim().replaceAll('-', '').replaceAll(' ', '');
-            await _db.collection('branches').doc(branchId).collection('prescriptions').doc(patientCnic).collection('prescriptions').doc(serial).set(data, SetOptions(merge: true));
             
-            final queueType = resolveQueueType(action['queueType']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['queueType']?.toString());
+            final queueType = resolveQueueType(action['queueType']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['queueType']?.toString(), branchId: branchId);
             final dateKey   = action['dateKey']?.toString() ?? Hive.box(LocalStorageService.entriesBox).get('$branchId-$serial')?['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey();
             final campDocKey = CampSessionService.getCampDateDocId(
               branchId: branchId,
@@ -378,7 +389,19 @@ class SyncService {
               dispensaryTag: data['dispensaryTag']?.toString(),
               serial: serial,
             );
-            await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set({'status': 'completed', 'completedAt': data['completedAt'] ?? DateTime.now().toUtc().toIso8601String()}, SetOptions(merge: true));
+
+            final updateMap = <String, dynamic>{
+              'status':         'completed',
+              'completedAt':    data['completedAt'] ?? DateTime.now().toUtc().toIso8601String(),
+              'dispenseStatus': data['dispenseStatus'] ?? 'pending',
+            };
+            for (final f in ['doctorName', 'doctorId', 'daysOfMedicine', 'extraCharge', 'vitals', 'prescription', 'medicines', 'diagnosis', 'complaints']) {
+              if (data.containsKey(f) && data[f] != null) {
+                updateMap[f] = data[f];
+              }
+            }
+
+            await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set(updateMap, SetOptions(merge: true));
             if (rawSerial != serial) {
               try {
                 await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(rawSerial.toLowerCase()).delete();
@@ -391,26 +414,37 @@ class SyncService {
             if (serial == null) throw Exception('Missing serial');
             final entryKey = '$branchId-$serial';
             final localEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
-            final queueType = resolveQueueType(action['queueType']?.toString() ?? localEntry?['queueType']?.toString());
+            final queueType = resolveQueueType(action['queueType']?.toString() ?? localEntry?['queueType']?.toString(), branchId: branchId);
             final dateKey   = action['dateKey']?.toString() ?? localEntry?['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey();
-            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
+            final campDocKey = CampSessionService.getCampDateDocId(
+              branchId: branchId,
+              dateKey: dateKey,
+              campId: data['campId']?.toString() ?? data['dispensaryId']?.toString() ?? localEntry?['campId']?.toString() ?? localEntry?['dispensaryId']?.toString(),
+              dispensaryTag: data['dispensaryTag']?.toString() ?? localEntry?['dispensaryTag']?.toString(),
+              serial: serial,
+            );
+            await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
           }
           else if (type == 'save_dispensary_record') {
-            final dateKey = action['dateKey'] as String?;
-            final serial  = action['serial'] as String?;
-            final data    = Map<String, dynamic>.from(action['data'] ?? {});
-            if (dateKey == null || serial == null) throw Exception('Missing dateKey/serial');
-            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
-            await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).set({...data, 'queueType': queueType}, SetOptions(merge: true));
+            // [DEDUP] Dispensary collection write deprecated. All dispense data is
+            // stored in the serial document via update_serial_status.
+            debugPrint('[SyncService] save_dispensary_record skipped (redundant write removed)');
           }
           else if (type == 'save_dispensary_charge') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
             final serial  = (action['serial'] ?? data['serial'])?.toString();
             final dateKey = (action['dateKey'] ?? data['dateKey'])?.toString() ?? LocalStorageService.getTodayDateKey();
             if (serial == null || serial.isEmpty) throw Exception('Missing serial');
-            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString());
+            final queueType = resolveQueueType((action['queueType'] ?? data['queueType'])?.toString(), branchId: branchId);
+            final campDocKey = CampSessionService.getCampDateDocId(
+              branchId: branchId,
+              dateKey: dateKey,
+              campId: data['campId']?.toString() ?? data['dispensaryId']?.toString(),
+              dispensaryTag: data['dispensaryTag']?.toString(),
+              serial: serial,
+            );
             await _db.collection('branches').doc(branchId).collection('dispensary_charges').doc(dateKey).collection('charges').doc(serial).set({...data, 'queueType': queueType}, SetOptions(merge: true));
-            await _db.collection('branches').doc(branchId).collection('serials').doc(dateKey).collection(queueType).doc(serial).set({'daysOfMedicine': (data['daysOfMedicine'] as num?)?.toInt() ?? 1}, SetOptions(merge: true));
+            await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set({'daysOfMedicine': (data['daysOfMedicine'] as num?)?.toInt() ?? 1}, SetOptions(merge: true));
           }
           else if (type == 'update_inventory') {
             final medicineId = (action['medicineId'] ?? (action['data'] as Map?)?['medicineId'])?.toString().trim();
@@ -760,6 +794,7 @@ class SyncService {
             if (localId == null || localId.isEmpty) throw Exception('Missing localId');
 
             await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete();
+            await _db.collection('employees').doc(localId).delete();
           }
           else if (type == 'save_user') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
@@ -779,11 +814,20 @@ class SyncService {
           else if (type == 'delete_user') {
             final uid = action['uid']?.toString();
             final bId = action['branchId']?.toString() ?? branchId;
-            if (uid == null || uid.isEmpty) throw Exception('Missing uid');
+            final email = action['email']?.toString().trim().toLowerCase() ?? '';
+            final username = action['username']?.toString().trim().toLowerCase() ?? '';
+            final identifiers = <String>{
+              if (uid != null && uid.isNotEmpty) uid,
+              if (email.isNotEmpty) email,
+              if (username.isNotEmpty) username,
+            };
+            if (identifiers.isEmpty) throw Exception('Missing user identifiers');
 
-            await _db.collection('users').doc(uid).delete();
-            if (bId != 'all' && bId.isNotEmpty) {
-              await _db.collection('branches').doc(bId).collection('users').doc(uid).delete();
+            for (final identifier in identifiers) {
+              await _db.collection('users').doc(identifier).delete();
+              if (bId != 'all' && bId.isNotEmpty) {
+                await _db.collection('branches').doc(bId).collection('users').doc(identifier).delete();
+              }
             }
           }
           else if (type == 'save_salary_history') {
@@ -832,6 +876,11 @@ class SyncService {
             }
 
             final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
+            await _db.collection('branches').doc(bId).collection('employee_attendance').doc(dateStr).set({
+              'date': dateStr,
+              'branchId': bId,
+              'lastUpdated': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
             await _db.collection('branches').doc(bId).collection('employee_attendance').doc(dateStr).collection('records').doc(employeeId).set(fsData, SetOptions(merge: true));
 
             final box = Hive.box(LocalStorageService.attendanceBox);
@@ -1130,6 +1179,29 @@ class SyncService {
             if (dateKey == null) throw Exception('Missing dateKey');
             await _db.collection('branches').doc(branchId).collection('madrassa_daily_logs').doc(dateKey).set(data, SetOptions(merge: true));
           }
+          else if (type == 'save_madrassa_student' || type == 'save_madrassa_admission') {
+            final studentId = action['studentId'] as String?;
+            final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            if (studentId == null || studentId.isEmpty) throw Exception('Missing studentId');
+            if (data['joinDate'] is String) {
+              final parsed = DateTime.tryParse(data['joinDate'] as String);
+              if (parsed != null) data['joinDate'] = Timestamp.fromDate(parsed);
+            }
+            data['lastUpdatedAt'] = FieldValue.serverTimestamp();
+            await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set(data, SetOptions(merge: true));
+          }
+          else if (type == 'delete_madrassa_student' || type == 'offboard_madrassa_student') {
+            final studentId = action['studentId'] as String?;
+            final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
+            final status = action['status']?.toString() ?? 'left';
+            if (studentId == null || studentId.isEmpty) throw Exception('Missing studentId');
+            await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set({
+              'status': status,
+              'batch': status,
+              'lastUpdatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+          }
           else if (type == 'update_madrassa_student') {
             final studentId = action['studentId'] as String?;
             final currentLines = action['currentLines'] as int?;
@@ -1185,6 +1257,9 @@ class SyncService {
             await _resolveInventorySyncFailure(key, branchId);
           }
         } catch (e, stackTrace) {
+          if (QuotaService.isQuotaError(e)) {
+            QuotaService.recordQuotaExceeded(error: e);
+          }
           action['attempts'] = attempts + 1;
           await queueBox.put(key, action);
           Logger().d("[SyncService] ❌ Upload failed for key: $key (type: $type, attempt: ${attempts + 1}). Error: $e");
@@ -1259,10 +1334,18 @@ class SyncService {
     _periodicSyncTimer?.cancel();
   }
 
-  String resolveQueueType(String? raw) {
+  String resolveQueueType(String? raw, {String? branchId}) {
     if (raw == null) return 'zakat';
     final r = raw.toLowerCase().trim();
-    if (r.contains('non') || r.contains('general')) return 'non-zakat';
+    if (r.contains('non') || r.contains('general')) {
+      if (branchId != null) {
+        final b = branchId.toLowerCase().trim();
+        if (b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya')) {
+          return 'zakat';
+        }
+      }
+      return 'non-zakat';
+    }
     if (r.contains('gmwf')) return 'gmwf';
     return 'zakat';
   }

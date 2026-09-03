@@ -113,28 +113,18 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
       }
     }
 
-    return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('madrassa_config')
-          .doc('current')
-          .snapshots(),
-      builder: (context, configSnap) {
-        final configData = configSnap.data?.data() as Map<String, dynamic>? ?? {};
-        final bool dbAllowStudentLeave = configData['allowStudentLeave'] == true;
-        final bool effectiveAllowLeave = _localAllowStudentLeave ?? dbAllowStudentLeave;
+    final bool effectiveAllowLeave = _localAllowStudentLeave ?? true;
 
-        return PopScope(
-          canPop: _localChanges.isEmpty,
-          onPopInvokedWithResult: (didPop, result) async {
-            if (didPop) return;
-            final shouldPop = await _confirmDiscardChanges();
-            if (shouldPop && context.mounted) {
-              Navigator.pop(context);
-            }
-          },
-          child: Column(
+    return PopScope(
+      canPop: _localChanges.isEmpty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final shouldPop = await _confirmDiscardChanges();
+        if (shouldPop && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Column(
             children: [
               // Global Level User Allow Leave Banner
               if (_isGlobalLevelUser(widget.userRole)) ...[
@@ -399,8 +389,6 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
             ],
           ),
         );
-      },
-    );
   }
 
   Widget _buildStudentAttendanceCard({

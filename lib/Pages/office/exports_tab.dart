@@ -525,7 +525,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
 
   void _requestLockToggle(bool locked) async {
     try {
-      final performedBy = Hive.box('local_users').values.firstOrNull?['name']?.toString() ?? 'System';
+      final performedBy = LocalStorageService.getActiveUsername();
       await LocalStorageService.enqueueSync({
         'type': 'request_month_lock_approval',
         'branchId': widget.branchId,

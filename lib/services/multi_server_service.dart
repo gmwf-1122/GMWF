@@ -126,8 +126,12 @@ class MultiServerService {
       }
 
       // 3. Cache locally in Hive
+      final hiveData = Map<String, dynamic>.from(serverData);
+      hiveData['lastHeartbeat'] = DateTime.now().toIso8601String();
+      hiveData['updatedAt'] = DateTime.now().toIso8601String();
+
       final box = await Hive.openBox('branch_servers');
-      await box.put(serverId, serverData);
+      await box.put(serverId, hiveData);
 
       debugPrint('[MultiServerService] Node heartbeat recorded for $serverId ($ip:$serverRole)');
     } catch (e) {
@@ -170,10 +174,15 @@ class MultiServerService {
     }
   }
 
-  /// Real-time stream of all servers for a specific branch
+  /// Real-time stream of all servers for a specific branch or all branches
   Stream<List<ServerNodeInfo>> getBranchServersStream(String branchId) {
-    if (branchId.isEmpty || branchId == 'all') {
-      return Stream.value([]);
+    if (branchId.isEmpty || branchId == 'all' || branchId == 'global') {
+      return FirebaseFirestore.instance
+          .collectionGroup('servers')
+          .snapshots()
+          .map((snap) {
+        return snap.docs.map((doc) => ServerNodeInfo.fromMap(doc.data(), doc.id)).toList();
+      });
     }
 
     return FirebaseFirestore.instance

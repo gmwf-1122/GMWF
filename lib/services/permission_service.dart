@@ -179,6 +179,8 @@ class PermissionService {
     
     'office boy': {
       AppPermission.generateFoodTokens,
+      AppPermission.manageKitchen,
+      AppPermission.viewKitchenOrders,
       AppPermission.viewDonations,
       AppPermission.manageDonations,
     },
@@ -240,54 +242,83 @@ class PermissionService {
   // ── GMWF Finance v2 RBAC matrix checks ──────────────────────────────────────
   
   static const List<String> financeRoles = [
-    'chairman', 'ceo', 'admin', 'global admin', 'hq manager', 'branch manager', 'global accounts'
+    'chairman', 'ceo', 'admin', 'global admin', 'superadmin', 'hq manager', 'manager', 'global manager', 'hq', 'headquarters manager', 'headquarters', 'branch manager', 'global accounts'
   ];
 
   /// Checks if a role is allowed to open the GMWF Finance module.
   bool isFinanceUser(String role) {
-    return financeRoles.contains(role.toLowerCase().trim());
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    if (clean.isEmpty) return false;
+    if (clean == 'hq' ||
+        clean.contains('hq') ||
+        clean.contains('headquarter') ||
+        clean.contains('manager') ||
+        clean.contains('admin') ||
+        clean.contains('ceo') ||
+        clean.contains('chairman') ||
+        clean.contains('accounts')) {
+      return true;
+    }
+    return financeRoles.contains(clean);
   }
 
-  /// Mark attendance (own branch)
+  /// Mark attendance (own branch or global for HQ)
   FinanceAccess getAttendanceAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'branch manager':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       default:
+        if (clean.contains('manager') || clean.contains('admin')) return FinanceAccess.full;
         return FinanceAccess.none;
     }
   }
 
   /// Add/edit employee profile
   FinanceAccess getEmployeeProfileAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'branch manager':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       default:
+        if (clean.contains('manager') || clean.contains('admin')) return FinanceAccess.full;
         return FinanceAccess.none;
     }
   }
 
   /// Approve salary change
   FinanceAccess getSalaryApprovalAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
+      case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       case 'branch manager':
-      case 'hq manager':
         return FinanceAccess.requestOnly;
       default:
         return FinanceAccess.none;
@@ -296,15 +327,19 @@ class PermissionService {
 
   /// Run payroll payout
   FinanceAccess getPayrollPayoutAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'global accounts':
-        return FinanceAccess.full;
       case 'hq manager':
-        return FinanceAccess.requestOnly;
+      case 'manager':
+      case 'global manager':
+      case 'hq':
+        return FinanceAccess.full;
       default:
         return FinanceAccess.none;
     }
@@ -312,13 +347,18 @@ class PermissionService {
 
   /// Record/void expense entry
   FinanceAccess getExpenseAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'branch manager':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
       case 'global accounts':
         return FinanceAccess.full;
       default:
@@ -328,13 +368,18 @@ class PermissionService {
 
   /// Issue/close a loan
   FinanceAccess getLoanAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'global accounts':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       case 'branch manager':
         return FinanceAccess.requestOnly;
@@ -345,13 +390,18 @@ class PermissionService {
 
   /// Void a ledger entry
   FinanceAccess getLedgerVoidAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'global accounts':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -360,12 +410,17 @@ class PermissionService {
 
   /// Lock/unlock a payroll period
   FinanceAccess getPeriodLockAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global admin':
+      case 'superadmin':
       case 'admin':
       case 'ceo':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       case 'global accounts':
         return FinanceAccess.requestOnly;
@@ -376,11 +431,17 @@ class PermissionService {
 
   /// Manage user accounts/roles
   FinanceAccess getUserManagementAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'admin':
+      case 'global admin':
+      case 'superadmin':
       case 'ceo':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -389,12 +450,18 @@ class PermissionService {
 
   /// Resolve sync conflicts
   FinanceAccess getSyncConflictAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global accounts':
       case 'admin':
+      case 'global admin':
+      case 'superadmin':
       case 'ceo':
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
         return FinanceAccess.full;
       default:
         return FinanceAccess.none;
@@ -403,12 +470,18 @@ class PermissionService {
 
   /// Bank reconciliation
   FinanceAccess getBankReconciliationAccess(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'chairman':
       case 'global accounts':
-        return FinanceAccess.full;
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
+        return FinanceAccess.full;
       case 'admin':
+      case 'global admin':
+      case 'superadmin':
       case 'ceo':
         return FinanceAccess.viewOnly;
       default:
@@ -418,12 +491,18 @@ class PermissionService {
 
   /// View audit trail scope: returns 'none', 'own', or 'all'
   String getAuditTrailScope(String role) {
-    switch (role.toLowerCase().trim()) {
+    final clean = role.toLowerCase().replaceAll('_', ' ').replaceAll('-', ' ').trim();
+    switch (clean) {
       case 'branch manager':
         return 'own';
       case 'hq manager':
+      case 'manager':
+      case 'global manager':
+      case 'hq':
       case 'global accounts':
       case 'admin':
+      case 'global admin':
+      case 'superadmin':
       case 'ceo':
       case 'chairman':
         return 'all';

@@ -9,6 +9,8 @@ import 'holiday_management_view.dart';
 import '../madrassa_strings.dart';
 import '../utils/madrassa_csv_service.dart';
 import '../utils/madrassa_local_storage.dart';
+import '../../../services/local_storage_service.dart';
+import '../../../services/user_theme_service.dart';
 
 // Breakpoints for responsive configuration sizing
 const double kConfigMobileBreakpoint = 800.0;
@@ -168,82 +170,88 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
       _maxUniDeductionError = null;
     });
 
-    final baseVal = _baseFeeController.text.trim();
-    final ptmVal = _ptmDeductionController.text.trim();
-    final msgVal = _msgDeductionController.text.trim();
-    final attVal = _maxAttDeductionController.text.trim();
-    final uniVal = _maxUniDeductionController.text.trim();
+    final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
 
-    if (baseVal.isEmpty) {
-      setState(() => _baseFeeError = 'Base points are required');
-      hasError = true;
-    }
-    if (ptmVal.isEmpty) {
-      setState(() => _ptmDeductionError = 'PTM deduction is required');
-      hasError = true;
-    }
-    if (msgVal.isEmpty) {
-      setState(() => _msgDeductionError = 'Message deduction is required');
-      hasError = true;
-    }
-    if (attVal.isEmpty) {
-      setState(() => _maxAttDeductionError = 'Max attendance deduction is required');
-      hasError = true;
-    }
-    if (uniVal.isEmpty) {
-      setState(() => _maxUniDeductionError = 'Max uniform deduction is required');
-      hasError = true;
-    }
+    double? base, ptm, msg, att, uni;
 
-    final base = double.tryParse(baseVal);
-    final ptm = double.tryParse(ptmVal);
-    final msg = double.tryParse(msgVal);
-    final att = double.tryParse(attVal);
-    final uni = double.tryParse(uniVal);
+    if (isFeeEnabled) {
+      final baseVal = _baseFeeController.text.trim();
+      final ptmVal = _ptmDeductionController.text.trim();
+      final msgVal = _msgDeductionController.text.trim();
+      final attVal = _maxAttDeductionController.text.trim();
+      final uniVal = _maxUniDeductionController.text.trim();
 
-    if (baseVal.isNotEmpty && base == null) {
-      setState(() => _baseFeeError = 'Enter a valid number');
-      hasError = true;
-    }
-    if (ptmVal.isNotEmpty && ptm == null) {
-      setState(() => _ptmDeductionError = 'Enter a valid number');
-      hasError = true;
-    }
-    if (msgVal.isNotEmpty && msg == null) {
-      setState(() => _msgDeductionError = 'Enter a valid number');
-      hasError = true;
-    }
-    if (attVal.isNotEmpty && att == null) {
-      setState(() => _maxAttDeductionError = 'Enter a valid number');
-      hasError = true;
-    }
-    if (uniVal.isNotEmpty && uni == null) {
-      setState(() => _maxUniDeductionError = 'Enter a valid number');
-      hasError = true;
-    }
-
-    if (hasError) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            backgroundColor: Colors.red,
-            content: Text('Please correct all validation errors to continue'),
-          ),
-        );
+      if (baseVal.isEmpty) {
+        setState(() => _baseFeeError = 'Base points are required');
+        hasError = true;
       }
-      return;
-    }
-
-    if ((ptm! + msg! + att! + uni!) != base!) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red,
-            content: Text('Sum of deductions ($ptm + $msg + $att + $uni = ${ptm + msg + att + uni}) must equal Base Points ($base)'),
-          ),
-        );
+      if (ptmVal.isEmpty) {
+        setState(() => _ptmDeductionError = 'PTM deduction is required');
+        hasError = true;
       }
-      return;
+      if (msgVal.isEmpty) {
+        setState(() => _msgDeductionError = 'Message deduction is required');
+        hasError = true;
+      }
+      if (attVal.isEmpty) {
+        setState(() => _maxAttDeductionError = 'Max attendance deduction is required');
+        hasError = true;
+      }
+      if (uniVal.isEmpty) {
+        setState(() => _maxUniDeductionError = 'Max uniform deduction is required');
+        hasError = true;
+      }
+
+      base = double.tryParse(baseVal);
+      ptm = double.tryParse(ptmVal);
+      msg = double.tryParse(msgVal);
+      att = double.tryParse(attVal);
+      uni = double.tryParse(uniVal);
+
+      if (baseVal.isNotEmpty && base == null) {
+        setState(() => _baseFeeError = 'Enter a valid number');
+        hasError = true;
+      }
+      if (ptmVal.isNotEmpty && ptm == null) {
+        setState(() => _ptmDeductionError = 'Enter a valid number');
+        hasError = true;
+      }
+      if (msgVal.isNotEmpty && msg == null) {
+        setState(() => _msgDeductionError = 'Enter a valid number');
+        hasError = true;
+      }
+      if (attVal.isNotEmpty && att == null) {
+        setState(() => _maxAttDeductionError = 'Enter a valid number');
+        hasError = true;
+      }
+      if (uniVal.isNotEmpty && uni == null) {
+        setState(() => _maxUniDeductionError = 'Enter a valid number');
+        hasError = true;
+      }
+
+      if (hasError) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Please correct all validation errors to continue'),
+            ),
+          );
+        }
+        return;
+      }
+
+      if ((ptm! + msg! + att! + uni!) != base!) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.red,
+              content: Text('Sum of deductions ($ptm + $msg + $att + $uni = ${ptm + msg + att + uni}) must equal Base Points ($base)'),
+            ),
+          );
+        }
+        return;
+      }
     }
 
     setState(() => _isSaving = true);
@@ -253,12 +261,17 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
         'year': _year,
         'month': _month,
         'ptmDay': _ptmDay,
-        'baseFee': base,
-        'ptmDeduction': ptm,
-        'messageTotalDeduction': msg,
-        'attendanceMaxDeduction': att,
-        'uniformMaxDeduction': uni,
       };
+
+      if (isFeeEnabled && base != null) {
+        updateData.addAll({
+          'baseFee': base,
+          'ptmDeduction': ptm,
+          'messageTotalDeduction': msg,
+          'attendanceMaxDeduction': att,
+          'uniformMaxDeduction': uni,
+        });
+      }
 
       bool isRescheduled = _ptmDay != _initialPtmDay;
       int oldPtmDay = _initialPtmDay;
@@ -293,7 +306,9 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
 
       final oldDate = oldPtmDay == 0 ? 'Auto' : 'Day $oldPtmDay';
       final newDate = _ptmDay == 0 ? 'Auto' : 'Day $_ptmDay';
-      String auditMessage = 'Madrassa configuration updated. Base: Rs. ${base.toInt()}, PTM: $newDate';
+      String auditMessage = (isFeeEnabled && base != null)
+          ? 'Madrassa configuration updated. Base: Rs. ${base.toInt()}, PTM: $newDate'
+          : 'Madrassa configuration updated. PTM: $newDate';
       if (isRescheduled) {
         auditMessage += ' (PTM Rescheduled from $oldDate to $newDate)';
       }
@@ -318,7 +333,9 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSaving = false);
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -470,111 +487,122 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
 
   @override
   Widget build(BuildContext context) {
-    // TODO: Full dark mode theme support integration
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildWelcomeHeader(context),
-            const SizedBox(height: 32),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
-                if (isMobile) {
-                  return Column(
-                    children: [
-                      _buildActivePeriodCard(context),
-                      const SizedBox(height: 24),
-                      _buildDeductionsCard(context),
-                    ],
-                  );
-                } else {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _buildActivePeriodCard(context)),
-                      const SizedBox(width: 24),
-                      Expanded(child: _buildDeductionsCard(context)),
-                    ],
-                  );
-                }
-              },
-            ),
-            const SizedBox(height: 32),
-            _buildDataImportExportCard(context),
-            const SizedBox(height: 32),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed: _isSaving ? null : _save,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Icon(Icons.save_outlined),
-                label: Text(
-                  context.l.save,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+    return ValueListenableBuilder(
+      valueListenable: UserThemeService.listenable(widget.username),
+      builder: (context, _, __) {
+        final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+
+        return Scaffold(
+          backgroundColor: scaffoldBg,
+          body: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildWelcomeHeader(context),
+                const SizedBox(height: 32),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+                    final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
+                    if (!isFeeEnabled) {
+                      return _buildActivePeriodCard(context);
+                    }
+                    if (isMobile) {
+                      return Column(
+                        children: [
+                          _buildActivePeriodCard(context),
+                          const SizedBox(height: 24),
+                          _buildDeductionsCard(context),
+                        ],
+                      );
+                    } else {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: _buildActivePeriodCard(context)),
+                          const SizedBox(width: 24),
+                          Expanded(child: _buildDeductionsCard(context)),
+                        ],
+                      );
+                    }
+                  },
                 ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 2,
+                const SizedBox(height: 32),
+                _buildDataImportExportCard(context),
+                const SizedBox(height: 32),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: ElevatedButton.icon(
+                    onPressed: _isSaving ? null : _save,
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.save_outlined),
+                    label: Text(
+                      context.l.save,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0F766E),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 2,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isMobile = MediaQuery.of(context).size.width < kConfigMobileBreakpoint;
-                if (isMobile) {
-                  return Column(
-                    children: [
-                      const SizedBox(height: 24),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final navigator = Navigator.of(context);
-                            await FirebaseAuth.instance.signOut();
-                            navigator.pushNamedAndRemoveUntil('/login', (_) => false);
-                          },
-                          icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                          label: const Text(
-                            'Sign Out',
-                            style: TextStyle(
-                              color: Colors.redAccent,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isMobile = MediaQuery.of(context).size.width < kConfigMobileBreakpoint;
+                    if (isMobile) {
+                      return Column(
+                        children: [
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 52,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                final navigator = Navigator.of(context);
+                                await FirebaseAuth.instance.signOut();
+                                navigator.pushNamedAndRemoveUntil('/login', (_) => false);
+                              },
+                              icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
+                              label: const Text(
+                                'Sign Out',
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.redAccent, width: 1.5),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
                             ),
                           ),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.redAccent, width: 1.5),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                }
-                return const SizedBox.shrink();
-              },
+                        ],
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -722,7 +750,8 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
   }
 
   Widget _buildActivePeriodCard(BuildContext context) {
-    final periodColor = HSLColor.fromAHSL(1.0, 210, 0.65, 0.45).toColor();
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final periodColor = isDark ? const Color(0xFF60A5FA) : HSLColor.fromAHSL(1.0, 210, 0.65, 0.45).toColor();
 
     return _configCard(
       context: context,
@@ -807,19 +836,19 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
+                      color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.5) : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red.shade100),
+                      border: Border.all(color: isDark ? const Color(0xFF78350F) : Colors.red.shade100),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, color: Colors.red.shade700),
+                        Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFF87171) : Colors.red.shade700),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Warning: Selected PTM date falls on a holiday.',
                             style: TextStyle(
-                              color: Colors.red.shade800,
+                              color: isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
                               fontWeight: FontWeight.w500,
                               fontSize: 12,
                             ),
@@ -949,12 +978,15 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
       );
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+
     return OutlinedButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 18),
       label: Text(label),
       style: OutlinedButton.styleFrom(
-        foregroundColor: const Color(0xFF44474E),
+        foregroundColor: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF44474E),
+        side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFD0D3D9)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
@@ -962,14 +994,41 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
   }
 
   Widget _buildDeductionsCard(BuildContext context) {
+    final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+
     return _configCard(
       context: context,
       title: context.l.deductionParams,
-      subtitle: 'Rules for calculating pro-rated dues',
+      subtitle: isFeeEnabled ? 'Rules for calculating pro-rated dues' : 'Financial System & Fees are disabled in Branch Facilities',
       icon: Icons.account_balance_wallet_rounded,
-      hue: 35,
+      hue: isFeeEnabled ? 35 : 200,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (!isFeeEnabled) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.5) : const Color(0xFFFFFBEB),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: isDark ? const Color(0xFF78350F) : const Color(0xFFF59E0B)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Money Factor is disabled for this branch in Branch Facilities. Fee dues and deduction savings are turned off and hidden across all Parent, Teacher, and Principal screens.',
+                      style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E), fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           Row(
             children: [
               Expanded(
@@ -1059,21 +1118,24 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     required double hue,
     Widget? trailing,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF334155) : Colors.grey.withValues(alpha: 0.12);
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
 
-    final accentColor = HSLColor.fromAHSL(1.0, hue, 0.65, 0.45).toColor();
-    final bgTint = HSLColor.fromAHSL(1.0, hue, 0.65, 0.94).toColor();
+    final accentColor = HSLColor.fromAHSL(1.0, hue, 0.65, isDark ? 0.60 : 0.45).toColor();
+    final bgTint = HSLColor.fromAHSL(1.0, hue, 0.65, isDark ? 0.20 : 0.94).toColor();
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: theme.cardColor,
+        color: cardBg,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.12)),
+        border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF1A1C1E).withValues(alpha: 0.04),
+            color: const Color(0xFF1A1C1E).withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -1104,14 +1166,14 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 18,
-                          color: isDark ? Colors.white : const Color(0xFF1A1C1E),
+                          color: textPrimary,
                         ),
                       ),
                     ),
                     Text(
                       subtitle,
                       style: context.urduStyle(
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                        style: TextStyle(fontSize: 12, color: textMuted),
                       ),
                     ),
                   ],
@@ -1136,8 +1198,11 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     ValueChanged<String>? onChanged,
     IconData? prefixIcon,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final inputBg = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+    final labelColor = isDark ? Colors.white70 : const Color(0xFF44474E);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1152,7 +1217,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : const Color(0xFF44474E),
+                          color: labelColor,
                         ),
                       ),
                     ),
@@ -1169,7 +1234,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : const Color(0xFF44474E),
+                    color: labelColor,
                   ),
                 ),
               ),
@@ -1178,19 +1243,19 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
           controller: controller,
           keyboardType: TextInputType.number,
           onChanged: onChanged,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textPrimary),
           decoration: InputDecoration(
             errorText: errorText,
-            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20) : null,
+            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? const Color(0xFF94A3B8) : null) : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFD0D3D9)),
+              borderSide: BorderSide(color: borderColor),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: errorText != null ? const Color(0xFFD32F2F) : const Color(0xFFE0E2E7),
+                color: errorText != null ? const Color(0xFFD32F2F) : borderColor,
               ),
             ),
             focusedBorder: OutlineInputBorder(
@@ -1198,7 +1263,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
               borderSide: const BorderSide(color: Color(0xFF0F766E), width: 2),
             ),
             filled: true,
-            fillColor: isDark ? Colors.grey.shade900 : Colors.white,
+            fillColor: inputBg,
           ),
         ),
       ],
@@ -1215,8 +1280,12 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     bool isPtmDay = false,
     IconData? prefixIcon,
   }) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final inputBg = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+    final textPrimary = isDark ? Colors.white : Colors.black87;
+    final labelColor = isDark ? Colors.white70 : const Color(0xFF44474E);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1227,42 +1296,43 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white70 : const Color(0xFF44474E),
+              color: labelColor,
             ),
           ),
         ),
         const SizedBox(height: 8),
         DropdownButtonFormField<int>(
           initialValue: value,
+          dropdownColor: cardBg,
           items: items.map((i) {
             String text = '$i';
             if (isMonth) text = DateFormat('MMMM').format(DateTime(2024, i));
             if (isPtmDay) text = i == 0 ? 'Auto (1st Friday)' : 'Day $i';
-            return DropdownMenuItem(value: i, child: Text(text));
+            return DropdownMenuItem(value: i, child: Text(text, style: TextStyle(color: textPrimary)));
           }).toList(),
           onChanged: onChanged,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: isDark ? Colors.white : Colors.black87,
+            color: textPrimary,
           ),
           decoration: InputDecoration(
-            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20) : null,
+            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? const Color(0xFF94A3B8) : null) : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFD0D3D9)),
+              borderSide: BorderSide(color: borderColor),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+              borderSide: BorderSide(color: borderColor),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: Color(0xFF0F766E), width: 2),
             ),
             filled: true,
-            fillColor: isDark ? Colors.grey.shade900 : Colors.white,
+            fillColor: inputBg,
           ),
         ),
       ],

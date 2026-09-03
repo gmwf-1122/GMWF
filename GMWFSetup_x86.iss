@@ -7,7 +7,7 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.4.0
+AppVersion=1.4.4
 AppPublisher=GMWF Pvt. Ltd
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -21,7 +21,7 @@ DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.4.0-x86
+OutputBaseFilename=GMWF-v1.4.4-x86
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression
@@ -54,6 +54,17 @@ Source: "build\windows\x64\runner\Release\*"; \
     DestDir: "{app}"; \
     Flags: recursesubdirs createallsubdirs ignoreversion
 
+; ── Standalone Python Runtime (x86 / 32-bit) ──────────────────
+; Bundled with pyzk & firebase-admin pre-installed (Zero setup / 100% offline)
+Source: "Installer\python-3.12.10-embed-win32\*"; \
+    DestDir: "{app}\python"; \
+    Flags: recursesubdirs createallsubdirs ignoreversion
+
+; ── Background Sync Scripts & Configs ────────────────────────
+Source: "scripts\*"; \
+    DestDir: "{app}\scripts"; \
+    Flags: recursesubdirs createallsubdirs ignoreversion
+
 ; ── VC++ Redistributable ─────────────────────────────────────
 Source: "Installer\vc_redist.x64.exe"; \
     DestDir: "{tmp}"; \
@@ -68,11 +79,19 @@ Source: "Installer\gmwf.ico"; \
 Name: "{group}\GMWF";          Filename: "{app}\gmwf.exe"; WorkingDir: "{app}"; IconFilename: "{app}\gmwf.ico"
 Name: "{commondesktop}\GMWF";  Filename: "{app}\gmwf.exe"; WorkingDir: "{app}"; IconFilename: "{app}\gmwf.ico"
 
+[Tasks]
+Name: "serverautostart"; Description: "Start GMWF automatically when this Windows server user logs in"; GroupDescription: "Server startup:"; Flags: checkedonce
+
 [Run]
 Filename: "{tmp}\vc_redist.x64.exe"; \
     Parameters: "/install /quiet /norestart"; \
     StatusMsg: "Installing Microsoft Visual C++ Runtime..."; \
     Flags: waituntilterminated
+
+  Filename: "{cmd}"; \
+    Parameters: "/c schtasks /Create /TN ""GMWF Server"" /TR ""{app}\gmwf.exe"" /SC ONLOGON /RL HIGHEST /F"; \
+    Tasks: serverautostart; \
+    Flags: runhidden waituntilterminated
 
 Filename: "{app}\gmwf.exe"; \
     Description: "Launch GMWF now"; \
@@ -83,6 +102,11 @@ Filename: "{cmd}"; \
     Parameters: "/c taskkill /f /im gmwf.exe"; \
     Flags: runhidden waituntilterminated; \
     RunOnceId: "KillGMWF"
+
+  Filename: "{cmd}"; \
+    Parameters: "/c schtasks /Delete /TN ""GMWF Server"" /F"; \
+    Flags: runhidden waituntilterminated; \
+    RunOnceId: "RemoveGMWFServerTask"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"

@@ -15,9 +15,11 @@ import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/widgets/clock_skew_warning_banner.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/widgets/camp_selection_dialog.dart';
+import 'package:gmwf/utils/notification_deduper.dart';
 import '../user_settings_dialog.dart';
 import 'inventory.dart';
 import 'patient_form.dart';
@@ -262,6 +264,24 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
     if (serial == null) return;
 
+    final isReplay = event['_serverPush'] == true ||
+        event['_resent'] == true ||
+        event['isCatchUp'] == true ||
+        event['_isReplay'] == true ||
+        data['_serverPush'] == true ||
+        data['_resent'] == true ||
+        data['isCatchUp'] == true ||
+        data['_isReplay'] == true;
+
+    final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final itemDateKey = (data['dateKey'] ?? event['dateKey'])?.toString().trim();
+    final parts = serial.contains('-') ? serial.split('-') : <String>[];
+    final serialDk = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+        ? (parts.length > 1 ? parts[1] : '')
+        : (parts.isNotEmpty ? parts[0] : '');
+    final isToday = (itemDateKey == null || itemDateKey.isEmpty || itemDateKey == today) &&
+        (serialDk.length != 6 || serialDk == today);
+
     final activeCamp = CampSessionService.getActiveCamp(widget.branchId);
     final matchesActiveCamp = (activeCamp == null || activeCamp.isEmpty || activeCamp == 'all')
         ? true
@@ -301,32 +321,52 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       }
       if (mounted) setState(() {});
 
-      if (matchesActiveCamp) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            Flushbar(
-              message: '💊 Prescription ready for #$serial',
-              backgroundColor: Colors.blue.shade700,
-              duration: const Duration(seconds: 5),
-            ).show(context);
-          }
-        });
+      final entryMap = (entry is Map) ? entry as Map : null;
+      final isAlreadyDispensed = (entryMap?['dispenseStatus'] ?? data['dispenseStatus']) == 'dispensed';
+
+      final rawTime = data['completedAt'] ?? data['createdAt'] ?? data['timestamp'];
+      final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+      final isRecent = dt == null || DateTime.now().difference(dt).inMinutes <= 3;
+
+      if (!isReplay && isToday && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
+        if (NotificationDeduper.shouldShow('dispenser_presc_${widget.branchId}_$serial', window: const Duration(minutes: 5))) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              Flushbar(
+                message: '💊 Prescription ready for #$serial',
+                backgroundColor: Colors.blue.shade700,
+                duration: const Duration(seconds: 5),
+              ).show(context);
+            }
+          });
+        }
       }
 
     } else if (type == RealtimeEvents.saveEntry || type == 'token_created') {
       // [BUG-14] Use saveEntryLocal for proper sanitisation
       LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
       if (mounted) setState(() {});
-      if (matchesActiveCamp) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            Flushbar(
-              message: '🎟️ New token: #$serial',
-              backgroundColor: Colors.green.shade700,
-              duration: const Duration(seconds: 4),
-            ).show(context);
-          }
-        });
+
+      final status = (data['status'] ?? 'waiting').toString().toLowerCase();
+      final isWaiting = status == 'waiting';
+      final isAlreadyDispensed = data['dispenseStatus'] == 'dispensed';
+
+      final rawTime = data['createdAt'] ?? data['timestamp'];
+      final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+      final isRecent = dt == null || DateTime.now().difference(dt).inMinutes <= 3;
+
+      if (!isReplay && isToday && isWaiting && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
+        if (NotificationDeduper.shouldShow('dispenser_token_${widget.branchId}_$serial', window: const Duration(minutes: 5))) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              Flushbar(
+                message: '🎟️ New token: #$serial',
+                backgroundColor: Colors.green.shade700,
+                duration: const Duration(seconds: 4),
+              ).show(context);
+            }
+          });
+        }
       }
 
     } else if (type == 'dispense_completed') {
@@ -391,15 +431,25 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   }
 
   Future<void> _forceSync() async {
-    if (!_online || _isSyncing || !mounted) return;
+    if (_isSyncing || !mounted) return;
     setState(() => _isSyncing = true);
     try {
-      await SyncService().forceFullRefresh(widget.branchId);
-      await LocalStorageService.downloadTodayTokens(widget.branchId);
+      // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
+      await RealtimeManager().forceFlushAndCatchUp();
+
+      // 2. If online, sync with cloud
+      if (_online) {
+        await SyncService().forceFullRefresh(widget.branchId);
+        await LocalStorageService.downloadTodayTokens(widget.branchId);
+      }
       if (mounted) setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          Flushbar(message: 'Full sync completed', backgroundColor: Colors.green.shade700, duration: const Duration(seconds: 4)).show(context);
+          Flushbar(
+            message: _online ? 'Full sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)',
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 4),
+          ).show(context);
         }
       });
     } catch (e) {
@@ -516,7 +566,14 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
                   : const [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
             ),
           ),
-          child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+          child: Column(
+            children: [
+              ClockSkewWarningBanner(branchId: widget.branchId),
+              Expanded(
+                child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
+              ),
+            ],
+          ),
         );
 
         if (widget.isEmbedded) return bodyContent;

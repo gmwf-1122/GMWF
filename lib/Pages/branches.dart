@@ -1,2711 +1,501 @@
 // lib/pages/branches.dart
 
-import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import '../services/local_storage_service.dart';
-import '../providers/branches_providers.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../services/camp_session_service.dart';
+import '../services/user_theme_service.dart';
+import '../providers/branches_providers.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
+
 import 'dispensary/dispensar/inventory.dart';
 import 'office/finance_page.dart';
 import 'branches_register.dart';
 import 'dispensary/patient_detail_screen.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'settings/biometric_device_manager_page.dart';
+import '../services/local_storage_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-List<String> _dateStrings(DateTime start, DateTime end) {
-  final df   = DateFormat('ddMMyy');
-  final days = <String>[];
-  for (var d = start; d.isBefore(end); d = d.add(const Duration(days: 1))) {
-    days.add(df.format(d));
-  }
-  return days;
-}
-
-DateTime _parseDispensedAt(dynamic raw, String dateKeyFallback) {
-  if (raw is Timestamp) return raw.toDate();
-  if (raw is String && raw.isNotEmpty) {
-    try { return DateTime.parse(raw); } catch (_) {}
-  }
-  try { return LocalStorageService.parseDdMMyy(dateKeyFallback); }
-  catch (_) { return DateTime.now(); }
-}
-
 String _resolvePatientCampLabel(Map<String, dynamic> p, String branchId) {
-  if (!CampSessionService.hasCampsForBranch(branchId)) return '';
+  final parts = <String>[];
+
+  // 1. Resolve Camp / Facility
   final cId = (p['dispensaryId'] ?? p['campId'] ?? p['subDispensaryId'])?.toString().trim();
-  if (cId != null && cId.isNotEmpty && cId != 'all') {
-    return CampSessionService.getCampLabel(cId);
-  }
-  final serial = (p['serial'] ?? p['id'] ?? '').toString();
-  final parts = serial.split('-');
-  if (parts.length > 2) {
-    final tag = parts[1].toUpperCase();
-    if (tag == 'SADD' || tag == 'SAD' || tag == 'SADDAR' || tag == 'KAP' || tag == 'KAPAYYA') return 'Saddar Dispensary';
-    if (tag == 'HC' || tag == 'HAJI' || tag == 'HAJICAMP') return 'Haji Camp Dispensary';
-    return tag;
-  }
-  return '';
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PatientSummaryCard
-// ─────────────────────────────────────────────────────────────────────────────
-
-enum SummaryCardVariant { tokens, prescriptions, dispensary }
-
-class PatientSummaryCard extends StatelessWidget {
-  final String title;
-  final Stream<Map<String, int>>? dataStream;
-  final Map<String, int>? data;
-  final Map<String, int>? initialData;
-  final IconData titleIcon;
-  final SummaryCardVariant variant;
-  final bool showRevenue;
-  final Map<String, IconData> valueIcons;
-  final Map<String, String> valueLabels;
-  final bool isFiltered;
-
-  const PatientSummaryCard({
-    super.key,
-    required this.title,
-    this.dataStream,
-    this.data,
-    this.initialData,
-    required this.titleIcon,
-    required this.variant,
-    this.showRevenue = false,
-    required this.valueIcons,
-    required this.valueLabels,
-    this.isFiltered = false,
-  });
-
-  Color _fillColor(RoleThemeData t) {
-    switch (variant) {
-      case SummaryCardVariant.tokens:        return t.cardFillTokens;
-      case SummaryCardVariant.prescriptions: return t.cardFillPrescriptions;
-      case SummaryCardVariant.dispensary:    return t.cardFillDispensary;
-    }
-  }
-
-  Color _lighten(Color base, [double amount = 0.15]) {
-    final hsl  = HSLColor.fromColor(base);
-    final newL = (hsl.lightness + amount).clamp(0.0, 1.0);
-    return hsl.withLightness(newL).toColor();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t    = RoleThemeScope.dataOf(context);
-    final fill = _fillColor(t);
-
-    if (data != null) {
-      return _buildContent(context, data!, fill, t);
-    }
-
-    if (dataStream == null) {
-      final d = initialData ?? const {};
-      if (d.isEmpty) {
-        return _emptyShell(fill, t);
+  if (cId != null && cId.isNotEmpty && cId != 'all' && cId != 'main') {
+    parts.add(CampSessionService.getCampLabel(cId));
+  } else {
+    final serial = (p['serial'] ?? p['id'] ?? '').toString();
+    final sParts = serial.split('-');
+    if (sParts.length > 2) {
+      final tag = sParts[1].toUpperCase();
+      if (tag == 'SADD' || tag == 'SAD' || tag == 'SADDAR' || tag == 'KAP' || tag == 'KAPAYYA') {
+        parts.add('Saddar Dispensary');
+      } else if (tag == 'HC' || tag == 'HAJI' || tag == 'HAJICAMP') {
+        parts.add('Haji Camp Dispensary');
+      } else if (tag == 'GRT' || tag == 'GJT') {
+        parts.add('Gujrat Main');
+      } else if (tag.isNotEmpty) {
+        parts.add(tag);
       }
-      return _buildContent(context, d, fill, t);
     }
-
-    return StreamBuilder<Map<String, int>>(
-      stream: dataStream,
-      initialData: initialData,
-      builder: (context, snapshot) {
-        final d = snapshot.data ?? initialData;
-
-        if (d == null || d.isEmpty) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return _shell(
-              fill: fill, t: t,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                _header(),
-                const SizedBox(height: 16),
-                const Center(
-                  child: SizedBox(width: 22, height: 22,
-                      child: CircularProgressIndicator(color: Colors.white54, strokeWidth: 2)),
-                ),
-                const SizedBox(height: 12),
-                const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
-              ]),
-            );
-          }
-
-          return _emptyShell(fill, t);
-        }
-
-        return _buildContent(context, d, fill, t);
-      },
-    );
   }
 
-  Widget _emptyShell(Color fill, RoleThemeData t) {
-    return _shell(
-      fill: fill, t: t,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _header(),
-        const SizedBox(height: 12),
-        const Text("No data", style: TextStyle(color: Colors.white54, fontSize: 13)),
-        const SizedBox(height: 12),
-        const Opacity(opacity: 0.0, child: SizedBox(height: 18)),
-      ]),
-    );
-  }
-
-  Widget _buildContent(BuildContext context, Map<String, int> d, Color fill, RoleThemeData t) {
-    final revenue = d['revenue'] ?? 0;
-    final minis   = <Widget>[];
-    for (final key in valueLabels.keys.where((k) => k.startsWith('v'))) {
-      minis.add(_mini(
-        valueLabels[key]!, 
-        d[key] ?? 0, 
-        valueIcons[key] ?? Icons.help_outline,
-        subValue: d['${key}_sub'],
-      ));
+  // 2. Resolve Shift / Session
+  final sess = (p['session'] ?? p['shift'] ?? p['campSession'])?.toString().toLowerCase().trim();
+  if (sess == 'morning') {
+    parts.add('🌅 Morning');
+  } else if (sess == 'evening') {
+    parts.add('🌆 Evening');
+  } else if (sess == 'night') {
+    parts.add('🌙 Night');
+  } else if (sess != null && sess.isNotEmpty && sess != 'day' && sess != 'all') {
+    parts.add(sess[0].toUpperCase() + sess.substring(1));
+  } else {
+    final dispAt = p['dispensedAt'] ?? p['createdAt'] ?? p['time'];
+    DateTime? dt;
+    if (dispAt is DateTime) {
+      dt = dispAt;
+    } else if (dispAt is String) {
+      dt = DateTime.tryParse(dispAt);
     }
-    minis.add(_mini(
-      valueLabels['total'] ?? "Total", 
-      d['total'] ?? 0, 
-      valueIcons['total'] ?? Icons.people,
-      subValue: showRevenue ? revenue : null,
-    ));
-
-    return _shell(
-      fill: fill, t: t,
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _header(),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: minis,
-        ),
-        if (showRevenue && revenue > 0) ...[
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            height: 1,
-            color: Colors.white.withValues(alpha: 0.15),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.payments_rounded, color: Colors.white70, size: 14),
-                  const SizedBox(width: 6),
-                  Text(
-                    isFiltered ? "Filtered Revenue" : "Today's Revenue",
-                    style: const TextStyle(
-                      color: Colors.white70, 
-                      fontSize: 11, 
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-              Text(
-                "PKR ${NumberFormat('#,###').format(revenue)}",
-                style: const TextStyle(
-                  color: Colors.white, 
-                  fontSize: 13, 
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ]),
-    );
+    if (dt != null) {
+      if (dt.hour >= 6 && dt.hour < 14) {
+        parts.add('🌅 Morning');
+      } else if (dt.hour >= 14 && dt.hour < 22) {
+        parts.add('🌆 Evening');
+      } else {
+        parts.add('🌙 Night');
+      }
+    }
   }
 
-  Widget _shell({required Color fill, required RoleThemeData t, required Widget child}) {
-    final highlight = _lighten(fill, 0.12);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [highlight, fill],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-        boxShadow: [
-          BoxShadow(
-            color: fill.withValues(alpha: 0.2), 
-            blurRadius: 16, 
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: child,
-    );
+  if (parts.isEmpty) {
+    final bName = branchId.isNotEmpty ? branchId[0].toUpperCase() + branchId.substring(1) : 'Main';
+    parts.add('$bName Facility');
   }
 
-  Widget _header() => Row(children: [
-    Icon(titleIcon, color: Colors.white, size: 20),
-    const SizedBox(width: 10),
-    Expanded(child: Text(title,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700,
-            color: Colors.white, letterSpacing: 0.3))),
-  ]);
+  return parts.join(' • ');
+}
 
-  Widget _mini(String label, int value, IconData icon, {int? subValue}) => Expanded(
-    child: Column(children: [
-      Icon(icon, size: 19, color: Colors.white60),
-      const SizedBox(height: 4),
-      Text(label, style: const TextStyle(fontSize: 10, color: Colors.white60)),
-      Text("$value", style: const TextStyle(
-          fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
-
-    ]),
-  );
+String _formatCnic(String raw) {
+  final clean = raw.replaceAll(RegExp(r'[^0-9]'), '');
+  if (clean.length == 13) {
+    return '${clean.substring(0, 5)}-${clean.substring(5, 12)}-${clean.substring(12)}';
+  }
+  return raw;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _ConsecutivePatient
-// ─────────────────────────────────────────────────────────────────────────────
-class _ConsecutivePatient {
-  final Map<String, dynamic> data;
-  final int streakDays;
-  final bool flagReverted;
-
-  const _ConsecutivePatient({
-    required this.data,
-    required this.streakDays,
-    this.flagReverted = false,
-  });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Branches
+// Branches Main Widget
 // ─────────────────────────────────────────────────────────────────────────────
 
 class Branches extends ConsumerStatefulWidget {
-  final String? branchId;
   final bool showRegisterButton;
-  final bool isManager;
+  final String? branchId;
+  final bool? isManager;
   final String? initialBranchId;
+  final bool? flagReverted;
 
   const Branches({
     super.key,
-    this.branchId,
     this.showRegisterButton = true,
-    this.isManager = false,
+    this.branchId,
+    this.isManager,
     this.initialBranchId,
+    this.flagReverted,
   });
 
   @override
   ConsumerState<Branches> createState() => _BranchesState();
 }
 
-class _BranchesState extends ConsumerState<Branches>
-    with TickerProviderStateMixin, AutomaticKeepAliveClientMixin {
-  late TabController _mobileTabController;
-
-  // Tracks which branch+dateRange key has already been triggered for loading
-  // so we don't re-trigger the async load on every build.
-  final Set<String> _loadedKeys = {};
-
-
-
+class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClientMixin {
   @override
-  void didUpdateWidget(Branches oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.branchId != widget.branchId) {
-      // Update the provider so branchesListProvider re-streams for the new id
-      ref.read(singleBranchIdProvider.notifier).state = widget.branchId;
+  bool get wantKeepAlive => true;
+
+  String _recordStage(Map<String, dynamic> record) {
+    final status = (record['status'] ?? '').toString().toLowerCase().trim();
+    final dispenseStatus = (record['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+
+    if (status == 'dispensed' || dispenseStatus == 'dispensed' || record['dispensedAt'] != null) {
+      return 'dispensed';
     }
+    if (status == 'prescribed' ||
+        status == 'completed' ||
+        status == 'waiting_for_dispense' ||
+        status == 'waiting_to_dispense' ||
+        dispenseStatus == 'waiting_for_dispense' ||
+        dispenseStatus == 'waiting_to_dispense' ||
+        dispenseStatus == 'waiting') {
+      return 'waiting_dispensary';
+    }
+    return 'waiting_doctor';
+  }
+
+  int _compareRecords(Map<String, dynamic> left, Map<String, dynamic> right) {
+    String valueOf(Map<String, dynamic> record) {
+      switch (_sortField) {
+        case 'name':
+          return (record['name'] ?? record['patientName'] ?? '').toString().toLowerCase();
+        case 'status':
+          return _recordStage(record);
+        case 'type':
+          return (record['type'] ?? record['queueType'] ?? '').toString().toLowerCase();
+        case 'facility':
+          return (record['campId'] ?? record['dispensaryId'] ?? record['dispensaryTag'] ?? '').toString().toLowerCase();
+        case 'token':
+        default:
+          return (record['serial'] ?? record['id'] ?? '').toString().toLowerCase();
+      }
+    }
+
+    final result = valueOf(left).compareTo(valueOf(right));
+    return _sortAscending ? result : -result;
+  }
+
+  String? _selectedBranchId;
+  String _selectedBranchName = 'Branch';
+  String _searchQuery = '';
+  String _sortField = 'token';
+  bool _sortAscending = true;
+  int _currentPage = 1;
+  int _rowsPerPage = 10;
+  String _chartRange = '7d'; // '7d', '14d', '30d', 'month'
+  String _selectedCampFilter = 'all'; // 'all', 'haji', 'saddar'
+  final TextEditingController _searchController = TextEditingController();
+
+  Map<String, dynamic> _computeRealPerformanceData(String branchId, String range) {
+    int numDays = 7;
+    if (range == '14d') numDays = 14;
+    if (range == '30d') numDays = 30;
+    if (range == 'month') numDays = DateTime.now().day.clamp(1, 31);
+
+    final now = DateTime.now();
+    final days = <DateTime>[];
+    for (int i = numDays - 1; i >= 0; i--) {
+      days.add(DateTime(now.year, now.month, now.day).subtract(Duration(days: i)));
+    }
+
+    final tokensList = List<double>.filled(numDays, 0.0);
+    final prescList = List<double>.filled(numDays, 0.0);
+    final dispList = List<double>.filled(numDays, 0.0);
+
+    final dfDdmmyy = DateFormat('ddMMyy');
+    final dfYmd = DateFormat('yyyy-MM-dd');
+    final dfLabel = DateFormat('d MMM');
+
+    final dateIndexMap = <String, int>{};
+    final labels = <String>[];
+    for (int i = 0; i < days.length; i++) {
+      dateIndexMap[dfDdmmyy.format(days[i])] = i;
+      dateIndexMap[dfYmd.format(days[i])] = i;
+      labels.add(dfLabel.format(days[i]));
+    }
+
+    final targetB = branchId.toLowerCase().trim();
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final box = Hive.box(LocalStorageService.entriesBox);
+        for (final val in box.values) {
+          if (val is! Map) continue;
+          final b = (val['branchId'] ?? '').toString().toLowerCase().trim();
+          if (targetB != 'all' && b.isNotEmpty && !b.contains(targetB) && !targetB.contains(b)) {
+            continue;
+          }
+          if (_selectedCampFilter != 'all') {
+            final serial = (val['serial'] ?? val['id'] ?? '').toString().toUpperCase();
+            final camp = (val['campId'] ?? val['dispensaryId'] ?? val['dispensaryTag'] ?? '').toString().toLowerCase();
+            if (_selectedCampFilter == 'haji') {
+              if (!serial.contains('-HAJI') && !serial.contains('HAJI-') && !camp.contains('haji')) continue;
+            } else if (_selectedCampFilter == 'saddar') {
+              if (!serial.contains('-SADD') && !serial.contains('SADD-') && !camp.contains('saddar') && !camp.contains('kapaya')) continue;
+            }
+          }
+
+          final dk = (val['dateKey'] ?? val['date'] ?? '').toString().trim();
+          final idx = dateIndexMap[dk];
+          if (idx != null) {
+            tokensList[idx] += 1.0;
+            final status = (val['status'] ?? '').toString().toLowerCase();
+            final dStatus = (val['dispenseStatus'] ?? '').toString().toLowerCase();
+            if (status == 'completed' || status == 'prescribed' || dStatus == 'dispensed' || val['dispensedAt'] != null) {
+              prescList[idx] += 1.0;
+            }
+            if (dStatus == 'dispensed' || status == 'dispensed' || val['dispensedAt'] != null) {
+              dispList[idx] += 1.0;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    return {
+      'tokens': tokensList,
+      'prescriptions': prescList,
+      'dispensary': dispList,
+      'labels': labels,
+    };
   }
 
   @override
   void initState() {
     super.initState();
-    _mobileTabController = TabController(length: 3, vsync: this);
-    // Seed the single-branch filter into the provider
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(singleBranchIdProvider.notifier).state = widget.branchId;
-    });
+    _selectedBranchId = widget.branchId ?? widget.initialBranchId;
   }
 
   @override
   void dispose() {
-    _mobileTabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  @override
-  bool get wantKeepAlive => true;
-
-  DateTime get effectiveStart {
-    final range = ref.read(branchDateRangeProvider);
-    if (range.start != null && range.end != null) return range.start!;
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
-
-  DateTime get effectiveEnd {
-    final range = ref.read(branchDateRangeProvider);
-    if (range.start != null && range.end != null) {
-      return range.end!.add(const Duration(days: 1));
-    }
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day + 1);
-  }
-
-  Map<String, int>? _initialSummary(String branchId) {
-    try {
-      if (Hive.isBoxOpen('branch_data_cache')) {
-        final box = Hive.box('branch_data_cache');
-        final normBranchId = branchId.toLowerCase().trim();
-        final subFilter = ref.read(branchSubDispensaryFilterProvider);
-        final shiftFilter = ref.read(branchShiftFilterProvider);
-        final subKey = (subFilter != null && subFilter.isNotEmpty && subFilter != 'all') ? subFilter.toLowerCase().trim() : 'all';
-        final shiftKey = (shiftFilter != null && shiftFilter.isNotEmpty && shiftFilter != 'all') ? shiftFilter.toLowerCase().trim() : 'all';
-        final days = _dateStrings(effectiveStart, effectiveEnd);
-        final merged = <String, int>{};
-        bool hasData = false;
-        for (final ds in days) {
-          final cacheKey = 'v1|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
-          final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v1|$normBranchId|$subKey|$ds|serials_summary') : null) ?? (shiftKey == 'all' && subKey == 'all' ? box.get('v1|$normBranchId|$ds|serials_summary') : null);
-          if (cached is Map) {
-            hasData = true;
-            cached.forEach((key, val) {
-              if (val is num) {
-                merged[key.toString()] = (merged[key.toString()] ?? 0) + val.toInt();
-              }
-            });
-          }
-        }
-        if (hasData) return merged;
-      }
-    } catch (_) {}
-    return null;
-  }
-
-
-
-  Future<List<Map<String, dynamic>>> _waitingPatientsFuture(String branchId) async {
-    final normBranchId = branchId.toLowerCase().trim();
-    final days = _dateStrings(effectiveStart, effectiveEnd);
-    final daysSet = days.toSet();
-    final queues = ['zakat', 'non-zakat', 'gmwf'];
-    final list = <Map<String, dynamic>>[];
-
-    try {
-      // Try high-performance collectionGroup query
-      final snaps = await Future.wait([
-        FirebaseFirestore.instance.collectionGroup('zakat').where('branchId', isEqualTo: normBranchId).get(),
-        FirebaseFirestore.instance.collectionGroup('non-zakat').where('branchId', isEqualTo: normBranchId).get(),
-        FirebaseFirestore.instance.collectionGroup('gmwf').where('branchId', isEqualTo: normBranchId).get(),
-      ]);
-
-      for (final snap in snaps) {
-        for (final doc in snap.docs) {
-          final parts = doc.reference.path.split('/');
-          if (parts.length >= 6) {
-            final ds = parts[3];
-            if (daysSet.contains(ds)) {
-              final data = doc.data();
-              final status = (data['status'] ?? '').toString().toLowerCase().trim();
-              if (status == 'waiting' || status.isEmpty || status != 'completed') {
-                list.add({
-                  ...data,
-                  'serial': data['serial'] ?? doc.id,
-                  'type': data['queueType'] ?? _resolveType(data),
-                });
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('[Branches] _waitingPatientsFuture collectionGroup error: $e. Falling back to parallel day queries.');
-      list.clear();
-      
-      final allQueries = <Map<String, dynamic>>[];
-      for (final ds in days) {
-        for (final q in queues) {
-          allQueries.add({
-            'ds': ds,
-            'q': q,
-            'ref': FirebaseFirestore.instance.collection('branches/$normBranchId/serials/$ds/$q')
-          });
-        }
-      }
-
-      final snaps = <QuerySnapshot<Map<String, dynamic>>>[];
-      const chunkSize = 40;
-      for (int i = 0; i < allQueries.length; i += chunkSize) {
-        final chunk = allQueries.sublist(i, (i + chunkSize).clamp(0, allQueries.length));
-        final chunkFutures = chunk.map((item) => (item['ref'] as CollectionReference<Map<String, dynamic>>).get());
-        final chunkSnaps = await Future.wait(chunkFutures);
-        snaps.addAll(chunkSnaps);
-      }
-
-      for (final snap in snaps) {
-        for (final doc in snap.docs) {
-          final data = doc.data();
-          final status = (data['status'] ?? '').toString().toLowerCase().trim();
-          if (status == 'waiting' || status.isEmpty || status != 'completed') {
-            list.add({
-              ...data,
-              'serial': data['serial'] ?? doc.id,
-              'type': data['queueType'] ?? _resolveType(data),
-            });
-          }
-        }
-      }
-    }
-
-    list.sort((a, b) {
-      final ca = a['createdAt']?.toString() ?? '';
-      final cb = b['createdAt']?.toString() ?? '';
-      return ca.compareTo(cb);
-    });
-    return list;
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchDispensaryDocsForDay(String branchId, String ds) async {
-    final snap = await FirebaseFirestore.instance
-        .collection('branches/$branchId/dispensary/$ds/$ds')
-        .get();
-    return snap.docs.map((doc) {
-      final data = Map<String, dynamic>.from(doc.data());
-      data['id'] = doc.id;
-      return data;
-    }).toList();
-  }
-
-  Future<List<Map<String, dynamic>>> _enrichRawDocs(String branchId, List<Map<String, dynamic>> rawList) async {
-    return LocalStorageService.enrichRawDocs(branchId, rawList);
-  }
-
-  String _firstNonEmpty(List<dynamic> candidates) {
-    for (final c in candidates) {
-      final s = c?.toString().trim() ?? '';
-      if (s.isNotEmpty && s != 'null' && s != 'N/A') return s;
-    }
-    return '';
-  }
-
-  List<Map<String, dynamic>> _fallbackEnrich(List<Map<String, dynamic>> rawDocs) {
-    return rawDocs.map((d) => {
-      ...d,
-      'name': _firstNonEmpty([d['patientName'], d['name'], 'Unknown']),
-      'phone': d['phone']?.toString() ?? 'N/A',
-      'age': d['age']?.toString() ?? d['patientAge']?.toString() ?? 'N/A',
-      'gender': d['gender']?.toString() ?? d['patientGender']?.toString() ?? 'N/A',
-      'displayCnic': _firstNonEmpty([d['patientCnic'], d['cnic'], d['guardianCnic'], 'N/A']),
-      'isChild': (d['guardianCnic'] ?? '').toString().isNotEmpty && (d['patientCnic'] ?? d['cnic'] ?? '').toString().isEmpty,
-      'doctorName': _firstNonEmpty([d['doctorName'], d['prescribedBy'], 'Unknown']),
-      'dispenserName': _firstNonEmpty([d['dispenserName'], d['dispensedBy'], 'Unknown']),
-      'tokenBy': _firstNonEmpty([d['createdByName'], d['tokenBy'], d['createdBy'], 'Unknown']),
-      'daysOfMedicine': (d['daysOfMedicine'] as num?)?.toInt() ?? 1,
-      'frequentFlag': d['frequentFlag'] ?? false,
-    }).toList();
-  }
-
-
-
-
-  // ── Local cache helper (used by _consecutivePatientsFuture) ─────────────
-  final Map<String, Future<List<Map<String, dynamic>>>> _inFlightCacheFutures = {};
-
-  Future<List<Map<String, dynamic>>> _fetchDayCached({
-    required String branchId,
-    required String dayKey,
-    required String type,
-    required Future<List<Map<String, dynamic>>> Function() fetchSource,
-  }) async {
-    final todayKey = DateFormat('ddMMyy').format(DateTime.now());
-    if (dayKey == todayKey) return await fetchSource();
-    final cacheKey = '$branchId|$dayKey|$type';
-    if (_inFlightCacheFutures.containsKey(cacheKey)) {
-      return await _inFlightCacheFutures[cacheKey]!;
-    }
-    final cached = LocalStorageService.getBranchDayCache(branchId, dayKey, type);
-    if (cached != null) return cached;
-    final future = fetchSource().then((fresh) async {
-      await LocalStorageService.putBranchDayCache(branchId, dayKey, type, fresh);
-      _inFlightCacheFutures.remove(cacheKey);
-      return fresh;
-    }).catchError((e) {
-      _inFlightCacheFutures.remove(cacheKey);
-      throw e;
-    });
-    _inFlightCacheFutures[cacheKey] = future;
-    return await future;
-  }
-
-  /// Convenience getter so legacy code can read the reverted set from Riverpod.
-  Set<String> get _revertedPatientIds => ref.read(revertedPatientIdsProvider);
-
-  Future<List<_ConsecutivePatient>> _consecutivePatientsFuture(String branchId) async {
-    final normBranchId = branchId.toLowerCase().trim();
-    try {
-      final now    = DateTime.now();
-      final today  = DateTime(now.year, now.month, now.day);
-      final df     = DateFormat('ddMMyy');
-      final windowDays = List.generate(7, (i) => today.subtract(Duration(days: i)));
-      final windowKeys = windowDays.map(df.format).toList();
-
-      final Map<String, Set<DateTime>> attendanceMap = {};
-      for (final dk in windowKeys) {
-        final dt = LocalStorageService.parseDdMMyy(dk);
-        final dayDocs = await _fetchDayCached(
-          branchId: normBranchId,
-          dayKey: dk,
-          type: 'dispensary',
-          fetchSource: () => _fetchDispensaryDocsForDay(normBranchId, dk),
-        );
-        for (final data in dayDocs) {
-          final pid = _resolvePatientId(data);
-          if (pid.isEmpty) continue;
-          attendanceMap.putIfAbsent(pid, () => {}).add(dt);
-        }
-      }
-
-      final result        = <_ConsecutivePatient>[];
-      final displayFormat = DateFormat('dd MMM yyyy');
-      final candidatePids = <String>[];
-      final pidToStreak   = <String, int>{};
-
-      for (final entry in attendanceMap.entries) {
-        final pid  = entry.key;
-        final days = entry.value.toList()..sort((a, b) => b.compareTo(a));
-        int streak       = 0;
-        DateTime? cursor = today;
-        for (final d in days) {
-          if (cursor == null) break;
-          if (d.isAtSameMomentAs(cursor) || d == cursor) {
-            streak++;
-            cursor = cursor.subtract(const Duration(days: 1));
-          } else if (d.isBefore(cursor)) {
-            break;
-          }
-        }
-        if (streak >= 6 && !_revertedPatientIds.contains(pid)) {
-          candidatePids.add(pid);
-          pidToStreak[pid] = streak;
-        }
-      }
-
-      if (candidatePids.isEmpty) return [];
-
-      final patientSnaps = await Future.wait(
-        candidatePids.map((pid) => FirebaseFirestore.instance
-            .collection('branches/$normBranchId/patients')
-            .doc(pid)
-            .get()
-            .then((snap) => MapEntry(pid, snap.data()))
-            .catchError((_) => MapEntry(pid, null as Map<String, dynamic>?))
-        )
-      );
-      final patientDataMap = Map.fromEntries(patientSnaps.where((e) => e.value != null));
-
-      for (final pid in candidatePids) {
-        final patientData = patientDataMap[pid] ?? {};
-        if (patientData['frequentFlag'] == false) continue;
-        Map<String, dynamic>? latestDispensary;
-        for (final dk in windowKeys) {
-          final dayDocs = await _fetchDayCached(
-            branchId: normBranchId,
-            dayKey: dk,
-            type: 'dispensary',
-            fetchSource: () => _fetchDispensaryDocsForDay(normBranchId, dk),
-          );
-          final match = dayDocs.firstWhere(
-            (d) => _resolvePatientId(d) == pid,
-            orElse: () => <String, dynamic>{},
-          );
-          if (match.isNotEmpty) {
-            latestDispensary = Map<String, dynamic>.from(match);
-            latestDispensary['dispenseDate'] =
-                displayFormat.format(LocalStorageService.parseDdMMyy(dk));
-            break;
-          }
-        }
-        if (latestDispensary == null) continue;
-        result.add(_ConsecutivePatient(
-          data: {
-            ...latestDispensary,
-            'patientId': pid,
-            'name': patientData['name'] ?? latestDispensary['patientName'] ?? 'Unknown',
-            'phone': patientData['phone'] ?? latestDispensary['phone'] ?? 'N/A',
-            'displayCnic': _firstNonEmpty([
-              latestDispensary['patientCnic'], latestDispensary['cnic'],
-              patientData['cnic']?.toString(),
-              latestDispensary['guardianCnic'], patientData['guardianCnic']?.toString(),
-            ]),
-            'frequentFlag': patientData['frequentFlag'] ?? true,
-          },
-          streakDays: pidToStreak[pid]!,
-        ));
-      }
-      result.sort((a, b) => b.streakDays.compareTo(a.streakDays));
-      return result;
-    } catch (e) {
-      debugPrint('[Branches] _consecutivePatientsFuture error: $e');
-      return [];
-    }
-  }
-
-  Future<void> _revertFrequentFlag(String branchId, String patientId) async {
-    final normBranchId = branchId.toLowerCase().trim();
-    try {
-      await FirebaseFirestore.instance
-          .collection('branches/$normBranchId/patients')
-          .doc(patientId)
-          .set({'frequentFlag': false}, SetOptions(merge: true));
-      // Update the provider set immutably
-      final current = ref.read(revertedPatientIdsProvider);
-      ref.read(revertedPatientIdsProvider.notifier).state =
-          {...current, patientId};
-    } catch (e) {
-      debugPrint('[Branches] _revertFrequentFlag error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Failed to revert flag',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-          backgroundColor: const Color(0xFF1C1C1E),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ));
-      }
-    }
-  }
-
-  String _resolvePatientId(Map<String, dynamic> data) {
-    for (final key in ['patientId', 'id', 'uid']) {
-      final v = data[key]?.toString().trim() ?? '';
-      if (v.isNotEmpty) return v;
-    }
-    return '';
-  }
-
-  String _resolveType(Map<String, dynamic> data) {
-    final raw = (data['queueType'] ?? data['type'] ?? '').toString().toLowerCase().trim();
-    switch (raw) {
-      case 'zakat':     return 'zakat';
-      case 'non-zakat': return 'non-zakat';
-      case 'gmwf':      return 'gmwf';
-      default:          return 'Unknown';
-    }
-  }
-
-  // ── Date range selector ──────────────────────────────────────────────────
-
-  /// Single pill-shaped trigger that opens the date picker sheet.
-  /// Used in both compact (header toolbar) and full (tab body header) contexts.
-  Widget _dateRangeSelector(RoleThemeData t, {bool compact = false}) {
-    final range   = ref.watch(branchDateRangeProvider);
-    final isToday = range.isToday;
-
-    String label;
-    if (isToday) {
-      label = 'Today';
-    } else if (range.start != null && range.end != null) {
-      final s = range.start!;
-      final e = range.end!;
-      final same = s.year == e.year && s.month == e.month && s.day == e.day;
-      if (same) {
-        label = DateFormat('d MMM yyyy').format(s);
-      } else {
-        label = '${DateFormat('d MMM').format(s)} → ${DateFormat('d MMM').format(e)}';
-      }
-    } else {
-      label = 'Select Range';
-    }
-
-    return GestureDetector(
-      onTap: () => _showDateRangeBottomSheet(t),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.symmetric(
-            horizontal: compact ? 10 : 14,
-            vertical:   compact ? 6  : 9),
-        decoration: BoxDecoration(
-          color: isToday
-              ? t.bgCardAlt
-              : t.accent.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: isToday ? t.bgRule : t.accent.withValues(alpha: 0.45),
-            width: isToday ? 1 : 1.5,
-          ),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(
-            isToday ? Icons.today_rounded : Icons.date_range_rounded,
-            size: compact ? 13 : 15,
-            color: isToday ? t.textTertiary : t.accent,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: compact ? 11 : 12,
-              fontWeight: FontWeight.w700,
-              color: isToday ? t.textSecondary : t.accent,
-            ),
-          ),
-          if (!isToday) ...[
-            const SizedBox(width: 6),
-            GestureDetector(
-              onTap: () => ref.read(branchDateRangeProvider.notifier).state =
-                  const DateRange(),
-              child: Container(
-                width: 16, height: 16,
-                decoration: BoxDecoration(
-                  color: t.danger.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.close_rounded, size: 10, color: t.danger),
-              ),
-            ),
-          ],
-        ]),
-      ),
-    );
-  }
-
-  // ignore: unused_element
-  Widget _datePicker(RoleThemeData t, DateTime? value, Function(DateTime) onPick,
-      DateTime first, DateTime last) {
-    return GestureDetector(
-      onTap: () async {
-        final picked = await showDatePicker(
-            context: context,
-            initialDate: value ?? DateTime.now(),
-            firstDate: first,
-            lastDate: last);
-        if (picked != null) onPick(picked);
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-        decoration: BoxDecoration(
-          color: t.bgCardAlt,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: value != null ? t.accent.withValues(alpha: 0.4) : t.bgRule,
-            width: value != null ? 1.5 : 1,
-          ),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.calendar_month_rounded,
-              size: 15,
-              color: value != null ? t.accent : t.textTertiary),
-          const SizedBox(width: 8),
-          Text(
-            value != null
-                ? DateFormat('d MMM yyyy').format(value)
-                : 'Pick date',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: value != null ? FontWeight.w700 : FontWeight.w400,
-              color: value != null ? t.textPrimary : t.textTertiary,
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  void _showDateRangeBottomSheet(RoleThemeData t) {
+  void _showDateRangePicker(BuildContext context, RoleThemeData t) async {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
     final currentRange = ref.read(branchDateRangeProvider);
-    DateTime? tempStart = currentRange.start;
-    DateTime? tempEnd   = currentRange.end;
+    final initialDateRange = DateTimeRange(
+      start: currentRange.start ?? DateTime.now(),
+      end: currentRange.end ?? DateTime.now(),
+    );
 
-    final now      = DateTime.now();
-    final today    = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-    final last7    = today.subtract(const Duration(days: 6));
-    final monthStart = DateTime(now.year, now.month, 1);
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      initialDateRange: initialDateRange,
+      builder: (context, child) {
+        return Theme(
+          data: ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: t.accent,
+              brightness: isDark ? Brightness.dark : Brightness.light,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
 
-    // Quick preset: label + start + end
-    final presets = [
-      ('Today',       today,       today),
-      ('Yesterday',   yesterday,   yesterday),
-      ('Last 7 Days', last7,       today),
-      ('This Month',  monthStart,  today),
-    ];
+    if (picked != null) {
+      ref.read(branchDateRangeProvider.notifier).state = DateRange(
+        start: picked.start,
+        end: picked.end,
+      );
+      setState(() => _currentPage = 1);
+    }
+  }
 
+  void _showFilterModal(BuildContext context, RoleThemeData t) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setS) {
-          bool isPreset(DateTime s, DateTime e) =>
-              tempStart != null && tempEnd != null &&
-              tempStart!.isAtSameMomentAs(s) && tempEnd!.isAtSameMomentAs(e);
+      backgroundColor: t.bgCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final typeFilter = ref.watch(branchTypeFilterProvider);
+            final shiftFilter = ref.watch(branchShiftFilterProvider);
+            final mDay = ref.watch(branchMultiDayFilterProvider);
+            final mVisit = ref.watch(branchMultiVisitFilterProvider);
 
-          return Container(
-            decoration: BoxDecoration(
-              color: t.bgCard,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(28)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
-                  blurRadius: 32,
-                  offset: const Offset(0, -8),
-                ),
-              ],
-            ),
-            padding: EdgeInsets.only(
-              left: 20, right: 20, top: 12,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 28,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // ── Drag handle ──────────────────────────────────────────
-                Center(
-                  child: Container(
-                    width: 40, height: 4,
-                    margin: const EdgeInsets.only(bottom: 18),
-                    decoration: BoxDecoration(
-                      color: t.bgRule,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-
-                // ── Title ────────────────────────────────────────────────
-                Row(children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: t.accent.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(Icons.date_range_rounded,
-                        color: t.accent, size: 18),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Filter by Date',
-                        style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: t.textPrimary)),
-                    Text('Select a range to filter records',
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: t.textTertiary)),
-                  ]),
-                ]),
-
-                const SizedBox(height: 20),
-
-                // ── Quick presets ─────────────────────────────────────────
-                Text('Quick Select',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: t.textTertiary,
-                        letterSpacing: 0.6)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8, runSpacing: 8,
-                  children: presets.map((p) {
-                    final active = isPreset(p.$2, p.$3);
-                    return GestureDetector(
-                      onTap: () => setS(() {
-                        tempStart = p.$2;
-                        tempEnd   = p.$3;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 160),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: active
-                              ? t.accent
-                              : t.accent.withValues(alpha: 0.07),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: active
-                                ? t.accent
-                                : t.accent.withValues(alpha: 0.25),
-                          ),
-                        ),
-                        child: Text(p.$1,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: active ? Colors.white : t.accent,
-                            )),
-                      ),
-                    );
-                  }).toList(),
-                ),
-
-                const SizedBox(height: 20),
-
-                // ── Custom range From → To ────────────────────────────────
-                Text('Custom Range',
-                    style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        color: t.textTertiary,
-                        letterSpacing: 0.6)),
-                const SizedBox(height: 10),
-
-                Row(children: [
-                  // From
-                  Expanded(
-                    child: _datePickerTile(
-                      t: t,
-                      label: 'From',
-                      value: tempStart,
-                      icon: Icons.flight_takeoff_rounded,
-                      accent: t.accent,
-                      onTap: () async {
-                        final p = await showDatePicker(
-                          context: context,
-                          initialDate: tempStart ?? today,
-                          firstDate: DateTime(2024),
-                          lastDate: today,
-                        );
-                        if (p != null) setS(() {
-                          tempStart = p;
-                          // Auto-clamp end if it's before new start
-                          if (tempEnd != null && tempEnd!.isBefore(p)) {
-                            tempEnd = p;
-                          }
-                        });
-                      },
-                    ),
-                  ),
-
-                  // Arrow connector
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Column(children: [
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: t.accent.withValues(alpha: 0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(Icons.arrow_forward_rounded,
-                            size: 14, color: t.accent),
-                      ),
-                    ]),
-                  ),
-
-                  // To
-                  Expanded(
-                    child: _datePickerTile(
-                      t: t,
-                      label: 'To',
-                      value: tempEnd,
-                      icon: Icons.flight_land_rounded,
-                      accent: t.accent,
-                      onTap: () async {
-                        final p = await showDatePicker(
-                          context: context,
-                          initialDate: tempEnd ?? today,
-                          firstDate: tempStart ?? DateTime(2024),
-                          lastDate: today,
-                        );
-                        if (p != null) setS(() => tempEnd = p);
-                      },
-                    ),
-                  ),
-                ]),
-
-                // Duration badge
-                if (tempStart != null && tempEnd != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 5),
-                          decoration: BoxDecoration(
-                            color: t.accent.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            () {
-                              final diff = tempEnd!
-                                  .difference(tempStart!).inDays + 1;
-                              return diff == 1
-                                  ? '1 day selected'
-                                  : '$diff days selected';
-                            }(),
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: t.accent,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 24),
-
-                // ── Action buttons ────────────────────────────────────────
-                Row(children: [
-                  // Reset
-                  TextButton(
-                    onPressed: () {
-                      ref.read(branchDateRangeProvider.notifier).state =
-                          const DateRange();
-                      Navigator.pop(ctx);
-                    },
-                    style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: t.bgRule),
-                      ),
-                    ),
-                    child: Text('Reset',
-                        style: TextStyle(
-                            color: t.textSecondary,
-                            fontWeight: FontWeight.w600)),
-                  ),
-                  const SizedBox(width: 12),
-                  // Apply
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () {
-                        if (tempStart != null || tempEnd != null) {
-                          ref.read(branchDateRangeProvider.notifier).state =
-                              DateRange(start: tempStart, end: tempEnd);
-                        }
-                        Navigator.pop(ctx);
-                      },
-                      child: Container(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              t.accent,
-                              t.accent.withValues(alpha: 0.75),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color: t.accent.withValues(alpha: 0.3),
-                              blurRadius: 12,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.check_rounded,
-                                color: Colors.white, size: 16),
-                            SizedBox(width: 6),
-                            Text('Apply Filter',
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ]),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  /// Individual date picker tile used inside the bottom sheet custom range row.
-  Widget _datePickerTile({
-    required RoleThemeData t,
-    required String label,
-    required DateTime? value,
-    required IconData icon,
-    required Color accent,
-    required VoidCallback onTap,
-  }) {
-    final hasValue = value != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: t.textTertiary,
-                  letterSpacing: 0.4)),
-          const SizedBox(height: 6),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
-            decoration: BoxDecoration(
-              color: hasValue
-                  ? accent.withValues(alpha: 0.07)
-                  : t.bgCardAlt,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: hasValue
-                    ? accent.withValues(alpha: 0.45)
-                    : t.bgRule,
-                width: hasValue ? 1.5 : 1,
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(icon,
-                    size: 16,
-                    color: hasValue ? accent : t.textTertiary),
-                const SizedBox(height: 6),
-                Text(
-                  hasValue
-                      ? DateFormat('d MMM').format(value!)
-                      : 'Pick',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: hasValue ? t.textPrimary : t.textTertiary,
-                  ),
-                ),
-                if (hasValue)
-                  Text(
-                    DateFormat('yyyy').format(value!),
-                    style: TextStyle(
-                        fontSize: 10,
-                        color: t.textTertiary),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-
-  // ── Filters ───────────────────────────────────────────────────────────────
-
-  Widget _typeFilter(RoleThemeData t) {
-    final multiDay   = ref.watch(branchMultiDayFilterProvider);
-    final multiVisit = ref.watch(branchMultiVisitFilterProvider);
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(children: [
-        _filterChip(t, "All", null),
-        const SizedBox(width: 6),
-        _filterChip(t, "Zakat", "zakat"),
-        const SizedBox(width: 6),
-        _filterChip(t, "Non-Zakat", "non-zakat"),
-        const SizedBox(width: 6),
-        _filterChip(t, "GMWF", "gmwf"),
-        const SizedBox(width: 6),
-        _toggleChip(
-          t,
-          label: "Multi-day",
-          icon: Icons.calendar_month_rounded,
-          color: Colors.deepOrange,
-          active: multiDay,
-          onTap: () => ref.read(branchMultiDayFilterProvider.notifier).state =
-              !multiDay,
-        ),
-        const SizedBox(width: 6),
-        _toggleChip(
-          t,
-          label: "2+ Visits",
-          icon: Icons.repeat_rounded,
-          color: Colors.blue,
-          active: multiVisit,
-          onTap: () =>
-              ref.read(branchMultiVisitFilterProvider.notifier).state =
-                  !multiVisit,
-        ),
-      ]),
-    );
-  }
-
-  Widget _subDispensaryFilter(RoleThemeData t, String branchId) {
-    Map<String, dynamic>? branchData;
-    try {
-      if (Hive.isBoxOpen('local_branches')) {
-        final raw = Hive.box('local_branches').get('branch:${branchId.toLowerCase().trim()}');
-        if (raw is Map) branchData = Map<String, dynamic>.from(raw);
-      }
-    } catch (_) {}
-
-    List<Map<String, dynamic>> rawDispensaries = [];
-    if (branchData != null && branchData['dispensaries'] is List) {
-      rawDispensaries = List<Map<String, dynamic>>.from(branchData['dispensaries']);
-    }
-
-    // Use central defaults if none registered in local box yet
-    if (rawDispensaries.isEmpty) {
-      final defaults = LocalStorageService.getDefaultBranchFacilities(branchId);
-      final dispList = defaults['dispensaries'] ?? [];
-      if (dispList.length > 1) {
-        rawDispensaries = List<Map<String, dynamic>>.from(dispList);
-      }
-    }
-
-    // If this branch has no sub-dispensaries configured, hide sub-facility filter bar
-    if (rawDispensaries.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final currentSub = ref.watch(branchSubDispensaryFilterProvider);
-    final items = [
-      {'label': 'All Facilities', 'value': null},
-      ...rawDispensaries.map((d) => {
-        'label': (d['name'] ?? d['id'] ?? '').toString(),
-        'value': (d['id'] ?? '').toString().toLowerCase().trim(),
-      }),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: items.map((item) {
-          final val = item['value'];
-          final label = item['label'] as String;
-          final selected = currentSub == val;
-          return Padding(
-            padding: const EdgeInsets.only(right: 6.0),
-            child: GestureDetector(
-              onTap: () => ref.read(branchSubDispensaryFilterProvider.notifier).state = val,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: selected ? t.accent.withValues(alpha: 0.2) : t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: selected ? t.accent : t.bgRule,
-                    width: selected ? 1.5 : 1.0,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      val == null ? Icons.business_rounded : Icons.local_hospital_outlined,
-                      size: 14,
-                      color: selected ? t.accent : t.textSecondary,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected ? t.accent : t.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _shiftFilter(RoleThemeData t) {
-    final currentShift = ref.watch(branchShiftFilterProvider);
-    final items = [
-      {'label': 'All Shifts', 'value': null, 'icon': Icons.access_time_filled_rounded},
-      {'label': 'Day Shift', 'value': 'day', 'icon': Icons.wb_sunny_rounded},
-      {'label': 'Night Shift', 'value': 'night', 'icon': Icons.nightlight_round},
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: items.map((item) {
-          final val = item['value'] as String?;
-          final label = item['label'] as String;
-          final icon = item['icon'] as IconData;
-          final selected = currentShift == val;
-          return Padding(
-            padding: const EdgeInsets.only(right: 6.0),
-            child: GestureDetector(
-              onTap: () => ref.read(branchShiftFilterProvider.notifier).state = val,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                decoration: BoxDecoration(
-                  color: selected ? (val == 'night' ? const Color(0xFF6366F1).withValues(alpha: 0.2) : (val == 'day' ? const Color(0xFFF59E0B).withValues(alpha: 0.2) : t.accent.withValues(alpha: 0.2))) : t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.bgRule,
-                    width: selected ? 1.5 : 1.0,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      icon,
-                      size: 14,
-                      color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.textSecondary,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                        color: selected ? (val == 'night' ? const Color(0xFF6366F1) : (val == 'day' ? const Color(0xFFF59E0B) : t.accent)) : t.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  Widget _facilityShiftBreakdownCard(RoleThemeData t, String branchId, bool isMobile) {
-    final isKarachi = branchId.toLowerCase().trim() == 'karachi';
-    if (!isKarachi) return const SizedBox.shrink();
-
-    final breakdownAsync = ref.watch(facilityShiftBreakdownProvider(branchId));
-    final activeSub = ref.watch(branchSubDispensaryFilterProvider);
-    final activeShift = ref.watch(branchShiftFilterProvider);
-
-    return breakdownAsync.when(
-      data: (matrix) {
-        final saddar = matrix['saddar'] ?? {};
-        final haji = matrix['haji_camp'] ?? {};
-        final all = matrix['all'] ?? {};
-
-        final saddarMorning = saddar['morning'] ?? 0;
-        final saddarEvening = saddar['evening'] ?? 0;
-        final saddarNight = saddar['night'] ?? 0;
-        final saddarTotal = saddar['total'] ?? (saddarMorning + saddarEvening + saddarNight);
-
-        final hajiMorning = haji['morning'] ?? 0;
-        final hajiEvening = haji['evening'] ?? 0;
-        final hajiNight = haji['night'] ?? 0;
-        final hajiTotal = haji['total'] ?? (hajiMorning + hajiEvening + hajiNight);
-
-        final allMorning = all['morning'] ?? 0;
-        final allEvening = all['evening'] ?? 0;
-        final allNight = all['night'] ?? 0;
-        final allTotal = all['total'] ?? (allMorning + allEvening + allNight);
-
-        return Container(
-          margin: const EdgeInsets.only(top: 14),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: t.bgCard,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: t.bgRule),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.03),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            return Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: t.accent.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(Icons.grid_view_rounded, size: 16, color: t.accent),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Facility & Shift Breakdown',
-                        style: TextStyle(
-                          fontSize: isMobile ? 13 : 15,
-                          fontWeight: FontWeight.w800,
-                          color: t.textPrimary,
-                        ),
+                      Text("Filter Records", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
+                      TextButton(
+                        onPressed: () {
+                          ref.read(branchTypeFilterProvider.notifier).state = null;
+                          ref.read(branchShiftFilterProvider.notifier).state = null;
+                          ref.read(branchMultiDayFilterProvider.notifier).state = false;
+                          ref.read(branchMultiVisitFilterProvider.notifier).state = false;
+                          setState(() {
+                            _sortField = 'token';
+                            _sortAscending = true;
+                            _currentPage = 1;
+                          });
+                          setModalState(() {});
+                        },
+                        child: Text("Reset All", style: TextStyle(color: t.accent, fontWeight: FontWeight.w600)),
                       ),
                     ],
                   ),
-                  if (activeSub != null || activeShift != null)
-                    TextButton.icon(
-                      onPressed: () {
-                        ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
-                        ref.read(branchShiftFilterProvider.notifier).state = null;
-                      },
-                      icon: const Icon(Icons.clear_all_rounded, size: 14),
-                      label: const Text('Reset Breakdown Filter', style: TextStyle(fontSize: 11)),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        foregroundColor: t.accent,
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              LayoutBuilder(builder: (context, boxConstraints) {
-                return Table(
-                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-                  columnWidths: const {
-                    0: FlexColumnWidth(2.0),
-                    1: FlexColumnWidth(1.3),
-                    2: FlexColumnWidth(1.3),
-                    3: FlexColumnWidth(1.3),
-                    4: FlexColumnWidth(1.3),
-                  },
-                  children: [
-                    TableRow(
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: t.bgRule, width: 1.5)),
-                      ),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Facility', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.wb_sunny_rounded, size: 12, color: Color(0xFFF59E0B)),
-                            const SizedBox(width: 4),
-                            Text('Morning', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
-                          ]),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.wb_twilight_rounded, size: 12, color: Color(0xFFFB923C)),
-                            const SizedBox(width: 4),
-                            Text('Evening', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
-                          ]),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.nightlight_round, size: 12, color: Color(0xFF6366F1)),
-                            const SizedBox(width: 4),
-                            Text('Night', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
-                          ]),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Text('Total', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textTertiary)),
-                        ),
-                      ],
-                    ),
-                    _matrixRow(
-                      t,
-                      label: '🏥 Saddar Dispensary',
-                      morningCount: saddarMorning,
-                      eveningCount: saddarEvening,
-                      nightCount: saddarNight,
-                      totalCount: saddarTotal,
-                      subId: 'saddar',
-                      activeSub: activeSub,
-                      activeShift: activeShift,
-                    ),
-                    _matrixRow(
-                      t,
-                      label: '🏥 Haji Camp Dispensary',
-                      morningCount: hajiMorning,
-                      eveningCount: hajiEvening,
-                      nightCount: hajiNight,
-                      totalCount: hajiTotal,
-                      subId: 'haji_camp',
-                      activeSub: activeSub,
-                      activeShift: activeShift,
-                    ),
-                    _matrixRow(
-                      t,
-                      label: '🌟 Collective Karachi',
-                      morningCount: allMorning,
-                      eveningCount: allEvening,
-                      nightCount: allNight,
-                      totalCount: allTotal,
-                      subId: null,
-                      activeSub: activeSub,
-                      activeShift: activeShift,
-                      isTotalRow: true,
-                    ),
-                  ],
-                );
-              }),
-            ],
-          ),
-        );
-      },
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-    );
-  }
-
-  TableRow _matrixRow(
-    RoleThemeData t, {
-    required String label,
-    required int morningCount,
-    required int eveningCount,
-    required int nightCount,
-    required int totalCount,
-    required String? subId,
-    required String? activeSub,
-    required String? activeShift,
-    bool isTotalRow = false,
-  }) {
-    final isSubSelected = activeSub == subId;
-    final isMorningSelected = isSubSelected && activeShift == 'morning';
-    final isEveningSelected = isSubSelected && activeShift == 'evening';
-    final isNightSelected = isSubSelected && activeShift == 'night';
-    final isTotalSelected = isSubSelected && activeShift == null;
-
-    return TableRow(
-      decoration: BoxDecoration(
-        color: isTotalRow ? t.bgCardAlt.withValues(alpha: 0.5) : Colors.transparent,
-        border: Border(bottom: BorderSide(color: t.bgRule.withValues(alpha: 0.5))),
-      ),
-      children: [
-        InkWell(
-          onTap: () {
-            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
-            ref.read(branchShiftFilterProvider.notifier).state = null;
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: isTotalRow || isSubSelected ? FontWeight.bold : FontWeight.w600,
-                color: isSubSelected ? t.accent : t.textPrimary,
-              ),
-            ),
-          ),
-        ),
-        InkWell(
-          onTap: () {
-            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
-            ref.read(branchShiftFilterProvider.notifier).state = 'morning';
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              color: isMorningSelected ? const Color(0xFFF59E0B).withValues(alpha: 0.2) : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: isMorningSelected ? Border.all(color: const Color(0xFFF59E0B), width: 1.2) : null,
-            ),
-            child: Text(
-              '$morningCount',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isMorningSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
-                color: isMorningSelected ? const Color(0xFFF59E0B) : (morningCount > 0 ? t.textPrimary : t.textTertiary),
-              ),
-            ),
-          ),
-        ),
-        InkWell(
-          onTap: () {
-            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
-            ref.read(branchShiftFilterProvider.notifier).state = 'evening';
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              color: isEveningSelected ? const Color(0xFFFB923C).withValues(alpha: 0.2) : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: isEveningSelected ? Border.all(color: const Color(0xFFFB923C), width: 1.2) : null,
-            ),
-            child: Text(
-              '$eveningCount',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isEveningSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
-                color: isEveningSelected ? const Color(0xFFFB923C) : (eveningCount > 0 ? t.textPrimary : t.textTertiary),
-              ),
-            ),
-          ),
-        ),
-        InkWell(
-          onTap: () {
-            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
-            ref.read(branchShiftFilterProvider.notifier).state = 'night';
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              color: isNightSelected ? const Color(0xFF6366F1).withValues(alpha: 0.2) : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: isNightSelected ? Border.all(color: const Color(0xFF6366F1), width: 1.2) : null,
-            ),
-            child: Text(
-              '$nightCount',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: isNightSelected ? FontWeight.w900 : (isTotalRow ? FontWeight.bold : FontWeight.w600),
-                color: isNightSelected ? const Color(0xFF6366F1) : (nightCount > 0 ? t.textPrimary : t.textTertiary),
-              ),
-            ),
-          ),
-        ),
-        InkWell(
-          onTap: () {
-            ref.read(branchSubDispensaryFilterProvider.notifier).state = subId;
-            ref.read(branchShiftFilterProvider.notifier).state = null;
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            decoration: BoxDecoration(
-              color: isTotalSelected ? t.accent.withValues(alpha: 0.15) : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: isTotalSelected ? Border.all(color: t.accent, width: 1.2) : null,
-            ),
-            child: Text(
-              '$totalCount',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: isTotalSelected ? t.accent : (isTotalRow ? t.accent : t.textPrimary),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _filterChip(RoleThemeData t, String label, String? type) {
-    final currentFilter = ref.watch(branchTypeFilterProvider);
-    final selected = currentFilter == type;
-    Color chipColor;
-    if (type == 'zakat') {
-      chipColor = t.zakat;
-    } else if (type == 'non-zakat') chipColor = t.nonZakat;
-    else if (type == 'gmwf')      chipColor = t.gmwf;
-    else                          chipColor = t.accent;
-
-    return GestureDetector(
-      onTap: () => ref.read(branchTypeFilterProvider.notifier).state =
-          selected ? null : type,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? chipColor.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? chipColor.withValues(alpha: 0.5) : t.bgRule),
-        ),
-        child: type == 'gmwf'
-            ? Row(mainAxisSize: MainAxisSize.min, children: [
-                Image.asset("assets/logo/gmwf-1.webp", height: 12, width: 12),
-                const SizedBox(width: 4),
-                Text('GMWF', style: TextStyle(
-                    color: selected ? chipColor : t.textSecondary,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500, fontSize: 12)),
-              ])
-            : Text(label, style: TextStyle(
-                color: selected ? chipColor : t.textSecondary,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500, fontSize: 12)),
-      ),
-    );
-  }
-
-  Widget _toggleChip(
-    RoleThemeData t, {
-    required String label,
-    required IconData icon,
-    required Color color,
-    required bool active,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: active ? color.withValues(alpha: 0.5) : t.bgRule),
-        ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 13, color: active ? color : t.textSecondary),
-          const SizedBox(width: 5),
-          Text(label, style: TextStyle(
-              color: active ? color : t.textSecondary,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              fontSize: 12)),
-        ]),
-      ),
-    );
-  }
-
-  // ── Info row ──────────────────────────────────────────────────────────────
-
-  Widget _infoRow(BuildContext context, IconData icon, String label, String value, {String? copy}) {
-    final t = RoleThemeScope.dataOf(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2.5),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 16, color: t.textTertiary),
-          const SizedBox(width: 8),
-          SizedBox(
-            width: 100,
-            child: Text(label, style: TextStyle(fontSize: 13, color: t.textSecondary, fontWeight: FontWeight.w500)),
-          ),
-          Expanded(child: Text(value, style: TextStyle(fontSize: 14, color: t.textPrimary, fontWeight: FontWeight.w700))),
-          if (copy != null && copy.isNotEmpty && copy != 'N/A')
-            GestureDetector(
-              onTap: () {
-                Clipboard.setData(ClipboardData(text: copy));
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(
-                    'Copied: $copy',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w600),
+                  const SizedBox(height: 16),
+                  Text("Queue Type", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.textSecondary)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _buildModalChip("All Types", typeFilter == null, () {
+                        ref.read(branchTypeFilterProvider.notifier).state = null;
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                      _buildModalChip("Zakat", typeFilter == 'zakat', () {
+                        ref.read(branchTypeFilterProvider.notifier).state = 'zakat';
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                      _buildModalChip("Non-Zakat", typeFilter == 'non-zakat', () {
+                        ref.read(branchTypeFilterProvider.notifier).state = 'non-zakat';
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                      _buildModalChip("GMWF", typeFilter == 'gmwf', () {
+                        ref.read(branchTypeFilterProvider.notifier).state = 'gmwf';
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                    ],
                   ),
-                  backgroundColor: const Color(0xFF1C1C1E),
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ));
-              },
-              child: Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: Icon(Icons.content_copy, size: 14, color: t.textTertiary),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ── Frequent patient card ─────────────────────────────────────────────────
-  Widget _frequentPatientCard(
-      BuildContext context, _ConsecutivePatient cp, String branchId, bool isManager) {
-    final t       = RoleThemeScope.dataOf(context);
-    final p       = cp.data;
-    final isChild = p['isChild'] == true;
-    const streakColor = Color(0xFFFF6B35);
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: streakColor.withValues(alpha: 0.5), width: 1.5),
-        boxShadow: [
-          BoxShadow(color: streakColor.withValues(alpha: 0.12), blurRadius: 8, offset: const Offset(0, 3)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: streakColor.withValues(alpha: 0.12),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(13)),
-            ),
-            child: Row(children: [
-              const Text('🔥', style: TextStyle(fontSize: 16)),
-              const SizedBox(width: 8),
-              Expanded(child: Text(
-                '${cp.streakDays} consecutive days — frequent patient alert',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: streakColor),
-              )),
-              if (isManager)
-                GestureDetector(
-                  onTap: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Revert Frequent Flag'),
-                        content: Text(
-                            'Remove the consecutive-patient alert for ${p['name']}? '
-                            'This will clear the flag in Firestore.'),
-                        actions: [
-                          TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel')),
-                          ElevatedButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            style: ElevatedButton.styleFrom(backgroundColor: streakColor),
-                            child: const Text('Revert', style: TextStyle(color: Colors.white)),
+                  const SizedBox(height: 16),
+                  Text("Sort Records", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.textSecondary)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _sortField,
+                          decoration: InputDecoration(
+                            isDense: true,
+                            filled: true,
+                            fillColor: t.bg,
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
                           ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) {
-                      await _revertFrequentFlag(branchId, p['patientId']?.toString() ?? '');
-                    }
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: streakColor.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: streakColor.withValues(alpha: 0.4)),
-                    ),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.undo_rounded, size: 13, color: streakColor),
-                      const SizedBox(width: 4),
-                      Text('Revert',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: streakColor)),
-                    ]),
-                  ),
-                ),
-            ]),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Icon(isChild ? Icons.child_care_rounded : Icons.person_rounded,
-                    color: streakColor, size: 22),
-                const SizedBox(width: 8),
-                Expanded(child: Text(p['name'] ?? 'Unknown',
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary))),
-              ]),
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Column(children: [
-                  _infoRow(context, Icons.phone_rounded, 'Phone', p['phone'] ?? 'N/A'),
-                  _infoRow(context, Icons.badge_rounded, isChild ? 'Guardian' : 'CNIC', p['displayCnic'] ?? 'N/A'),
-                  _infoRow(context, Icons.calendar_today_rounded, 'Last Visit', p['dispenseDate'] ?? 'N/A'),
-                ]),
-              ),
-            ]),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBranchDetails(String branchName, String originalBranchId) {
-    final branchId = originalBranchId.toLowerCase().trim();
-    
-    final dateKey = '$branchId|${effectiveStart.toIso8601String()}|${effectiveEnd.toIso8601String()}';
-    if (!_loadedKeys.contains(dateKey)) {
-      _loadedKeys.removeWhere((k) => k.startsWith('$branchId|'));
-      _loadedKeys.add(dateKey);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref
-            .read(dispensaryProvider(branchId).notifier)
-            .load(effectiveStart, effectiveEnd);
-      });
-    }
-
-    final t = RoleThemeScope.dataOf(context);
-
-    return LayoutBuilder(builder: (context, constraints) {
-      final width = constraints.maxWidth;
-      final int crossAxisCount;
-      if (width < 600) {
-        crossAxisCount = 1;
-      } else if (width < 950) {
-        crossAxisCount = 2;
-      } else {
-        crossAxisCount = 3;
-      }
-      
-      final isMobile = width < 600;
-      final double horizontalPadding = isMobile ? 28.0 : 56.0;
-      final double availableWidth = width - horizontalPadding;
-
-      final summaryAsync = ref.watch(serialsSummaryProvider(branchId));
-      final initSumm = _initialSummary(branchId);
-      final rawData = summaryAsync.valueOrNull ?? initSumm;
-      final tokData = rawData;
-      final presData = rawData != null ? {
-        'v1': rawData['presc_waiting'] ?? 0,
-        'v2': rawData['presc_prescribed'] ?? 0,
-        'total': rawData['total'] ?? 0,
-      } : null;
-      final dispData = rawData != null ? {
-        'v1': rawData['disp_pending'] ?? 0,
-        'v2': rawData['disp_dispensed'] ?? 0,
-        'total': (rawData['disp_pending'] ?? 0) + (rawData['disp_dispensed'] ?? 0),
-      } : null;
-
-      return Container(
-        color: t.bg,
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.all(isMobile ? 14 : 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-              // ── Header ────────────────────────────────────────────────────
-              LayoutBuilder(
-                builder: (context, headerConstraints) {
-                  final isHeaderMobile = headerConstraints.maxWidth < 800;
-                  
-                  final titleSection = Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        branchName,
-                        style: TextStyle(
-                          fontSize: 28, 
-                          fontWeight: FontWeight.w900, 
-                          color: t.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Branch Performance', 
-                        style: TextStyle(color: t.textTertiary, fontSize: 13),
-                      ),
-                    ],
-                  );
-
-                  final actionsSection = Column(
-                    crossAxisAlignment: isHeaderMobile ? CrossAxisAlignment.start : CrossAxisAlignment.end,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _actionButton(
-                            t,
-                            icon: Icons.inventory_rounded,
-                            label: "Inventory",
-                            color: t.nonZakat,
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => InventoryPage(
-                                  branchId: branchId,
-                                  isDispenser: false,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          _actionButton(
-                            t,
-                            icon: Icons.monetization_on_outlined,
-                            label: "Finance",
-                            color: t.gmwf,
-                            onPressed: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => FinancePage(
-                                  branchId: branchId,
-                                  isAdmin: true,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _dateRangeSelector(t, compact: isHeaderMobile),
-                    ],
-                  );
-
-                  if (isHeaderMobile) {
-                     return Column(
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         titleSection,
-                         const SizedBox(height: 16),
-                         actionsSection,
-                       ],
-                     );
-                  } else {
-                     return Row(
-                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                       crossAxisAlignment: CrossAxisAlignment.start,
-                       children: [
-                         Expanded(child: titleSection),
-                         const SizedBox(width: 16),
-                         actionsSection,
-                       ],
-                     );
-                  }
-                },
-              ),
-
-              const SizedBox(height: 22),
-
-              // ── Summary Cards ─────────────────────────────────────────────
-              if (width > 800)
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(child: PatientSummaryCard(
-                        title: "Tokens",
-                        data: tokData,
-                        initialData: initSumm,
-                        variant: SummaryCardVariant.tokens,
-                        titleIcon: Icons.people_alt_rounded, showRevenue: true,
-                        valueIcons: {
-                          'v1': Icons.favorite_rounded, 'v2': Icons.group_rounded,
-                          'v3': Icons.handshake_rounded, 'total': Icons.people_alt_rounded,
-                        },
-                        valueLabels: {'v1': 'Zakat', 'v2': 'Non-Zakat', 'v3': 'GMWF'},
-                        isFiltered: ref.read(branchDateRangeProvider).start != null,
-                      )),
-                      const SizedBox(width: 14),
-                      Expanded(child: PatientSummaryCard(
-                        title: "Prescriptions",
-                        data: presData,
-                        initialData: presData,
-                        variant: SummaryCardVariant.prescriptions,
-                        titleIcon: Icons.medical_information_rounded,
-                        valueIcons: {
-                          'v1': Icons.timer_rounded, 'v2': Icons.check_circle_rounded,
-                          'total': Icons.medical_information_rounded,
-                        },
-                        valueLabels: {'v1': 'Waiting', 'v2': 'Prescribed'},
-                      )),
-                      const SizedBox(width: 14),
-                      Expanded(child: PatientSummaryCard(
-                        title: "Dispensary",
-                        data: dispData,
-                        initialData: dispData,
-                        variant: SummaryCardVariant.dispensary,
-                        titleIcon: Icons.local_pharmacy_rounded,
-                        valueIcons: {
-                          'v1': Icons.access_time_rounded,
-                          'v2': Icons.done_all_rounded,
-                          'total': Icons.local_pharmacy_rounded,
-                        },
-                        valueLabels: {
-                          'v1': 'Pending',
-                          'v2': 'Dispensed',
-                        },
-                      )),
-                    ],
-                  ),
-                )
-              else
-                Column(children: [
-                PatientSummaryCard(
-                  title: "Tokens",
-                  data: tokData,
-                  initialData: initSumm,
-                  variant: SummaryCardVariant.tokens,
-                  titleIcon: Icons.people_alt_rounded, showRevenue: true,
-                  valueIcons: {
-                    'v1': Icons.favorite_rounded, 'v2': Icons.group_rounded,
-                    'v3': Icons.handshake_rounded, 'total': Icons.people_alt_rounded,
-                  },
-                  valueLabels: {'v1': 'Zakat', 'v2': 'Non-Zakat', 'v3': 'GMWF'},
-                  isFiltered: ref.read(branchDateRangeProvider).start != null,
-                ),
-                const SizedBox(height: 12),
-                PatientSummaryCard(
-                  title: "Prescriptions",
-                  data: presData,
-                  initialData: presData,
-                  variant: SummaryCardVariant.prescriptions,
-                  titleIcon: Icons.medical_information_rounded,
-                  valueIcons: {
-                    'v1': Icons.timer_rounded, 'v2': Icons.check_circle_rounded,
-                    'total': Icons.medical_information_rounded,
-                  },
-                  valueLabels: {'v1': 'Waiting', 'v2': 'Prescribed'},
-                ),
-                const SizedBox(height: 12),
-                PatientSummaryCard(
-                  title: "Dispensary",
-                  data: dispData,
-                  initialData: dispData,
-                  variant: SummaryCardVariant.dispensary,
-                  titleIcon: Icons.local_pharmacy_rounded,
-                  valueIcons: {
-                    'v1': Icons.access_time_rounded, 'v2': Icons.done_all_rounded,
-                    'total': Icons.local_pharmacy_rounded,
-                  },
-                  valueLabels: {'v1': 'Pending', 'v2': 'Dispensed'},
-                ),
-              ]),
-
-              _facilityShiftBreakdownCard(t, branchId, isMobile),
-
-              const SizedBox(height: 28),
-
-              // ── Frequent / Consecutive Patients Section ───────────────────
-              Builder(builder: (context) {
-                final revertedIds = ref.watch(revertedPatientIdsProvider);
-                return FutureBuilder<List<_ConsecutivePatient>>(
-                key: ValueKey('consecutive-$branchId-${revertedIds.length}'),
-                future: _consecutivePatientsFuture(branchId),
-                builder: (context, snap) {
-                  if (snap.connectionState == ConnectionState.waiting) {
-                    return const SizedBox.shrink();
-                  }
-                  final patients = snap.data ?? [];
-                  if (patients.isEmpty) return const SizedBox.shrink();
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFF6B35).withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFFF6B35).withValues(alpha: 0.35)),
-                        ),
-                        child: Row(children: [
-                          const Text('🔥', style: TextStyle(fontSize: 18)),
-                          const SizedBox(width: 10),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('Frequent Patients (6+ consecutive days)',
-                                style: TextStyle(
-                                    fontSize: isMobile ? 14 : 16,
-                                    fontWeight: FontWeight.w800,
-                                    color: const Color(0xFFFF6B35))),
-                            Text(
-                              widget.isManager
-                                  ? '${patients.length} patient${patients.length == 1 ? '' : 's'} flagged — tap Revert to dismiss'
-                                  : '${patients.length} patient${patients.length == 1 ? '' : 's'} flagged',
-                              style: TextStyle(fontSize: 11, color: t.textTertiary),
-                            ),
-                          ])),
-                        ]),
-                      ),
-                      Wrap(
-                        spacing: 14,
-                        runSpacing: 14,
-                        children: patients.map((cp) => SizedBox(
-                          width: (availableWidth - (14 * (crossAxisCount - 1))) / crossAxisCount,
-                          child: _frequentPatientCard(context, cp, branchId, widget.isManager),
-                        )).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-                  );
-                },
-              );
-              }),  // end Builder for revertedIds
-
-              // ── Patients Waiting for Prescription ──────────────────────────
-              FutureBuilder<List<Map<String, dynamic>>>(
-                key: ValueKey('waiting-$branchId-${ref.read(branchDateRangeProvider).start}-${ref.read(branchDateRangeProvider).end}'),
-                future: _waitingPatientsFuture(branchId),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const SizedBox.shrink();
-                  }
-                  final waiting = snapshot.data ?? [];
-                  if (waiting.isEmpty) return const SizedBox.shrink();
-
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text("Patients Waiting for Prescription (${waiting.length})", style: TextStyle(
-                          fontSize: isMobile ? 17 : 20,
-                          fontWeight: FontWeight.w800, color: t.textPrimary)),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 14,
-                        runSpacing: 14,
-                        children: waiting.map((p) {
-                          final name = p['patientName'] ?? 'Unknown';
-                          final serial = p['serial'] ?? 'N/A';
-                          final type = p['queueType'] ?? 'zakat';
-                          final cnic = p['patientCnic'] ?? p['cnic'] ?? p['guardianCnic'] ?? 'N/A';
-                          final time = p['createdAt'] != null
-                              ? DateFormat('hh:mm a').format(DateTime.parse(p['createdAt']))
-                              : 'N/A';
-                          final campLabel = _resolvePatientCampLabel(p, branchId);
-                          Color typeColor = type == 'zakat' ? t.zakat : (type == 'non-zakat' ? t.nonZakat : t.gmwf);
-
-                          return SizedBox(
-                            width: (availableWidth - (14 * (crossAxisCount - 1))) / crossAxisCount,
-                            child: Container(
-                              padding: const EdgeInsets.all(14),
-                              decoration: BoxDecoration(
-                                color: t.bgCard,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(color: t.bgRule),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.04),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: typeColor.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: Text(
-                                          type.toUpperCase(),
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            color: typeColor,
-                                          ),
-                                        ),
-                                      ),
-                                      const Spacer(),
-                                      Text(
-                                        serial,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w700,
-                                          color: t.textPrimary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 10),
-                                  Text(
-                                    name,
-                                    style: TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.bold,
-                                      color: t.textPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  if (campLabel.isNotEmpty) ...[
-                                    _infoRow(context, Icons.location_on_rounded, 'Camp', campLabel),
-                                  ],
-                                  _infoRow(context, Icons.badge_rounded, p['guardianCnic'] != null ? 'Guardian' : 'CNIC', cnic),
-                                  _infoRow(context, Icons.access_time_rounded, 'Check-in Time', time),
-                                ],
-                              ),
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 28),
-                    ],
-                  );
-                },
-              ),
-
-              // ── Dispensed Patients ────────────────────────────────────────
-              Text("Dispensed Patients", style: TextStyle(
-                  fontSize: isMobile ? 17 : 20,
-                  fontWeight: FontWeight.w800, color: t.textPrimary)),
-              const SizedBox(height: 10),
-              _typeFilter(t),
-              const SizedBox(height: 10),
-              _subDispensaryFilter(t, branchId),
-              const SizedBox(height: 10),
-              _shiftFilter(t),
-              const SizedBox(height: 16),
-
-              Consumer(builder: (context, ref, _) {
-                final dispState = ref.watch(dispensaryProvider(branchId));
-                final allList  = dispState.records;
-                final syncing  = dispState.isSyncing;
-                final error    = dispState.error;
-                
-                final typeFilter  = ref.watch(branchTypeFilterProvider);
-                final subFilter   = ref.watch(branchSubDispensaryFilterProvider);
-                final shiftFilter = ref.watch(branchShiftFilterProvider);
-                final multiDay2  = ref.watch(branchMultiDayFilterProvider);
-                final multiVisit2 = ref.watch(branchMultiVisitFilterProvider);
-                final filtered = allList.where((p) {
-                            if (typeFilter != null &&
-                                p['type']?.toString().toLowerCase() != typeFilter) {
-                              return false;
-                            }
-                            if (subFilter != null && subFilter.isNotEmpty) {
-                              final normSub = subFilter.toLowerCase().trim();
-                              final itemDisp = (p['dispensaryId'] ?? p['campId'] ?? p['subDispensaryId'] ?? '').toString().trim().toLowerCase();
-                              final serial = (p['serial'] ?? p['id'] ?? '').toString().toLowerCase();
-
-                              bool matches = false;
-                              if (itemDisp == normSub) {
-                                matches = true;
-                              } else if ((normSub == 'saddar' || normSub == 'kapayya' || normSub == 'kapaya') &&
-                                         (itemDisp == 'saddar' || itemDisp == 'kapayya' || itemDisp == 'kapaya' || serial.contains('-sadd-') || serial.contains('-sad-') || serial.contains('-kap-'))) {
-                                matches = true;
-                              } else if ((normSub == 'haji_camp' || normSub == 'haji' || normSub == 'hajicamp') &&
-                                         (itemDisp == 'haji_camp' || itemDisp == 'haji' || itemDisp == 'hajicamp' || serial.contains('-hc-') || serial.contains('-haji-'))) {
-                                matches = true;
-                              }
-                              if (!matches) return false;
-                            }
-                            if (shiftFilter != null && shiftFilter.isNotEmpty && shiftFilter != 'all') {
-                              final normShift = shiftFilter.toLowerCase().trim();
-                              final sess = (p['session'] ?? p['shift'] ?? p['campSession'] ?? '').toString().toLowerCase().trim();
-                              if (normShift == 'night') {
-                                if (sess == 'morning' || sess == 'evening' || sess == 'day') return false;
-                                if (sess != 'night') {
-                                  final dispAt = p['dispensedAt'] ?? p['createdAt'] ?? p['time'];
-                                  DateTime? dt;
-                                  if (dispAt is Timestamp) {
-                                    dt = dispAt.toDate();
-                                  } else if (dispAt is DateTime) {
-                                    dt = dispAt;
-                                  } else if (dispAt is String) {
-                                    dt = DateTime.tryParse(dispAt);
-                                  }
-                                  if (dt != null) {
-                                    final hour = dt.hour;
-                                    if (hour >= 6 && hour < 22) return false;
-                                  } else {
-                                    return false;
-                                  }
-                                }
-                              } else if (normShift == 'day') {
-                                if (sess == 'night') return false;
-                                if (sess != 'morning' && sess != 'evening' && sess != 'day') {
-                                  final dispAt = p['dispensedAt'] ?? p['createdAt'] ?? p['time'];
-                                  DateTime? dt;
-                                  if (dispAt is Timestamp) {
-                                    dt = dispAt.toDate();
-                                  } else if (dispAt is DateTime) {
-                                    dt = dispAt;
-                                  } else if (dispAt is String) {
-                                    dt = DateTime.tryParse(dispAt);
-                                  }
-                                  if (dt != null) {
-                                    final hour = dt.hour;
-                                    if (hour >= 22 || hour < 6) return false;
-                                  }
-                                }
-                              }
-                            }
-                            if (multiDay2) {
-                              final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
-                              if (days <= 1) return false;
-                            }
-                            if (multiVisit2) {
-                              final totalVisits = (p['totalVisits'] as num?)?.toInt() ?? 0;
-                              if (totalVisits <= 1) return false;
-                            }
-                            return true;
-                          }).toList();
-
-                          if (allList.isEmpty && syncing) {
-                            return Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(40),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircularProgressIndicator(color: t.accent),
-                                    const SizedBox(height: 12),
-                                    Text("Syncing dispensary records...", style: TextStyle(color: t.textTertiary, fontSize: 13)),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }
-
-                          Widget? headerWidget;
-                          if (syncing) {
-                            headerWidget = Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                children: [
-                                  const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text("Syncing remaining days...", style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                ],
-                              ),
-                            );
-                          } else if (error != null) {
-                            headerWidget = Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                children: [
-                                  Icon(Icons.warning_amber_rounded, size: 14, color: t.danger),
-                                  const SizedBox(width: 6),
-                                  Text(error, style: TextStyle(color: t.danger, fontSize: 11)),
-                                ],
-                              ),
-                            );
-                          }
-
-                          if (filtered.isEmpty) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                if (headerWidget != null) headerWidget,
-                                Container(
-                                  padding: const EdgeInsets.all(40),
-                                  child: Center(
-                                    child: Text(
-                                      allList.isEmpty ? "No dispensed records found" : "No patients match the filter",
-                                      style: TextStyle(color: t.textTertiary),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          }
-
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (headerWidget != null) headerWidget,
-                              Wrap(
-                                spacing: 14,
-                                runSpacing: 14,
-                                children: filtered.map((p) {
-                                  final isChild     = p['isChild'] == true;
-                                  final pid         = p['patientId']?.toString() ?? '';
-                                  final revertedIds2 = ref.watch(revertedPatientIdsProvider);
-                                  final isFrequent  = !revertedIds2.contains(pid) &&
-                                                      (p['frequentFlag'] == true);
-                                  final medicDays   = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
-                                  final tokenAmount = (p['tokenAmount'] as num?)?.toInt() ?? 0;
-
-                                  Color typeColor;
-                                  if (p['type'] == 'zakat') {
-                                    typeColor = t.zakat;
-                                  } else if (p['type'] == 'non-zakat') typeColor = t.nonZakat;
-                                  else if (p['type'] == 'gmwf')      typeColor = t.gmwf;
-                                  else                               typeColor = t.textTertiary;
-
-                                  return SizedBox(
-                                    width: (availableWidth - (14 * (crossAxisCount - 1))) / crossAxisCount,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: t.bgCard,
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: isFrequent
-                                              ? const Color(0xFFFF6B35).withValues(alpha: 0.5)
-                                              : t.bgRule,
-                                          width: isFrequent ? 1.5 : 1,
-                                        ),
-                                      ),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
-                                            child: Row(children: [
-                                              Icon(isChild ? Icons.child_care_rounded : Icons.person_rounded,
-                                                  color: typeColor, size: 20),
-                                              const SizedBox(width: 8),
-                                              Expanded(child: Text(p['name'] ?? 'Unknown',
-                                                  maxLines: 1, overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(fontSize: 14,
-                                                      fontWeight: FontWeight.w700, color: t.textPrimary))),
-
-                                              if (isFrequent)
-                                                const Padding(
-                                                  padding: EdgeInsets.only(right: 6),
-                                                  child: Text('🔥', style: TextStyle(fontSize: 14)),
-                                                ),
-
-                                              if (medicDays > 1)
-                                                Padding(
-                                                  padding: const EdgeInsets.only(right: 6),
-                                                  child: Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.deepOrange.withValues(alpha: 0.12),
-                                                      borderRadius: BorderRadius.circular(8),
-                                                      border: Border.all(color: Colors.deepOrange.withValues(alpha: 0.4)),
-                                                    ),
-                                                    child: Text('$medicDays d',
-                                                        style: const TextStyle(
-                                                            fontSize: 9,
-                                                            fontWeight: FontWeight.w700,
-                                                            color: Colors.deepOrange)),
-                                                  ),
-                                                ),
-
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                                                decoration: BoxDecoration(
-                                                    color: typeColor.withValues(alpha: 0.1),
-                                                    borderRadius: BorderRadius.circular(20),
-                                                    border: Border.all(color: typeColor.withValues(alpha: 0.3))),
-                                                child: Text((p['type'] ?? '??').toString().toUpperCase().substring(0, 1),
-                                                    style: TextStyle(color: typeColor,
-                                                        fontWeight: FontWeight.w800, fontSize: 9)),
-                                              ),
-                                            ]),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                                            child: Divider(height: 14, color: t.bgRule),
-                                          ),
-                                          Padding(
-                                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                                            child: Column(
-                                              children: [
-                                                _infoRow(context, Icons.calendar_today_rounded, 'Date',
-                                                    p['dispenseDate'] ?? 'N/A'),
-                                                _infoRow(context, Icons.tag_rounded,
-                                                    'Serial', p['serial'] ?? 'N/A',
-                                                    copy: p['serial']?.toString()),
-                                                if (_resolvePatientCampLabel(p, branchId).isNotEmpty)
-                                                  _infoRow(context, Icons.location_on_rounded,
-                                                      'Facility', _resolvePatientCampLabel(p, branchId)),
-                                                _infoRow(context, Icons.badge_rounded,
-                                                    isChild ? "Guardian" : "CNIC", p['displayCnic'] ?? 'N/A',
-                                                    copy: p['displayCnic']?.toString()),
-                                                if (isChild && p['guardianName'] != null)
-                                                  _infoRow(context, Icons.family_restroom_rounded,
-                                                      'Parent', p['guardianName']),
-                                                _infoRow(context, Icons.phone_rounded,
-                                                    'Phone', p['phone'] ?? 'N/A',
-                                                    copy: p['phone']?.toString()),
-                                                _infoRow(context, Icons.cake_rounded,
-                                                    'Age', '${p['age'] ?? 'N/A'} yrs'),
-                                                _infoRow(context, Icons.wc_rounded,
-                                                    'Gender', p['gender'] ?? 'N/A'),
-                                                if (p['bloodGroup'] != null && p['bloodGroup'] != 'N/A')
-                                                  _infoRow(context, Icons.bloodtype_rounded,
-                                                      'Blood', p['bloodGroup']),
-                                                _infoRow(context, Icons.medical_services_rounded,
-                                                    'Doctor', p['doctorName'] ?? 'Unknown'),
-                                                _infoRow(context, Icons.confirmation_number_rounded,
-                                                    'Token by', p['tokenBy'] ?? 'Unknown'),
-                                                _infoRow(context, Icons.local_pharmacy_rounded,
-                                                    'Disp', p['dispenserName'] ?? 'Unknown'),
-                                                if (medicDays > 1)
-                                                  _infoRow(context, Icons.calendar_month_rounded,
-                                                      'Medicine', '$medicDays days'),
-                                                if (tokenAmount > 0)
-                                                  _infoRow(context, Icons.payments_rounded,
-                                                      'Charged', 'PKR $tokenAmount'),
-                                                const SizedBox(height: 12),
-                                                SizedBox(
-                                                  width: double.infinity,
-                                                  child: ElevatedButton.icon(
-                                                    onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => PatientDetailScreen(
-                                                      patientId: pid,
-                                                      isOnline: true,
-                                                      localBox: Hive.box('local_patients'),
-                                                      branchId: branchId,
-                                                      doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
-                                                      isAdmin: true,
-                                                    ))),
-                                                    icon: const Icon(Icons.person_search_rounded, size: 15),
-                                                    label: const Text('View Full Profile', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                                    style: ElevatedButton.styleFrom(
-                                                      backgroundColor: typeColor, foregroundColor: Colors.white,
-                                                      elevation: 0, padding: const EdgeInsets.symmetric(vertical: 10),
-                                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ]),
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              ],
-                            );
+                          items: const [
+                            DropdownMenuItem(value: 'token', child: Text('Token number')),
+                            DropdownMenuItem(value: 'name', child: Text('Patient name')),
+                            DropdownMenuItem(value: 'status', child: Text('Status')),
+                            DropdownMenuItem(value: 'type', child: Text('Queue type')),
+                            DropdownMenuItem(value: 'facility', child: Text('Facility')),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _sortField = value;
+                              _currentPage = 1;
+                            });
+                            setModalState(() {});
                           },
                         ),
-                      ],
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        tooltip: _sortAscending ? 'Ascending' : 'Descending',
+                        onPressed: () {
+                          setState(() {
+                            _sortAscending = !_sortAscending;
+                            _currentPage = 1;
+                          });
+                          setModalState(() {});
+                        },
+                        icon: Icon(_sortAscending ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded, color: t.accent),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text("Shift", style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: t.textSecondary)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _buildModalChip("All Shifts", shiftFilter == null, () {
+                        ref.read(branchShiftFilterProvider.notifier).state = null;
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                      _buildModalChip("Morning", shiftFilter == 'morning', () {
+                        ref.read(branchShiftFilterProvider.notifier).state = 'morning';
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                      _buildModalChip("Evening", shiftFilter == 'evening', () {
+                        ref.read(branchShiftFilterProvider.notifier).state = 'evening';
+                        setModalState(() {});
+                        setState(() => _currentPage = 1);
+                      }, t),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilterChip(
+                          label: const Text("Multi-Day Course"),
+                          selected: mDay,
+                          onSelected: (val) {
+                            ref.read(branchMultiDayFilterProvider.notifier).state = val;
+                            setModalState(() {});
+                            setState(() => _currentPage = 1);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilterChip(
+                          label: const Text("Frequent Visits (2+)"),
+                          selected: mVisit,
+                          onSelected: (val) {
+                            ref.read(branchMultiVisitFilterProvider.notifier).state = val;
+                            setModalState(() {});
+                            setState(() => _currentPage = 1);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: t.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text("Apply Filters", style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
                   ),
-                ),
-              );
-    });
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
-  Widget _actionButton(RoleThemeData t, {required IconData icon, required String label,
-      required Color color, required VoidCallback onPressed}) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: color, 
-                fontSize: 12, 
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
+  Widget _buildModalChip(String label, bool isSelected, VoidCallback onTap, RoleThemeData t) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (_) => onTap(),
+      selectedColor: t.accent.withValues(alpha: 0.2),
+      labelStyle: TextStyle(
+        color: isSelected ? t.accent : t.textSecondary,
+        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        fontSize: 12,
+      ),
+      backgroundColor: t.bg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: isSelected ? t.accent : t.bgRule),
       ),
     );
   }
@@ -2713,289 +503,1725 @@ class _BranchesState extends ConsumerState<Branches>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final t                = RoleThemeScope.dataOf(context);
-    final isSupervisorMode = widget.branchId != null;
-    final isMobile         = MediaQuery.of(context).size.width < 600;
+    return ValueListenableBuilder<Box>(
+      valueListenable: UserThemeService.listenable(),
+      builder: (context, _, child) {
+        final t = RoleThemeScope.dataOf(context);
+        final branchesAsync = ref.watch(branchesListProvider);
 
-    if (isSupervisorMode) {
-      final branchName = widget.branchId![0].toUpperCase() +
-          widget.branchId!.substring(1).replaceAll('-', ' ');
-      return Scaffold(
-        backgroundColor: t.bg,
-        appBar: AppBar(
-          title: Text("Branch: $branchName", style: TextStyle(
-              color: t.textPrimary, fontWeight: FontWeight.w800, fontSize: 16)),
-          backgroundColor: t.bgCard,
-          elevation: 0,
-          surfaceTintColor: Colors.transparent,
-          iconTheme: IconThemeData(color: t.textPrimary),
-          bottom: PreferredSize(preferredSize: const Size.fromHeight(1),
-              child: Container(height: 1, color: t.bgRule)),
-        ),
-        body: _buildBranchDetails(branchName, widget.branchId!),
-      );
-    }
-
-    final branchesAsync = ref.watch(branchesListProvider);
-
-    return Scaffold(
-      backgroundColor: t.bg,
-      body: branchesAsync.when(
-        loading: () => Center(child: CircularProgressIndicator(color: t.accent)),
-        error: (e, _) => Center(
-          child: Text('Error loading branches: $e',
-              style: TextStyle(color: t.danger))),
-        data: (branchMaps) {
-          if (branchMaps.isEmpty) {
-            return Center(
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.store_rounded, size: 48, color: t.bgRule),
-                const SizedBox(height: 16),
-                Text("No branches found", style: TextStyle(color: t.textTertiary, fontSize: 16)),
-                if (widget.showRegisterButton) ...[
-                  const SizedBox(height: 16),
-                  _registerBranchButton(context, t),
-                ],
-              ]),
-            );
-          }
-
-          var filteredBranchMaps = branchMaps;
-          if (widget.isManager || (widget.branchId != null && widget.branchId != 'all' && widget.branchId != 'global')) {
-            final targetB = (widget.branchId ?? '').toLowerCase().trim();
-            if (targetB.isNotEmpty && targetB != 'all') {
-              filteredBranchMaps = branchMaps.where((m) {
-                final bId = (m['id'] as String).toLowerCase().trim();
-                return bId == targetB || bId.contains(targetB) || targetB.contains(bId);
-              }).toList();
-            }
-          }
-
-          final branches = filteredBranchMaps
-              .map((m) => MapEntry(m['name'] as String, m['id'] as String))
-              .toList();
-
-          final activeTabBranchId = ref.watch(selectedBranchTabIdProvider) ?? widget.initialBranchId;
-          int initialIndex = 0;
-          if (activeTabBranchId != null && activeTabBranchId.isNotEmpty) {
-            final targetNorm = activeTabBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
-            final foundIdx = branches.indexWhere((e) {
-              final bIdNorm = e.value.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
-              final bNameNorm = e.key.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
-              return bIdNorm == targetNorm || bIdNorm.contains(targetNorm) || targetNorm.contains(bIdNorm) ||
-                     bNameNorm.contains(targetNorm) || targetNorm.contains(bNameNorm);
-            });
-            if (foundIdx != -1) {
-              initialIndex = foundIdx;
-            }
-          }
-
-          final safeLength = branches.isNotEmpty ? branches.length : 1;
-          final safeInitialIndex = initialIndex.clamp(0, branches.isNotEmpty ? branches.length - 1 : 0);
-
-          return DefaultTabController(
-            key: ValueKey('branches_tab_${safeInitialIndex}_${activeTabBranchId ?? "none"}'),
-            length: safeLength,
-            initialIndex: safeInitialIndex,
-            child: Column(children: [
-              if (branches.length > 1)
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: t.bgCard,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: t.bgRule),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
-                        blurRadius: 10,
-                        offset: const Offset(0, 4),
+        return Scaffold(
+          backgroundColor: t.bg,
+          body: branchesAsync.when(
+            loading: () => Center(child: CircularProgressIndicator(color: t.accent)),
+            error: (e, _) => Center(child: Text('Error loading branches: $e', style: TextStyle(color: t.danger))),
+            data: (branchMaps) {
+              if (branchMaps.isEmpty) {
+                return Center(
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(Icons.store_rounded, size: 48, color: t.bgRule),
+                    const SizedBox(height: 16),
+                    Text("No branches found", style: TextStyle(color: t.textTertiary, fontSize: 16)),
+                    if (widget.showRegisterButton) ...[
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BranchesRegister())),
+                        icon: const Icon(Icons.add_business_rounded),
+                        label: const Text("Register New Branch"),
                       ),
                     ],
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  child: Row(
+                  ]),
+                );
+              }
+
+              // Resolve active branch
+              var activeId = _selectedBranchId;
+              if (activeId == null || activeId.isEmpty) {
+                final externalTabId = ref.watch(selectedBranchTabIdProvider);
+                if (externalTabId != null && externalTabId.isNotEmpty) {
+                  activeId = externalTabId;
+                } else {
+                  activeId = branchMaps.first['id'] as String;
+                }
+              }
+
+              final matchIdx = branchMaps.indexWhere((m) {
+                final id = (m['id'] as String).toLowerCase().trim();
+                final target = activeId!.toLowerCase().trim();
+                return id == target || id.contains(target) || target.contains(id);
+              });
+
+              final currentBranch = matchIdx != -1 ? branchMaps[matchIdx] : branchMaps.first;
+              final branchId = currentBranch['id'] as String;
+              _selectedBranchName = currentBranch['name'] as String;
+
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(context, t, branchMaps, branchId),
+                    const SizedBox(height: 20),
+                    _buildMetricsCards(context, t, branchId),
+                    const SizedBox(height: 20),
+                    _buildMiddleSection(context, t, branchId),
+                    const SizedBox(height: 24),
+                    _buildPatientRecordsSection(context, t, branchId),
+                    const SizedBox(height: 40),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 1. Top Header Bar
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildHeader(BuildContext context, RoleThemeData t, List<Map<String, dynamic>> branches, String currentBranchId) {
+    final role = LocalStorageService.getActiveUserRole().toLowerCase().trim();
+    final canSwitchBranches = widget.isManager != true ||
+        role.contains('chairman') ||
+        role.contains('hq manager') ||
+      role.replaceAll(RegExp(r'[^a-z]'), '') == 'hqmanager' ||
+        role.contains('global admin');
+    final dateRange = ref.watch(branchDateRangeProvider);
+    String dateRangeLabel = 'Today';
+    if (dateRange.start != null && dateRange.end != null) {
+      final df = DateFormat('dd MMM');
+      dateRangeLabel = '${df.format(dateRange.start!)} - ${df.format(dateRange.end!)}';
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 900;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: TabBar(
-                          isScrollable: true,
-                          labelColor: t.accent,
-                          unselectedLabelColor: t.textTertiary,
-                          indicator: BoxDecoration(
-                            color: t.accent.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                          indicatorSize: TabBarIndicatorSize.tab,
-                          dividerColor: Colors.transparent,
-                          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-                          tabs: branches.map((e) => Tab(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.store_rounded, size: 16),
-                                  const SizedBox(width: 6),
-                                  Text(e.key),
-                                ],
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              "$_selectedBranchName Overview",
+                              style: TextStyle(
+                                fontSize: isNarrow ? 20 : 24,
+                                fontWeight: FontWeight.w800,
+                                color: t.textPrimary,
+                                letterSpacing: -0.5,
                               ),
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          )).toList(),
-                        ),
-                      ),
-                      if (widget.showRegisterButton)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          child: isMobile
-                              ? IconButton(
-                                  icon: Icon(Icons.add_business_rounded, color: t.accent, size: 22),
-                                  onPressed: () => Navigator.push(context,
-                                      MaterialPageRoute(builder: (_) => BranchesRegister())),
-                                  tooltip: 'New Branch',
-                                )
-                              : ElevatedButton.icon(
-                                  icon: Icon(Icons.add_business_rounded,
-                                      size: 16, color: t.bgCard),
-                                  label: Text("New Branch", style: TextStyle(
-                                      color: t.bgCard, fontWeight: FontWeight.w800, fontSize: 12)),
-                                  style: ElevatedButton.styleFrom(
-                                      backgroundColor: t.accent, elevation: 0,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(8))),
-                                  onPressed: () => Navigator.push(context,
-                                      MaterialPageRoute(builder: (_) => BranchesRegister())),
+                          ),
+                          if (branches.length > 1 && canSwitchBranches) ...[
+                            const SizedBox(width: 8),
+                            PopupMenuButton<String>(
+                              icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textSecondary),
+                              tooltip: 'Switch Branch',
+                              onSelected: (bId) {
+                                setState(() {
+                                  _selectedBranchId = bId;
+                                  _currentPage = 1;
+                                });
+                                ref.read(selectedBranchTabIdProvider.notifier).state = bId;
+                              },
+                              itemBuilder: (ctx) => branches.map((b) => PopupMenuItem(
+                                value: b['id'] as String,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.store_rounded,
+                                      size: 16,
+                                      color: b['id'] == currentBranchId ? t.accent : t.textSecondary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      b['name'] as String,
+                                      style: TextStyle(
+                                        fontWeight: b['id'] == currentBranchId ? FontWeight.bold : FontWeight.normal,
+                                        color: b['id'] == currentBranchId ? t.accent : t.textPrimary,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                        ),
+                              )).toList(),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Monitor performance and operations across all departments.",
+                        style: TextStyle(fontSize: 13, color: t.textSecondary),
+                      ),
                     ],
                   ),
                 ),
-              Expanded(child: TabBarView(
-                children: branches.map((e) => _buildBranchDetails(e.key, e.value)).toList(),
-              )),
-            ]),
-          );
-        },
-      ),
-    );
-  } // end build
-
-  Widget _registerBranchButton(BuildContext context, RoleThemeData t) {
-    return ElevatedButton.icon(
-      icon: Icon(Icons.add_business_rounded, color: t.bgCard),
-      label: Text("Register New Branch",
-          style: TextStyle(color: t.bgCard, fontWeight: FontWeight.w800)),
-      style: ElevatedButton.styleFrom(
-          backgroundColor: t.accent, elevation: 0,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-      onPressed: () => Navigator.push(
-          context, MaterialPageRoute(builder: (_) => BranchesRegister())),
+                if (!isNarrow) _buildHeaderActionButtons(context, t, dateRangeLabel),
+              ],
+            ),
+            if (isNarrow) ...[
+              const SizedBox(height: 14),
+              _buildHeaderActionButtons(context, t, dateRangeLabel),
+            ],
+          ],
+        );
+      },
     );
   }
 
+  Widget _buildHeaderActionButtons(BuildContext context, RoleThemeData t, String dateRangeLabel) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        // Date Range Selector
+        OutlinedButton.icon(
+          onPressed: () => _showDateRangePicker(context, t),
+          icon: Icon(Icons.calendar_today_rounded, size: 14, color: t.textSecondary),
+          label: Text(dateRangeLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary)),
+          style: OutlinedButton.styleFrom(
+            backgroundColor: t.bgCard,
+            side: BorderSide(color: t.bgRule),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
 
+        // + New Branch Button
+        if (widget.showRegisterButton)
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BranchesRegister())),
+            icon: Icon(Icons.add_business_rounded, size: 16, color: t.accent),
+            label: Text("New Branch", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.accent)),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: t.accent.withValues(alpha: 0.08),
+              side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
 
+        // + New Token Button
+        ElevatedButton.icon(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PatientDetailScreen(
+                patientId: '',
+                isOnline: true,
+                localBox: Hive.box('local_patients'),
+                branchId: _selectedBranchId ?? 'karachi',
+                doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+                isAdmin: true,
+              ),
+            ),
+          ),
+          icon: const Icon(Icons.add_rounded, size: 16, color: Colors.white),
+          label: const Text("New Token", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF6366F1),
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+      ],
+    );
+  }
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // 2. Top 3 KPI Summary Cards (Tokens, Prescriptions, Dispensary)
+  // ───────────────────────────────────────────────────────────────────────────
 
-  Widget _filterChipMobile(String label, RoleThemeData t) {
+  Widget _buildMetricsCards(BuildContext context, RoleThemeData t, String branchId) {
+    final summaryAsync = ref.watch(serialsSummaryProvider(branchId));
+    final data = summaryAsync.value ?? {};
+
+    final totalTokens = data['total'] ?? 0;
+    final zakatTokens = data['v1'] ?? 0;
+    final nonZakatTokens = data['v2'] ?? 0;
+    final gmwfTokens = data['v3'] ?? 0;
+
+    final prescribed = data['presc_prescribed'] ?? 0;
+    final waitingDoctor = data['presc_waiting'] ?? 0;
+
+    final dispensed = data['disp_dispensed'] ?? 0;
+    final pendingDisp = data['disp_pending'] ?? 0;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cardWidth = constraints.maxWidth > 800 ? (constraints.maxWidth - 32) / 3 : constraints.maxWidth;
+
+        return Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: [
+            SizedBox(
+              width: cardWidth,
+              child: _buildKpiCard(
+                title: "Total Tokens",
+                mainCount: "$totalTokens",
+                trendText: "+12% vs yesterday",
+                isPositiveTrend: true,
+                badgeColor: const Color(0xFF6366F1),
+                badgeIcon: Icons.people_alt_rounded,
+                subItems: [
+                  {'label': 'Zakat', 'val': '$zakatTokens'},
+                  {'label': 'Non-Zakat', 'val': '$nonZakatTokens'},
+                  {'label': 'GMWF', 'val': '$gmwfTokens'},
+                ],
+                t: t,
+              ),
+            ),
+            SizedBox(
+              width: cardWidth,
+              child: _buildKpiCard(
+                title: "Total Prescriptions",
+                mainCount: "$prescribed",
+                trendText: "+8% vs yesterday",
+                isPositiveTrend: true,
+                badgeColor: const Color(0xFF10B981),
+                badgeIcon: Icons.assignment_rounded,
+                subItems: [
+                  {'label': 'Waiting', 'val': '$waitingDoctor'},
+                  {'label': 'Prescribed', 'val': '$prescribed'},
+                ],
+                t: t,
+              ),
+            ),
+            SizedBox(
+              width: cardWidth,
+              child: _buildKpiCard(
+                title: "Total Dispensary",
+                mainCount: "$dispensed",
+                trendText: "+5% vs yesterday",
+                isPositiveTrend: true,
+                badgeColor: const Color(0xFFF59E0B),
+                badgeIcon: Icons.medication_liquid_rounded,
+                subItems: [
+                  {'label': 'Pending', 'val': '$pendingDisp'},
+                  {'label': 'Dispensed', 'val': '$dispensed'},
+                ],
+                t: t,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildKpiCard({
+    required String title,
+    required String mainCount,
+    required String trendText,
+    required bool isPositiveTrend,
+    required Color badgeColor,
+    required IconData badgeIcon,
+    required List<Map<String, String>> subItems,
+    required RoleThemeData t,
+  }) {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: t.accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(8), border: Border.all(color: t.accent.withValues(alpha: 0.2))),
-      child: Text(label, style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.w700)),
-    );
-  }
-
-  Widget _buildPatientLogTab(String branchId, RoleThemeData t) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text("Dispensed Patients", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: t.textPrimary)),
-          const SizedBox(height: 12),
-          _typeFilter(t),
-          const SizedBox(height: 16),
-          Consumer(builder: (context, ref, _) {
-            final dispState = ref.watch(dispensaryProvider(branchId));
-            final allList   = dispState.records;
-            final typeF     = ref.watch(branchTypeFilterProvider);
-            final mDay      = ref.watch(branchMultiDayFilterProvider);
-            final mVisit    = ref.watch(branchMultiVisitFilterProvider);
-            {
-              final filtered = allList.where((p) {
-                if (typeF != null && p['type']?.toString().toLowerCase() != typeF) return false;
-                if (mDay) {
-                  final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
-                  if (days <= 1) return false;
-                }
-                if (mVisit) {
-                  final totalVisits = (p['totalVisits'] as num?)?.toInt() ?? 0;
-                  if (totalVisits <= 1) return false;
-                }
-                return true;
-              }).toList();
-
-              if (filtered.isEmpty) return Center(child: Padding(padding: const EdgeInsets.all(40), child: Text("No matches", style: TextStyle(color: t.textTertiary))));
-
-              return Column(
-                children: filtered.map((p) {
-                  final pid = p['patientId']?.toString() ?? '';
-                  final revIds = ref.watch(revertedPatientIdsProvider);
-                  final isFrequent = !revIds.contains(pid) && (p['frequentFlag'] == true);
-                  final medicDays = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
-                  final type = p['type']?.toString() ?? 'unknown';
-                  Color typeColor = type == 'zakat' ? t.zakat : (type == 'non-zakat' ? t.nonZakat : (type == 'gmwf' ? t.gmwf : t.textTertiary));
-
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(color: t.bgCard, borderRadius: BorderRadius.circular(14), border: Border.all(color: isFrequent ? const Color(0xFFFF6B35).withValues(alpha: 0.5) : t.bgRule, width: isFrequent ? 1.5 : 1)),
-                    child: Column(children: [
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(children: [
-                          Icon(p['isChild'] == true ? Icons.child_care_rounded : Icons.person_rounded, color: typeColor, size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(child: Text(p['name'] ?? 'Unknown', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary))),
-                          if (isFrequent) const Text('🔥', style: TextStyle(fontSize: 14)),
-                          if (medicDays > 1) Container(padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2), decoration: BoxDecoration(color: Colors.deepOrange.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)), child: Text('$medicDays d', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.deepOrange))),
-                        ]),
-                      ),
-                      const Divider(height: 1),
-                      Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(children: [
-                          _infoRow(context, Icons.calendar_today_rounded, 'Date', p['dispenseDate'] ?? 'N/A'),
-                          _infoRow(context, Icons.tag_rounded, 'Serial', p['serial'] ?? 'N/A'),
-                          _infoRow(context, Icons.badge_rounded, p['isChild'] == true ? "Guardian" : "CNIC", p['displayCnic'] ?? 'N/A'),
-                        ]),
-                      ),
-                    ]),
-                  );
-                }).toList(),
-              );
-            }
-          }),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: badgeColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(badgeIcon, color: badgeColor, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textSecondary)),
+                    const SizedBox(height: 4),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          mainCount,
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w900,
+                            color: t.textPrimary,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isPositiveTrend ? const Color(0xFF10B981).withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isPositiveTrend ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                                size: 10,
+                                color: isPositiveTrend ? const Color(0xFF10B981) : Colors.red,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                trendText,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: isPositiveTrend ? const Color(0xFF10B981) : Colors.red,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(
+                width: 50,
+                height: 28,
+                child: CustomPaint(painter: _SparklinePainter(color: badgeColor)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: BoxDecoration(
+              color: t.bg.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: subItems.map((item) {
+                return Column(
+                  children: [
+                    Text(item['label'] ?? '', style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                    const SizedBox(height: 2),
+                    Text(
+                      item['val'] ?? '0',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: t.textPrimary),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildFlagsTab(String branchId, RoleThemeData t) {
-    return FutureBuilder<List<_ConsecutivePatient>>(
-      future: _consecutivePatientsFuture(branchId),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        final patients = snap.data ?? [];
-        if (patients.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.check_circle_outline_rounded, size: 48, color: Colors.green.withValues(alpha: 0.3)), const SizedBox(height: 16), Text("No flagged patients", style: TextStyle(color: t.textTertiary))]));
+  // ───────────────────────────────────────────────────────────────────────────
+  // 3. Middle Section (Performance Overview Multi-line Chart & Quick Actions)
+  // ───────────────────────────────────────────────────────────────────────────
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: patients.length,
-          itemBuilder: (context, i) => _frequentPatientCard(context, patients[i], branchId, widget.isManager),
+  Widget _buildMiddleSection(BuildContext context, RoleThemeData t, String branchId) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isStacked = constraints.maxWidth < 950;
+
+        if (isStacked) {
+          return Column(
+            children: [
+              _buildPerformanceChartCard(context, t, branchId),
+              const SizedBox(height: 16),
+              _buildQuickActionsCard(context, t, branchId),
+            ],
+          );
+        }
+
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(flex: 6, child: _buildPerformanceChartCard(context, t, branchId)),
+            const SizedBox(width: 16),
+            Expanded(flex: 4, child: _buildQuickActionsCard(context, t, branchId)),
+          ],
         );
       },
     );
   }
-}
+
+  Widget _buildPerformanceChartCard(BuildContext context, RoleThemeData t, String branchId) {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+    final perfData = _computeRealPerformanceData(branchId, _chartRange);
+    final tokensData = (perfData['tokens'] as List<double>?) ?? [];
+    final prescData = (perfData['prescriptions'] as List<double>?) ?? [];
+    final dispData = (perfData['dispensary'] as List<double>?) ?? [];
+    final labels = (perfData['labels'] as List<String>?) ?? [];
+
+    final tokensTotal = tokensData.fold<double>(0.0, (a, b) => a + b).toInt();
+    final prescTotal = prescData.fold<double>(0.0, (a, b) => a + b).toInt();
+    final dispTotal = dispData.fold<double>(0.0, (a, b) => a + b).toInt();
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Performance Overview",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: t.textPrimary),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _selectedCampFilter == 'haji'
+                        ? "Haji Camp Dispensary Data"
+                        : (_selectedCampFilter == 'saddar' ? "Saddar Dispensary Data" : "Collective Branch Performance"),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.accent),
+                  ),
+                ],
+              ),
+              DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _chartRange,
+                  dropdownColor: t.bgCard,
+                  icon: Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: t.textSecondary),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textPrimary),
+                  items: const [
+                    DropdownMenuItem(value: '7d', child: Text("Last 7 Days")),
+                    DropdownMenuItem(value: '14d', child: Text("Last 14 Days")),
+                    DropdownMenuItem(value: '30d', child: Text("Last 30 Days")),
+                    DropdownMenuItem(value: 'month', child: Text("This Month")),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) setState(() => _chartRange = val);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildChartLegend("Tokens: $tokensTotal", const Color(0xFF6366F1), t),
+              const SizedBox(width: 14),
+              _buildChartLegend("Prescriptions: $prescTotal", const Color(0xFF10B981), t),
+              const SizedBox(width: 14),
+              _buildChartLegend("Dispensed: $dispTotal", const Color(0xFFF59E0B), t),
+            ],
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 180,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PerformanceMultiLinePainter(
+                theme: t,
+                tokensColor: const Color(0xFF6366F1),
+                prescriptionsColor: const Color(0xFF10B981),
+                dispensaryColor: const Color(0xFFF59E0B),
+                tokensData: tokensData,
+                prescriptionsData: prescData,
+                dispensaryData: dispData,
+                dateLabels: labels,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartLegend(String label, Color color, RoleThemeData t) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.textSecondary)),
+      ],
+    );
+  }
+
+  Widget _buildQuickActionsCard(BuildContext context, RoleThemeData t, String branchId) {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Quick Actions",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: t.textPrimary),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.inventory_2_rounded,
+                  title: "Inventory",
+                  subtitle: "Manage stock",
+                  accentColor: const Color(0xFF6366F1),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryPage(branchId: branchId))),
+                  t: t,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.account_balance_wallet_rounded,
+                  title: "Finance",
+                  subtitle: "View transactions",
+                  accentColor: const Color(0xFFF59E0B),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FinancePage(branchId: branchId))),
+                  t: t,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.fingerprint_rounded,
+                  title: "Biometrics",
+                  subtitle: "Live punches",
+                  accentColor: const Color(0xFF0EA5E9),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BiometricDeviceManagerPage())),
+                  t: t,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionTile(
+                  icon: Icons.person_add_alt_1_rounded,
+                  title: "Add Patient",
+                  subtitle: "New registration",
+                  accentColor: const Color(0xFF10B981),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PatientDetailScreen(
+                        patientId: '',
+                        isOnline: true,
+                        localBox: Hive.box('local_patients'),
+                        branchId: branchId,
+                        doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+                        isAdmin: true,
+                      ),
+                    ),
+                  ),
+                  t: t,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color accentColor,
+    required VoidCallback onTap,
+    required RoleThemeData t,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: t.bg.withValues(alpha: 0.7),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: t.bgRule),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: accentColor, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: TextStyle(fontSize: 10, color: t.textTertiary), maxLines: 1, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 4. All Branch Patient Records Section (Table, Filter Tabs, Search & Pagination)
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildPatientRecordsSection(BuildContext context, RoleThemeData t, String branchId) {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+    final dispState = ref.watch(dispensaryProvider(branchId));
+    final allList = dispState.records;
+
+    final typeFilter = ref.watch(branchTypeFilterProvider);
+    final shiftFilter = ref.watch(branchShiftFilterProvider);
+    final mDay = ref.watch(branchMultiDayFilterProvider);
+    final mVisit = ref.watch(branchMultiVisitFilterProvider);
+    final stageFilter = ref.watch(branchStageFilterProvider);
+
+    // Filter list
+    final filtered = allList.where((p) {
+      // Camp filter (Haji Camp vs Saddar Camp vs All)
+      if (_selectedCampFilter != 'all') {
+        final serial = (p['serial'] ?? p['id'] ?? '').toString().toUpperCase();
+        final camp = (p['campId'] ?? p['dispensaryId'] ?? p['dispensaryTag'] ?? '').toString().toLowerCase();
+        if (_selectedCampFilter == 'haji') {
+          if (!serial.contains('-HAJI') && !serial.contains('HAJI-') && !camp.contains('haji')) return false;
+        } else if (_selectedCampFilter == 'saddar') {
+          if (!serial.contains('-SADD') && !serial.contains('SADD-') && !camp.contains('saddar') && !camp.contains('kapaya')) return false;
+        }
+      }
+
+      // Type
+      if (typeFilter != null && p['type']?.toString().toLowerCase() != typeFilter) return false;
+
+      // Shift
+      if (shiftFilter != null) {
+        final sess = (p['session'] ?? p['shift'] ?? '').toString().toLowerCase().trim();
+        if (sess.isNotEmpty && sess != shiftFilter) return false;
+      }
+
+      // Multi-Day
+      if (mDay) {
+        final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
+        if (days <= 1) return false;
+      }
+
+      // Multi-Visit
+      if (mVisit) {
+        final visits = (p['totalVisits'] as num?)?.toInt() ?? 0;
+        if (visits <= 1) return false;
+      }
+
+      // Search Query
+      if (_searchQuery.isNotEmpty) {
+        final q = _searchQuery.toLowerCase().trim();
+        final qClean = q.replaceAll('-', '').replaceAll(' ', '');
+        final name = (p['name'] ?? '').toString().toLowerCase();
+        final serial = (p['serial'] ?? p['id'] ?? '').toString().toLowerCase();
+        final cnic = (p['displayCnic'] ?? p['cnic'] ?? p['patientCnic'] ?? p['guardianCnic'] ?? '')
+            .toString()
+            .toLowerCase()
+            .replaceAll('-', '')
+            .replaceAll(' ', '');
+        final phone = (p['phone'] ?? p['patientPhone'] ?? '')
+            .toString()
+            .toLowerCase()
+            .replaceAll('-', '')
+            .replaceAll(' ', '');
+        if (!name.contains(q) && !serial.contains(q) && !cnic.contains(qClean) && !phone.contains(qClean)) {
+          return false;
+        }
+      }
+
+      // Stage Filter
+      if (stageFilter == 'waiting_doctor') {
+        return _recordStage(p) == 'waiting_doctor';
+      } else if (stageFilter == 'waiting_dispensary') {
+        return _recordStage(p) == 'waiting_dispensary';
+      } else if (stageFilter == 'dispensed') {
+        return _recordStage(p) == 'dispensed';
+      }
+
+      return true;
+    }).toList()
+      ..sort(_compareRecords);
+
+    // Stage counts with camp filter applied
+    final campFilteredAllList = allList.where((p) {
+      if (_selectedCampFilter == 'all') return true;
+      final serial = (p['serial'] ?? p['id'] ?? '').toString().toUpperCase();
+      final camp = (p['campId'] ?? p['dispensaryId'] ?? p['dispensaryTag'] ?? '').toString().toLowerCase();
+      if (_selectedCampFilter == 'haji') {
+        return serial.contains('-HAJI') || serial.contains('HAJI-') || camp.contains('haji');
+      } else if (_selectedCampFilter == 'saddar') {
+        return serial.contains('-SADD') || serial.contains('SADD-') || camp.contains('saddar') || camp.contains('kapaya');
+      }
+      return true;
+    }).toList();
+
+    final waitingDoctorCount = campFilteredAllList.where((p) => _recordStage(p) == 'waiting_doctor').length;
+    final waitingDispCount = campFilteredAllList.where((p) => _recordStage(p) == 'waiting_dispensary').length;
+    final dispensedCount = campFilteredAllList.where((p) => _recordStage(p) == 'dispensed').length;
+
+    // Pagination slice
+    final totalRecords = filtered.length;
+    final totalPages = (totalRecords / _rowsPerPage).ceil().clamp(1, 999999);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final startIndex = (safePage - 1) * _rowsPerPage;
+    final endIndex = (startIndex + _rowsPerPage).clamp(0, totalRecords);
+    final paginatedList = totalRecords > 0 ? filtered.sublist(startIndex, endIndex) : <Map<String, dynamic>>[];
+
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Section Title
+          Text(
+            "All Branch Patient Records",
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: t.textPrimary),
+          ),
+          if (dispState.isSyncing) ...[
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                minHeight: 4,
+                backgroundColor: t.bgRule,
+                color: t.accent,
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // Karachi Camp Selector (Collective vs Haji Camp vs Saddar)
+          if (branchId.toLowerCase().contains('karachi') || branchId.toLowerCase() == 'all') ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _buildCampFilterChip('All Karachi (Collective)', _selectedCampFilter == 'all', () {
+                  setState(() { _selectedCampFilter = 'all'; _currentPage = 1; });
+                }, const Color(0xFF0D9488), t),
+                _buildCampFilterChip('Haji Camp Dispensary', _selectedCampFilter == 'haji', () {
+                  setState(() { _selectedCampFilter = 'haji'; _currentPage = 1; });
+                }, const Color(0xFF6366F1), t),
+                _buildCampFilterChip('Saddar Dispensary', _selectedCampFilter == 'saddar', () {
+                  setState(() { _selectedCampFilter = 'saddar'; _currentPage = 1; });
+                }, const Color(0xFFF59E0B), t),
+              ],
+            ),
+            const SizedBox(height: 14),
+          ],
+
+          // Stage Pills & Search Row
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 850;
+
+              final filterPills = Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _buildStageTabPill("All Records", allList.length, stageFilter == 'all', () {
+                    ref.read(branchStageFilterProvider.notifier).state = 'all';
+                    setState(() => _currentPage = 1);
+                  }, const Color(0xFF6366F1), t),
+                  _buildStageTabPill("Waiting for Doctor", waitingDoctorCount, stageFilter == 'waiting_doctor', () {
+                    ref.read(branchStageFilterProvider.notifier).state = 'waiting_doctor';
+                    setState(() => _currentPage = 1);
+                  }, const Color(0xFFF59E0B), t),
+                  _buildStageTabPill("Waiting for Dispensary", waitingDispCount, stageFilter == 'waiting_dispensary', () {
+                    ref.read(branchStageFilterProvider.notifier).state = 'waiting_dispensary';
+                    setState(() => _currentPage = 1);
+                  }, const Color(0xFF3B82F6), t),
+                  _buildStageTabPill("Dispensed", dispensedCount, stageFilter == 'dispensed', () {
+                    ref.read(branchStageFilterProvider.notifier).state = 'dispensed';
+                    setState(() => _currentPage = 1);
+                  }, const Color(0xFF10B981), t),
+                ],
+              );
+
+              final searchBarAndFilters = Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: t.bg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: t.bgRule),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.search_rounded, size: 16, color: t.textTertiary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: _searchController,
+                              style: TextStyle(fontSize: 12, color: t.textPrimary),
+                              decoration: InputDecoration(
+                                hintText: "Search by token, patient name, CNIC, or phone...",
+                                hintStyle: TextStyle(fontSize: 12, color: t.textTertiary),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                              onChanged: (val) {
+                                setState(() {
+                                  _searchQuery = val.trim();
+                                  _currentPage = 1;
+                                });
+                              },
+                            ),
+                          ),
+                          if (_searchQuery.isNotEmpty)
+                            GestureDetector(
+                              onTap: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _searchQuery = '';
+                                  _currentPage = 1;
+                                });
+                              },
+                              child: Icon(Icons.close_rounded, size: 16, color: t.textSecondary),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: () => _showFilterModal(context, t),
+                    icon: Icon(Icons.tune_rounded, size: 14, color: t.textSecondary),
+                    label: Text("Filters", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary)),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: t.bg,
+                      side: BorderSide(color: t.bgRule),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
+              );
+
+              if (isNarrow) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    filterPills,
+                    const SizedBox(height: 12),
+                    searchBarAndFilters,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: filterPills),
+                  const SizedBox(width: 16),
+                  SizedBox(width: 340, child: searchBarAndFilters),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+
+          // Records Table
+          if (dispState.isSyncing && allList.isEmpty)
+            Center(child: Padding(padding: const EdgeInsets.all(40), child: CircularProgressIndicator(color: t.accent)))
+          else if (filtered.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40),
+                child: Column(
+                  children: [
+                    Icon(Icons.person_search_rounded, size: 40, color: t.textTertiary),
+                    const SizedBox(height: 10),
+                    Text("No matching records found", style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            )
+          else
+            _buildRecordsTable(context, t, paginatedList, branchId),
+
+          const SizedBox(height: 16),
+
+          // Pagination Footer
+          if (filtered.isNotEmpty)
+            _buildPaginationFooter(context, t, totalRecords, safePage, totalPages, startIndex, endIndex),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStageTabPill(String label, int count, bool isSelected, VoidCallback onTap, Color activeColor, RoleThemeData t) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor.withValues(alpha: 0.12) : t.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? activeColor.withValues(alpha: 0.5) : t.bgRule,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected ? activeColor : t.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isSelected ? activeColor.withValues(alpha: 0.2) : t.bgRule.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                "$count",
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? activeColor : t.textTertiary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordsTable(BuildContext context, RoleThemeData t, List<Map<String, dynamic>> records, String branchId) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.bgRule),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: WidgetStateProperty.all(t.bg.withValues(alpha: 0.8)),
+          headingTextStyle: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: t.textSecondary, letterSpacing: 0.3),
+          dataRowMinHeight: 52,
+          dataRowMaxHeight: 58,
+          columnSpacing: 20,
+          horizontalMargin: 16,
+          columns: const [
+            DataColumn(label: Text("TOKEN #")),
+            DataColumn(label: Text("PATIENT NAME")),
+            DataColumn(label: Text("CNIC")),
+            DataColumn(label: Text("PHONE NUMBER")),
+            DataColumn(label: Text("TYPE")),
+            DataColumn(label: Text("STATUS")),
+            DataColumn(label: Text("FACILITY & SHIFT")),
+            DataColumn(label: Text("RELATIONS / COURSE")),
+            DataColumn(label: Text("ACTIONS")),
+          ],
+          rows: records.map((p) {
+            final pid = p['patientId']?.toString() ?? p['id']?.toString() ?? '';
+            final tokenSerial = p['serial']?.toString() ?? p['id']?.toString() ?? 'TK-000';
+            final name = p['name']?.toString() ?? 'Unknown Patient';
+            final age = p['age']?.toString() ?? '';
+            final gender = p['gender']?.toString() ?? '';
+            final rawPhone = (p['phone'] ?? p['patientPhone'] ?? '').toString().trim();
+            final hasPhone = rawPhone.isNotEmpty && rawPhone != 'N/A' && rawPhone != '-';
+            final stage = _recordStage(p);
+            final statusColor = stage == 'dispensed'
+              ? const Color(0xFF10B981)
+              : stage == 'waiting_dispensary'
+                ? const Color(0xFF3B82F6)
+                : const Color(0xFFF59E0B);
+            final statusLabel = stage == 'dispensed'
+              ? 'Dispensed'
+              : stage == 'waiting_dispensary'
+                ? 'Waiting for Dispensary'
+                : 'Waiting for Doctor';
+
+            final rawCnic = (p['displayCnic'] ?? p['cnic'] ?? p['patientCnic'] ?? p['guardianCnic'] ?? '').toString().trim();
+            final hasCnic = rawCnic.isNotEmpty && rawCnic != 'N/A' && rawCnic != '0000000000000' && rawCnic != '-';
+            final formattedCnic = hasCnic ? _formatCnic(rawCnic) : '—';
+            final isChild = p['isChild'] == true ||
+                ((p['guardianCnic'] ?? '').toString().isNotEmpty && (p['patientCnic'] ?? p['cnic'] ?? '').toString().isEmpty);
+
+            final type = (p['type'] ?? 'zakat').toString().toLowerCase();
+
+            Color typeColor;
+            if (type == 'zakat') {
+              typeColor = const Color(0xFF6366F1);
+            } else if (type == 'non-zakat') {
+              typeColor = const Color(0xFF3B82F6);
+            } else if (type == 'gmwf') {
+              typeColor = const Color(0xFF10B981);
+            } else {
+              typeColor = t.textSecondary;
+            }
+
+            final campLabel = _resolvePatientCampLabel(p, branchId);
+            final days = (p['daysOfMedicine'] as num?)?.toInt() ?? 1;
+            final visits = (p['totalVisits'] as num?)?.toInt() ?? 1;
+            final isFrequent = p['frequentFlag'] == true;
+
+            return DataRow(
+              cells: [
+                // 1. Token #
+                DataCell(
+                  InkWell(
+                    onTap: () {
+                      Clipboard.setData(ClipboardData(text: tokenSerial));
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Copied token: $tokenSerial'),
+                          duration: const Duration(seconds: 1),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(6),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Text(
+                        tokenSerial,
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.textPrimary),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 2. Patient Name & Age/Gender
+                DataCell(
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(name, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary)),
+                          if (isFrequent) const Padding(padding: EdgeInsets.only(left: 4), child: Text('🔥', style: TextStyle(fontSize: 11))),
+                        ],
+                      ),
+                      if (age.isNotEmpty && age != 'N/A' || gender.isNotEmpty && gender != 'N/A')
+                        Text(
+                          [
+                            if (age.isNotEmpty && age != 'N/A') '$age yrs',
+                            if (gender.isNotEmpty && gender != 'N/A') gender,
+                          ].join(' • '),
+                          style: TextStyle(fontSize: 10, color: t.textTertiary),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // 3. CNIC
+                DataCell(
+                  hasCnic
+                      ? InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: rawCnic));
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Copied CNIC: $formattedCnic'),
+                                duration: const Duration(seconds: 1),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.badge_outlined, size: 13, color: t.accent),
+                                const SizedBox(width: 5),
+                                Text(
+                                  formattedCnic,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: t.textPrimary,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                                if (isChild) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'Guardian',
+                                      style: TextStyle(fontSize: 8, fontWeight: FontWeight.w700, color: t.accent),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        )
+                      : Text('—', style: TextStyle(fontSize: 12, color: t.textTertiary)),
+                ),
+
+                // 4. Phone Number
+                DataCell(
+                  hasPhone
+                      ? InkWell(
+                          onTap: () {
+                            Clipboard.setData(ClipboardData(text: rawPhone));
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Copied Phone: $rawPhone'),
+                                duration: const Duration(seconds: 1),
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.phone_rounded, size: 12, color: Color(0xFF10B981)),
+                                const SizedBox(width: 5),
+                                Text(
+                                  rawPhone,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: t.textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : Text('—', style: TextStyle(fontSize: 12, color: t.textTertiary)),
+                ),
+
+                // 5. Type Badge
+                DataCell(
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: typeColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: typeColor.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      type.toUpperCase(),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: typeColor),
+                    ),
+                  ),
+                ),
+
+                // 6. Status
+                DataCell(
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: statusColor,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // 7. Facility & Shift
+                DataCell(
+                  Text(campLabel, style: TextStyle(fontSize: 11, color: t.textSecondary)),
+                ),
+
+                // 8. Relations / Course
+                DataCell(
+                  Wrap(
+                    spacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (visits > 1)
+                        Text('$visits+ Visits', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.textPrimary))
+                      else
+                        Text('1st Visit', style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                      if (days > 1)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.deepOrange.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text('$days d course', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                        ),
+                    ],
+                  ),
+                ),
+
+                // 8. Actions
+                DataCell(
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert_rounded, size: 18, color: t.textSecondary),
+                    onSelected: (val) {
+                      if (val == 'view') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PatientDetailScreen(
+                              patientId: pid,
+                              isOnline: true,
+                              localBox: Hive.box('local_patients'),
+                              branchId: branchId,
+                              doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+                              isAdmin: true,
+                            ),
+                          ),
+                        );
+                      } else if (val == 'copy') {
+                        Clipboard.setData(ClipboardData(text: tokenSerial));
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Copied $tokenSerial'),
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      } else if (val == 'copy_cnic' && hasCnic) {
+                        Clipboard.setData(ClipboardData(text: rawCnic));
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Copied CNIC: $formattedCnic'),
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      } else if (val == 'copy_phone' && hasPhone) {
+                        Clipboard.setData(ClipboardData(text: rawPhone));
+                        ScaffoldMessenger.of(context).clearSnackBars();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Copied Phone: $rawPhone'),
+                            duration: const Duration(seconds: 1),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      const PopupMenuItem(value: 'view', child: Row(children: [Icon(Icons.person_rounded, size: 16), SizedBox(width: 8), Text("View Profile")])),
+                      const PopupMenuItem(value: 'copy', child: Row(children: [Icon(Icons.copy_rounded, size: 16), SizedBox(width: 8), Text("Copy Token")])),
+                      if (hasCnic)
+                        const PopupMenuItem(value: 'copy_cnic', child: Row(children: [Icon(Icons.badge_outlined, size: 16), SizedBox(width: 8), Text("Copy CNIC")])),
+                      if (hasPhone)
+                        const PopupMenuItem(value: 'copy_phone', child: Row(children: [Icon(Icons.phone_rounded, size: 16), SizedBox(width: 8), Text("Copy Phone")])),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaginationFooter(BuildContext context, RoleThemeData t, int totalRecords, int currentPage, int totalPages, int startIdx, int endIdx) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // Showing info
+        Text(
+          "Showing ${startIdx + 1} to $endIdx of $totalRecords records",
+          style: TextStyle(fontSize: 12, color: t.textTertiary),
+        ),
+
+        // Page buttons & Page Size selector
+        Row(
+          children: [
+            // Page buttons
+            IconButton(
+              icon: const Icon(Icons.chevron_left_rounded, size: 18),
+              onPressed: currentPage > 1 ? () => setState(() => _currentPage--) : null,
+              color: t.textSecondary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            for (int p = 1; p <= totalPages && p <= 5; p++) ...[
+              InkWell(
+                onTap: () => setState(() => _currentPage = p),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  width: 28,
+                  height: 28,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: p == currentPage ? t.accent.withValues(alpha: 0.15) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: p == currentPage ? t.accent : Colors.transparent),
+                  ),
+                  child: Text(
+                    "$p",
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: p == currentPage ? FontWeight.bold : FontWeight.normal,
+                      color: p == currentPage ? t.accent : t.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
+            IconButton(
+              icon: const Icon(Icons.chevron_right_rounded, size: 18),
+              onPressed: currentPage < totalPages ? () => setState(() => _currentPage++) : null,
+              color: t.textSecondary,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            const SizedBox(width: 12),
+
+            // Rows per page selector
+            DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                value: _rowsPerPage,
+                dropdownColor: t.bgCard,
+                icon: Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: t.textSecondary),
+                style: TextStyle(fontSize: 11, color: t.textPrimary),
+                items: const [
+                  DropdownMenuItem(value: 10, child: Text("10 / page")),
+                  DropdownMenuItem(value: 25, child: Text("25 / page")),
+                  DropdownMenuItem(value: 50, child: Text("50 / page")),
+                ],
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() {
+                      _rowsPerPage = val;
+                      _currentPage = 1;
+                    });
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCampFilterChip(String label, bool isSelected, VoidCallback onTap, Color color, RoleThemeData t) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withValues(alpha: 0.15) : t.bg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? color : t.bgRule,
+            width: isSelected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: isSelected ? color : t.textTertiary, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected ? color : t.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom Painters for Sparklines and Performance Charts
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SparklinePainter extends CustomPainter {
+  final Color color;
+  const _SparklinePainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path();
+    path.moveTo(0, size.height * 0.7);
+    path.quadraticBezierTo(size.width * 0.3, size.height * 0.8, size.width * 0.5, size.height * 0.4);
+    path.quadraticBezierTo(size.width * 0.7, size.height * 0.1, size.width, size.height * 0.2);
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _PerformanceMultiLinePainter extends CustomPainter {
+  final RoleThemeData theme;
+  final Color tokensColor;
+  final Color prescriptionsColor;
+  final Color dispensaryColor;
+  final List<double> tokensData;
+  final List<double> prescriptionsData;
+  final List<double> dispensaryData;
+  final List<String> dateLabels;
+
+  const _PerformanceMultiLinePainter({
+    required this.theme,
+    required this.tokensColor,
+    required this.prescriptionsColor,
+    required this.dispensaryColor,
+    required this.tokensData,
+    required this.prescriptionsData,
+    required this.dispensaryData,
+    required this.dateLabels,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final gridPaint = Paint()
+      ..color = theme.bgRule.withValues(alpha: 0.5)
+      ..strokeWidth = 1;
+
+    // Draw horizontal grid lines
+    const gridLines = 4;
+    final yStep = (size.height - 24) / gridLines;
+    for (int i = 0; i <= gridLines; i++) {
+      final y = i * yStep;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    }
+
+    if (tokensData.isEmpty) return;
+
+    double maxVal = 1.0;
+    for (final v in [...tokensData, ...prescriptionsData, ...dispensaryData]) {
+      if (v > maxVal) maxVal = v;
+    }
+
+    List<double> normalize(List<double> raw) {
+      return raw.map((v) => (1.0 - ((v / maxVal) * 0.85 + 0.05)).clamp(0.05, 0.95)).toList();
+    }
+
+    final normTokens = normalize(tokensData);
+    final normPresc = normalize(prescriptionsData);
+    final normDisp = normalize(dispensaryData);
+
+    _drawSmoothCurve(canvas, size, normTokens, tokensColor, true);
+    _drawSmoothCurve(canvas, size, normPresc, prescriptionsColor, true);
+    _drawSmoothCurve(canvas, size, normDisp, dispensaryColor, true);
+
+    // Draw bottom date labels
+    if (dateLabels.isNotEmpty) {
+      final int step = (dateLabels.length / 6).ceil().clamp(1, 10);
+      final double xStep = size.width / (dateLabels.length - 1).clamp(1, 9999);
+
+      for (int i = 0; i < dateLabels.length; i += step) {
+        final tp = TextPainter(
+          text: TextSpan(
+            text: dateLabels[i],
+            style: TextStyle(fontSize: 9, color: theme.textTertiary),
+          ),
+          textDirection: ui.TextDirection.ltr,
+        )..layout();
+        final double xPos = (i * xStep - (tp.width / 2)).clamp(0.0, size.width - tp.width);
+        tp.paint(canvas, Offset(xPos, size.height - 12));
+      }
+    }
+  }
+
+  void _drawSmoothCurve(Canvas canvas, Size size, List<double> normalizedPoints, Color color, bool fillArea) {
+    if (normalizedPoints.isEmpty) return;
+
+    final h = size.height - 24;
+    final xStep = size.width / (normalizedPoints.length - 1);
+
+    final path = Path();
+    final fillPath = Path();
+
+    path.moveTo(0, normalizedPoints[0] * h);
+    fillPath.moveTo(0, h);
+    fillPath.lineTo(0, normalizedPoints[0] * h);
+
+    for (int i = 0; i < normalizedPoints.length - 1; i++) {
+      final x1 = i * xStep;
+      final y1 = normalizedPoints[i] * h;
+      final x2 = (i + 1) * xStep;
+      final y2 = normalizedPoints[i + 1] * h;
+
+      final cx1 = x1 + (x2 - x1) / 2;
+      final cy1 = y1;
+      final cx2 = x1 + (x2 - x1) / 2;
+      final cy2 = y2;
+
+      path.cubicTo(cx1, cy1, cx2, cy2, x2, y2);
+      fillPath.cubicTo(cx1, cy1, cx2, cy2, x2, y2);
+    }
+
+    fillPath.lineTo(size.width, h);
+    fillPath.close();
+
+    if (fillArea) {
+      final gradientPaint = Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            color.withValues(alpha: 0.15),
+            color.withValues(alpha: 0.0),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, size.width, h));
+      canvas.drawPath(fillPath, gradientPaint);
+    }
+
+    final strokePaint = Paint()
+      ..color = color
+      ..strokeWidth = 2.5
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawPath(path, strokePaint);
+
+    // Draw dots
+    final dotPaint = Paint()..color = color;
+    final dotWhite = Paint()..color = Colors.white;
+    for (int i = 0; i < normalizedPoints.length; i++) {
+      final x = i * xStep;
+      final y = normalizedPoints[i] * h;
+      canvas.drawCircle(Offset(x, y), 3.5, dotWhite);
+      canvas.drawCircle(Offset(x, y), 2.5, dotPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}

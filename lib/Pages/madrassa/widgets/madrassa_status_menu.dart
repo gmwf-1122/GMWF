@@ -6,6 +6,7 @@ import 'madrassa_common_widgets.dart';
 import '../../../theme/app_theme.dart';
 import '../dialogs/enrollment_dialog.dart';
 import '../utils/madrassa_local_storage.dart';
+import '../../../widgets/media_upload_tile.dart';
 
 class StatusActionMenu extends StatelessWidget {
   final dynamic student;
@@ -92,94 +93,108 @@ class StatusActionMenu extends StatelessWidget {
     final reasonCtrl = TextEditingController();
     // Required statuses default to today; unarchive starts empty (optional, opt-in)
     DateTime? selectedDate = requiresDate ? DateTime.now() : null;
+    String? hifzCertBase64 = sData['hifzCertificateUrl'] ?? sData['hifzCertificateBase64'];
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDs) {
           return AlertDialog(
+            backgroundColor: t.bgCard,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Text(
               dialogTitle,
-              style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+              style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: t.textPrimary)),
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  context.l.confirmAction.replaceAll('{action}', statusLabelEn).replaceAll('{name}', sData['name'] ?? ''),
-                  style: context.urduStyle(),
-                ),
-                if (requiresDate || isUnarchive) ...[
-                  const SizedBox(height: 16),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    isUnarchive
-                        ? (ctx.isUrdu ? 'دوبارہ فعال ہونے کی تاریخ (اختیاری)' : 'Reactivation Date (optional)')
-                        : (ctx.isUrdu ? 'واقعہ کی تاریخ' : 'Event Date'),
-                    style: context.urduStyle(
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
-                    ),
+                    context.l.confirmAction.replaceAll('{action}', statusLabelEn).replaceAll('{name}', sData['name'] ?? ''),
+                    style: context.urduStyle(style: TextStyle(color: t.textSecondary)),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(12),
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: ctx,
-                              initialDate: selectedDate ?? DateTime.now(),
-                              firstDate: DateTime(2000),
-                              lastDate: DateTime.now(),
-                            );
-                            if (picked != null) {
-                              setDs(() => selectedDate = picked);
-                            }
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: const Color(0xFFE0E2E7)),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.calendar_today_outlined, size: 16, color: Color(0xFF008080)),
-                                const SizedBox(width: 10),
-                                Text(
-                                  selectedDate != null
-                                      ? DateFormat('d MMM yyyy').format(selectedDate!)
-                                      : (ctx.isUrdu ? 'کوئی تاریخ منتخب نہیں' : 'No date selected'),
-                                  style: const TextStyle(fontWeight: FontWeight.w600),
-                                ),
-                              ],
+                  if (requiresDate || isUnarchive) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      isUnarchive
+                          ? (ctx.isUrdu ? 'دوبارہ فعال ہونے کی تاریخ (اختیاری)' : 'Reactivation Date (optional)')
+                          : (ctx.isUrdu ? 'واقعہ کی تاریخ' : 'Event Date'),
+                      style: context.urduStyle(
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                initialDate: selectedDate ?? DateTime.now(),
+                                firstDate: DateTime(2000),
+                                lastDate: DateTime.now(),
+                              );
+                              if (picked != null) {
+                                setDs(() => selectedDate = picked);
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: t.bgRule),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.calendar_today_outlined, size: 16, color: Color(0xFF008080)),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    selectedDate != null
+                                        ? DateFormat('d MMM yyyy').format(selectedDate!)
+                                        : (ctx.isUrdu ? 'کوئی تاریخ منتخب نہیں' : 'No date selected'),
+                                    style: TextStyle(fontWeight: FontWeight.w600, color: t.textPrimary),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      // Only unarchive can clear back to "no date" — required statuses always keep one
-                      if (isUnarchive && selectedDate != null) ...[
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.clear, size: 18, color: Colors.grey),
-                          tooltip: 'Clear',
-                          onPressed: () => setDs(() => selectedDate = null),
-                        ),
+                        // Only unarchive can clear back to "no date" — required statuses always keep one
+                        if (isUnarchive && selectedDate != null) ...[
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.clear, size: 18, color: Colors.grey),
+                            tooltip: 'Clear',
+                            onPressed: () => setDs(() => selectedDate = null),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
+                  ],
+                  if (newStatus == 'hifz_completed') ...[
+                    const SizedBox(height: 16),
+                    MediaUploadTile(
+                      label: 'Certificate of Hifz Completion',
+                      icon: Icons.workspace_premium_outlined,
+                      initialValue: hifzCertBase64,
+                      isDocument: true,
+                      onChanged: (val) => setDs(() => hifzCertBase64 = val),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  buildTf(
+                    reasonCtrl,
+                    'Custom Reason / Additional Notes',
+                    Icons.comment,
+                    context,
+                    hint: 'e.g. Moved to another city',
                   ),
                 ],
-                const SizedBox(height: 20),
-                buildTf(
-                  reasonCtrl,
-                  'Custom Reason / Additional Notes',
-                  Icons.comment,
-                  context,
-                  hint: 'e.g. Moved to another city',
-                ),
-              ],
+              ),
             ),
             actions: [
               TextButton(
@@ -212,6 +227,10 @@ class StatusActionMenu extends StatelessWidget {
       final updates = <String, dynamic>{
         'status': newStatus,
         'batch': newStatus,
+        if (newStatus == 'hifz_completed' && hifzCertBase64 != null) ...{
+          'hifzCertificateUrl': hifzCertBase64,
+          'hifzCertificateBase64': hifzCertBase64,
+        },
         'auditLog': FieldValue.arrayUnion([
           {
             'status': newStatus,
@@ -225,28 +244,44 @@ class StatusActionMenu extends StatelessWidget {
       if (requiresDate && dateFieldName != null && selectedDate != null) {
         updates[dateFieldName] = Timestamp.fromDate(selectedDate!);
       }
-      // Unarchive: only write a reactivation date if the admin actually picked one.
-      // Leaving it empty does nothing extra — status just flips back to active.
       if (isUnarchive && selectedDate != null) {
         updates['reactivatedDate'] = Timestamp.fromDate(selectedDate!);
       }
 
-      final docRef = FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('madrassa_students')
-          .doc(studentId);
-      await docRef.update(updates);
-
-      // Instant Hive cache sync
-      final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId);
-      if (studentCache != null) {
+      if (newStatus == 'left' || newStatus == 'dropped' || newStatus == 'archived') {
+        // Full offboard: Hive first, unenroll PIN, revoke app access, broadcast & queue
+        await MadrassaLocalStorage.deleteOrOffboardStudentLocalAndSync(
+          branchId: branchId,
+          studentId: studentId,
+          status: newStatus,
+          reason: finalReason,
+          effectiveDate: selectedDate,
+        );
+      } else {
+        // Active or Hifz completed: instant local Hive cache update & flush
+        final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId) ?? Map<String, dynamic>.from(sData);
         studentCache['status'] = newStatus;
         studentCache['batch'] = newStatus;
+        if (newStatus == 'hifz_completed' && hifzCertBase64 != null) {
+          studentCache['hifzCertificateUrl'] = hifzCertBase64;
+          studentCache['hifzCertificateBase64'] = hifzCertBase64;
+        }
         if (requiresDate && dateFieldName != null && selectedDate != null) {
           studentCache[dateFieldName] = selectedDate!.toIso8601String();
         }
         await MadrassaLocalStorage.cacheStudent(branchId, studentId, studentCache);
+
+        // Firestore direct update
+        try {
+          final docRef = FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchId)
+              .collection('madrassa_students')
+              .doc(studentId);
+          await docRef.update(updates);
+        } catch (e) {
+          debugPrint('[MadrassaStatusMenu] Firestore status update error: $e');
+        }
       }
 
       // Centralized Audit Log

@@ -689,9 +689,10 @@ class _HomeRouterState extends State<HomeRouter> {
         // ── Normalize Role (handles lists, legacy synonyms, nulls) ──
         String rawRole = '';
         if (data['role'] != null && data['role'].toString().trim().isNotEmpty) {
-          rawRole = data['role'].toString();
-        } else if (data['roles'] is List && (data['roles'] as List).isNotEmpty) {
-          rawRole = (data['roles'] as List).first.toString();
+          rawRole = data['role'].toString().toLowerCase().trim()
+              .replaceAll('_', ' ')
+              .replaceAll('-', ' ')
+              .replaceAll(RegExp(r'\s+'), ' ');
         } else if (data['type'] != null && data['type'].toString().trim().isNotEmpty) {
           rawRole = data['type'].toString();
         } else if (data['accountType'] != null && data['accountType'].toString().trim().isNotEmpty) {
@@ -721,7 +722,7 @@ class _HomeRouterState extends State<HomeRouter> {
           } catch (_) {}
         }
 
-        rawRole = rawRole.toLowerCase().trim();
+                rawRole = rawRole.toLowerCase().trim();
         if (rawRole == 'dispensar' || rawRole == 'pharmacist' || rawRole == 'chemist') {
           rawRole = 'dispenser';
         } else if (rawRole == 'reception' || rawRole == 'front desk') {
@@ -732,6 +733,8 @@ class _HomeRouterState extends State<HomeRouter> {
           rawRole = 'rec+dis';
         } else if (rawRole == 'hqmanager' || rawRole == 'hq_manager' || rawRole == 'hq') {
           rawRole = 'hq manager';
+        } else if (rawRole == 'principal') {
+          rawRole = 'school principal';
         }
 
         final role = rawRole.isEmpty ? 'unknown' : rawRole;

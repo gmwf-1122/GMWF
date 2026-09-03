@@ -1,5 +1,8 @@
 // lib/pages/server_dashboard_with_sync.dart
 //
+// [ARCH DECISION] This is the live ServerSyncManager as of 2026-08-27. See Task 0.1 report.
+// The implementation in lib/realtime/server_sync_manager.dart is dead code (only its static initHive helper is called at startup).
+//
 // FIXES vs previous version:
 //   [FIX-A] The embedded ServerSyncManager._resolveQueueType() previously only
 //           recognised 'zakat' and fell back to 'zakat' for everything else.
@@ -17,6 +20,9 @@
 //   [FIX-D] Medicine inventory is decremented in Firestore when a
 //           'dispense_completed' is synced (FieldValue.increment on
 //           branches/{branchId}/inventory/{medicineId}.quantity).
+//
+//   [FIX-0.3] Standardized attendance event mapping and Firestore ingestion
+//           to branches/{branchId}/employee_attendance/{dateKey}/records/{employeeId}.
 
 import 'dart:async';
 import 'dart:convert';
@@ -29,16 +35,17 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'server_data_viewer.dart';
 import 'settings/biometric_device_manager_page.dart';
+import 'settings/python_terminal_screen.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../realtime/lan_server.dart';
 import '../config/constants.dart';
 import '../utils/network_utils.dart';
+import '../services/auth_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/camp_session_service.dart';
 import '../widgets/department_activity_widget.dart';
@@ -46,8 +53,11 @@ import '../widgets/multi_server_control_widget.dart';
 import '../widgets/lan_hardware_status_widget.dart';
 import '../services/multi_server_service.dart';
 import '../services/zkteco_network_service.dart';
+import '../services/python_runner_service.dart';
 import '../services/system_metrics_service.dart';
-import '../models/biometric_device_config.dart';
+import '../services/user_theme_service.dart';
+import '../services/network_health_service.dart';
+import 'madrassa/utils/madrassa_local_storage.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected client model
@@ -156,6 +166,7 @@ class _ServerDashboardWithSyncState
     extends State<ServerDashboardWithSync> {
   bool _isAuthenticated = false;
   bool _isRunning       = false;
+  bool _isStarting      = false;
   int  _selectedTab     = 0;
   String? _serverIp;
   DateTime? _startTime;
@@ -204,13 +215,23 @@ class _ServerDashboardWithSyncState
 
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen((results) {
-      final online = results.any((r) => r != ConnectivityResult.none);
+      final online = results.any((r) => r != ConnectivityResult.none) || NetworkHealthService().isStableOnline;
       setState(() => _isOnline = online);
       if (online && _syncManager != null) {
         _addLog('📡 Back online - triggering sync');
         _syncManager!.triggerSync();
       } else if (!online) {
         _addLog('⚠️ Offline - queuing changes');
+      }
+    });
+
+    NetworkHealthService().onHealthChanged.listen((state) {
+      if (mounted) {
+        final online = state == NetworkQualityState.onlineStable;
+        setState(() => _isOnline = online);
+        if (online && _syncManager != null) {
+          _syncManager!.triggerSync();
+        }
       }
     });
 
@@ -225,10 +246,22 @@ class _ServerDashboardWithSyncState
 
     _punchSubscription = ZkTecoNetworkService.punchStream.listen((punch) {
       if (mounted) {
-        final name = punch['entityName'] ?? 'PIN ${punch['pin']}';
+        final pin = punch['pin']?.toString() ?? '';
+        final name = punch['entityName'] ?? 'PIN $pin';
         final type = punch['entityType'] ?? 'user';
         final loc = punch['buildingLocation'] ?? punch['deviceIp'] ?? 'Biometric Scanner';
-        _addLog('👉 Biometric Punch: $name ($type) at $loc');
+        final driftStr = punch['timeDriftFormatted']?.toString() ?? 'In Sync';
+        final hasDriftAlert = punch['hasTimeDriftAlert'] == true;
+
+        if (punch['isMapped'] == true) {
+          _addLog('👉 Biometric Punch: $name ($type) at $loc [Time Drift: $driftStr]');
+        } else {
+          _addLog('⚠️ Scanner Scan: PIN $pin (Unassigned) at $loc [Time Drift: $driftStr]');
+        }
+
+        if (hasDriftAlert) {
+          _addLog('⏱️ Clock Drift Alert: Device clock differs by $driftStr from Server PC!');
+        }
       }
     });
 
@@ -300,14 +333,8 @@ class _ServerDashboardWithSyncState
 
       if (alreadyAdded) {
         _addLog('ℹ️ Firewall rules already verified active for ports $port, 8088, and 4370');
-        if (mounted) {
-          _showFirewallStatusAndNextStepsDialog(alreadyAdded: true);
-        }
       } else {
         _addLog('🔓 Firewall rules added for ports $port, 8088 (ADMS TCP), and 4370 (ZKTeco UDP)');
-        if (mounted) {
-          _showFirewallStatusAndNextStepsDialog(alreadyAdded: false);
-        }
       }
     } catch (e) {
       _addLog('⚠️ Could not add firewall rule automatically: $e');
@@ -339,10 +366,20 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _checkConnectivity() async {
-    final results = await Connectivity().checkConnectivity();
-    setState(() {
-      _isOnline = results.any((r) => r != ConnectivityResult.none);
-    });
+    bool online = true;
+    try {
+      if (NetworkHealthService().isStableOnline) {
+        online = true;
+      } else if (!kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS)) {
+        final results = await Connectivity().checkConnectivity();
+        online = results.any((r) => r != ConnectivityResult.none);
+      }
+    } catch (_) {
+      online = true;
+    }
+    if (mounted) {
+      setState(() => _isOnline = online);
+    }
   }
 
   Future<void> _detectIp() async {
@@ -351,12 +388,26 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _startServer() async {
+    if (_isRunning || _isStarting) return;
+    _isStarting = true;
+
     if (kIsWeb) {
       _showError('Server hosting is not supported on web.');
+      _isStarting = false;
       return;
     }
+    // IP discovery runs in parallel during initState. Wait for it here so
+    // auto-start cannot permanently fail just because discovery is slow.
     if (_serverIp == null) {
+      final detectedIp = await getPrimaryLanIp();
+      if (detectedIp != null && detectedIp.isNotEmpty && mounted) {
+        setState(() => _serverIp = detectedIp);
+      }
+    }
+
+    if (_serverIp == null || _serverIp!.isEmpty) {
       _showError('Could not detect IP address');
+      _isStarting = false;
       return;
     }
 
@@ -429,6 +480,16 @@ class _ServerDashboardWithSyncState
 
       await _server!.start(_serverIp);
 
+      // The WebSocket server is the essential service. Mark it running now;
+      // optional biometric/Python/Firestore services must not hide a working
+      // LAN token server if one of them is unavailable.
+      if (mounted) {
+        setState(() {
+          _isRunning = true;
+          _startTime = DateTime.now();
+        });
+      }
+
       _syncManager = ServerSyncManager(
         branchId: widget.branchId,
         server:   _server!,
@@ -454,9 +515,33 @@ class _ServerDashboardWithSyncState
 
       await _syncManager!.start();
 
-      // Start embedded ZKTeco Biometric listener on Port 8088 / 4370
-      await ZkTecoNetworkService.startServer();
-      _addLog('✅ ZKTeco Biometric Listener active on Port 8088 / 4370');
+      // [FIX-1.2] Enable attendance server role for this instance
+      await LocalStorageService.setAttendanceServerRole(true);
+
+      // Start embedded ZKTeco Biometric listener on Port 8088 / 4370.
+      // A busy hardware port must not stop LAN token routing.
+      try {
+        await ZkTecoNetworkService.startServer();
+        _addLog('✅ ZKTeco Biometric Listener active on Port 8088 / 4370');
+      } catch (e) {
+        _addLog('⚠️ Biometric listener unavailable; LAN tokens remain active: $e');
+      }
+
+      // Automatically start Python ZKTeco Sync Daemon when the Server starts
+      if (!kIsWeb) {
+        if (!PythonRunnerService.instance.isRunning) {
+          _addLog('🐍 Auto-starting Python ZKTeco Sync Daemon...');
+          unawaited(PythonRunnerService.instance.startScript('zkteco_sync_service.py', args: ['--config', 'config.json']).then((success) {
+            if (success) {
+              _addLog('🟢 Python ZKTeco Sync Daemon running (PID: ${PythonRunnerService.instance.runningPid})');
+            } else {
+              _addLog('⚠️ Python daemon start skipped (check Python Terminal for details)');
+            }
+          }));
+        } else {
+          _addLog('🟢 Python ZKTeco Sync Daemon already active (PID: ${PythonRunnerService.instance.runningPid})');
+        }
+      }
 
       MultiServerService().startHeartbeatLoop(
         branchId: widget.branchId,
@@ -475,18 +560,18 @@ class _ServerDashboardWithSyncState
         );
       }
 
-      setState(() {
-        _isRunning = true;
-        _startTime = DateTime.now();
-      });
-
       _addLog('✅ Server started on $_serverIp:${AppNetwork.websocketPort}');
       _addLog('✅ Sync bridge active');
       _showSuccess('Server is running!');
       _startUdpBroadcast();
     } catch (e) {
+      if (mounted && _server == null) {
+        setState(() => _isRunning = false);
+      }
       _showError('Failed to start: $e');
       _addLog('❌ Start failed: $e');
+    } finally {
+      _isStarting = false;
     }
   }
 
@@ -518,6 +603,13 @@ class _ServerDashboardWithSyncState
       await _syncManager?.stop();
       await _server?.stop();
       await ZkTecoNetworkService.stopServer();
+      // Stop Python daemon when LAN server stops
+      if (!kIsWeb && PythonRunnerService.instance.isRunning) {
+        await PythonRunnerService.instance.stopProcess();
+        _addLog('🛑 Python ZKTeco Sync Daemon stopped');
+      }
+      // [FIX-1.2] Disable attendance server role when server stops
+      await LocalStorageService.setAttendanceServerRole(false);
       setState(() {
         _isRunning  = false;
         _syncManager = null;
@@ -536,10 +628,157 @@ class _ServerDashboardWithSyncState
     setState(() => _isManualSyncing = true);
     _addLog('🔄 Manual sync triggered');
     try {
-      await _syncManager!.triggerSync();
+      final purged = _syncManager!.purgeInvalidQueue();
+      if (purged > 0) {
+        _addLog('🧹 Cleaned $purged stale/no-op entries from queue');
+      }
+      _syncManager!.pushCatchUpAll();
+      await _syncManager!.triggerSync(force: true);
+      await ZkTecoNetworkService.syncAllDevices();
+      final pushedCount = await ZkTecoNetworkService.syncAllRecordedAttendanceToFirestore();
+      if (pushedCount > 0) {
+        _addLog('✅ Uploaded $pushedCount attendance records to Cloud Firestore');
+      }
+      _addLog('✅ Catch-up broadcast & cloud sync completed');
     } finally {
       if (mounted) setState(() => _isManualSyncing = false);
     }
+  }
+
+  void _showQueueManagementDialog() {
+    if (_syncManager == null) {
+      _showError('Server is not running');
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final total = _syncManager!.queueSize;
+            final breakdown = _syncManager!.getQueueBreakdown();
+
+            return AlertDialog(
+              backgroundColor: isDark ? const Color(0xFF1E1B2E) : Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withOpacity(0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.cloud_sync_outlined, color: Color(0xFFF59E0B), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Sync Queue Management',
+                      style: GoogleFonts.outfit(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 480,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF130F26) : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Pending Operations In Queue:', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
+                          Text('$total items', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: total > 0 ? const Color(0xFFF59E0B) : const Color(0xFF10B981))),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text('Queue Operations Breakdown:', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white60 : Colors.black54)),
+                    const SizedBox(height: 6),
+                    if (breakdown.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text('✅ No pending sync operations in queue.', style: GoogleFonts.inter(fontSize: 13, color: Colors.green)),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxHeight: 180),
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: breakdown.entries.map((e) {
+                            final isStale = ['activity', 'status_update', 'heartbeat', 'unknown', 'echo', 'broadcast'].contains(e.key);
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 3),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(isStale ? Icons.cleaning_services : Icons.sync, size: 14, color: isStale ? Colors.amber : Colors.blueAccent),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        e.key,
+                                        style: GoogleFonts.firaCode(fontSize: 12, color: isDark ? Colors.white : Colors.black87),
+                                      ),
+                                    ],
+                                  ),
+                                  Text('${e.value}', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? Colors.white70 : Colors.black87)),
+                                ],
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton.icon(
+                  icon: const Icon(Icons.cleaning_services_outlined, size: 16, color: Colors.amber),
+                  label: const Text('Purge Stale Items', style: TextStyle(color: Colors.amber)),
+                  onPressed: () {
+                    final removed = _syncManager!.purgeInvalidQueue();
+                    _addLog('🧹 Cleaned $removed stale/no-op items from sync queue');
+                    setDialogState(() {});
+                    setState(() => _syncQueueSize = _syncManager!.queueSize);
+                    _showSuccess('Purged $removed stale items. Clean queue size: ${_syncManager!.queueSize}');
+                  },
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.cloud_upload_outlined, size: 16, color: Colors.white),
+                  label: const Text('Force Fast Sync', style: TextStyle(color: Colors.white)),
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
+                  onPressed: () async {
+                    _addLog('🚀 Triggered Force Fast Sync from Queue Manager');
+                    _syncManager!.triggerSync(force: true);
+                    Navigator.of(ctx).pop();
+                    _showSuccess('Sync in progress in background');
+                  },
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   void _addLog(String message) {
@@ -588,38 +827,63 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _showLogoutDialog(BuildContext context) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16)),
         title: Row(children: [
-          Icon(Icons.logout, color: Colors.orange.shade700),
+          Icon(Icons.logout_rounded, color: Colors.orange.shade600),
           const SizedBox(width: 12),
-          const Text('Confirm Logout'),
+          Text(
+            'Confirm Logout',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Are you sure you want to logout?'),
+            Text(
+              'Are you sure you want to logout?',
+              style: TextStyle(
+                color: isDark ? const Color(0xFFCBD5E1) : Colors.black87,
+                fontSize: 14,
+              ),
+            ),
             if (_isRunning) ...[
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange.shade200),
+                  color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFFB45309) : const Color(0xFFFDE68A),
+                    width: 1.2,
+                  ),
                 ),
                 child: Row(children: [
-                  Icon(Icons.warning_amber,
-                      color: Colors.orange.shade700, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                    size: 22,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Text(
-                        'Server is currently running and will be stopped.',
-                        style: TextStyle(fontSize: 13)),
+                      'Server is currently running and will be stopped.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                      ),
+                    ),
                   ),
                 ]),
               ),
@@ -628,15 +892,21 @@ class _ServerDashboardWithSyncState
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel')),
+            onPressed: () => Navigator.of(context).pop(false),
+            style: TextButton.styleFrom(
+              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+            ),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton.icon(
             onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.logout, size: 18),
+            icon: const Icon(Icons.logout_rounded, size: 18),
             label: const Text('Logout'),
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.shade600,
-                foregroundColor: Colors.white),
+              backgroundColor: Colors.red.shade600,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
           ),
         ],
       ),
@@ -688,7 +958,12 @@ class _ServerDashboardWithSyncState
   Future<void> _logout() async {
     if (_isRunning) await _stopServer();
     try {
-      await FirebaseAuth.instance.signOut();
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        await box.delete('server_authenticated');
+        await box.flush();
+      }
+      await AuthService().signOut();
       if (mounted) {
         Navigator.of(context)
             .pushNamedAndRemoveUntil('/login', (route) => false);
@@ -802,8 +1077,48 @@ class _ServerDashboardWithSyncState
                     padding: const EdgeInsets.all(8),
                     constraints: const BoxConstraints(),
                     onPressed: () async {
-                      await Hive.box('app_settings').put('is_dark_mode', !isDark);
+                      await UserThemeService.setDarkMode(!isDark);
                     },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (context) => BiometricDeviceManagerPage(branchId: widget.branchId),
+                    ));
+                  },
+                  icon: const Icon(Icons.fingerprint_rounded, size: 16, color: Color(0xFF10B981)),
+                  label: Text(
+                    'Biometric Devices',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A)),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                    elevation: 0,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(MaterialPageRoute(
+                      builder: (context) => const PythonTerminalScreen(),
+                    ));
+                  },
+                  icon: const Icon(Icons.terminal_rounded, size: 16, color: Color(0xFF38BDF8)),
+                  label: Text(
+                    'Python Terminal',
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A)),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                    elevation: 0,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1390,11 +1705,12 @@ class _ServerDashboardWithSyncState
         _buildMetricKpiCard(
           label: 'SYNC TELEMETRY',
           value: '$_syncedToday ($_syncQueueSize Queued)',
-          subtitle: 'Pending Operations',
+          subtitle: 'Pending Ops (Tap to Manage)',
           icon: Icons.cloud_sync_outlined,
           glowColor: const Color(0xFFF59E0B),
           bgGradient: isDark ? const [Color(0xFF241A06), Color(0xFF181203)] : const [Colors.white, Color(0xFFF8FAFC)],
           isDark: isDark,
+          onTap: _showQueueManagementDialog,
         ),
       ];
 
@@ -1432,8 +1748,9 @@ class _ServerDashboardWithSyncState
     required Color glowColor,
     required List<Color> bgGradient,
     required bool isDark,
+    VoidCallback? onTap,
   }) {
-    return Container(
+    final cardContent = Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(colors: bgGradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
@@ -1493,6 +1810,19 @@ class _ServerDashboardWithSyncState
         ],
       ),
     );
+
+    if (onTap != null) {
+      return Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: cardContent,
+        ),
+      );
+    }
+
+    return cardContent;
   }
 
   // ── 3. Middle Left: Live Network System Log Stream ──────────────────────────
@@ -2542,13 +2872,51 @@ class ServerSyncManager {
   final Function(Map<String, dynamic>) onMessageReceived;
 
   Timer? _syncTimer;
+  Timer? _catchUpTimer;
   bool _isSyncing = false;
+  int _syncedThisRun = 0;
 
-  // FIX-A: full resolver — matches ServerSyncManager in server_sync_manager.dart
+  // ── Non-persistence / heartbeat event types that must NOT be queued ─────────
+  static const Set<String> _ignoredEventTypes = {
+    'activity',
+    'status_update',
+    'client_activity',
+    'heartbeat',
+    'version_mismatch',
+    'ping',
+    'pong',
+    'identify',
+    'identified',
+    'client_count_update',
+    'ack_serials',
+    'request_catch_up',
+    'auth_handshake',
+    'message_ack',
+    'credential_sync',
+    'session_event',
+    'welcome',
+    'identify_request',
+    'cross_branch_punch_alert',
+    'cross_branch_punch_status_update',
+    'biometric_heartbeat',
+    'echo',
+    'broadcast',
+    'unknown',
+    '',
+  };
+
+  // ── [CATCH-UP] Per-client seen-serial tracking ─────────────────────────────
+  final Map<String, Set<String>> _clientSeenSerials = {};
+  static const int _maxSeenPerClient = 2000;
+
+  // ── Saved previous callbacks so the dashboard UI keeps working ─────────────
+  Function(String socketId, Map<String, dynamic> info)? _prevOnClientConnected;
+  Function(String socketId)? _prevOnClientDisconnected;
+
+  // FIX-A: full resolver — matches canonical resolver
   static const _validQueueTypes = {'zakat', 'non-zakat', 'gmwf'};
 
   /// Canonical resolver — NEVER falls back silently.
-  /// Input may be a patient status ('Zakat', 'Non-Zakat', 'GMWF') or any variant.
   static String _resolveQueueType(dynamic raw) {
     if (raw == null) return 'zakat';
     final s = raw.toString().toLowerCase().trim();
@@ -2559,7 +2927,6 @@ class ServerSyncManager {
     }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
     if (s == 'zakat') return 'zakat';
-    debugPrint('[ServerSyncManager] ⚠️  Unknown queueType "$raw" — defaulting to zakat');
     return 'zakat';
   }
 
@@ -2573,39 +2940,459 @@ class ServerSyncManager {
 
   int get queueSize {
     try {
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return 0;
       return Hive.box(LocalStorageService.syncBox).length;
     } catch (e) {
       return 0;
     }
   }
 
-  Future<void> start() async {
-    debugPrint('ServerSyncManager: Starting for branch $branchId');
-    server.onMessageReceived = _handleIncomingMessage;
-    _syncTimer =
-        Timer.periodic(const Duration(seconds: 10), (_) { triggerSync(); });
-    await triggerSync();
+  /// Purges no-op / heartbeat / invalid entries from the sync queue.
+  int purgeInvalidQueue() {
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return 0;
+      final box = Hive.box(LocalStorageService.syncBox);
+      final keysToDelete = <dynamic>[];
+
+      for (final key in box.keys) {
+        final val = box.get(key);
+        if (val == null || val is! Map) {
+          keysToDelete.add(key);
+          continue;
+        }
+        final rawType = (val['type'] ?? val['event_type'] ?? '').toString().toLowerCase().trim();
+        if (_ignoredEventTypes.contains(rawType) || val['data'] == null) {
+          keysToDelete.add(key);
+        }
+      }
+
+      for (final k in keysToDelete) {
+        box.delete(k);
+      }
+
+      if (keysToDelete.isNotEmpty) {
+        debugPrint('[SSM] 🧹 Purged ${keysToDelete.length} stale/no-op items from sync queue');
+      }
+      return keysToDelete.length;
+    } catch (e) {
+      debugPrint('[SSM] purgeInvalidQueue error: $e');
+      return 0;
+    }
   }
 
+  /// Returns count breakdown of pending items by type
+  Map<String, int> getQueueBreakdown() {
+    final map = <String, int>{};
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return map;
+      final box = Hive.box(LocalStorageService.syncBox);
+      for (final val in box.values) {
+        if (val is Map) {
+          final t = (val['type'] ?? val['event_type'] ?? 'unknown').toString();
+          map[t] = (map[t] ?? 0) + 1;
+        }
+      }
+    } catch (_) {}
+    return map;
+  }
+
+  /// Clears the entire sync queue
+  Future<void> clearEntireQueue() async {
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+        await Hive.box(LocalStorageService.syncBox).clear();
+      }
+    } catch (e) {
+      debugPrint('[SSM] clearEntireQueue error: $e');
+    }
+  }
+
+  Future<void> start() async {
+    debugPrint('ServerSyncManager: Starting for branch $branchId');
+
+    // Clean any dead items on start
+    purgeInvalidQueue();
+
+    // ── Chain onClientConnected for catch-up push ────────────────────────────
+    _prevOnClientConnected = server.onClientConnected;
+    _prevOnClientDisconnected = server.onClientDisconnected;
+
+    server.onClientConnected = (socketId, info) {
+      _clientSeenSerials[socketId] = {};
+      _prevOnClientConnected?.call(socketId, info);
+      Future.delayed(const Duration(seconds: 1), () {
+        _pushCatchUpToSocket(socketId, Map<String, dynamic>.from(info));
+      });
+    };
+
+    server.onClientDisconnected = (socketId) {
+      _clientSeenSerials.remove(socketId);
+      _prevOnClientDisconnected?.call(socketId);
+    };
+
+    server.onMessageReceived = _handleIncomingMessage;
+
+    // ── Periodic catch-up: push to all connected clients every 2 minutes ────
+    _catchUpTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      _periodicCatchUpAll();
+    });
+
+    // ── High-performance periodic sync timer every 5 seconds ───────────────
+    _syncTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      triggerSync();
+    });
+
+    await triggerSync(force: true);
+  }
+
+  // ── Message interception — local saves + catch-up + Firestore queue ────────
   void _handleIncomingMessage(Map<String, dynamic> message) {
     final eventType = message['event_type'] as String?;
     if (eventType == null) return;
     onMessageReceived(message);
-    _queueForSync(message);
-  }
 
-  void _queueForSync(Map<String, dynamic> message) {
-    final eventType = message['event_type'] as String?;
-    if (eventType == null ||
-        eventType == 'unknown' ||
-        eventType == 'ping' ||
-        eventType == 'pong' ||
-        eventType == 'identify' ||
-        eventType == 'identified' ||
-        eventType == 'client_count_update') {
+    // ── Handle catch-up / ACK events (do NOT queue for Firestore) ────────────
+    if (eventType == 'ack_serials') {
+      _handleClientAck(message);
       return;
     }
 
+    if (eventType == 'request_catch_up') {
+      final socketId = message['_socketId']?.toString();
+      if (socketId != null) {
+        final clients = server.getConnectedClients();
+        Map<String, dynamic>? info;
+        for (final c in clients) {
+          if (c['socketId']?.toString() == socketId) {
+            info = c;
+            break;
+          }
+        }
+        if (info != null) {
+          debugPrint('[SSM] Catch-up requested by $socketId');
+          _pushCatchUpToSocket(socketId, info);
+        }
+      }
+      return;
+    }
+
+    // ── Save data locally on the server device ───────────────────────────────
+    _saveToLocalHive(eventType, message);
+
+    // ── Queue for Firestore sync ─────────────────────────────────────────────
+    _queueForSync(message);
+  }
+
+  // ── Save all tokens/prescriptions/dispense/patients locally ────────────────
+  Future<void> _saveToLocalHive(String eventType, Map<String, dynamic> message) async {
+    try {
+      final data = (message['data'] is Map)
+          ? Map<String, dynamic>.from(message['data'] as Map)
+          : Map<String, dynamic>.from(message);
+
+      for (final field in ['queueType', 'dateKey', 'serial', 'branchId']) {
+        if (!data.containsKey(field) && message.containsKey(field)) {
+          data[field] = message[field];
+        }
+      }
+
+      final msgBranch = (message['branchId']?.toString() ??
+              data['branchId']?.toString() ??
+              branchId)
+          .toLowerCase()
+          .trim();
+
+      switch (eventType) {
+        case 'save_entry':
+        case 'token_created':
+          final serial = data['serial']?.toString().trim();
+          if (serial != null && serial.isNotEmpty) {
+            LocalStorageService.saveEntryLocal(msgBranch, serial, data);
+            debugPrint('[SSM] ✅ Entry saved locally: $msgBranch-$serial');
+          }
+          break;
+
+        case 'save_prescription':
+        case 'prescription_created':
+          final serial = data['serial']?.toString().trim();
+          if (serial != null && serial.isNotEmpty) {
+            LocalStorageService.saveLocalPrescription(data);
+            try {
+              if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+                final eBox = Hive.box(LocalStorageService.entriesBox);
+                final normBranch = msgBranch.toLowerCase().trim();
+                final normSerial = serial.toLowerCase().trim();
+                final key = '$normBranch-$serial';
+
+                dynamic targetKey = key;
+                dynamic existing = eBox.get(key);
+                if (existing == null) {
+                  for (final k in eBox.keys) {
+                    final kStr = k.toString().toLowerCase().trim();
+                    if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+                      targetKey = k;
+                      existing = eBox.get(k);
+                      break;
+                    }
+                  }
+                }
+
+                if (existing != null && existing is Map) {
+                  final updated = Map<String, dynamic>.from(existing);
+                  updated['status'] = 'completed';
+                  updated['prescription'] = data;
+                  updated['prescriptionId'] = data['id'] ?? serial;
+                  updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
+                  eBox.put(targetKey, updated);
+                }
+              }
+            } catch (_) {}
+            debugPrint('[SSM] ✅ Prescription saved locally: $serial');
+          }
+          break;
+
+        case 'dispense_completed':
+          final serial = data['serial']?.toString().trim();
+          if (serial != null && serial.isNotEmpty) {
+            try {
+              if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+                final eBox = Hive.box(LocalStorageService.entriesBox);
+                final normBranch = msgBranch.toLowerCase().trim();
+                final normSerial = serial.toLowerCase().trim();
+                final key = '$normBranch-$serial';
+
+                dynamic targetKey = key;
+                dynamic existing = eBox.get(key);
+                if (existing == null) {
+                  for (final k in eBox.keys) {
+                    final kStr = k.toString().toLowerCase().trim();
+                    if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+                      targetKey = k;
+                      existing = eBox.get(k);
+                      break;
+                    }
+                  }
+                }
+
+                if (existing != null && existing is Map) {
+                  final updated = Map<String, dynamic>.from(existing);
+                  updated['dispenseStatus'] = 'dispensed';
+                  updated['status'] = 'completed';
+                  updated['dispensedAt'] =
+                      data['dispensedAt'] ?? DateTime.now().toIso8601String();
+                  updated['dispensedBy'] = data['dispensedBy'];
+                  updated['completedAt'] =
+                      data['completedAt'] ?? DateTime.now().toIso8601String();
+                  eBox.put(targetKey, updated);
+                  debugPrint('[SSM] ✅ Dispense saved locally: $targetKey');
+                }
+              }
+            } catch (_) {}
+          }
+          break;
+
+        case 'save_patient':
+          try {
+            LocalStorageService.saveLocalPatient(
+                {...data, 'branchId': msgBranch});
+            debugPrint('[SSM] ✅ Patient saved locally');
+          } catch (_) {}
+          break;
+
+        case 'save_madrassa_student':
+        case 'save_madrassa_admission':
+          try {
+            final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
+            final bId = (data['branchId']?.toString() ?? msgBranch).toLowerCase().trim();
+            if (studentId.isNotEmpty && bId.isNotEmpty) {
+              await MadrassaLocalStorage.cacheStudent(bId, studentId, data);
+              debugPrint('[SSM] ✅ Madrassa student cached locally on server');
+            }
+          } catch (e) {
+            debugPrint('[SSM] Madrassa student cache error on server: $e');
+          }
+          break;
+
+        case 'delete_madrassa_student':
+        case 'offboard_madrassa_student':
+          try {
+            final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
+            final bId = (data['branchId']?.toString() ?? msgBranch).toLowerCase().trim();
+            final status = data['status']?.toString() ?? 'left';
+            if (studentId.isNotEmpty && bId.isNotEmpty) {
+              final studentCache = MadrassaLocalStorage.getStudentCached(bId, studentId);
+              if (studentCache != null) {
+                studentCache['status'] = status;
+                studentCache['batch'] = status;
+                if (data['effectiveDate'] != null) {
+                  studentCache['offboardedAt'] = data['effectiveDate'];
+                }
+                await MadrassaLocalStorage.cacheStudent(bId, studentId, studentCache);
+              }
+              debugPrint('[SSM] ✅ Madrassa student offboarded locally on server');
+            }
+          } catch (e) {
+            debugPrint('[SSM] Madrassa student offboard error on server: $e');
+          }
+          break;
+      }
+    } catch (e) {
+      debugPrint('[SSM] _saveToLocalHive error: $e');
+    }
+  }
+
+  // ── Catch-up push — send unseen today's entries to a client ────────────────
+  Future<void> _pushCatchUpToSocket(
+      String socketId, Map<String, dynamic> info) async {
+    final role = (info['role'] ?? '').toString().toLowerCase();
+
+    final today = _todayKey();
+    List<Map<String, dynamic>> entries;
+    try {
+      entries = LocalStorageService.getLocalEntries(branchId).where((e) {
+        final dk = (e['dateKey'] ?? '').toString().trim();
+        final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
+        final serialDk = CampSessionService.getDateKeyFromSerial(serial);
+        // [FIX] Strict today-only: no 24h fallback window.
+        // The fallback was causing yesterday's entries to be re-sent on every
+        // periodic catch-up (every 2 min), creating the 'old tokens reappearing'
+        // bug. Clients that need historical data should fetch from Firestore.
+        if (dk == today || dk.startsWith(today) || serialDk == today || serialDk.startsWith(today)) {
+          return true;
+        }
+        return false;
+      }).toList();
+    } catch (e) {
+      debugPrint('[SSM] Catch-up read failed: $e');
+      return;
+    }
+
+    final clientSeen = _clientSeenSerials[socketId] ?? <String>{};
+    final unseen = entries.where((e) {
+      final serial = e['serial']?.toString().trim() ?? '';
+      return serial.isNotEmpty && !clientSeen.contains(serial);
+    }).toList();
+
+    if (unseen.isEmpty) return;
+
+    debugPrint('[SSM] 📤 Catch-up to $role ($socketId): ${unseen.length} unseen entry(ies)');
+
+    for (final entry in unseen) {
+      final serial = entry['serial']?.toString() ?? '';
+      if (serial.isEmpty) continue;
+
+      final entryCopy = Map<String, dynamic>.from(entry);
+
+      Map<String, dynamic>? presc;
+      try {
+        presc = LocalStorageService.getLocalPrescription(serial) ??
+            (entry['prescription'] is Map
+                ? Map<String, dynamic>.from(entry['prescription'] as Map)
+                : null);
+      } catch (_) {}
+
+      if (presc != null && presc.isNotEmpty) {
+        entryCopy['status'] = 'completed';
+        entryCopy['prescription'] = presc;
+        entryCopy['prescriptionId'] = presc['id'] ?? serial;
+      }
+      if ((entry['dispenseStatus'] ?? '') == 'dispensed') {
+        entryCopy['status'] = 'completed';
+        entryCopy['dispenseStatus'] = 'dispensed';
+      }
+
+      _sendToSocket(socketId, {
+        'event_type': 'save_entry',
+        'branchId': branchId,
+        'data': entryCopy,
+        '_serverPush': true,
+      });
+
+      if (presc != null && presc.isNotEmpty) {
+        _sendToSocket(socketId, {
+          'event_type': 'save_prescription',
+          'branchId': branchId,
+          'data': presc,
+          '_serverPush': true,
+        });
+      }
+
+      if ((entryCopy['dispenseStatus'] ?? '') == 'dispensed') {
+        _sendToSocket(socketId, {
+          'event_type': 'dispense_completed',
+          'branchId': branchId,
+          'data': entryCopy,
+          '_serverPush': true,
+        });
+      }
+
+      _clientSeenSerials[socketId] ??= {};
+      _clientSeenSerials[socketId]!.add(serial);
+
+      if (_clientSeenSerials[socketId]!.length > _maxSeenPerClient) {
+        final overflow =
+            _clientSeenSerials[socketId]!.length - _maxSeenPerClient;
+        _clientSeenSerials[socketId]!.removeAll(
+            _clientSeenSerials[socketId]!.take(overflow).toList());
+      }
+
+      await Future.delayed(const Duration(milliseconds: 20));
+    }
+  }
+
+  void _sendToSocket(String socketId, Map<String, dynamic> payload) {
+    try {
+      server.sendToSocket(socketId, jsonEncode(payload));
+    } catch (e) {
+      debugPrint('[SSM] sendToSocket failed: $e');
+    }
+  }
+
+  void _handleClientAck(Map<String, dynamic> msg) {
+    var socketId = (msg['_socketId'] ?? '').toString();
+    final clientId = (msg['_clientId'] ?? '').toString();
+    if (socketId.isEmpty && clientId.isNotEmpty) {
+      for (final client in server.getConnectedClients()) {
+        if (client['clientId']?.toString() == clientId) {
+          socketId = client['socketId']?.toString() ?? '';
+          break;
+        }
+      }
+    }
+    final serials = msg['serials'];
+    if (socketId.isEmpty || serials is! List) return;
+
+    _clientSeenSerials[socketId] ??= {};
+    for (final s in serials) {
+      final serial = s?.toString().trim() ?? '';
+      if (serial.isNotEmpty) _clientSeenSerials[socketId]!.add(serial);
+    }
+
+    final seen = _clientSeenSerials[socketId]!;
+    if (seen.length > _maxSeenPerClient) {
+      final overflow = seen.length - _maxSeenPerClient;
+      seen.removeAll(seen.take(overflow).toList());
+    }
+  }
+
+  void pushCatchUpAll() => _periodicCatchUpAll();
+
+  void _periodicCatchUpAll() {
+    final clients = server.getConnectedClients();
+    if (clients.isEmpty) return;
+    for (final client in clients) {
+      final socketId = client['socketId']?.toString();
+      if (socketId == null || socketId.isEmpty) continue;
+      _pushCatchUpToSocket(socketId, Map<String, dynamic>.from(client));
+    }
+  }
+
+  // ── Queue for Firestore — strict whitelist of non-ignored event types ──────
+  void _queueForSync(Map<String, dynamic> message) {
+    final eventType = (message['event_type'] as String?)?.toLowerCase().trim();
+    if (eventType == null || _ignoredEventTypes.contains(eventType)) {
+      return;
+    }
 
     try {
       final box = Hive.box(LocalStorageService.syncBox);
@@ -2616,21 +3403,18 @@ class ServerSyncManager {
         final data = (message['data'] as Map<String, dynamic>?) ??
             Map<String, dynamic>.from(message);
 
-        // FIX-A: resolve queueType from the message, the data map, or from
-        // the local entry in Hive — in that priority order.
         final rawQT = (message['queueType'] ?? data['queueType'])?.toString();
         String queueType;
         if (rawQT != null && rawQT.trim().isNotEmpty) {
           queueType = _resolveQueueType(rawQT);
         } else {
-          // Fallback: look up the entry in Hive
           final serial    = data['serial']?.toString() ?? '';
           final entryKey  = '$branchId-$serial';
           final localEntry = Hive.box(LocalStorageService.entriesBox).get(entryKey);
           queueType = _resolveQueueType(localEntry?['queueType']);
         }
 
-        final serial    = data['serial']?.toString() ?? '';
+        final serial    = (data['serial']?.toString() ?? '').trim().toUpperCase();
         final parts = serial.split('-');
         final cleanDateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
             ? (parts.length > 1 ? parts[1] : '')
@@ -2640,23 +3424,11 @@ class ServerSyncManager {
         final bId       = (data['branchId'] as String?)?.trim() ?? branchId;
 
         if (serial.isNotEmpty && dateKey.isNotEmpty) {
-          // Write A: dispensary record
-          box.put('${key}_dispensary', {
-            'type':      'save_dispensary_record',
-            'branchId':  bId,
-            'dateKey':   dateKey,
-            'serial':    serial,
-            'data':      data,
-            'createdAt': DateTime.now().toIso8601String(),
-            'attempts':  0,
-            'status':    'pending',
-          });
-          // Write B: serial status patch — queueType at TOP LEVEL (FIX-B)
           box.put('${key}_serial', {
             'type':      'update_serial_status',
             'branchId':  bId,
             'dateKey':   dateKey,
-            'queueType': queueType,   // FIX-B: top-level, not buried in data
+            'queueType': queueType,
             'serial':    serial,
             'data': {
               'dispenseStatus': data['dispenseStatus'] ?? 'dispensed',
@@ -2672,7 +3444,6 @@ class ServerSyncManager {
             'status':    'pending',
           });
 
-          // FIX-D: Write C: inventory deduction ops for each medicine
           final medicines = data['medicines'];
           if (medicines is List && medicines.isNotEmpty) {
             for (int i = 0; i < medicines.length; i++) {
@@ -2711,8 +3482,6 @@ class ServerSyncManager {
         return;
       }
 
-      // All other event types
-      // FIX-A: carry queueType at top level for save_entry ops
       final opQueueType = _resolveQueueType(
           message['queueType'] ?? (message['data'] is Map ? message['data']['queueType'] : null));
 
@@ -2724,20 +3493,51 @@ class ServerSyncManager {
           ? clientBranchId
           : branchId;
 
-      box.put(key, {
-        'type':      _mapEventTypeToSyncType(eventType),
+      final rawSerial = (message['serial'] ?? (message['data'] is Map ? (message['data']['serial'] ?? message['data']['id']) : null))?.toString().trim().toUpperCase();
+
+      const serialTypes = {'save_entry', 'save_prescription', 'update_serial_status'};
+      final mappedType = _mapEventTypeToSyncType(eventType);
+      final isSerialType = serialTypes.contains(mappedType);
+
+      String targetKey = key;
+      Map<String, dynamic> payloadData = (message['data'] is Map ? Map<String, dynamic>.from(message['data'] as Map) : Map<String, dynamic>.from(message));
+
+      if (isSerialType && rawSerial != null && rawSerial.isNotEmpty) {
+        final entityId = '${bId}_$rawSerial';
+        for (final k in box.keys) {
+          final existing = box.get(k);
+          if (existing is Map) {
+            final eType = (existing['type'] ?? '').toString();
+            final eSerial = (existing['serial'] ?? (existing['data'] is Map ? existing['data']['serial'] : ''))?.toString().trim().toUpperCase();
+            final eBranch = (existing['branchId'] ?? '').toString();
+            if (serialTypes.contains(eType) && eBranch == bId && eSerial == rawSerial) {
+              targetKey = k.toString();
+              if (existing['data'] is Map) {
+                payloadData = {
+                  ...Map<String, dynamic>.from(existing['data'] as Map),
+                  ...payloadData,
+                };
+              }
+              break;
+            }
+          }
+        }
+      }
+
+      box.put(targetKey, {
+        'type':      isSerialType ? 'save_entry' : mappedType,
         'branchId':  bId,
-        'queueType': opQueueType,   // top level
+        'queueType': opQueueType,
         'dateKey':   message['dateKey'] ?? (message['data'] is Map ? message['data']['dateKey'] : null),
-        'serial':    message['serial'] ?? (message['data'] is Map ? message['data']['serial'] : null),
-        'data':      message['data'] ?? message,
+        'serial':    rawSerial ?? message['serial'],
+        'data':      payloadData,
         'createdAt': DateTime.now().toIso8601String(),
         'attempts':  0,
         'status':    'pending',
       });
-      debugPrint('Queued for sync: $eventType (queue: ${box.length})');
+      debugPrint('[SSM] Queued for sync: $mappedType | key: $targetKey | serial: $rawSerial (queue: ${box.length})');
     } catch (e) {
-      debugPrint('Error queuing message: $e');
+      debugPrint('[SSM] Error queuing message: $e');
     }
   }
 
@@ -2757,6 +3557,15 @@ class ServerSyncManager {
         return 'save_dispensary_record';
       case 'update_serial_status':
         return 'update_serial_status';
+      case 'save_dispensary_charge':
+        return 'save_dispensary_charge';
+      case 'save_attendance':
+      case 'save_attendance_record':
+      case 'save_biometric_log':
+      case 'save_employee_attendance':
+      case 'save_faculty_attendance':
+      case 'save_student_attendance':
+        return 'save_attendance';
       default:
         return eventType;
     }
@@ -2764,88 +3573,55 @@ class ServerSyncManager {
 
   String _todayKey() => DateFormat('ddMMyy').format(DateTime.now());
 
-  Future<void> triggerSync() async {
-    if (_isSyncing) return;
+  /// Fast parallelized sync processor with auto-purging
+  Future<void> triggerSync({bool force = false}) async {
+    if (_isSyncing && !force) return;
+    if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return;
     final box = Hive.box(LocalStorageService.syncBox);
     if (box.isEmpty) return;
 
     _isSyncing = true;
-    int syncedCount = 0;
+    _syncedThisRun = 0;
 
     try {
-      final connectivity = await Connectivity().checkConnectivity();
-      if (!connectivity.any((r) => r != ConnectivityResult.none)) {
+      // First, purge invalid noise
+      purgeInvalidQueue();
+
+      // Desktop-resilient online verification
+      bool isOnline = true;
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          isOnline = true;
+        } else if (!kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS)) {
+          final connectivity = await Connectivity().checkConnectivity();
+          isOnline = connectivity.any((r) => r != ConnectivityResult.none);
+        }
+      } catch (_) {
+        isOnline = true;
+      }
+
+      if (!isOnline && !force) {
         _isSyncing = false;
         return;
       }
 
       final keys = box.keys.toList();
-      for (final key in keys) {
-        try {
-          final item = box.get(key);
-          if (item == null || item is! Map) {
-            await box.delete(key);
-            continue;
-          }
-          final syncItem = Map<String, dynamic>.from(item);
-          final type     = syncItem['type'] as String?;
-          final data     = syncItem['data'];
-          if (type == null || type == 'unknown' || data == null) {
-            await box.delete(key);
-            continue;
-          }
-
-
-          final resolvedBranchId =
-              (syncItem['branchId'] as String?)?.trim().isNotEmpty == true
-                  ? syncItem['branchId'] as String
-                  : branchId;
-          final resolvedDateKey =
-              (syncItem['dateKey'] as String?)?.trim() ?? '';
-          // FIX-A: read from top-level op first
-          final resolvedQueueType =
-              _resolveQueueType(syncItem['queueType']);
-          final resolvedSerial =
-              (syncItem['serial'] as String?)?.trim() ?? '';
-
-          final dataMap = data is Map
-              ? Map<String, dynamic>.from(data)
-              : <String, dynamic>{};
-
-          await _syncToFirestore(
-            type:       type,
-            data:       dataMap,
-            branchId:   resolvedBranchId,
-            dateKey:    resolvedDateKey,
-            queueType:  resolvedQueueType,
-            serial:     resolvedSerial,
-            medicineId: (syncItem['medicineId'] as String?)?.trim() ?? '',
-            delta:      syncItem['delta'] is num
-                ? (syncItem['delta'] as num).toDouble()
-                : double.tryParse(syncItem['delta']?.toString() ?? '') ?? 0.0,
-          );
-          await box.delete(key);
-          syncedCount++;
-        } catch (e) {
-          final item = box.get(key);
-          if (item is Map) {
-            final updated = Map<String, dynamic>.from(item);
-            updated['attempts'] =
-                (updated['attempts'] as int? ?? 0) + 1;
-            updated['lastError'] = e.toString();
-            if (updated['attempts'] >= 5) {
-              debugPrint(
-                  'Dropping sync item after 5 failures: ${updated['type']} — $e');
-              await box.delete(key);
-            } else {
-              await box.put(key, updated);
-            }
-          }
-        }
-        await Future.delayed(const Duration(milliseconds: 500));
+      if (keys.isEmpty) {
+        _isSyncing = false;
+        return;
       }
 
-      if (syncedCount > 0) onSyncComplete(syncedCount);
+      // Process in concurrent batches of 8 items for maximum speed and responsiveness
+      const chunkSize = 8;
+      for (int i = 0; i < keys.length; i += chunkSize) {
+        final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
+        await Future.wait(chunk.map((key) => _processSyncItem(box, key)));
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+
+      if (_syncedThisRun > 0) {
+        onSyncComplete(_syncedThisRun);
+      }
     } catch (e) {
       onSyncError(e.toString());
     } finally {
@@ -2853,7 +3629,85 @@ class ServerSyncManager {
     }
   }
 
-  // ── Firestore writer ───────────────────────────────────────────────────────
+  Future<void> _processSyncItem(Box box, dynamic key) async {
+    try {
+      final item = box.get(key);
+      if (item == null || item is! Map) {
+        await box.delete(key);
+        return;
+      }
+      final syncItem = Map<String, dynamic>.from(item);
+      final type     = syncItem['type'] as String?;
+      final data     = syncItem['data'];
+      if (type == null || _ignoredEventTypes.contains(type.toLowerCase()) || data == null) {
+        await box.delete(key);
+        return;
+      }
+
+      final resolvedBranchId =
+          (syncItem['branchId'] as String?)?.trim().isNotEmpty == true
+              ? syncItem['branchId'] as String
+              : branchId;
+
+      String resolvedSerial = (syncItem['serial'] as String?)?.trim().toUpperCase() ??
+          (data is Map ? (data['serial'] ?? data['id'])?.toString().trim().toUpperCase() ?? '' : '');
+
+      String resolvedDateKey = (syncItem['dateKey'] as String?)?.trim() ??
+          (data is Map ? data['dateKey']?.toString().trim() ?? '' : '');
+
+      // Resilient fallback for missing dateKey: derive from serial
+      if (resolvedDateKey.isEmpty && resolvedSerial.contains('-')) {
+        final parts = resolvedSerial.split('-');
+        resolvedDateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+            ? (parts.length > 1 ? parts[1] : '')
+            : (parts.isNotEmpty ? parts[0] : '');
+      }
+      if (resolvedDateKey.isEmpty) {
+        resolvedDateKey = _todayKey();
+      }
+
+      final resolvedQueueType = _resolveQueueType(syncItem['queueType'] ?? (data is Map ? data['queueType'] : null));
+
+      final dataMap = data is Map
+          ? Map<String, dynamic>.from(data)
+          : <String, dynamic>{};
+
+      await _syncToFirestore(
+        type:       type,
+        data:       dataMap,
+        branchId:   resolvedBranchId,
+        dateKey:    resolvedDateKey,
+        queueType:  resolvedQueueType,
+        serial:     resolvedSerial,
+        medicineId: (syncItem['medicineId'] as String?)?.trim() ?? '',
+        delta:      syncItem['delta'] is num
+            ? (syncItem['delta'] as num).toDouble()
+            : double.tryParse(syncItem['delta']?.toString() ?? '') ?? 0.0,
+      );
+
+      await box.delete(key);
+      _syncedThisRun++;
+    } catch (e) {
+      debugPrint('[SSM] Sync item error for key $key: $e');
+      try {
+        final item = box.get(key);
+        if (item is Map) {
+          final updated = Map<String, dynamic>.from(item);
+          final attempts = ((updated['attempts'] as int?) ?? 0) + 1;
+          updated['attempts'] = attempts;
+          updated['lastError'] = e.toString();
+          if (attempts >= 5) {
+            debugPrint('[SSM] Dropping unrecoverable item after 5 failures: ${updated['type']} — $e');
+            await box.delete(key);
+          } else {
+            await box.put(key, updated);
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // ── Firestore writer with comprehensive support across all modules ─────────
   Future<void> _syncToFirestore({
     required String type,
     required Map<String, dynamic> data,
@@ -2867,78 +3721,77 @@ class ServerSyncManager {
     final db        = FirebaseFirestore.instance;
     final cleanData = _removeFieldValues(data);
 
-    final effectiveDateKey  = dateKey.isNotEmpty
-        ? dateKey  : (cleanData['dateKey']  as String? ?? '');
-    final effectiveSerial   = serial.isNotEmpty
-        ? serial   : (cleanData['serial']   as String? ?? '');
-    // FIX-A: queueType already resolved to canonical value before this call
+    final effectiveDateKey  = dateKey.isNotEmpty ? dateKey : (cleanData['dateKey'] as String? ?? _todayKey());
+    final rawSerial         = serial.isNotEmpty ? serial : (cleanData['serial'] as String? ?? '');
+    final effectiveSerial   = rawSerial.trim().toUpperCase();
     final effectiveQueueType = queueType;
     final effectiveBranchId = branchId.isNotEmpty ? branchId : this.branchId;
 
     switch (type) {
       // ── Token entry ──────────────────────────────────────────────────────
       case 'save_entry':
-        final s  = effectiveSerial.isNotEmpty
-            ? effectiveSerial
-            : (cleanData['serial'] as String? ?? '');
-        final dk = effectiveDateKey.isNotEmpty
-            ? effectiveDateKey
-            : (cleanData['dateKey'] as String? ?? '');
-        // FIX-A: queueType comes resolved from op level; only fall back to
-        // cleanData if effectiveQueueType is somehow still 'zakat' and
-        // cleanData has a different value.
+      case 'token_created':
+        final s  = effectiveSerial;
+        final dk = effectiveDateKey;
         final qt = _validQueueTypes.contains(effectiveQueueType)
             ? effectiveQueueType
             : _resolveQueueType(cleanData['queueType']);
-        if (s.isEmpty || dk.isEmpty) {
-          throw Exception('save_entry: missing serial ($s) or dateKey ($dk)');
-        }
-        final upperS = s.trim().toUpperCase();
-        cleanData['serial'] = upperS;
+        if (s.isEmpty) throw Exception('save_entry: missing serial');
+
+        cleanData['serial'] = s;
         final campDocKey = CampSessionService.getCampDateDocId(
           branchId: effectiveBranchId,
           dateKey: dk,
           campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
           dispensaryTag: cleanData['dispensaryTag']?.toString(),
-          serial: upperS,
+          serial: s,
         );
         await db
             .collection('branches').doc(effectiveBranchId)
             .collection('serials').doc(campDocKey)
-            .collection(qt).doc(upperS)
+            .collection(qt).doc(s)
             .set(cleanData, SetOptions(merge: true));
-        if (s != upperS) {
-          try {
-            await db
-                .collection('branches').doc(effectiveBranchId)
-                .collection('serials').doc(campDocKey)
-                .collection(qt).doc(s.toLowerCase())
-                .delete();
-          } catch (_) {}
-        }
-        debugPrint('✅ save_entry → serials/$campDocKey/$qt/$upperS');
+        debugPrint('✅ save_entry → serials/$campDocKey/$qt/$s');
         break;
 
-      // ── Prescription ─────────────────────────────────────────────────────
+      // ── Prescription (Single Canonical Serials Write) ─────────────────────
       case 'save_prescription':
-        final s = effectiveSerial.isNotEmpty
-            ? effectiveSerial
-            : (cleanData['serial'] as String? ?? cleanData['id'] as String? ?? '');
-        final cnic = (cleanData['patientCnic'] as String? ??
-                cleanData['cnic'] as String? ?? 'unknown')
-            .trim();
+      case 'prescription_created':
+        final s = effectiveSerial.isNotEmpty ? effectiveSerial : (cleanData['id'] as String? ?? '');
         if (s.isEmpty) throw Exception('save_prescription: missing serial');
+        cleanData['serial'] = s;
+
+        // Mark serial status as completed and embed clinical prescription data directly
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: effectiveBranchId,
+          dateKey: effectiveDateKey,
+          campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
+          dispensaryTag: cleanData['dispensaryTag']?.toString(),
+          serial: s,
+        );
+
+        final updateMap = <String, dynamic>{
+          'status':         'completed',
+          'completedAt':    cleanData['completedAt'] ?? DateTime.now().toIso8601String(),
+          'dispenseStatus': cleanData['dispenseStatus'] ?? 'pending',
+        };
+        for (final f in ['doctorName', 'doctorId', 'daysOfMedicine', 'extraCharge', 'vitals', 'prescription', 'medicines', 'diagnosis', 'complaints']) {
+          if (cleanData.containsKey(f) && cleanData[f] != null) {
+            updateMap[f] = cleanData[f];
+          }
+        }
+
         await db
             .collection('branches').doc(effectiveBranchId)
-            .collection('prescriptions').doc(cnic)
-            .collection('prescriptions').doc(s)
-            .set(cleanData, SetOptions(merge: true));
-        debugPrint('✅ save_prescription → prescriptions/$cnic/$s');
+            .collection('serials').doc(campDocKey)
+            .collection(effectiveQueueType).doc(s)
+            .set(updateMap, SetOptions(merge: true));
+        debugPrint('✅ save_prescription → serials/$campDocKey/$effectiveQueueType/$s');
         break;
 
       // ── Patient ──────────────────────────────────────────────────────────
       case 'save_patient':
-        final pid = (cleanData['patientId'] as String? ?? '').trim();
+        final pid = (cleanData['patientId'] as String? ?? cleanData['id'] as String? ?? '').trim();
         if (pid.isEmpty) throw Exception('save_patient: missing patientId');
         await db
             .collection('branches').doc(effectiveBranchId)
@@ -2947,59 +3800,67 @@ class ServerSyncManager {
         debugPrint('✅ save_patient → patients/$pid');
         break;
 
-      // ── Dispensary record ─────────────────────────────────────────────────
-      case 'save_dispensary_record':
-        final s  = effectiveSerial.isNotEmpty
-            ? effectiveSerial
-            : (cleanData['serial'] as String? ?? '');
-        final dk = effectiveDateKey.isNotEmpty
-            ? effectiveDateKey
-            : (cleanData['dateKey'] as String? ?? '');
-        if (s.isEmpty || dk.isEmpty) {
-          throw Exception(
-              'save_dispensary_record: missing serial ($s) or dateKey ($dk)');
-        }
-        cleanData.remove('dateKey');
+      // ── Dispensary charge ─────────────────────────────────────────────────
+      case 'save_dispensary_charge':
+        final s  = effectiveSerial;
+        final dk = effectiveDateKey;
+        if (s.isEmpty) throw Exception('save_dispensary_charge: missing serial');
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: effectiveBranchId,
+          dateKey: dk,
+          campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
+          dispensaryTag: cleanData['dispensaryTag']?.toString(),
+          serial: s,
+        );
         await db
             .collection('branches').doc(effectiveBranchId)
-            .collection('dispensary').doc(dk)
-            .collection(dk).doc(s)
-            .set(cleanData, SetOptions(merge: true));
-        debugPrint('✅ save_dispensary_record → dispensary/$dk/$dk/$s');
+            .collection('dispensary_charges').doc(dk)
+            .collection('charges').doc(s)
+            .set({...cleanData, 'queueType': effectiveQueueType}, SetOptions(merge: true));
+        await db
+            .collection('branches').doc(effectiveBranchId)
+            .collection('serials').doc(campDocKey)
+            .collection(effectiveQueueType).doc(s)
+            .set({'daysOfMedicine': (cleanData['daysOfMedicine'] as num?)?.toInt() ?? 1}, SetOptions(merge: true));
+        debugPrint('✅ save_dispensary_charge → charges/$dk/$s');
         break;
 
-      // ── Serial status patch ───────────────────────────────────────────────
-      // FIX-C: queueType is now always resolved at op level before reaching here
+      // ── Dispensary record / Serial status patch ───────────────────────────
+      case 'save_dispensary_record':
       case 'update_serial_status':
-        final s  = effectiveSerial.isNotEmpty
-            ? effectiveSerial
-            : (cleanData['serial'] as String? ?? '');
-        final dk = effectiveDateKey.isNotEmpty
-            ? effectiveDateKey
-            : (cleanData['dateKey'] as String? ?? '');
-        final qt = effectiveQueueType; // already canonical
-        if (s.isEmpty || dk.isEmpty) {
-          throw Exception(
-              'update_serial_status: missing serial ($s) or dateKey ($dk)');
-        }
+        final s  = effectiveSerial;
+        final dk = effectiveDateKey;
+        final qt = effectiveQueueType;
+        if (s.isEmpty) throw Exception('update_serial_status: missing serial');
+
         final statusPatch = {
           'dispenseStatus': cleanData['dispenseStatus'] ?? 'dispensed',
+          'status': 'completed',
           if (cleanData['dispensedAt'] != null)
             'dispensedAt': cleanData['dispensedAt'],
           if (cleanData['dispensedBy'] != null)
             'dispensedBy': cleanData['dispensedBy'],
+          if (cleanData['completedAt'] != null)
+            'completedAt': cleanData['completedAt'],
         };
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: effectiveBranchId,
+          dateKey: dk,
+          campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
+          dispensaryTag: cleanData['dispensaryTag']?.toString(),
+          serial: s,
+        );
         await db
             .collection('branches').doc(effectiveBranchId)
-            .collection('serials').doc(dk)
+            .collection('serials').doc(campDocKey)
             .collection(qt).doc(s)
             .set(statusPatch, SetOptions(merge: true));
-        debugPrint('✅ update_serial_status → serials/$dk/$qt/$s');
+        debugPrint('✅ update_serial_status → serials/$campDocKey/$qt/$s');
         break;
 
       // ── Delete patient ───────────────────────────────────────────────────
       case 'delete_patient':
-        final pid = (cleanData['patientId'] as String? ?? '').trim();
+        final pid = (cleanData['patientId'] as String? ?? cleanData['id'] as String? ?? '').trim();
         if (pid.isEmpty) throw Exception('delete_patient: missing patientId');
         await db
             .collection('branches').doc(effectiveBranchId)
@@ -3008,11 +3869,15 @@ class ServerSyncManager {
         debugPrint('✅ delete_patient → patients/$pid');
         break;
 
-      // FIX-D: inventory deduction ──────────────────────────────────────────
+      // ── Fast Atomic Inventory Update ─────────────────────────────────────
       case 'update_inventory':
+      case 'add_inventory_stock':
+      case 'register_medicine':
+      case 'add_stock':
+      case 'add_proforma_stock':
         final mid = medicineId.isNotEmpty
             ? medicineId
-            : (cleanData['medicineId'] as String? ?? '').trim();
+            : (cleanData['medicineId'] as String? ?? cleanData['id'] as String? ?? '').trim();
         if (mid.isEmpty) {
           debugPrint('⚠️ update_inventory: missing medicineId — skipping');
           return;
@@ -3021,28 +3886,148 @@ class ServerSyncManager {
             ? delta
             : (cleanData['delta'] is num
                 ? (cleanData['delta'] as num).toDouble()
-                : double.tryParse(cleanData['delta']?.toString() ?? '') ?? 0.0);
+                : double.tryParse(cleanData['delta']?.toString() ?? cleanData['quantity']?.toString() ?? '') ?? 0.0);
         final invCol = CampSessionService.getCampInventoryPath(
           branchId: effectiveBranchId,
           campId: cleanData['campId']?.toString() ?? cleanData['dispensaryId']?.toString(),
           serial: cleanData['serial']?.toString(),
         );
+
         final docRef = db
             .collection('branches').doc(effectiveBranchId)
             .collection(invCol).doc(mid);
-        await db.runTransaction((transaction) async {
-          final snapshot = await transaction.get(docRef);
-          if (snapshot.exists) {
-            final current = (snapshot.data()?['quantity'] as num?)?.toDouble() ?? 0.0;
-            final updated = (current + d).clamp(0.0, double.infinity);
-            transaction.update(docRef, {'quantity': updated});
-          }
-        });
+
+        if (d != 0.0) {
+          await docRef.set({
+            'quantity': FieldValue.increment(d),
+            'lastUpdated': FieldValue.serverTimestamp(),
+            if (cleanData.containsKey('medicineName')) 'medicineName': cleanData['medicineName'],
+            if (cleanData.containsKey('category')) 'category': cleanData['category'],
+            if (cleanData.containsKey('unit')) 'unit': cleanData['unit'],
+          }, SetOptions(merge: true));
+        } else {
+          await docRef.set(cleanData, SetOptions(merge: true));
+        }
         debugPrint('✅ update_inventory → $invCol/$mid delta=$d');
         break;
 
+      // ── Attendance record sync ────────────────────────────────────────────
+      case 'save_attendance':
+      case 'save_attendance_record':
+      case 'save_biometric_log':
+      case 'save_employee_attendance':
+      case 'save_faculty_attendance':
+      case 'save_student_attendance':
+        final empId = (cleanData['employeeId'] ?? cleanData['entityId'] ?? cleanData['id'] ?? cleanData['pin'] ?? '').toString().trim();
+        final dtKey = effectiveDateKey.isNotEmpty
+            ? effectiveDateKey
+            : (cleanData['date'] ?? cleanData['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString().trim();
+        if (empId.isEmpty || dtKey.isEmpty) {
+          throw Exception('save_attendance: missing employeeId ($empId) or dateKey ($dtKey)');
+        }
+        await db
+            .collection('branches').doc(effectiveBranchId)
+            .collection('employee_attendance').doc(dtKey)
+            .set({'date': dtKey, 'branchId': effectiveBranchId, 'lastUpdated': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        await db
+            .collection('branches').doc(effectiveBranchId)
+            .collection('employee_attendance').doc(dtKey)
+            .collection('records').doc(empId)
+            .set(cleanData, SetOptions(merge: true));
+        debugPrint('✅ save_attendance → branches/$effectiveBranchId/employee_attendance/$dtKey/records/$empId');
+        break;
+
+      // ── Donations Module sync ─────────────────────────────────────────────
+      case 'save_donation':
+      case 'update_donation':
+        final donationId = (cleanData['id'] ?? cleanData['donationId'] ?? cleanData['receiptNumber'] ?? '').toString().trim();
+        if (donationId.isEmpty) throw Exception('save_donation: missing donationId');
+        await db.collection('donations').doc(donationId).set(cleanData, SetOptions(merge: true));
+        await db.collection('branches').doc(effectiveBranchId).collection('donations').doc(donationId).set(cleanData, SetOptions(merge: true));
+        debugPrint('✅ save_donation → donations/$donationId');
+        break;
+
+      case 'delete_donation':
+        final donationId = (cleanData['id'] ?? cleanData['donationId'] ?? '').toString().trim();
+        if (donationId.isNotEmpty) {
+          await db.collection('donations').doc(donationId).delete();
+          await db.collection('branches').doc(effectiveBranchId).collection('donations').doc(donationId).delete();
+        }
+        break;
+
+      // ── Finance & Expenses Module sync ────────────────────────────────────
+      case 'save_expense':
+      case 'void_expense':
+        final expenseId = (cleanData['id'] ?? cleanData['expenseId'] ?? '').toString().trim();
+        if (expenseId.isEmpty) throw Exception('save_expense: missing expenseId');
+        await db.collection('branches').doc(effectiveBranchId).collection('expenses').doc(expenseId).set(cleanData, SetOptions(merge: true));
+        debugPrint('✅ save_expense → expenses/$expenseId');
+        break;
+
+      case 'save_salary_history':
+        final recordId = (cleanData['id'] ?? cleanData['employeeId'] ?? '').toString().trim();
+        if (recordId.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection('salary_history').doc(recordId).set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
+      case 'save_finance_loan':
+        final loanId = (cleanData['id'] ?? cleanData['loanId'] ?? '').toString().trim();
+        if (loanId.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection('loans').doc(loanId).set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
+      // ── Madrassa Module sync ──────────────────────────────────────────────
+      case 'save_madrassa_student':
+      case 'save_madrassa_admission':
+      case 'update_madrassa_student':
+        final studentId = (cleanData['studentId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (studentId.isNotEmpty) {
+          final payload = Map<String, dynamic>.from(cleanData);
+          if (payload['joinDate'] is String) {
+            final parsed = DateTime.tryParse(payload['joinDate'] as String);
+            if (parsed != null) payload['joinDate'] = Timestamp.fromDate(parsed);
+          }
+          payload['lastUpdatedAt'] = FieldValue.serverTimestamp();
+          await db.collection('branches').doc(effectiveBranchId).collection('madrassa_students').doc(studentId).set(payload, SetOptions(merge: true));
+        }
+        break;
+
+      case 'delete_madrassa_student':
+      case 'offboard_madrassa_student':
+        final studentId = (cleanData['studentId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (studentId.isNotEmpty) {
+          final status = cleanData['status']?.toString() ?? 'left';
+          await db.collection('branches').doc(effectiveBranchId).collection('madrassa_students').doc(studentId).set({
+            'status': status,
+            'batch': status,
+            'lastUpdatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+        break;
+
+      case 'save_madrassa_log':
+        final studentId = (cleanData['studentId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (studentId.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection('madrassa_students').doc(studentId).set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
+      // ── Token Exception Requests ──────────────────────────────────────────
+      case 'save_token_exception_request':
+      case 'approve_token_exception':
+        final reqId = (cleanData['id'] ?? cleanData['requestId'] ?? '').toString().trim();
+        if (reqId.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection('token_exceptions').doc(reqId).set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
       default:
-        debugPrint('⚠️ Unknown sync type "$type" — skipping');
+        debugPrint('ℹ️ [SSM] Generic sync type "$type" — saving to branches/$effectiveBranchId/records');
+        final recordId = (cleanData['id'] ?? cleanData['key'] ?? DateTime.now().millisecondsSinceEpoch.toString()).toString();
+        await db.collection('branches').doc(effectiveBranchId).collection('sync_records').doc(recordId).set(cleanData, SetOptions(merge: true));
+        break;
     }
   }
 
@@ -3068,6 +4053,19 @@ class ServerSyncManager {
 
   Future<void> stop() async {
     _syncTimer?.cancel();
+    _catchUpTimer?.cancel();
+    _clientSeenSerials.clear();
+
+    if (_prevOnClientConnected != null) {
+      server.onClientConnected = _prevOnClientConnected;
+    }
+    if (_prevOnClientDisconnected != null) {
+      server.onClientDisconnected = _prevOnClientDisconnected;
+    }
+    _prevOnClientConnected = null;
+    _prevOnClientDisconnected = null;
+
     debugPrint('ServerSyncManager: Stopped');
   }
 }
+

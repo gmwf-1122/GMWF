@@ -10,6 +10,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:uuid/uuid.dart';
+import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/tools/legacy_data_migration_adapter.dart';
 
@@ -22,6 +23,8 @@ void main() {
     await Hive.openBox(LocalStorageService.syncBox);
     await Hive.openBox(LocalStorageService.patientsBox);
     await Hive.openBox(LocalStorageService.donationsBox);
+    await Hive.openBox(LocalStorageService.entriesBox);
+    await Hive.openBox(LocalStorageService.prescriptionsBox);
     await Hive.openBox('submissions');
     await Hive.openBox('app_flags');
     await Hive.openBox('app_settings');
@@ -38,9 +41,52 @@ void main() {
     await Hive.box(LocalStorageService.syncBox).clear();
     await Hive.box(LocalStorageService.patientsBox).clear();
     await Hive.box(LocalStorageService.donationsBox).clear();
+    await Hive.box(LocalStorageService.entriesBox).clear();
+    await Hive.box(LocalStorageService.prescriptionsBox).clear();
     await Hive.box('submissions').clear();
     await Hive.box('app_flags').clear();
     await Hive.box('app_settings').clear();
+  });
+
+  test('TEST 0: Dispensed entry sets completed and preserves prescription history', () async {
+    final entryKey = 'karachi-010926-grt-003';
+    final entriesBox = Hive.box(LocalStorageService.entriesBox);
+    final orig = {
+      'serial': '010926-GRT-003',
+      'branchId': 'karachi',
+      'patientName': 'Javaid Iqbal',
+      'status': 'completed',
+      'dispenseStatus': 'waiting',
+      'prescription': {
+        'serial': '010926-GRT-003',
+        'prescriptions': [
+          {'name': 'Panadol', 'quantity': 1}
+        ],
+      },
+      'prescriptions': [
+        {'name': 'Panadol', 'quantity': 1}
+      ],
+      'dateKey': '010926',
+    };
+
+    await entriesBox.put(entryKey, orig);
+    await entriesBox.put('karachi-010926-grt-003', orig);
+
+    await LocalStorageService.updateDispenseStatus('karachi', '010926-GRT-003', 'dispensed');
+
+    final updated = entriesBox.get(entryKey) as Map;
+    expect(updated['dispenseStatus'], equals('dispensed'));
+    expect(updated['status'], equals('completed'));
+    expect(updated['prescription'], isNotNull);
+  });
+
+  test('Inventory delete action is only visible for Chairman and HQ Manager roles', () {
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'Chairman'}), isTrue);
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'HQ Manager'}), isTrue);
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'hq_manager'}), isTrue);
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'Doctor'}), isFalse);
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'Receptionist'}), isFalse);
+    expect(InventoryPage.canDeleteInventoryItemFromRole({'role': 'Dispenser'}), isFalse);
   });
 
   // ══════════════════════════════════════════════════════════════════════════

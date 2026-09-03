@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../constants/colors.dart';
+import '../../../theme/role_theme_provider.dart';
 import '../donations_shared.dart';
 
 class DashboardActionTile extends StatefulWidget {
@@ -27,6 +28,7 @@ class _DashboardActionTileState extends State<DashboardActionTile> {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -44,12 +46,12 @@ class _DashboardActionTileState extends State<DashboardActionTile> {
             decoration: BoxDecoration(
               color: widget.isActive
                   ? widget.color.withValues(alpha: _isHovered ? 0.08 : 0.06)
-                  : (_isHovered ? widget.color.withValues(alpha: 0.03) : Colors.white),
+                  : (_isHovered ? widget.color.withValues(alpha: 0.03) : t.bgCard),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: widget.isActive
                     ? widget.color.withValues(alpha: _isHovered ? 0.6 : 0.4)
-                    : (_isHovered ? widget.color.withValues(alpha: 0.3) : const Color(0x0A000000)),
+                    : (_isHovered ? widget.color.withValues(alpha: 0.3) : t.bgRule),
                 width: widget.isActive || _isHovered ? 1.5 : 1.0,
               ),
               boxShadow: [
@@ -100,7 +102,7 @@ class _DashboardActionTileState extends State<DashboardActionTile> {
                       fontWeight: FontWeight.w800,
                       color: widget.isActive
                           ? widget.color
-                          : (_isHovered ? widget.color : AppColors.gray800),
+                          : (_isHovered ? widget.color : t.textPrimary),
                       letterSpacing: 0.2,
                     ),
                     overflow: TextOverflow.ellipsis,

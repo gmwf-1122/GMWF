@@ -7,9 +7,13 @@ import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'package:gmwf/pages/dispensary/doctor/patient_history.dart';
 import 'dart:async';
+import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/theme/role_theme_provider.dart';
 import 'package:gmwf/theme/app_theme.dart';
 import 'package:gmwf/widgets/app_back_button.dart';
+import 'package:gmwf/widgets/app_skeleton.dart';
+import 'package:gmwf/utils/formatters.dart';
+import 'package:gmwf/services/staff_patient_link_service.dart';
 
 class PatientDetailScreen extends StatefulWidget {
   final String patientId;
@@ -51,6 +55,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   String? _selectedStatus;
   String? branchName;
 
+  late String _currentPatientId;
+  Map<String, dynamic>? _currentPatientData;
+
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
 
@@ -63,10 +70,20 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   @override
   void initState() {
     super.initState();
+    _currentPatientId = widget.patientId;
+    _loadLocalPatientData();
     _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
     _fetchBranchName();
+  }
+
+  void _loadLocalPatientData() {
+    final local = LocalStorageService.getLocalPatient(_currentPatientId) ??
+        LocalStorageService.getLocalPatientByCnic(_currentPatientId);
+    if (local != null) {
+      _currentPatientData = local;
+    }
   }
 
   @override
@@ -86,11 +103,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   }
 
   Stream<DocumentSnapshot> _patientStream() => _firestore
-      .collection('branches').doc(widget.branchId.toLowerCase()).collection('patients').doc(widget.patientId).snapshots();
+      .collection('branches').doc(widget.branchId.toLowerCase()).collection('patients').doc(_currentPatientId).get().asStream();
 
   Stream<QuerySnapshot> _childrenStream(String? cnic) => _firestore
       .collection('branches').doc(widget.branchId.toLowerCase()).collection('patients')
-      .where('guardianCnic', isEqualTo: cnic).where('isAdult', isEqualTo: false).snapshots();
+      .where('guardianCnic', isEqualTo: cnic).where('isAdult', isEqualTo: false).limit(10).get().asStream();
 
   Future<DocumentSnapshot?> _getGuardian(String? guardianCnic) async {
     if (guardianCnic == null || guardianCnic.trim().isEmpty || guardianCnic == 'Unknown') return null;
@@ -230,12 +247,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                       formatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
                         LengthLimitingTextInputFormatter(10), _DobFormatter()],
                       onChanged: (v) {
-                        if (RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v)) {
-                          final p = v.split('-');
-                          final birth = DateTime(int.parse(p[2]), int.parse(p[1]), int.parse(p[0]));
+                        final parsed = parseDobDateTime(v);
+                        if (parsed != null) {
                           final today = DateTime.now();
-                          int age = today.year - birth.year;
-                          if (today.month < birth.month || (today.month == birth.month && today.day < birth.day)) age--;
+                          int age = today.year - parsed.year;
+                          if (today.month < parsed.month || (today.month == parsed.month && today.day < parsed.day)) age--;
                           _ageController.text = age.toString();
                         }
                       },
@@ -290,29 +306,54 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   Future<void> _savePatient(BuildContext ctx, GlobalKey<FormState> key, bool isAdult) async {
     if (!key.currentState!.validate()) return;
     final updates = <String, dynamic>{
-      'name': _nameController.text.trim(), 'phone': _phoneController.text.trim(),
-      'gender': _selectedGender, 'bloodGroup': _selectedBloodGroup ?? 'N/A',
+      'name': _nameController.text.trim(),
+      'patientName': _nameController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'gender': _selectedGender,
+      'bloodGroup': _selectedBloodGroup ?? 'N/A',
       'status': _selectedStatus ?? 'Zakat',
       'age': int.tryParse(_ageController.text) ?? 0,
       'isAdult': (int.tryParse(_ageController.text) ?? 0) >= 18,
     };
+    final newCnic = _cnicController.text.trim();
+    final newGuardianCnic = _guardianCnicController.text.trim();
     if (updates['isAdult'] == true) {
-      updates['cnic'] = _cnicController.text.trim();
+      updates['cnic'] = newCnic;
+      updates['patientCnic'] = newCnic;
       updates['guardianCnic'] = null;
     } else {
-      updates['guardianCnic'] = _guardianCnicController.text.trim();
+      updates['guardianCnic'] = newGuardianCnic;
       updates['cnic'] = null;
     }
     if (_dobController.text.isNotEmpty) {
-      final p = _dobController.text.split('-');
-      updates['dob'] = Timestamp.fromDate(DateTime(int.parse(p[2]), int.parse(p[1]), int.parse(p[0])));
+      final parsedDob = parseDobDateTime(_dobController.text);
+      if (parsedDob != null) {
+        updates['dob'] = Timestamp.fromDate(parsedDob);
+      }
     }
+    updates['branchId'] = widget.branchId.toLowerCase();
+
+    // 1. Save & migrate CNIC atomically across local storage and active entries
+    String updatedKey = _currentPatientId;
     try {
-      await _firestore.collection('branches').doc(widget.branchId.toLowerCase())
-          .collection('patients').doc(widget.patientId).update(updates);
-      _snack('Patient updated successfully!', success: true);
-      if (mounted) Navigator.pop(ctx);
-    } catch (e) { _snack('Error: $e', error: true); }
+      updatedKey = await LocalStorageService.updatePatientWithCnicMigration(
+        oldPatientId: _currentPatientId,
+        updatedPatient: updates,
+        oldCnic: _currentPatientData?['cnic']?.toString() ?? _currentPatientData?['guardianCnic']?.toString(),
+      );
+    } catch (e) {
+      debugPrint('[PatientDetail] Local save error: $e');
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentPatientId = updatedKey;
+        _currentPatientData = updates;
+      });
+    }
+
+    _snack('Patient details & CNIC updated instantly!', success: true);
+    if (ctx.mounted) Navigator.pop(ctx);
   }
 
   Future<void> _addPrescription() async {
@@ -340,6 +381,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   void _deletePatient(RoleThemeData t) async {
     if (!await _checkPassword(t)) return;
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => Dialog(
@@ -406,17 +448,27 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       body: StreamBuilder<DocumentSnapshot>(
         stream: _patientStream(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.error_outline_rounded, size: 48, color: t.danger.withValues(alpha: 0.6)),
-              const SizedBox(height: 12),
-              Text('Error loading patient', style: TextStyle(fontWeight: FontWeight.w600, color: t.textSecondary)),
-            ]));
+          final localData = _currentPatientData ?? LocalStorageService.getLocalPatient(_currentPatientId);
+          Map<String, dynamic>? data;
+
+          if (snapshot.hasData && snapshot.data!.exists) {
+            data = snapshot.data!.data() as Map<String, dynamic>;
+            _currentPatientData = data;
+          } else if (localData != null) {
+            data = localData;
           }
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator(color: t.accent));
-          }
-          if (!snapshot.hasData || !snapshot.data!.exists) {
+
+          if (data == null) {
+            if (snapshot.hasError) {
+              return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.error_outline_rounded, size: 48, color: t.danger.withValues(alpha: 0.6)),
+                const SizedBox(height: 12),
+                Text('Error loading patient', style: TextStyle(fontWeight: FontWeight.w600, color: t.textSecondary)),
+              ]));
+            }
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const PatientDetailSkeleton();
+            }
             return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.person_off_outlined, size: 48, color: t.textTertiary),
               const SizedBox(height: 12),
@@ -424,13 +476,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             ]));
           }
 
-          final data = snapshot.data!.data() as Map<String, dynamic>;
           return FadeTransition(
             opacity: _fadeAnim,
             child: LayoutBuilder(builder: (context, constraints) {
               return constraints.maxWidth > 700
-                  ? _wideLayout(data, t)
-                  : _narrowLayout(data, t);
+                  ? _wideLayout(data!, t)
+                  : _narrowLayout(data!, t);
             }),
           );
         },
@@ -439,259 +490,395 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   }
 
   Widget _wideLayout(Map<String, dynamic> data, RoleThemeData t) {
-    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(width: 340, child: CustomScrollView(slivers: [
-        _buildSliverAppBar(data, t),
-        SliverPadding(padding: const EdgeInsets.all(16),
-            sliver: SliverList(delegate: SliverChildListDelegate(_buildInfoWidgets(data, t)))),
-      ])),
-      VerticalDivider(width: 1, color: t.bgRule),
-      Expanded(child: _buildHistoryPanel(data, t)),
-    ]);
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: _buildTopBar(data, t),
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Left Column: Patient Profile & Details (Scrollable)
+          SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 16),
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: _buildInfoWidgets(data, t),
+              ),
+            ),
+          ),
+          VerticalDivider(width: 1, color: t.bgRule),
+          // Right Column: Visit History & Prescriptions
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 12, 16, 16),
+              child: _buildHistoryPanel(data, t),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _narrowLayout(Map<String, dynamic> data, RoleThemeData t) {
-    return CustomScrollView(
-      physics: const BouncingScrollPhysics(),
-      slivers: [
-        _buildSliverAppBar(data, t),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: Column(
-              children: [
-                ..._buildInfoWidgets(data, t),
-                const SizedBox(height: 20),
-                Text(
-                  'Medical History & Visits',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: t.textPrimary,
-                    letterSpacing: -0.3,
-                  ),
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: _buildTopBar(data, t),
+      body: SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          children: [
+            ..._buildInfoWidgets(data, t),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 600,
+              child: _buildHistoryPanel(data, t),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildTopBar(Map<String, dynamic> data, RoleThemeData t) {
+    final name = data['name'] ?? 'Patient';
+    final age = data['age']?.toString() ?? '?';
+    final gender = data['gender'] ?? 'N/A';
+    final status = data['status'] as String? ?? 'Zakat';
+    final statusColor = _statusColors[status] ?? t.accent;
+
+    return AppBar(
+      elevation: 0,
+      backgroundColor: t.bgCard,
+      surfaceTintColor: Colors.transparent,
+      automaticallyImplyLeading: false,
+      leading: Navigator.canPop(context)
+          ? AppBackButton(color: t.textPrimary)
+          : null,
+      titleSpacing: Navigator.canPop(context) ? 0 : 16,
+      title: Row(
+        children: [
+          // Avatar
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [t.accent, t.accentLight],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: 0.25),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
-                const SizedBox(height: 12),
+              ],
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              name.trim().isEmpty ? '?' : name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase(),
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
+            ),
+          ),
+          const SizedBox(width: 12),
+          // Name & Badges
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: t.textPrimary,
+                          letterSpacing: -0.3,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: statusColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                      ),
+                      child: Text(
+                        status,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: statusColor,
+                        ),
+                      ),
+                    ),
+                    Builder(builder: (context) {
+                      final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
+                        cnic: data['cnic'] ?? data['guardianCnic'],
+                        name: data['name'],
+                      );
+                      if (staffInfo != null) {
+                        return Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: StaffPatientLinkService.buildStaffBadge(
+                            staffInfo,
+                            isDark: Theme.of(context).brightness == Brightness.dark,
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    }),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Text(
+                      '$gender • $age yrs',
+                      style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(Icons.location_on_outlined, size: 12, color: t.textTertiary),
+                    const SizedBox(width: 2),
+                    Flexible(
+                      child: Text(
+                        branchName ?? widget.branchId,
+                        style: TextStyle(fontSize: 11, color: t.textTertiary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
-        ),
-        SliverFillRemaining(
-          hasScrollBody: true,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: _buildHistoryPanel(data, t),
-          ),
-        ),
-      ],
+        ],
+      ),
+      actions: widget.isAdmin
+          ? [
+              IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: t.accentMuted,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.edit_outlined, size: 18, color: t.accent),
+                ),
+                tooltip: 'Edit Patient',
+                onPressed: () => _showEditDialog(data, t),
+              ),
+              IconButton(
+                icon: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: t.danger.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.delete_outline_rounded, size: 18, color: t.danger),
+                ),
+                tooltip: 'Delete Patient',
+                onPressed: () => _deletePatient(t),
+              ),
+              const SizedBox(width: 12),
+            ]
+          : null,
+      bottom: PreferredSize(
+        preferredSize: const Size.fromHeight(1),
+        child: Divider(height: 1, color: t.bgRule),
+      ),
     );
   }
 
   Widget _buildHistoryPanel(Map<String, dynamic> data, RoleThemeData t) {
     return Container(
       decoration: BoxDecoration(
-        color: t.bgCard, borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4))],
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
-      margin: const EdgeInsets.all(12),
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.bgRule))),
-          child: Row(children: [
-            Container(padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(10)),
-                child: Icon(Icons.history_rounded, color: t.accent, size: 18)),
-            const SizedBox(width: 10),
-            Text('Visit History', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary)),
-          ]),
-        ),
-        if (!widget.isAdmin)
-          Padding(padding: const EdgeInsets.fromLTRB(12, 12, 12, 0), child: _buildPrescriptionForm(t)),
-        Expanded(child: PatientHistory(
-          patientCnic: widget.patientId, branchId: widget.branchId, onRepeatLast: (visit) {},
-        )),
-      ]),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: t.bgRule)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: t.accentMuted,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.history_rounded, color: t.accent, size: 16),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Visit History',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: t.textPrimary),
+                ),
+              ],
+            ),
+          ),
+          if (!widget.isAdmin)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: _buildPrescriptionForm(t),
+            ),
+          Expanded(
+            child: PatientHistory(
+              branchId: widget.branchId,
+              patientData: data,
+              patientCnic: widget.patientId,
+              onRepeatLast: (visit) {},
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildPrescriptionForm(RoleThemeData t) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: t.accentMuted.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(14),
+        color: t.accentMuted.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: t.accent.withValues(alpha: 0.2)),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(Icons.note_add_rounded, color: t.accent, size: 17),
-          const SizedBox(width: 7),
-          Text('Add Prescription', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: t.textPrimary)),
-        ]),
-        const SizedBox(height: 10),
-        _prescField(t, _noteController, 'Note / Diagnosis', Icons.description_outlined, maxLines: 2),
-        const SizedBox(height: 8),
-        _prescField(t, _medicineController, 'Medicine', Icons.medication_outlined),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.save_rounded, size: 15),
-            label: const Text('Save Prescription', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-            onPressed: _addPrescription,
-            style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-          ),
-        ),
-      ]),
-    );
-  }
-
-  Widget _prescField(RoleThemeData t, TextEditingController ctrl, String hint, IconData icon, {int maxLines = 1}) {
-    return TextField(
-      controller: ctrl, maxLines: maxLines,
-      style: TextStyle(fontSize: 14, color: t.textPrimary),
-      decoration: InputDecoration(
-        hintText: hint, hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
-        prefixIcon: Icon(icon, color: t.textTertiary, size: 20),
-        filled: true, fillColor: t.bgCard,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      ),
-    );
-  }
-
-  SliverAppBar _buildSliverAppBar(Map<String, dynamic> data, RoleThemeData t) {
-    final name   = data['name'] ?? 'Patient';
-    final age    = data['age']?.toString() ?? '?';
-    final gender = data['gender'] ?? 'N/A';
-    final status = data['status'] as String? ?? '';
-    final statusColor = _statusColors[status] ?? t.accent;
-
-    return SliverAppBar(
-      expandedHeight: 220,
-      pinned: true,
-      backgroundColor: t.accent,
-      foregroundColor: Colors.white,
-      automaticallyImplyLeading: false,
-      leading: Navigator.canPop(context)
-          ? const AppBackButton(color: Colors.white)
-          : null,
-      actions: widget.isAdmin ? [
-        IconButton(
-          icon: Container(padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.edit_rounded, size: 18, color: Colors.white)),
-          onPressed: () => _patientStream().first.then((s) {
-            if (s.exists) _showEditDialog(s.data() as Map<String, dynamic>, t);
-          }),
-        ),
-        IconButton(
-          icon: Container(padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)),
-              child: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.white)),
-          onPressed: () => _deletePatient(t),
-        ),
-        const SizedBox(width: 8),
-      ] : null,
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                t.accent,
-                t.accent.withBlue(t.accent.blue + 20).withRed(t.accent.red - 10),
-                t.accentLight,
-              ],
-            ),
-          ),
-          child: Stack(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Positioned(
-                right: -40,
-                top: -40,
-                child: CircleAvatar(
-                  radius: 100,
-                  backgroundColor: Colors.white.withValues(alpha: 0.05),
-                ),
+              Icon(Icons.note_add_rounded, color: t.accent, size: 15),
+              const SizedBox(width: 6),
+              Text(
+                'Quick Prescription Note',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5, color: t.textPrimary),
               ),
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
-                  child: Row(children: [
-                    Container(width: 76, height: 76,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withValues(alpha: 0.15),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 3),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 12, offset: const Offset(0, 4)),
-                        ],
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        name.trim().isEmpty ? '?' : name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                    const SizedBox(width: 18),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Text(name, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5),
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                      const SizedBox(height: 8),
-                      Wrap(spacing: 8, runSpacing: 6, children: [
-                        Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20)),
-                            child: Text('$gender · $age yrs', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700))),
-                        if (status.isNotEmpty)
-                          Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-                              child: Text(status, style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w900))),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        Icon(Icons.location_on_rounded, color: Colors.white.withValues(alpha: 0.7), size: 12),
-                        const SizedBox(width: 4),
-                        Text(branchName ?? widget.branchId, style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12, fontWeight: FontWeight.w500)),
-                      ]),
-                    ])),
-                  ]),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _prescField(t, _noteController, 'Note / Diagnosis', Icons.description_outlined),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _prescField(t, _medicineController, 'Medicine (e.g. Paracetamol)', Icons.medication_outlined),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.save_rounded, size: 14),
+                label: const Text('Save', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12)),
+                onPressed: _addPrescription,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: t.accent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  elevation: 0,
                 ),
               ),
             ],
           ),
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _prescField(RoleThemeData t, TextEditingController ctrl, String hint, IconData icon) {
+    return TextField(
+      controller: ctrl,
+      style: TextStyle(fontSize: 13, color: t.textPrimary),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
+        prefixIcon: Icon(icon, color: t.textTertiary, size: 16),
+        filled: true,
+        fillColor: t.bgCard,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.accent, width: 1.5)),
       ),
     );
   }
 
   List<Widget> _buildInfoWidgets(Map<String, dynamic> data, RoleThemeData t) {
-    final isAdult    = data['isAdult'] == true;
-    final dobString  = data['dob'] is Timestamp
-        ? DateFormat('dd MMM yyyy').format((data['dob'] as Timestamp).toDate()) : 'N/A';
-    final joined     = _parseDate(data['createdAt']);
+    final isAdult = data['isAdult'] == true;
+    final dobString = data['dob'] is Timestamp
+        ? DateFormat('dd MMM yyyy').format((data['dob'] as Timestamp).toDate())
+        : 'N/A';
+    final joined = _parseDate(data['createdAt']);
 
     return [
-      const SizedBox(height: 4),
-      _card(t, 'Patient Info', Icons.person_outline_rounded, t.accent, [
-        _infoRow(t, 'Patient ID', widget.patientId, Icons.fingerprint_rounded),
-        _infoRow(t, 'Date of Birth', dobString, Icons.cake_outlined),
-        _infoRow(t, 'Blood Group', data['bloodGroup'] ?? 'N/A', Icons.bloodtype_outlined),
-        _infoRow(t, 'Status', data['status'] ?? 'N/A', Icons.mosque_rounded),
-        _infoRow(t, 'Phone', data['phone'] ?? 'N/A', Icons.phone_outlined),
-        if (isAdult)
-          _infoRow(t, 'CNIC', data['cnic'] ?? 'N/A', Icons.credit_card_outlined)
-        else
-          _infoRow(t, 'Guardian CNIC', data['guardianCnic'] ?? 'N/A', Icons.credit_card_outlined),
-        _infoRow(t, 'Branch', branchName ?? widget.branchId, Icons.location_on_outlined),
-        _infoRow(t, 'Joined', joined, Icons.calendar_today_outlined),
-      ]),
+      _card(
+        t,
+        'Patient Information',
+        Icons.badge_outlined,
+        t.accent,
+        [
+          _infoRowWithCopy(t, 'Patient ID', _currentPatientId, Icons.fingerprint_rounded),
+          _infoRow(t, 'Date of Birth', dobString, Icons.cake_outlined),
+          _infoRow(t, 'Blood Group', data['bloodGroup'] ?? 'N/A', Icons.bloodtype_outlined),
+          _infoRow(t, 'Status', data['status'] ?? 'N/A', Icons.mosque_rounded),
+          _infoRow(t, 'Phone', data['phone'] ?? 'N/A', Icons.phone_outlined),
+          if (isAdult)
+            _infoRowWithEdit(t, 'CNIC', data['cnic'] ?? 'N/A', Icons.credit_card_outlined, onEdit: () => _showEditDialog(data, t))
+          else
+            _infoRowWithEdit(t, 'Guardian CNIC', data['guardianCnic'] ?? 'N/A', Icons.credit_card_outlined, onEdit: () => _showEditDialog(data, t)),
+          _infoRow(t, 'Branch', branchName ?? widget.branchId, Icons.location_on_outlined),
+          _infoRow(t, 'Registered', joined, Icons.calendar_today_outlined),
+        ],
+        trailing: widget.isAdmin
+            ? InkWell(
+                onTap: () => _showEditDialog(data, t),
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.edit_rounded, size: 12, color: t.accent),
+                      const SizedBox(width: 4),
+                      Text('Edit Card', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.accent)),
+                    ],
+                  ),
+                ),
+              )
+            : null,
+      ),
       const SizedBox(height: 12),
       _buildFamilySection(data, t),
     ];
@@ -717,51 +904,185 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         future: _getGuardian(data['guardianCnic']),
         builder: (ctx, snap) {
           if (!snap.hasData || snap.data == null) {
-            return _card(t, 'Guardian', Icons.person_outlined, const Color(0xFF6A1B9A), [
+            return _card(t, 'Guardian Details', Icons.shield_outlined, const Color(0xFF6A1B9A), [
               _infoRow(t, 'Status', 'Ungrouped Child', Icons.info_outline_rounded),
             ]);
           }
           final gd = snap.data!.data() as Map<String, dynamic>;
-          return _card(t, 'Guardian', Icons.person_outlined, const Color(0xFF6A1B9A), [
-            _infoRow(t, 'Name', gd['name'] ?? 'N/A', Icons.person_outline_rounded),
+          return _card(t, 'Guardian Details', Icons.shield_outlined, const Color(0xFF6A1B9A), [
+            _infoRow(t, 'Guardian Name', gd['name'] ?? 'N/A', Icons.person_outline_rounded),
             _infoRow(t, 'Age', '${gd['age'] ?? '?'} yrs', Icons.calendar_today_outlined),
             _infoRow(t, 'Gender', gd['gender'] ?? 'N/A', Icons.wc_rounded),
+            _infoRow(t, 'CNIC', data['guardianCnic'] ?? 'N/A', Icons.credit_card_outlined),
           ]);
         },
       );
     }
   }
 
-  Widget _card(RoleThemeData t, String title, IconData icon, Color accent, List<Widget> children) {
+  Widget _card(RoleThemeData t, String title, IconData icon, Color accent, List<Widget> children, {Widget? trailing}) {
     return Container(
       decoration: BoxDecoration(
-        color: t.bgCard, borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 14, offset: const Offset(0, 4))],
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: t.bgRule, width: 1),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Padding(padding: const EdgeInsets.fromLTRB(14, 14, 14, 10), child: Row(children: [
-          Container(padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: accent.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
-              child: Icon(icon, color: accent, size: 17)),
-          const SizedBox(width: 10),
-          Text(title, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary)),
-        ])),
-        Divider(height: 1, color: t.bgRule),
-        Padding(padding: const EdgeInsets.all(14), child: Column(children: children)),
-      ]),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: accent, size: 15),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: t.textPrimary),
+                  ),
+                ),
+                if (trailing != null) trailing,
+              ],
+            ),
+          ),
+          Divider(height: 1, color: t.bgRule),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(children: children),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRowWithEdit(RoleThemeData t, String label, String value, IconData icon, {VoidCallback? onEdit}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, size: 14, color: t.textTertiary),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 95,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (widget.isAdmin && onEdit != null)
+            InkWell(
+              onTap: onEdit,
+              borderRadius: BorderRadius.circular(4),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.edit_rounded, size: 12, color: t.accent),
+                    const SizedBox(width: 3),
+                    Text('Edit', style: TextStyle(fontSize: 11, color: t.accent, fontWeight: FontWeight.w600)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
   Widget _infoRow(RoleThemeData t, String label, String value, IconData icon) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Icon(icon, size: 15, color: t.textTertiary),
-        const SizedBox(width: 8),
-        SizedBox(width: 100, child: Text(label, style: TextStyle(fontSize: 12, color: t.textSecondary, fontWeight: FontWeight.w500))),
-        Expanded(child: Text(value, style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600))),
-      ]),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, size: 14, color: t.textTertiary),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 95,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRowWithCopy(RoleThemeData t, String label, String value, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, size: 14, color: t.textTertiary),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 95,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
+            ),
+          ),
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontFamily: 'monospace',
+                      color: t.accent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: value));
+                    _snack('ID copied to clipboard', success: true);
+                  },
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.copy_rounded, size: 13, color: t.textTertiary),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 

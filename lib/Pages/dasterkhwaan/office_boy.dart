@@ -4,6 +4,7 @@
 // Palette  : Deep forest green hero · mint accent · white surfaces
 // Typography: Google Fonts – DM Serif Display (headings) + DM Sans (body)
 //
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -12,9 +13,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../widgets/gmwf_loading_view.dart';
 import '../donations/donations_screen.dart';
+import '../donations/donation_boxes_screen.dart';
+import '../donations/donors_registry.dart';
 import '../donations/donations_shared.dart';
 import '../../services/donations_local_storage.dart';
+import '../../services/donation_box_storage.dart';
+import '../../models/donation_box_models.dart';
+import '../../services/local_storage_service.dart';
 import '../../services/auth_service.dart';
+import '../../utils/formatters.dart';
+import '../settings_page.dart';
 
 // ─────────────────────────── Design Tokens ──────────────────────────────────
 
@@ -105,6 +113,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   String _userName = 'User';
   String? _branchId;
 
+  late PageController _pageController;
   final _qtyCtrl = TextEditingController(text: '1');
   final double _pricePerToken = 10.0;
 
@@ -135,6 +144,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   @override
   void initState() {
     super.initState();
+    _pageController = PageController(initialPage: _currentNav);
 
     _fadeCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
@@ -155,8 +165,44 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     }
   }
 
+  void _goToTab(int index) {
+    HapticFeedback.selectionClick();
+    setState(() => _currentNav = index);
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        index,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  String get _effectiveUserName {
+    final activeUser = LocalStorageService.getActiveUserData();
+    final resolved = resolveUserDisplayName(activeUser, fallback: '');
+    if (resolved.isNotEmpty && resolved != 'User' && resolved != 'Office Boy') {
+      return resolved;
+    }
+    if (widget.userName != null &&
+        widget.userName!.trim().isNotEmpty &&
+        widget.userName != 'User' &&
+        widget.userName != 'Office Boy') {
+      return widget.userName!.trim();
+    }
+    if (_userName.isNotEmpty && _userName != 'User' && _userName != 'Office Boy') {
+      return _userName;
+    }
+    final email = FirebaseAuth.instance.currentUser?.email;
+    if (email != null && email.contains('@')) {
+      final prefix = email.split('@').first;
+      if (prefix.isNotEmpty) return prefix[0].toUpperCase() + prefix.substring(1);
+    }
+    return 'Office Boy';
+  }
+
   @override
   void dispose() {
+    _pageController.dispose();
     _fadeCtrl.dispose();
     _pulseCtrl.dispose();
     _qtyCtrl.dispose();
@@ -177,9 +223,10 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         if (userDoc.exists) {
           final data = userDoc.data()!;
           setState(() {
-            _userName = data['username'] ??
-                user.email?.split('@').first ??
-                'Office Boy';
+            _userName = resolveUserDisplayName(
+              data,
+              fallback: data['username'] ?? user.email?.split('@').first ?? 'Office Boy',
+            );
             _branchId = branch.id;
           });
           return;
@@ -462,74 +509,221 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     ));
   }
 
+  Widget _buildPersistentHeader(BuildContext context) {
+    final activeData = LocalStorageService.getActiveUserData();
+    final branchName = activeData['branchName'] as String? ?? 'Gujrat';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      decoration: const BoxDecoration(
+        color: _DS.sage,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/logo/gmwf-1.webp',
+                  width: 36,
+                  height: 36,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'GMWF Dasterkhwaan',
+                          style: GoogleFonts.dmSans(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _DS.mint.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _DS.mint.withValues(alpha: 0.4), width: 0.5),
+                        ),
+                        child: Text(
+                          branchName,
+                          style: GoogleFonts.dmSans(
+                            color: _DS.mint,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _effectiveUserName,
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _SettingsButton(onTap: _openSettings),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final showDonations = _isOfficeBoy;
-    final activeNav = showDonations ? _currentNav : _currentNav.clamp(0, 2);
+    final activeNav = showDonations ? _currentNav.clamp(0, 5) : _currentNav.clamp(0, 2);
+
+    final views = [
+      _HomeScreen(
+        userName:        _effectiveUserName,
+        role:            widget.role,
+        branchId:        _branchId,
+        today:           today,
+        getTodayStats:   _getTodayStats,
+        onGoTokens:      () => _goToTab(1),
+        onReverseTokens: _showReverseTokensDialog,
+        onGoDonation:    () => _goToTab(2),
+        onGoDonors:      () => _goToTab(3),
+        onGoBoxes:       () => _goToTab(4),
+        onGoHistory:     () => _goToTab(showDonations ? 5 : 2),
+        onLogout:        _logout,
+        onSettings:      _openSettings,
+        heroFade:        _fadeAnim,
+        pricePerToken:   _pricePerToken,
+        isOfficeBoy:     showDonations,
+      ),
+      _TokensScreen(
+        userName:           _effectiveUserName,
+        branchId:           _branchId,
+        today:              today,
+        displayFormat:      _displayFmt,
+        quantityController: _qtyCtrl,
+        pricePerToken:      _pricePerToken,
+        onGenerate:         _generateTokens,
+        onReverse:          _showReverseTokensDialog,
+        pulseAnim:          _pulseAnim,
+        getTodayStats:      _getTodayStats,
+        onLogout:           _logout,
+        onSettings:         _openSettings,
+        showLogout:         showDonations,
+        onSelectQty: (qty) {
+          _qtyCtrl.text = qty.toString();
+          setState(() {});
+        },
+      ),
+      if (showDonations) ...[
+        // 2 – Donations
+        _branchId == null
+            ? const GmwfLoadingView()
+            : DonationsScreen.embedded(
+                branchId: _branchId!,
+                username: _effectiveUserName,
+                userId:   FirebaseAuth.instance.currentUser?.uid ?? '',
+                role:     UserRole.officeBoy,
+              ),
+        // 3 – Donors
+        _branchId == null
+            ? const GmwfLoadingView()
+            : DonorRegistryWidget(
+                branchId:   _branchId!,
+                branchName: (LocalStorageService.getActiveUserData()['branchName'] as String?) ?? 'Gujrat',
+              ),
+        // 4 – Donation Boxes
+        _branchId == null
+            ? const GmwfLoadingView()
+            : DonationBoxesWidget(
+                branchId:   _branchId!,
+                branchName: 'Dasterkhwaan',
+                username:   _effectiveUserName,
+                role:       UserRole.officeBoy,
+              ),
+      ],
+      // 5 (or 2 for non-office-boy) – History (always last)
+      _branchId == null
+          ? const GmwfLoadingView()
+          : _HistoryScreen(
+              branchId:      _branchId!,
+              dateFmt:       _dateFmt,
+              onLogout:      _logout,
+              onSettings:    _openSettings,
+              showLogout:    showDonations,
+              pricePerToken: _pricePerToken,
+            ),
+    ];
 
     return Scaffold(
       backgroundColor: _DS.bg,
-      body: IndexedStack(
-        index: activeNav,
+      body: Column(
         children: [
-          _HomeScreen(
-            userName:     _userName,
-            role:         widget.role,
-            branchId:     _branchId,
-            today:        today,
-            getTodayStats: _getTodayStats,
-            onGoTokens:   () => setState(() => _currentNav = 1),
-            onReverseTokens: _showReverseTokensDialog,
-            onGoHistory:  () => setState(() => _currentNav = 2),
-            onGoDonation: () => setState(() => _currentNav = 3),
-            onLogout:     _logout,
-            heroFade:     _fadeAnim,
-            pricePerToken: _pricePerToken,
-            isOfficeBoy:  showDonations,
+          _buildPersistentHeader(context),
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              physics: const BouncingScrollPhysics(),
+              onPageChanged: (idx) => setState(() => _currentNav = idx),
+              children: views,
+            ),
           ),
-          _TokensScreen(
-            userName:           _userName,
-            branchId:           _branchId,
-            today:              today,
-            displayFormat:      _displayFmt,
-            quantityController: _qtyCtrl,
-            pricePerToken:      _pricePerToken,
-            onGenerate:         _generateTokens,
-            onReverse:          _showReverseTokensDialog,
-            pulseAnim:          _pulseAnim,
-            getTodayStats:      _getTodayStats,
-            onLogout:           _logout,
-            showLogout:         showDonations,
-            onSelectQty: (qty) {
-              _qtyCtrl.text = qty.toString();
-              setState(() {});
-            },
-          ),
-          _branchId == null
-              ? const GmwfLoadingView()
-              : _HistoryScreen(
-                  branchId:     _branchId!,
-                  dateFmt:      _dateFmt,
-                  onLogout:     _logout,
-                  showLogout:   showDonations,
-                  pricePerToken: _pricePerToken,
-                ),
-          if (showDonations)
-            // 3 – Donations
-            _branchId == null
-                ? const GmwfLoadingView()
-                : DonationsScreen.embedded(
-                    branchId: _branchId!,
-                    username: _userName,
-                    userId:   FirebaseAuth.instance.currentUser?.uid ?? '',
-                    role:     UserRole.officeBoy,
-                  ),
         ],
       ),
       bottomNavigationBar: _buildBottomNav(showDonations: showDonations, currentIndex: activeNav),
     );
+  }
+
+  void _openSettings() {
+    final uData = LocalStorageService.getActiveUserData();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SettingsPage(userData: Map<String, dynamic>.from(uData)),
+      ),
+    ).then((_) {
+      final refreshed = LocalStorageService.getActiveUserData();
+      if (refreshed['name'] != null || refreshed['username'] != null) {
+        setState(() {
+          _userName = refreshed['name'] as String? ?? refreshed['username'] as String? ?? _userName;
+        });
+      }
+    });
   }
 
   Future<void> _logout() async {
@@ -545,19 +739,21 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
   Widget _buildBottomNav({required bool showDonations, required int currentIndex}) {
     final labels = showDonations
-        ? ['Home', 'Tokens', 'History', 'Donation']
+        ? ['Home', 'Tokens', 'Donations', 'Donors', 'Boxes', 'History']
         : ['Home', 'Tokens', 'History'];
     final icons = showDonations
         ? [
-            Icons.home_rounded,
-            Icons.credit_card_rounded,
-            Icons.access_time_rounded,
+            Icons.space_dashboard_rounded,
+            Icons.confirmation_number_rounded,
             Icons.volunteer_activism_rounded,
+            Icons.people_alt_rounded,
+            Icons.inventory_2_rounded,
+            Icons.history_rounded,
           ]
         : [
-            Icons.home_rounded,
-            Icons.credit_card_rounded,
-            Icons.access_time_rounded,
+            Icons.space_dashboard_rounded,
+            Icons.confirmation_number_rounded,
+            Icons.history_rounded,
           ];
 
     return Container(
@@ -568,39 +764,43 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(labels.length, (idx) {
               final sel = currentIndex == idx;
               return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  setState(() => _currentNav = idx);
-                },
+                onTap: () => _goToTab(idx),
                 behavior: HitTestBehavior.opaque,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 18, vertical: 9),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: sel ? _DS.sage : Colors.transparent,
                     borderRadius: BorderRadius.circular(_DS.r14),
                   ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(icons[idx],
-                        size: 20,
-                        color: sel ? Colors.white : _DS.ink3),
-                    if (sel) ...[
-                      const SizedBox(width: 7),
-                      Text(labels[idx],
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        icons[idx],
+                        size: 18,
+                        color: sel ? Colors.white : _DS.ink3,
+                      ),
+                      if (sel) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          labels[idx],
                           style: GoogleFonts.dmSans(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white)),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
                     ],
-                  ]),
+                  ),
                 ),
               );
             }),
@@ -621,7 +821,8 @@ class _HomeScreen extends StatelessWidget {
   final String? branchId;
   final String today;
   final Future<Map<String, dynamic>> Function() getTodayStats;
-  final VoidCallback onGoTokens, onReverseTokens, onGoHistory, onGoDonation, onLogout;
+  final VoidCallback onGoTokens, onReverseTokens, onGoHistory, onGoDonation, onLogout, onSettings;
+  final VoidCallback? onGoBoxes, onGoDonors;
   final Animation<double> heroFade;
   final double pricePerToken;
   final bool isOfficeBoy;
@@ -636,7 +837,10 @@ class _HomeScreen extends StatelessWidget {
     required this.onReverseTokens,
     required this.onGoHistory,
     required this.onGoDonation,
+    this.onGoDonors,
+    this.onGoBoxes,
     required this.onLogout,
+    required this.onSettings,
     required this.heroFade,
     required this.pricePerToken,
     this.isOfficeBoy = true,
@@ -661,6 +865,7 @@ class _HomeScreen extends StatelessWidget {
               greeting:  _greeting(),
               userName:  userName,
               onLogout:  onLogout,
+              onSettings: onSettings,
               badgeLabel: isOfficeBoy ? 'Office Boy' : (role ?? 'Office'),
               showLogout: isOfficeBoy,
             ),
@@ -716,7 +921,7 @@ class _HomeScreen extends StatelessWidget {
                 _SectionLabel('Quick Actions'),
                 const SizedBox(height: 12),
                 _ActionCardWide(
-                  icon:      Icons.credit_card_rounded,
+                  icon:      Icons.confirmation_number_rounded,
                   iconColor: _DS.mint,
                   iconBg:    _DS.mintBg,
                   title:     'Issue Tokens',
@@ -745,15 +950,35 @@ class _HomeScreen extends StatelessWidget {
                     urdu:      'عطیہ جمع کریں',
                     onTap:     onGoDonation,
                   ),
+                  const SizedBox(height: 10),
+                  _ActionCardWide(
+                    icon:      Icons.people_alt_rounded,
+                    iconColor: const Color(0xFF2563EB),
+                    iconBg:    const Color(0xFFEFF6FF),
+                    title:     'Registered Donors',
+                    subtitle:  'View & search donor database',
+                    urdu:      'رجسٹرڈ ڈونرز کی فہرست',
+                    onTap:     onGoDonors ?? () {},
+                  ),
+                  const SizedBox(height: 10),
+                  _ActionCardWide(
+                    icon:      Icons.inventory_2_rounded,
+                    iconColor: const Color(0xFF0D9488),
+                    iconBg:    const Color(0xFFCCFBF1),
+                    title:     'Donation Boxes',
+                    subtitle:  'Track & open collection boxes',
+                    urdu:      'ڈبہ جات کا ریکارڈ',
+                    onTap:     onGoBoxes ?? () {},
+                  ),
                 ],
                 const SizedBox(height: 10),
                 _ActionCardWide(
-                  icon:      Icons.calendar_month_rounded,
+                  icon:      Icons.history_rounded,
                   iconColor: _DS.purple,
                   iconBg:    _DS.purpleBg,
-                  title:     'Daily History',
-                  subtitle:  'Tokens & donations by date',
-                  urdu:      'روزانہ کا ریکارڈ دیکھیں',
+                  title:     'History & Reports',
+                  subtitle:  'Daily & monthly tokens, donations & boxes',
+                  urdu:      'روزانہ اور ماہانہ ریکارڈ',
                   onTap:     onGoHistory,
                 ),
               ],
@@ -794,6 +1019,7 @@ class _HeroHeader extends StatelessWidget {
   final String greeting;
   final String userName;
   final VoidCallback onLogout;
+  final VoidCallback onSettings;
   final String badgeLabel;
   final List<Color> gradientColors;
   final bool showLogout;
@@ -802,6 +1028,7 @@ class _HeroHeader extends StatelessWidget {
     required this.greeting,
     required this.userName,
     required this.onLogout,
+    required this.onSettings,
     required this.badgeLabel,
     this.gradientColors = const [_DS.sage, _DS.sage2],
     this.showLogout = true,
@@ -842,62 +1069,36 @@ class _HeroHeader extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 18, 24, 28),
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Top row: logo + logout
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Logo pill
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.10),
-                        borderRadius: BorderRadius.circular(_DS.r14),
-                        border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.15),
-                            width: 0.5),
+                    _UserAvatar(userName: userName, onTap: onSettings),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(greeting,
+                              style: GoogleFonts.dmSans(
+                                  color: Colors.white.withValues(alpha: 0.45),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w400)),
+                          const SizedBox(height: 2),
+                          Text(userName,
+                              style: GoogleFonts.dmSerifDisplay(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  height: 1.1)),
+                        ],
                       ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.asset(
-                            'assets/logo/gmwf-1.webp',
-                            width: 58, height: 58,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) => const Icon(
-                                Icons.restaurant_rounded,
-                                color: Colors.white70, size: 32),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Text('Office',
-                            style: GoogleFonts.dmSans(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700)),
-                      ]),
                     ),
-                    // Logout
-                    if (showLogout) _LogoutButton(onTap: onLogout),
                   ],
                 ),
-                const SizedBox(height: 28),
-                Text(greeting,
-                    style: GoogleFonts.dmSans(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w400)),
-                const SizedBox(height: 4),
-                Text(userName,
-                    style: GoogleFonts.dmSerifDisplay(
-                        color: Colors.white,
-                        fontSize: 30,
-                        height: 1.1)),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
                 Row(children: [
                   Container(
                     padding: const EdgeInsets.symmetric(
@@ -939,33 +1140,95 @@ class _HeroHeader extends StatelessWidget {
   }
 }
 
-// ─── Logout Button ──────────────────────────────────────────────────────────
-
-class _LogoutButton extends StatelessWidget {
+// ─── Settings Button ────────────────────────────────────────────────────────
+class _SettingsButton extends StatelessWidget {
   final VoidCallback onTap;
-  const _LogoutButton({required this.onTap});
+  const _SettingsButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
           decoration: BoxDecoration(
-            color: _DS.red.withValues(alpha: 0.15),
+            color: Colors.white.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(_DS.r12),
             border: Border.all(
-                color: _DS.red.withValues(alpha: 0.25), width: 0.5),
+                color: Colors.white.withValues(alpha: 0.22), width: 0.5),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.logout_rounded,
-                color: Color(0xFFFF8080), size: 15),
-            const SizedBox(width: 5),
-            Text('Logout',
+            const Icon(Icons.settings_outlined,
+                color: Colors.white, size: 15),
+            const SizedBox(width: 4),
+            Text('Settings',
                 style: GoogleFonts.dmSans(
-                    color: const Color(0xFFFF8080),
+                    color: Colors.white,
                     fontSize: 12,
                     fontWeight: FontWeight.w600)),
           ]),
+        ),
+      );
+}
+
+// ─── User Avatar ─────────────────────────────────────────────────────────────
+class _UserAvatar extends StatelessWidget {
+  final String userName;
+  final VoidCallback onTap;
+  const _UserAvatar({required this.userName, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final userData = LocalStorageService.getActiveUserData();
+    final photoStr = (userData['profileImage'] ?? userData['photoUrl'] ?? userData['profilePictureUrl']) as String?;
+    ImageProvider? imageProvider;
+    if (photoStr != null && photoStr.isNotEmpty) {
+      if (photoStr.startsWith('http://') || photoStr.startsWith('https://')) {
+        imageProvider = NetworkImage(photoStr);
+      } else {
+        try {
+          final cleanBase64 = photoStr.contains(',') ? photoStr.split(',').last : photoStr;
+          imageProvider = MemoryImage(base64Decode(cleanBase64));
+        } catch (_) {}
+      }
+    }
+
+    final initial = userName.trim().isNotEmpty ? userName.trim()[0].toUpperCase() : 'U';
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 50,
+        height: 50,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: ClipOval(
+          child: imageProvider != null
+              ? Image(image: imageProvider, fit: BoxFit.cover, errorBuilder: (_, _, _) => _fallback(initial))
+              : _fallback(initial),
+        ),
+      ),
+    );
+  }
+
+  Widget _fallback(String initial) => Container(
+        color: Colors.white.withValues(alpha: 0.20),
+        alignment: Alignment.center,
+        child: Text(
+          initial,
+          style: GoogleFonts.dmSans(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
         ),
       );
 }
@@ -1217,7 +1480,7 @@ class _TokensScreen extends StatelessWidget {
   final DateFormat displayFormat;
   final TextEditingController quantityController;
   final double pricePerToken;
-  final VoidCallback onGenerate, onReverse, onLogout;
+  final VoidCallback onGenerate, onReverse, onLogout, onSettings;
   final Animation<double> pulseAnim;
   final Future<Map<String, dynamic>> Function() getTodayStats;
   final void Function(int) onSelectQty;
@@ -1236,6 +1499,7 @@ class _TokensScreen extends StatelessWidget {
     required this.getTodayStats,
     required this.onSelectQty,
     required this.onLogout,
+    required this.onSettings,
     this.showLogout = true,
   });
 
@@ -1269,25 +1533,15 @@ class _TokensScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Issue Tokens',
-                                style: GoogleFonts.dmSerifDisplay(
-                                    color: Colors.white, fontSize: 24)),
-                            Text(
-                              'PKR ${pricePerToken.toInt()} per token · Branch',
-                              style: GoogleFonts.dmSans(
-                                  color: Colors.white.withValues(alpha: 0.40),
-                                  fontSize: 11),
-                            ),
-                          ],
-                        ),
-                        if (showLogout) _LogoutButton(onTap: onLogout),
-                      ],
+                    Text('Issue Tokens',
+                        style: GoogleFonts.dmSerifDisplay(
+                            color: Colors.white, fontSize: 24)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'PKR ${pricePerToken.toInt()} per token · Meal Distribution',
+                      style: GoogleFonts.dmSans(
+                          color: Colors.white.withValues(alpha: 0.50),
+                          fontSize: 12),
                     ),
                     const SizedBox(height: 20),
                     // Inline stats strip
@@ -1663,6 +1917,7 @@ class _HistoryScreen extends StatefulWidget {
   final String branchId;
   final DateFormat dateFmt;
   final VoidCallback onLogout;
+  final VoidCallback onSettings;
   final double pricePerToken;
   final bool showLogout;
 
@@ -1670,6 +1925,7 @@ class _HistoryScreen extends StatefulWidget {
     required this.branchId,
     required this.dateFmt,
     required this.onLogout,
+    required this.onSettings,
     required this.pricePerToken,
     this.showLogout = true,
   });
@@ -1680,86 +1936,162 @@ class _HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<_HistoryScreen> {
   DateTime _selectedDate = DateTime.now();
+  bool _isMonthView = false;
 
-  Future<Map<String, dynamic>> _fetchDayData(String dateKey) async {
-    final tokensSnap = await FirebaseFirestore.instance
-        .collection('branches').doc(widget.branchId)
-        .collection('dasterkhwaan').doc(dateKey)
-        .collection('tokens')
-        .get();
-
+  Future<Map<String, dynamic>> _fetchHistoryData() async {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    
-    // a. Get Local (Hive)
-    final localList = DonationsLocalStorage.getAllDonations(widget.branchId)
-        .where((d) => d.date == dateKey && d.collectorId == uid)
-        .toList();
+    final dateKey = widget.dateFmt.format(_selectedDate);
+    final monthKey = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}';
 
-    // b. Get Cloud (Global Collection)
-    final donationsSnap = await FirebaseFirestore.instance
-        .collection('branches')
-        .doc(widget.branchId)
-        .collection('donations')
-        .where('branchId', isEqualTo: widget.branchId)
-        .where('date', isEqualTo: dateKey)
-        .where('collectorId', isEqualTo: uid)
-        .get();
+    int totalTokens = 0;
+    int servedTokens = 0;
+    final List<Map<String, dynamic>> tokenList = [];
+    final List<Map<String, dynamic>> donationList = [];
+    final Set<String> seenDonationIds = {};
 
-    // c. Merge and deduplicate
-    final List<Map<String, dynamic>> mergedDonations = [];
-    final Set<String> seenIds = {};
+    if (!_isMonthView) {
+      // ── Day View ──
+      final tokensSnap = await FirebaseFirestore.instance
+          .collection('branches').doc(widget.branchId)
+          .collection('dasterkhwaan').doc(dateKey)
+          .collection('tokens')
+          .get();
 
-    for (var d in localList) {
-      mergedDonations.add({
-        'donorName':  d.donorName,
-        'amount':     d.amount,
-        'type':       d.categoryId,
-        'status':     d.status,
-        'syncStatus': d.syncStatus,
-        'localId':    d.localId,
-        'time':       DateTime.tryParse(d.timestamp ?? ''),
-      });
-      seenIds.add(d.localId);
-    }
+      totalTokens = tokensSnap.docs.length;
+      servedTokens = tokensSnap.docs
+          .where((d) => (d.data())['served'] == true)
+          .length;
 
-    for (var d in donationsSnap.docs) {
-      final data = d.data();
-      final lid = data['localId'] as String? ?? d.id;
-      if (!seenIds.contains(lid)) {
-        mergedDonations.add({
-          ...data,
-          'donorName':  data['donorName']  ?? 'Walk-in Donor',
-          'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
-          'type':       data['categoryId'] ?? 'GMWF',
-          'status':     data['status']     ?? 'pending',
-          'time':       (data['time']      as Timestamp?)?.toDate(),
+      tokenList.addAll(tokensSnap.docs.map((d) {
+        final data = d.data();
+        return {
+          'number':     data['number'] as int? ?? 0,
+          'served':     data['served'] as bool? ?? false,
+          'time':       (data['time'] as Timestamp?)?.toDate(),
+          'servedTime': (data['servedTime'] as Timestamp?)?.toDate(),
+        };
+      }).toList()
+        ..sort((a, b) => (a['number'] as int).compareTo(b['number'] as int)));
+
+      // Local Hive donations
+      final localList = DonationsLocalStorage.getAllDonations(widget.branchId)
+          .where((d) => d.date == dateKey && d.collectorId == uid)
+          .toList();
+      for (var d in localList) {
+        donationList.add({
+          'donorName':  d.donorName,
+          'amount':     d.amount,
+          'type':       d.categoryId,
+          'status':     d.status,
+          'syncStatus': d.syncStatus,
+          'localId':    d.localId,
+          'time':       DateTime.tryParse(d.timestamp ?? ''),
         });
+        seenDonationIds.add(d.localId);
+      }
+
+      // Cloud donations
+      final donationsSnap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('donations')
+          .where('branchId', isEqualTo: widget.branchId)
+          .where('date', isEqualTo: dateKey)
+          .where('collectorId', isEqualTo: uid)
+          .get();
+
+      for (var d in donationsSnap.docs) {
+        final data = d.data();
+        final lid = data['localId'] as String? ?? d.id;
+        if (!seenDonationIds.contains(lid)) {
+          donationList.add({
+            ...data,
+            'donorName':  data['donorName']  ?? 'Walk-in Donor',
+            'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
+            'type':       data['categoryId'] ?? 'GMWF',
+            'status':     data['status']     ?? 'pending',
+            'time':       (data['time']      as Timestamp?)?.toDate(),
+          });
+        }
+      }
+    } else {
+      // ── Month View ──
+      // Aggregate days in month
+      final daysInMonth = DateTime(_selectedDate.year, _selectedDate.month + 1, 0).day;
+      for (int day = 1; day <= daysInMonth; day++) {
+        final dStr = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches').doc(widget.branchId)
+              .collection('dasterkhwaan').doc(dStr)
+              .collection('tokens')
+              .get();
+          totalTokens += snap.docs.length;
+          servedTokens += snap.docs.where((d) => (d.data())['served'] == true).length;
+        } catch (_) {}
+      }
+
+      // Local Hive donations for month
+      final localList = DonationsLocalStorage.getAllDonations(widget.branchId)
+          .where((d) => d.date.startsWith(monthKey) && d.collectorId == uid)
+          .toList();
+      for (var d in localList) {
+        donationList.add({
+          'donorName':  d.donorName,
+          'amount':     d.amount,
+          'type':       d.categoryId,
+          'status':     d.status,
+          'syncStatus': d.syncStatus,
+          'localId':    d.localId,
+          'time':       DateTime.tryParse(d.timestamp ?? ''),
+        });
+        seenDonationIds.add(d.localId);
+      }
+
+      // Cloud donations for month
+      final donationsSnap = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('donations')
+          .where('branchId', isEqualTo: widget.branchId)
+          .where('collectorId', isEqualTo: uid)
+          .get();
+
+      for (var d in donationsSnap.docs) {
+        final data = d.data();
+        final dtStr = data['date']?.toString() ?? '';
+        if (dtStr.startsWith(monthKey)) {
+          final lid = data['localId'] as String? ?? d.id;
+          if (!seenDonationIds.contains(lid)) {
+            donationList.add({
+              ...data,
+              'donorName':  data['donorName']  ?? 'Walk-in Donor',
+              'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
+              'type':       data['categoryId'] ?? 'GMWF',
+              'status':     data['status']     ?? 'pending',
+              'time':       (data['time']      as Timestamp?)?.toDate(),
+            });
+          }
+        }
       }
     }
 
-    final totalTokens  = tokensSnap.docs.length;
-    final servedTokens = tokensSnap.docs
-        .where((d) => (d.data())['served'] == true)
-        .length;
     final totalRevenue = totalTokens * widget.pricePerToken;
-
-    final tokenList = tokensSnap.docs
-        .map((d) {
-          final data = d.data();
-          return {
-            'number':     data['number'] as int? ?? 0,
-            'served':     data['served'] as bool? ?? false,
-            'time':       (data['time'] as Timestamp?)?.toDate(),
-            'servedTime': (data['servedTime'] as Timestamp?)?.toDate(),
-          };
-        })
-        .toList()
-      ..sort((a, b) =>
-          (a['number'] as int).compareTo(b['number'] as int));
-
-    final donationList = mergedDonations;
     final totalDonations = donationList.fold<double>(
-        0.0, (sum, d) => sum + (d['amount'] as num? ?? 0).toDouble());
+        0.0, (acc, d) => acc + (d['amount'] as num? ?? 0).toDouble());
+
+    // ── Physical Box Openings ──
+    final allOpenings = DonationBoxStorage.getOpenings(widget.branchId);
+    final boxOpenings = allOpenings.where((op) {
+      final opDate = DateTime.tryParse(op.openDate);
+      if (opDate == null) return false;
+      if (_isMonthView) {
+        return opDate.year == _selectedDate.year && opDate.month == _selectedDate.month;
+      } else {
+        return widget.dateFmt.format(opDate) == dateKey;
+      }
+    }).toList();
+    final totalBoxAmount = boxOpenings.fold<double>(0.0, (acc, op) => acc + op.amount);
 
     return {
       'totalTokens':    totalTokens,
@@ -1768,6 +2100,8 @@ class _HistoryScreenState extends State<_HistoryScreen> {
       'tokenList':      tokenList,
       'donationList':   donationList,
       'totalDonations': totalDonations,
+      'boxOpenings':    boxOpenings,
+      'totalBoxAmount': totalBoxAmount,
     };
   }
 
@@ -1775,131 +2109,195 @@ class _HistoryScreenState extends State<_HistoryScreen> {
   Widget build(BuildContext context) {
     final todayStr   = widget.dateFmt.format(DateTime.now());
     final dateKey    = widget.dateFmt.format(_selectedDate);
+    final monthLabel = DateFormat('MMMM yyyy').format(_selectedDate);
     final isToday    = dateKey == todayStr;
     final displayDate = DateFormat('dd MMM yyyy').format(_selectedDate);
 
     return Column(children: [
-      // ── Purple header ──────────────────────────────────────────────────
+      // ── Header ──────────────────────────────────────────────────
       Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF2D1B69), Color(0xFF4C1D95)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF2D1B69), Color(0xFF4C1D95)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+        ),
+        child: SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _isMonthView ? 'Monthly History' : 'Daily History',
+                          style: GoogleFonts.dmSerifDisplay(
+                              color: Colors.white, fontSize: 22),
+                        ),
+                        Text(
+                          _isMonthView ? 'Cumulative tokens, boxes & donations' : 'Tokens, boxes & donations by date',
+                          style: GoogleFonts.dmSans(
+                              color: Colors.white.withValues(alpha: 0.50),
+                              fontSize: 11),
+                        ),
+                      ],
+                    ),
+                    // Segmented View Toggle
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text('Daily History',
-                              style: GoogleFonts.dmSerifDisplay(
-                                  color: Colors.white, fontSize: 24)),
-                          Text('Tokens & donations by date',
-                              style: GoogleFonts.dmSans(
-                                  color: Colors.white.withValues(alpha: 0.40),
-                                  fontSize: 11)),
+                          GestureDetector(
+                            onTap: () => setState(() => _isMonthView = false),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: !_isMonthView ? Colors.white : Colors.transparent,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                'Day',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: !_isMonthView ? _DS.purple : Colors.white70,
+                                ),
+                              ),
+                            ),
+                          ),
+                          GestureDetector(
+                            onTap: () => setState(() => _isMonthView = true),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _isMonthView ? Colors.white : Colors.transparent,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                'Month',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _isMonthView ? _DS.purple : Colors.white70,
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
-                      if (widget.showLogout) _LogoutButton(onTap: widget.onLogout),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  // Date navigator
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(_DS.r14),
-                      border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          width: 0.5),
                     ),
-                    child: Row(children: [
-                      _DateNavBtn(
-                        icon: Icons.chevron_left_rounded,
-                        onTap: () => setState(() => _selectedDate =
-                            _selectedDate.subtract(
-                                const Duration(days: 1))),
-                      ),
-                      Expanded(
-                        child: GestureDetector(
-                          onTap: () async {
-                            final picked = await showDatePicker(
-                              context: context,
-                              initialDate: _selectedDate,
-                              firstDate: DateTime(2024),
-                              lastDate: DateTime.now(),
-                              builder: (ctx, child) => Theme(
-                                data: ThemeData.light().copyWith(
-                                  colorScheme: const ColorScheme.light(
-                                      primary: _DS.purple),
-                                  textButtonTheme: TextButtonThemeData(
-                                    style: TextButton.styleFrom(
-                                        foregroundColor: _DS.purple),
-                                  ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                // Date navigator
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(_DS.r14),
+                    border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        width: 0.5),
+                  ),
+                  child: Row(children: [
+                    _DateNavBtn(
+                      icon: Icons.chevron_left_rounded,
+                      onTap: () => setState(() {
+                        if (_isMonthView) {
+                          _selectedDate = DateTime(_selectedDate.year, _selectedDate.month - 1, 1);
+                        } else {
+                          _selectedDate = _selectedDate.subtract(const Duration(days: 1));
+                        }
+                      }),
+                    ),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final picked = await showDatePicker(
+                            context: context,
+                            initialDate: _selectedDate,
+                            firstDate: DateTime(2024),
+                            lastDate: DateTime.now(),
+                            builder: (ctx, child) => Theme(
+                              data: ThemeData.light().copyWith(
+                                colorScheme: const ColorScheme.light(primary: _DS.purple),
+                                textButtonTheme: TextButtonThemeData(
+                                  style: TextButton.styleFrom(foregroundColor: _DS.purple),
                                 ),
-                                child: child!,
                               ),
-                            );
-                            if (picked != null) {
-                              setState(() => _selectedDate = picked);
-                            }
-                          },
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 10),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.calendar_today_rounded,
-                                    color: Colors.white, size: 13),
-                                const SizedBox(width: 7),
-                                Text(
-                                  isToday
-                                      ? 'Today · $displayDate'
-                                      : displayDate,
-                                  style: GoogleFonts.dmSans(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13),
-                                ),
-                              ],
+                              child: child!,
                             ),
+                          );
+                          if (picked != null) {
+                            setState(() => _selectedDate = picked);
+                          }
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.calendar_today_rounded,
+                                  color: Colors.white, size: 13),
+                              const SizedBox(width: 7),
+                              Text(
+                                _isMonthView
+                                    ? monthLabel
+                                    : (isToday ? 'Today · $displayDate' : displayDate),
+                                style: GoogleFonts.dmSans(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                      _DateNavBtn(
-                        icon: Icons.chevron_right_rounded,
-                        onTap: isToday
-                            ? null
-                            : () => setState(() => _selectedDate =
-                                _selectedDate.add(
-                                    const Duration(days: 1))),
-                        disabled: isToday,
-                      ),
-                    ]),
-                  ),
-                ],
-              ),
+                    ),
+                    _DateNavBtn(
+                      icon: Icons.chevron_right_rounded,
+                      onTap: (_isMonthView
+                              ? (_selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month)
+                              : isToday)
+                          ? null
+                          : () => setState(() {
+                              if (_isMonthView) {
+                                _selectedDate = DateTime(_selectedDate.year, _selectedDate.month + 1, 1);
+                              } else {
+                                _selectedDate = _selectedDate.add(const Duration(days: 1));
+                              }
+                            }),
+                      disabled: _isMonthView
+                          ? (_selectedDate.year == DateTime.now().year && _selectedDate.month == DateTime.now().month)
+                          : isToday,
+                    ),
+                  ]),
+                ),
+              ],
             ),
           ),
         ),
+      ),
 
       // ── Body ──────────────────────────────────────────────────────────
       Expanded(
         child: FutureBuilder<Map<String, dynamic>>(
-          key: ValueKey(dateKey),
-          future: _fetchDayData(dateKey),
+          key: ValueKey('${_isMonthView ? "m" : "d"}_${_selectedDate.toIso8601String()}'),
+          future: _fetchHistoryData(),
           builder: (_, snap) {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(
@@ -1915,59 +2313,56 @@ class _HistoryScreenState extends State<_HistoryScreen> {
             final totalTokens   = d['totalTokens']    as int;
             final servedTokens  = d['servedTokens']   as int;
             final totalRevenue  = d['totalRevenue']   as double;
-            final tokenList     = d['tokenList']
-                as List<Map<String, dynamic>>;
-            final donationList  = d['donationList']
-                as List<Map<String, dynamic>>;
+            final tokenList     = d['tokenList'] as List<Map<String, dynamic>>;
+            final donationList  = d['donationList'] as List<Map<String, dynamic>>;
             final totalDonations = d['totalDonations'] as double;
+            final boxOpenings   = d['boxOpenings'] as List<BoxOpening>;
+            final totalBoxAmount = d['totalBoxAmount'] as double;
 
-            if (totalTokens == 0 && donationList.isEmpty) {
+            if (totalTokens == 0 && donationList.isEmpty && boxOpenings.isEmpty) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.event_note_rounded,
-                        size: 72,
+                        size: 64,
                         color: _DS.purple.withValues(alpha: 0.15)),
-                    const SizedBox(height: 14),
-                    Text('No records for $displayDate',
-                        style: GoogleFonts.dmSans(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: _DS.ink3)),
+                    const SizedBox(height: 12),
+                    Text(
+                      _isMonthView
+                          ? 'No records for $monthLabel'
+                          : 'No records for $displayDate',
+                      style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: _DS.ink3),
+                    ),
                   ],
                 ),
               );
             }
 
             return ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 32),
               children: [
                 // Token summary
                 _HistSectionCard(
-                  icon:  Icons.credit_card_rounded,
+                  icon:  Icons.confirmation_number_rounded,
                   color: _DS.mint,
-                  title: 'Token Summary',
+                  title: _isMonthView ? 'Monthly Tokens Summary' : 'Token Summary',
                   child: Column(children: [
                     Row(children: [
-                      _HistStatTile('Issued',
-                          '$totalTokens',  _DS.mint),
+                      _HistStatTile('Issued', '$totalTokens', _DS.mint),
                       const SizedBox(width: 8),
-                      _HistStatTile('Served',
-                          '$servedTokens', _DS.green),
+                      _HistStatTile('Served', '$servedTokens', _DS.green),
                     ]),
                     const SizedBox(height: 8),
                     Row(children: [
-                      _HistStatTile('Pending',
-                          '${totalTokens - servedTokens}',
-                          _DS.amber),
+                      _HistStatTile('Pending', '${totalTokens - servedTokens}', _DS.amber),
                       const SizedBox(width: 8),
-                      _HistStatTile('Revenue',
-                          'PKR ${totalRevenue.toStringAsFixed(0)}',
-                          _DS.purple,
-                          smallVal: true),
+                      _HistStatTile('Revenue', 'PKR ${totalRevenue.toStringAsFixed(0)}', _DS.purple, smallVal: true),
                     ]),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     // Progress
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1992,39 +2387,130 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: LinearProgressIndicator(
-                        value: totalTokens > 0
-                            ? servedTokens / totalTokens
-                            : 0,
+                        value: totalTokens > 0 ? servedTokens / totalTokens : 0,
                         minHeight: 6,
-                        backgroundColor:
-                            _DS.mint.withValues(alpha: 0.1),
-                        valueColor:
-                            const AlwaysStoppedAnimation(_DS.mint),
+                        backgroundColor: _DS.mint.withValues(alpha: 0.1),
+                        valueColor: const AlwaysStoppedAnimation(_DS.mint),
                       ),
                     ),
                   ]),
                 ),
                 const SizedBox(height: 12),
 
-                // Token list
-                if (tokenList.isNotEmpty)
+                // Physical Box Openings Section
+                _HistSectionCard(
+                  icon: Icons.inventory_2_rounded,
+                  color: const Color(0xFF0D9488),
+                  title: 'Donation Boxes (${boxOpenings.length})',
+                  child: boxOpenings.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          child: Text(
+                            'No donation boxes opened on this date.',
+                            style: GoogleFonts.dmSans(color: _DS.ink3, fontSize: 13),
+                          ),
+                        )
+                      : Column(
+                          children: [
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFCCFBF1),
+                                borderRadius: BorderRadius.circular(_DS.r12),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Total Box Collections',
+                                    style: GoogleFonts.dmSans(
+                                        fontWeight: FontWeight.w600,
+                                        color: const Color(0xFF0F766E),
+                                        fontSize: 13),
+                                  ),
+                                  Text(
+                                    'PKR ${totalBoxAmount.toStringAsFixed(0)}',
+                                    style: GoogleFonts.dmSerifDisplay(
+                                        color: const Color(0xFF0F766E),
+                                        fontSize: 18),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            ...boxOpenings.map((op) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFE6FFFA),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFF99F6E4)),
+                                      ),
+                                      child: const Center(
+                                        child: Icon(Icons.inventory_2_rounded, size: 16, color: Color(0xFF0D9488)),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            'Box #${op.boxNumber}',
+                                            style: GoogleFonts.dmSans(
+                                                fontSize: 13,
+                                                fontWeight: FontWeight.w700,
+                                                color: _DS.ink),
+                                          ),
+                                          Text(
+                                            'Collected by ${op.collectedBy}',
+                                            style: GoogleFonts.dmSans(
+                                                fontSize: 11,
+                                                color: _DS.ink3),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      'PKR ${op.amount.toStringAsFixed(0)}',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF0D9488),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                ),
+                const SizedBox(height: 12),
+
+                // Tokens List (Daily only)
+                if (!_isMonthView && tokenList.isNotEmpty)
                   _HistSectionCard(
                     icon:  Icons.list_alt_rounded,
                     color: _DS.ink3,
                     title: 'Tokens (${tokenList.length})',
                     child: Column(
-                      children: tokenList.take(20).map((t) {
+                      children: tokenList.take(30).map((t) {
                         final served = t['served'] as bool;
                         final time   = t['time']   as DateTime?;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Row(children: [
                             Container(
-                              width: 36, height: 36,
+                              width: 34, height: 34,
                               decoration: BoxDecoration(
-                                color: served
-                                    ? _DS.greenBg
-                                    : _DS.amberBg,
+                                color: served ? _DS.greenBg : _DS.amberBg,
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Center(
@@ -2032,9 +2518,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                     style: GoogleFonts.dmSans(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: served
-                                            ? _DS.green
-                                            : _DS.amber)),
+                                        color: served ? _DS.green : _DS.amber)),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -2052,9 +2536,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: served
-                                    ? _DS.greenBg
-                                    : _DS.amberBg,
+                                color: served ? _DS.greenBg : _DS.amberBg,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -2062,9 +2544,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 style: GoogleFonts.dmSans(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
-                                    color: served
-                                        ? _DS.green
-                                        : _DS.amber),
+                                    color: served ? _DS.green : _DS.amber),
                               ),
                             ),
                           ]),
@@ -2072,19 +2552,19 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                       }).toList(),
                     ),
                   ),
-                const SizedBox(height: 12),
+                if (!_isMonthView && tokenList.isNotEmpty)
+                  const SizedBox(height: 12),
 
                 // Donations
                 _HistSectionCard(
-                  icon:  Icons.favorite_rounded,
+                  icon:  Icons.volunteer_activism_rounded,
                   color: _DS.purple,
                   title: 'Donations (${donationList.length})',
                   child: donationList.isEmpty
                       ? Padding(
-                          padding:
-                              const EdgeInsets.symmetric(vertical: 8),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Text(
-                            'No donations recorded for this date.',
+                            'No donations recorded for this period.',
                             style: GoogleFonts.dmSans(
                                 color: _DS.ink3, fontSize: 13),
                           ),
@@ -2095,14 +2575,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
                               color: _DS.purpleBg,
-                              borderRadius:
-                                  BorderRadius.circular(_DS.r12),
+                              borderRadius: BorderRadius.circular(_DS.r12),
                             ),
                             child: Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text('Total Collected',
+                                Text('Total Donations',
                                     style: GoogleFonts.dmSans(
                                         fontWeight: FontWeight.w600,
                                         color: _DS.purple,
@@ -2111,7 +2589,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                   'PKR ${totalDonations.toStringAsFixed(0)}',
                                   style: GoogleFonts.dmSerifDisplay(
                                       color: _DS.purple,
-                                      fontSize: 20),
+                                      fontSize: 18),
                                 ),
                               ],
                             ),
@@ -2121,23 +2599,17 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             final status = don['status']?.toString() ?? 'pending';
                             final isApproved = status == 'approved';
                             final isRejected = status == 'rejected';
-                            final statusColor = isApproved
-                                ? _DS.green
-                                : isRejected
-                                    ? _DS.red
-                                    : _DS.amber;
                             final statusBg = isApproved
                                 ? _DS.greenBg
                                 : isRejected
                                     ? _DS.redBg
                                     : _DS.amberBg;
                             return Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.only(bottom: 8),
                               child: Row(children: [
                                 Container(
-                                  width: 36, height: 36,
-                                  decoration: BoxDecoration(
+                                  width: 34, height: 34,
+                                  decoration: const BoxDecoration(
                                     color: _DS.purpleBg,
                                     shape: BoxShape.circle,
                                   ),
@@ -2147,7 +2619,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                           .substring(0, 1)
                                           .toUpperCase(),
                                       style: GoogleFonts.dmSans(
-                                          fontSize: 14,
+                                          fontSize: 13,
                                           fontWeight: FontWeight.w600,
                                           color: _DS.purple),
                                     ),
@@ -2156,8 +2628,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         don['donorName']?.toString() ?? 'Walk-in Donor',
@@ -2180,14 +2651,15 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
                                     color: statusBg,
-                                    borderRadius:
-                                        BorderRadius.circular(6),
+                                    borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: Text(status,
-                                      style: GoogleFonts.dmSans(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: statusColor)),
+                                  child: Text(
+                                    status,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                               ]),
                             );

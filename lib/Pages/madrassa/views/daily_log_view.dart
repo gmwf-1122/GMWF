@@ -19,6 +19,7 @@ import '../providers/madrassa_providers.dart';
 import 'dart:async';
 
 import '../madrassa_strings.dart';
+import '../../../services/user_theme_service.dart';
 
 bool _isGlobalLevelUser(String role) {
   final r = role.toLowerCase().trim();
@@ -481,19 +482,37 @@ _changeNotifier.value++;
         }
         final isHoliday = holidayName != null;
         final isSunday = _selectedDate.weekday == DateTime.sunday;
+        final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF8F9FD),
+          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD),
           floatingActionButton: ValueListenableBuilder<int>(
             valueListenable: _changeNotifier,
             builder: (context, _, __) {
               return _buildFabArea(isDesktop) ?? const SizedBox.shrink();
             },
           ),
-          body: CustomScrollView(
-            key: const PageStorageKey('daily_log_scroll'),
-            controller: _verticalScrollController,
-            slivers: [
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Opacity(
+                    opacity: isDark ? 0.085 : 0.11,
+                    child: Image.asset(
+                      'assets/images/islamic_pattern.webp',
+                      fit: BoxFit.cover,
+                      repeat: ImageRepeat.repeat,
+                      color: const Color(0xFFD4AF37),
+                      colorBlendMode: BlendMode.srcIn,
+                    ),
+                  ),
+                ),
+              ),
+              CustomScrollView(
+                key: const PageStorageKey('daily_log_scroll'),
+                controller: _verticalScrollController,
+                slivers: [
               SliverToBoxAdapter(
                 child: _buildHeader(config),
               ),
@@ -865,7 +884,9 @@ _changeNotifier.value++;
               ),
             ],
           ),
-        );
+        ],
+      ),
+    );
       },
     );
   }
@@ -876,10 +897,89 @@ _changeNotifier.value++;
 
 
   Widget _buildHeader(MadrassaConfig config) {
-    final ptmDate = config.getPtmDate();
-    final workingDays = MadrassaFeeLogic.getWorkingDaysCount(config.year, config.month);
+    final ptmDate = getPtmDateFor(_selectedDate.year, _selectedDate.month, config);
+    final workingDays = MadrassaFeeLogic.getWorkingDaysCount(_selectedDate.year, _selectedDate.month);
     final isMobile = MediaQuery.of(context).size.width < 600;
     final effectiveAllowLeave = _localAllowStudentLeave ?? config.allowStudentLeave;
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
+
+    final controlsRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextButton.icon(
+          icon: const Icon(Icons.today, size: 16, color: Color(0xFF008080)),
+          label: Text(
+            context.isUrdu ? 'آج' : 'Today',
+            style: const TextStyle(
+              color: Color(0xFF008080),
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          onPressed: () {
+            setState(() {
+              _selectedDate = DateTime.now();
+              _localChanges.clear();
+              _studentNotifiers.clear();
+            });
+            _changeNotifier.value++;
+            _updateDateStreams();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _scrollToSelectedDate(animate: true);
+            });
+          },
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Color(0xFF008080)),
+          tooltip: 'Previous Month',
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
+          onPressed: () {
+            setState(() {
+              final prevMonth = DateTime(_selectedDate.year, _selectedDate.month - 1, 1);
+              final lastDayOfPrevMonth = DateTime(prevMonth.year, prevMonth.month + 1, 0).day;
+              final targetDay = _selectedDate.day.clamp(1, lastDayOfPrevMonth);
+              _selectedDate = DateTime(prevMonth.year, prevMonth.month, targetDay);
+              _localChanges.clear();
+              _studentNotifiers.clear();
+            });
+            _changeNotifier.value++;
+            _updateDateStreams();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _scrollToSelectedDate(animate: true);
+            });
+          },
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          icon: const Icon(Icons.arrow_forward_ios, size: 16, color: Color(0xFF008080)),
+          tooltip: 'Next Month',
+          padding: const EdgeInsets.all(6),
+          constraints: const BoxConstraints(),
+          onPressed: () {
+            setState(() {
+              final nextMonth = DateTime(_selectedDate.year, _selectedDate.month + 1, 1);
+              final lastDayOfNextMonth = DateTime(nextMonth.year, nextMonth.month + 1, 0).day;
+              final targetDay = _selectedDate.day.clamp(1, lastDayOfNextMonth);
+              _selectedDate = DateTime(nextMonth.year, nextMonth.month, targetDay);
+              _localChanges.clear();
+              _studentNotifiers.clear();
+            });
+            _changeNotifier.value++;
+            _updateDateStreams();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _scrollToSelectedDate(animate: true);
+            });
+          },
+        ),
+      ],
+    );
 
     return Padding(
       padding: EdgeInsets.fromLTRB(isMobile ? 16 : 24, isMobile ? 16 : 24, isMobile ? 16 : 24, 8),
@@ -887,93 +987,44 @@ _changeNotifier.value++;
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
-                child: Text(
-                  '${DateFormat('MMMM yyyy').format(_selectedDate)} — ${context.l.dailyLog}',
-                  style: context.urduStyle(
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: isMobile ? 18 : 22,
-                      color: const Color(0xFF1A1C1E),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      DateFormat('MMMM yyyy').format(_selectedDate),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: isMobile ? 18 : 22,
+                        color: isDark ? Colors.white : const Color(0xFF1A1C1E),
+                      ),
                     ),
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                    Text(
+                      context.l.dailyLog,
+                      style: context.urduStyle(
+                        style: TextStyle(
+                          fontSize: isMobile ? 12 : 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? const Color(0xFF818CF8) : const Color(0xFF4C4DDC),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              TextButton.icon(
-                icon: const Icon(Icons.today, size: 16, color: Color(0xFF008080)),
-                label: Text(
-                  context.isUrdu ? 'آج' : 'Today',
-                  style: const TextStyle(
-                    color: Color(0xFF008080),
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: () {
-                  setState(() {
-                    _selectedDate = DateTime.now();
-                    _localChanges.clear();
-                    _studentNotifiers.clear();
-                  });
-                  _changeNotifier.value++;
-                  _updateDateStreams();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _scrollToSelectedDate(animate: true);
-                  });
-                },
-              ),
-              const SizedBox(width: 8),
-              IconButton(
-                icon: const Icon(Icons.arrow_back_ios, size: 16, color: Color(0xFF008080)),
-                tooltip: 'Previous Month',
-                onPressed: () {
-                  setState(() {
-                    final prevMonth = DateTime(_selectedDate.year, _selectedDate.month - 1, 1);
-                    final lastDayOfPrevMonth = DateTime(prevMonth.year, prevMonth.month + 1, 0).day;
-                    final targetDay = _selectedDate.day.clamp(1, lastDayOfPrevMonth);
-                    _selectedDate = DateTime(prevMonth.year, prevMonth.month, targetDay);
-                    _localChanges.clear();
-                    _studentNotifiers.clear();
-                  });
-                  _changeNotifier.value++;
-                  _updateDateStreams();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _scrollToSelectedDate(animate: true);
-                  });
-                },
-              ),
-              IconButton(
-                icon: const Icon(Icons.arrow_forward_ios, size: 16, color: Color(0xFF008080)),
-                tooltip: 'Next Month',
-                onPressed: () {
-                  setState(() {
-                    final nextMonth = DateTime(_selectedDate.year, _selectedDate.month + 1, 1);
-                    final lastDayOfNextMonth = DateTime(nextMonth.year, nextMonth.month + 1, 0).day;
-                    final targetDay = _selectedDate.day.clamp(1, lastDayOfNextMonth);
-                    _selectedDate = DateTime(nextMonth.year, nextMonth.month, targetDay);
-                    _localChanges.clear();
-                    _studentNotifiers.clear();
-                  });
-                  _changeNotifier.value++;
-                  _updateDateStreams();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    _scrollToSelectedDate(animate: true);
-                  });
-                },
-              ),
+              controlsRow,
             ],
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
             '$workingDays working days • Sundays excluded • PTM: ${DateFormat('EEE, MMM d').format(ptmDate)}',
-            style: const TextStyle(fontSize: 13, color: Colors.grey),
+            style: TextStyle(
+              fontSize: isMobile ? 12 : 13,
+              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+            ),
           ),
           if (_isGlobalLevelUser(widget.editorRole)) ...[
             const SizedBox(height: 12),
@@ -1188,11 +1239,12 @@ _changeNotifier.value++;
                   }
                   final isHoliday = holidayName != null;
 
-                  Color cardColor = Colors.white;
+                  final isDarkCalendar = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
+                  Color cardColor = isDarkCalendar ? const Color(0xFF1E293B) : Colors.white;
                   if (isSelected) {
                     cardColor = isHoliday ? const Color(0xFF2E7D32) : const Color(0xFF4C4DDC);
                   } else if (isHoliday) {
-                    cardColor = const Color(0xFFE8F5E9);
+                    cardColor = isDarkCalendar ? const Color(0xFF1B3D2F) : const Color(0xFFE8F5E9);
                   }
 
                   Border border;
@@ -1203,11 +1255,19 @@ _changeNotifier.value++;
                   } else if (isHoliday) {
                     border = Border.all(color: const Color(0xFF81C784), width: 1.0);
                   } else {
-                    border = Border.all(color: const Color(0xFFE0E2E7), width: 1.0);
+                    border = Border.all(color: isDarkCalendar ? const Color(0xFF334155) : const Color(0xFFE0E2E7), width: 1.0);
                   }
 
-                  Color dayAbbrevColor = isSelected ? Colors.white70 : (isHoliday ? const Color(0xFF2E7D32) : Colors.grey);
-                  Color dayNumColor = isSelected ? Colors.white : (isHoliday ? const Color(0xFF1B5E20) : const Color(0xFF1A1C1E));
+                  Color dayAbbrevColor = isSelected
+                      ? Colors.white70
+                      : (isHoliday
+                          ? (isDarkCalendar ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
+                          : (isDarkCalendar ? const Color(0xFF94A3B8) : Colors.grey));
+                  Color dayNumColor = isSelected
+                      ? Colors.white
+                      : (isHoliday
+                          ? (isDarkCalendar ? const Color(0xFFA7F3D0) : const Color(0xFF1B5E20))
+                          : (isDarkCalendar ? Colors.white : const Color(0xFF1A1C1E)));
 
                   return GestureDetector(
                     onTap: isSunday ? null : () {
@@ -1332,6 +1392,9 @@ _changeNotifier.value++;
 
     final dateText = DateFormat('EEEE, MMMM d, yyyy').format(_selectedDate);
 
+    final isDarkStats = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
+    final dateTextColor = isDarkStats ? Colors.white : const Color(0xFF1A1C1E);
+
     // Date & stats section
     Widget dateAndStatsWidget;
     if (isMobile) {
@@ -1340,7 +1403,7 @@ _changeNotifier.value++;
         children: [
           Text(
             dateText,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A1C1E)),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: dateTextColor),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -1361,7 +1424,7 @@ _changeNotifier.value++;
           Expanded(
             child: Text(
               dateText,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A1C1E)),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: dateTextColor),
             ),
           ),
           _statText('${context.l.present}: $present', const Color(0xFF4CAF50)),
@@ -1611,27 +1674,29 @@ _changeNotifier.value++;
 
 
   Widget _buildParaDropdown(BuildContext context, int? selectedValue, bool isEnabled, ValueChanged<int?>? onChanged) {
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       height: 36,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E2E7)),
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<int>(
           value: (selectedValue == null || selectedValue == 0) ? null : selectedValue,
-          hint: Text('-', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+          hint: Text('-', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12)),
           icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
           isDense: true,
           isExpanded: true,
-          style: const TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
           items: [
             for (int i = 1; i <= 30; i++)
               DropdownMenuItem(
                 value: i,
-                child: Text('$i', style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: Text('$i', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
               ),
           ],
           onChanged: isEnabled ? onChanged : null,
@@ -1641,28 +1706,30 @@ _changeNotifier.value++;
   }
 
   Widget _buildRatioDropdown(BuildContext context, String? selectedValue, bool isEnabled, ValueChanged<String?>? onChanged) {
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6),
       height: 36,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E2E7)),
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: (selectedValue == null || selectedValue.isEmpty || selectedValue == '-') ? null : selectedValue,
-          hint: Text('-', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+          hint: Text('-', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12)),
           icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
           isDense: true,
           isExpanded: true,
-          style: const TextStyle(fontSize: 12, color: Colors.black, fontWeight: FontWeight.bold),
+          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
           items: [
-            DropdownMenuItem(value: '1/4', child: Text(context.isUrdu ? 'پاؤ' : 'Pao')),
-            DropdownMenuItem(value: '1/2', child: Text(context.isUrdu ? 'نصف' : 'Nisf')),
-            DropdownMenuItem(value: '3/4', child: Text(context.isUrdu ? 'ثلاثہ' : 'Salasa')),
-            DropdownMenuItem(value: '1', child: Text(context.isUrdu ? 'پارہ' : 'Para')),
-            DropdownMenuItem(value: 'nahi_sunaya', child: Text(context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya')),
+            DropdownMenuItem(value: '1/4', child: Text(context.isUrdu ? 'پاؤ' : 'Pao', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+            DropdownMenuItem(value: '1/2', child: Text(context.isUrdu ? 'نصف' : 'Nisf', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+            DropdownMenuItem(value: '3/4', child: Text(context.isUrdu ? 'ثلاثہ' : 'Salasa', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+            DropdownMenuItem(value: '1', child: Text(context.isUrdu ? 'پارہ' : 'Para', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+            DropdownMenuItem(value: 'nahi_sunaya', child: Text(context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
           ],
           onChanged: isEnabled ? onChanged : null,
         ),
@@ -2394,7 +2461,7 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
-  Widget _attButton(String label, bool active, Color color, VoidCallback onTap) {
+  Widget _attButton(String label, bool active, Color color, VoidCallback onTap, {bool isDark = false}) {
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -2403,14 +2470,14 @@ class _StudentLogCard extends StatelessWidget {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: active ? color : const Color(0xFFE8EAED),
+          color: active ? color : (isDark ? const Color(0xFF334155) : const Color(0xFFE8EAED)),
           borderRadius: BorderRadius.circular(8),
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : const Color(0xFF9E9E9E),
+            color: active ? Colors.white : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF9E9E9E)),
             fontWeight: FontWeight.bold,
             fontSize: 13,
           ),
@@ -2419,12 +2486,12 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
-  Widget _switchCol(BuildContext context, String label, bool val, ValueChanged<bool>? onChanged, {Color? activeColor, Color? trackColor}) {
+  Widget _switchCol(BuildContext context, String label, bool val, ValueChanged<bool>? onChanged, {Color? activeColor, Color? trackColor, bool isDark = false}) {
     return Column(
       children: [
         Text(
           label,
-          style: context.urduStyle(style: const TextStyle(fontSize: 10, color: Color(0xFF78909C), fontWeight: FontWeight.w600)),
+          style: context.urduStyle(style: TextStyle(fontSize: 10, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF78909C), fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: 2),
         Switch(
@@ -2432,21 +2499,21 @@ class _StudentLogCard extends StatelessWidget {
           onChanged: onChanged,
           activeColor: activeColor ?? const Color(0xFF5B9BD5),
           activeTrackColor: trackColor ?? (activeColor ?? const Color(0xFF5B9BD5)).withValues(alpha: 0.4),
-          inactiveThumbColor: const Color(0xFFBDBDBD),
-          inactiveTrackColor: const Color(0xFFE0E0E0),
+          inactiveThumbColor: isDark ? const Color(0xFF64748B) : const Color(0xFFBDBDBD),
+          inactiveTrackColor: isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0),
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
       ],
     );
   }
 
-  Widget _buildSabakField(BuildContext context, String sId, int lines) {
+  Widget _buildSabakField(BuildContext context, String sId, int lines, {bool isDark = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           context.isUrdu ? 'سبق (لائنیں)' : 'Sabak (Lines)',
-          style: context.urduStyle(style: const TextStyle(fontSize: 11, color: Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
@@ -2472,14 +2539,14 @@ class _StudentLogCard extends StatelessWidget {
                 child: Container(
                   height: 36,
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    border: Border.all(color: const Color(0xFFE0E2E7)),
+                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     '$lines',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black),
                   ),
                 ),
               ),
@@ -2505,13 +2572,13 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
-  Widget _buildSabkiField(BuildContext context, int sabkiPara, String? sabkiRatio) {
+  Widget _buildSabkiField(BuildContext context, int sabkiPara, String? sabkiRatio, {bool isDark = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           context.isUrdu ? 'سبکی (پارہ / تناسب)' : 'Sabki (Para / Ratio)',
-          style: context.urduStyle(style: const TextStyle(fontSize: 11, color: Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
@@ -2535,13 +2602,13 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
-  Widget _buildManzilField(BuildContext context, int manzilPara, String? manzilRatio) {
+  Widget _buildManzilField(BuildContext context, int manzilPara, String? manzilRatio, {bool isDark = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           context.isUrdu ? 'منزل (پارہ / تناسب)' : 'Manzil (Para / Ratio)',
-          style: context.urduStyle(style: const TextStyle(fontSize: 11, color: Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
@@ -2588,6 +2655,13 @@ class _StudentLogCard extends StatelessWidget {
     return ValueListenableBuilder<Map<String, dynamic>>(
       valueListenable: logNotifier,
       builder: (context, log, child) {
+        final theme = Theme.of(context);
+        final isDark = theme.brightness == Brightness.dark || UserThemeService.isDarkMode(editorRole);
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
+
         final studentData = student;
         final sId = student['id'] ?? '';
 
@@ -2760,7 +2834,7 @@ class _StudentLogCard extends StatelessWidget {
               width: 32,
               child: Text(
                 rollNumber,
-                style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 13),
+                style: TextStyle(color: textMuted, fontWeight: FontWeight.bold, fontSize: 13),
               ),
             ),
             avatarWidget,
@@ -2771,7 +2845,7 @@ class _StudentLogCard extends StatelessWidget {
                   Flexible(
                     child: Text(
                       name,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textPrimary),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -2788,9 +2862,9 @@ class _StudentLogCard extends StatelessWidget {
             ),
             if (isPtmDay) ...[
               const SizedBox(width: 8),
-              _attButton('J', log['ptm'] == true, const Color(0xFF2E7D32), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true)),
+              _attButton('J', log['ptm'] == true, const Color(0xFF2E7D32), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true), isDark: isDark),
               const SizedBox(width: 4),
-              _attButton('M', log['ptm'] == false, const Color(0xFFD32F2F), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false)),
+              _attButton('M', log['ptm'] == false, const Color(0xFFD32F2F), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false), isDark: isDark),
             ],
           ],
         );
@@ -2862,6 +2936,7 @@ class _StudentLogCard extends StatelessWidget {
                 context.l.uniform,
                 (att == 'leave' || uni == true || uni == 'leave'),
                 (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
+                isDark: isDark,
               ),
               _switchCol(
                 context,
@@ -2870,6 +2945,7 @@ class _StudentLogCard extends StatelessWidget {
                 isReadOnly ? null : (v) => onUpdateLocal(sId, 'parentReplied', v),
                 activeColor: const Color(0xFFFFA726),
                 trackColor: const Color(0xFFFFCC80),
+                isDark: isDark,
               ),
             ]
           ],
@@ -2881,7 +2957,7 @@ class _StudentLogCard extends StatelessWidget {
               width: 40,
               child: Text(
                 rollNumber,
-                style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+                style: TextStyle(color: textMuted, fontWeight: FontWeight.bold),
               ),
             ),
             avatarWidget,
@@ -2895,7 +2971,7 @@ class _StudentLogCard extends StatelessWidget {
                       Flexible(
                         child: Text(
                           name,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -3179,28 +3255,28 @@ class _StudentLogCard extends StatelessWidget {
             margin: const EdgeInsets.only(top: 12),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8F9FA),
+              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FA),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFFE9ECEF)),
+              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE9ECEF)),
             ),
             child: isMobile
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildSabakField(context, sId, lines),
+                      _buildSabakField(context, sId, lines, isDark: isDark),
                       const SizedBox(height: 12),
-                      _buildSabkiField(context, sabkiPara, sabkiRatio),
+                      _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark),
                       const SizedBox(height: 12),
-                      _buildManzilField(context, manzilPara, manzilRatio),
+                      _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark),
                     ],
                   )
                 : Row(
                     children: [
-                      Expanded(child: _buildSabakField(context, sId, lines)),
+                      Expanded(child: _buildSabakField(context, sId, lines, isDark: isDark)),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildSabkiField(context, sabkiPara, sabkiRatio)),
+                      Expanded(child: _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark)),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildManzilField(context, manzilPara, manzilRatio)),
+                      Expanded(child: _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark)),
                     ],
                   ),
           );
@@ -3210,12 +3286,12 @@ class _StudentLogCard extends StatelessWidget {
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: cardBg,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFE0E2E7)),
+            border: Border.all(color: borderColor),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.02),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               ),

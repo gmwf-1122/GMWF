@@ -363,7 +363,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Image.asset(
-                            'assets/logo/twt_logo.webp',
+                            'assets/logo/twt.webp',
                             height: 38,
                             errorBuilder: (_, __, ___) => const Icon(Icons.school_rounded, color: Color(0xFF0F766E)),
                           ),

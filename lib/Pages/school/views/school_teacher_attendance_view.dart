@@ -88,91 +88,108 @@ class _SchoolTeacherAttendanceViewState extends State<SchoolTeacherAttendanceVie
         children: [
         // Date & Department Filter Toolbar
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           color: Colors.white,
-          child: Row(
+          width: double.infinity,
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              // Date picker button
-              InkWell(
-                onTap: _pickDate,
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.1),
+              // Left filters: Date picker + Dept dropdown
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  // Date picker button
+                  InkWell(
+                    onTap: _pickDate,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_today_rounded, color: Color(0xFF10B981), size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        DateFormat('EEEE, dd MMM yyyy').format(_selectedDate),
-                        style: const TextStyle(
-                          color: Color(0xFF10B981),
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.calendar_today_rounded, color: Color(0xFF10B981), size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormat('EEEE, dd MMM yyyy').format(_selectedDate),
+                            style: const TextStyle(
+                              color: Color(0xFF10B981),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 16),
 
-              // Department Dropdown
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _selectedDeptFilter,
-                    icon: const Icon(Icons.keyboard_arrow_down_rounded),
-                    items: _departments.map((d) {
-                      return DropdownMenuItem(value: d, child: Text('Dept: $d'));
-                    }).toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _selectedDeptFilter = v);
-                    },
+                  // Department Dropdown
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _selectedDeptFilter,
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                        items: _departments.map((d) {
+                          return DropdownMenuItem(value: d, child: Text('Dept: $d', style: const TextStyle(fontSize: 13)));
+                        }).toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedDeptFilter = v);
+                        },
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
-              const Spacer(),
 
-              // Mark All Present Button
-              OutlinedButton.icon(
-                onPressed: _markAllPresent,
-                icon: const Icon(Icons.done_all_rounded, size: 18),
-                label: const Text('Mark All Present'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF10B981),
-                  side: const BorderSide(color: Color(0xFF10B981)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Save Log Button
-              ElevatedButton.icon(
-                onPressed: _isSaving ? null : _saveAttendance,
-                icon: _isSaving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      )
-                    : const Icon(Icons.save_rounded, size: 18),
-                label: const Text('Save Teacher Log'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
+              // Right action buttons: Mark All Present + Save Teacher Log
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _markAllPresent,
+                    icon: const Icon(Icons.done_all_rounded, size: 16),
+                    label: const Text('Mark All Present', style: TextStyle(fontSize: 12)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF10B981),
+                      side: const BorderSide(color: Color(0xFF10B981)),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: _isSaving ? null : _saveAttendance,
+                    icon: _isSaving
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded, size: 16),
+                    label: const Text('Save Teacher Log', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF10B981),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

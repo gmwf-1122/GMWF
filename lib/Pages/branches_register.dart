@@ -147,7 +147,13 @@ class _BranchesRegisterState extends State<BranchesRegister>
 
       final branchDoc = await FirebaseFirestore.instance.collection('branches').doc(branchId).get();
       if (branchDoc.exists) {
-        _snack('Branch already exists', error: true);
+        final data = branchDoc.data() ?? {};
+        final isOffboarded = data['isOffboarded'] == true || data['status'] == 'offboarded';
+        if (isOffboarded) {
+          _snack('Branch "$branchName" is currently offboarded. You can reactivate it from Branch Management.', error: true);
+        } else {
+          _snack('Branch "$branchName" already exists and is active.', error: true);
+        }
         return;
       }
 

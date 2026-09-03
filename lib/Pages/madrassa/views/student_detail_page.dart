@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../widgets/read_only_document_tile.dart';
 import '../../../services/image_upload_service.dart';
+import '../../../services/user_theme_service.dart';
 import '../dialogs/enrollment_dialog.dart';
 import '../madrassa_strings.dart';
 import '../widgets/madrassa_status_menu.dart';
@@ -122,26 +123,41 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
 
         final String? bFormUrl = _data['bFormUrl'] ?? _data['bFormBase64'];
         final String? guardianCnicUrl = _data['guardianCnicUrl'] ?? _data['guardianCnicBase64'];
+        final String? hifzCertificateUrl = _data['hifzCertificateUrl'] ?? _data['hifzCertificateBase64'];
+
+        final isDark = UserThemeService.isDarkMode(widget.username);
+        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
 
         return Scaffold(
-          backgroundColor: const Color(0xFFF8F9FD),
+          backgroundColor: scaffoldBg,
           appBar: AppBar(
-            backgroundColor: Colors.white,
+            backgroundColor: cardBg,
             elevation: 0,
             scrolledUnderElevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF1E293B)),
+              icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
               onPressed: () => Navigator.pop(context),
             ),
             title: Text(
               name,
-              style: const TextStyle(
-                color: Color(0xFF1E293B),
+              style: TextStyle(
+                color: textPrimary,
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
               ),
             ),
             actions: [
+              StatusActionMenu(
+                student: _data,
+                branchId: widget.branchId,
+                isAdmin: widget.isAdmin,
+                t: RoleThemeScope.dataOf(context),
+                username: widget.username,
+                role: widget.role,
+              ),
               IconButton(
                 icon: const Icon(Icons.edit_note_rounded, color: Color(0xFF008080)),
                 tooltip: 'Edit Student Details',
@@ -474,6 +490,14 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                             icon: Icons.assignment_ind_outlined,
                             documentUri: bFormUrl,
                           ),
+                          if (hifzCertificateUrl != null && hifzCertificateUrl.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            ReadOnlyDocumentTile(
+                              label: 'Certificate of Hifz Completion',
+                              icon: Icons.workspace_premium_outlined,
+                              documentUri: hifzCertificateUrl,
+                            ),
+                          ],
                         ],
                       ),
                     ),

@@ -16,8 +16,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'widgets/parent_report_card.dart';
 import 'madrassa_strings.dart';
 import 'utils/madrassa_local_storage.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/offline_auth_service.dart';
 import '../../services/image_upload_service.dart';
+import '../../services/user_theme_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../login_page.dart';
 
@@ -563,6 +565,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                       onLogout: _logout,
                       langCode: _langCode,
                       onSelectLanguage: _selectLanguage,
+                      userData: widget.userData,
                     );
             },
           );
@@ -579,93 +582,105 @@ class _LanguagePickerScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          margin: const EdgeInsets.all(32),
-          padding: const EdgeInsets.all(40),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 32, offset: const Offset(0, 8)),
-            ],
-            border: Border.all(color: const Color(0xFFE8EAF0)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Icon
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F6C5A).withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.language_rounded, color: Color(0xFF0F6C5A), size: 36),
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, Box box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+        final border = isDark ? const Color(0xFF334155) : const Color(0xFFE8EAF0);
+
+        return Scaffold(
+          backgroundColor: bg,
+          body: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 420),
+              margin: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
+                ],
+                border: Border.all(color: border),
               ),
-              const SizedBox(height: 24),
-              // Title
-              const Text(
-                'زبان منتخب کریں',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, fontFamily: 'Noori', color: Color(0xFF1E293B)),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Select Language',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
-              ),
-              const SizedBox(height: 12),
-              const Text(
-                'Please choose your preferred language to continue.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Color(0xFF64748B), height: 1.5),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'براہ کرم جاری رکھنے کے لیے اپنی پسندیدہ زبان منتخب کریں۔',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontFamily: 'Noori', height: 1.5),
-              ),
-              const SizedBox(height: 32),
-              // English button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => onSelect('en'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F6C5A),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    elevation: 0,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Icon
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F6C5A).withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.language_rounded, color: Color(0xFF0F6C5A), size: 36),
                   ),
-                  child: const Text('English', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              // Urdu button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => onSelect('ur'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFF1F5F9),
-                    foregroundColor: const Color(0xFF1E293B),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    elevation: 0,
+                  const SizedBox(height: 24),
+                  // Title
+                  Text(
+                    'زبان منتخب کریں',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, fontFamily: 'Noori', color: textPrimary),
                   ),
-                  child: const Text('اردو', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, fontFamily: 'Noori')),
-                ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Select Language',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: textPrimary),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Please choose your preferred language to continue.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: textMuted, height: 1.5),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'براہ کرم جاری رکھنے کے لیے اپنی پسندیدہ زبان منتخب کریں۔',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 13, color: textMuted, fontFamily: 'Noori', height: 1.5),
+                  ),
+                  const SizedBox(height: 32),
+                  // English button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => onSelect('en'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F6C5A),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: const Text('English', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Urdu button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => onSelect('ur'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                        foregroundColor: textPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: const Text('اردو', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, fontFamily: 'Noori')),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -702,20 +717,28 @@ class _AdminStudentSwitchButton extends StatelessWidget {
 class _LoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, Box box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+        return Scaffold(
+          backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+          body: const Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+        );
+      },
     );
   }
 }
 
-class _FamilySummaryView extends StatelessWidget {
+class _FamilySummaryView extends StatefulWidget {
   final String branchId;
   final List<DocumentSnapshot> allDocs;
   final ValueChanged<int> onViewDetails;
   final VoidCallback onLogout;
   final String? langCode;
   final Function(String) onSelectLanguage;
+
+  final Map<String, dynamic>? userData;
 
   const _FamilySummaryView({
     required this.branchId,
@@ -724,396 +747,599 @@ class _FamilySummaryView extends StatelessWidget {
     required this.onLogout,
     required this.langCode,
     required this.onSelectLanguage,
+    this.userData,
   });
 
   @override
+  State<_FamilySummaryView> createState() => _FamilySummaryViewState();
+}
+
+class _FamilySummaryViewState extends State<_FamilySummaryView> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final branchId = widget.branchId;
+    final allDocs = widget.allDocs;
+    final onViewDetails = widget.onViewDetails;
+    final onLogout = widget.onLogout;
+    final langCode = widget.langCode;
+    final onSelectLanguage = widget.onSelectLanguage;
+    final userData = widget.userData;
+
     final title = context.t('Family Portal');
     final subtitle = context.t('Summary of children progress');
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF0F6C5A),
-        elevation: 0,
-        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white, fontFamily: context.isUrdu ? 'Noori' : null)),
-        actions: [
-          // Language selector
-          TextButton(
-            onPressed: () => onSelectLanguage(langCode == 'ur' ? 'en' : 'ur'),
-            child: Text(
-              langCode == 'ur' ? 'English' : 'اردو',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontFamily: langCode != 'ur' ? 'Noori' : null),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: onLogout,
-            tooltip: context.t('Logout'),
-          ),
-        ],
-      ),
-      body: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 800),
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8),
-                child: Text(
-                  subtitle,
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: const Color(0xFF64748B), fontFamily: context.isUrdu ? 'Noori' : null),
-                ),
-              ),
-              Expanded(
-                child: StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance
-                      .collection('branches')
-                      .doc(branchId)
-                      .collection('madrassa_daily_logs')
-                      .snapshots(),
-                  builder: (context, logSnap) {
-                    if (logSnap.hasError) {
-                      debugPrint("[FamilySummaryView] Error loading daily logs: ${logSnap.error}");
-                    }
-                    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-                    final rawDocs = logSnap.data?.docs ?? [];
-                    final logsDocs = [...rawDocs]..sort((a, b) => b.id.compareTo(a.id));
-                    
-                    QueryDocumentSnapshot? todayDoc;
-                    for (var doc in logsDocs) {
-                      if (doc.id == todayStr) {
-                        todayDoc = doc;
-                        break;
-                      }
-                    }
-                    final todayLogData = todayDoc != null && todayDoc.exists ? todayDoc.data() as Map<String, dynamic>? ?? {} : {};
+    final filteredDocs = allDocs.where((doc) {
+      if (_searchQuery.isEmpty) return true;
+      final d = doc.data() as Map<String, dynamic>? ?? {};
+      final name = (d['name'] ?? '').toString().toLowerCase();
+      final roll = (d['rollNumber'] ?? d['rollNo'] ?? '').toString().toLowerCase();
+      final cls = (d['class'] ?? '').toString().toLowerCase();
+      final q = _searchQuery.toLowerCase();
+      return name.contains(q) || roll.contains(q) || cls.contains(q);
+    }).toList();
 
-                    return ListView.separated(
-                      itemCount: allDocs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 16),
-                      itemBuilder: (ctx, index) {
-                        final doc = allDocs[index];
-                        final d = doc.data() as Map<String, dynamic>? ?? {};
-                        final studentId = doc.id;
-                        final name = d['name'] ?? 'Student';
-                        final rollNumber = d['rollNumber'] ?? '?';
-                        final className = d['class'] ?? 'Hifz';
-                        final photoUrl = (d['photoBase64'] ??
-                                d['photoUrl'] ??
-                                d['photo'] ??
-                                d['image'] ??
-                                d['studentPhotoBase64'])
-                            ?.toString();
+    return ValueListenableBuilder(
+      valueListenable: UserThemeService.listenable(),
+      builder: (context, Box box, _) {
+        final isDark = UserThemeService.isDarkMode();
+        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+        final appBarBg = isDark ? const Color(0xFF1E293B) : const Color(0xFF0F6C5A);
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+        final dividerColor = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
+        final progressTrack = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
+        const accentColor = Color(0xFF0F6C5A);
 
-                        int maxLogLines = 0;
-                        int sumSabakLogs = 0;
-                        for (var logDoc in logsDocs) {
-                          final map = logDoc.data() as Map<String, dynamic>? ?? {};
-                          final sLog = map[studentId] as Map<String, dynamic>?;
-                          if (sLog != null) {
-                            final sL = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
-                            if (sL != null && sL > 0) sumSabakLogs += sL;
-                            final cL = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
-                            if (cL != null && cL > maxLogLines) maxLogLines = cL;
-                          }
-                        }
-                        final currentLinesProfile = int.tryParse(d['currentLines']?.toString() ?? '0') ?? 0;
-                        final currentLines = [currentLinesProfile, maxLogLines, sumSabakLogs].reduce(math.max);
-                        final prevLines = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
-                        final totalMemorized = (currentLines + prevLines).clamp(0, 8640);
-                        const total = 8640;
-                        final pct = totalMemorized / total;
-
-                        final todayStudentLog = todayLogData[studentId] as Map<String, dynamic>?;
-
-                        int sabakDelta = 0;
-                        bool hasSabak = false;
-                        if (todayStudentLog != null) {
-                          hasSabak = true;
-                          if (todayStudentLog.containsKey('sabakLines') && todayStudentLog['sabakLines'] != null) {
-                            sabakDelta = (todayStudentLog['sabakLines'] as num?)?.toInt() ?? 0;
-                          } else if (todayStudentLog.containsKey('currentLines')) {
-                            final todayCumulativeLines = todayStudentLog['currentLines'] as int? ?? currentLines;
-                            int prevCumulativeLines = -1;
-                            for (var logDoc in logsDocs) {
-                              if (logDoc.id == todayStr) continue;
-                              final map = logDoc.data() as Map<String, dynamic>? ?? {};
-                              final sLog = map[studentId] as Map<String, dynamic>?;
-                              if (sLog != null && sLog.containsKey('currentLines')) {
-                                prevCumulativeLines = sLog['currentLines'] as int? ?? 0;
-                                break;
+        return Scaffold(
+          backgroundColor: scaffoldBg,
+          appBar: AppBar(
+            backgroundColor: appBarBg,
+            elevation: 0,
+            titleSpacing: 12,
+            automaticallyImplyLeading: false,
+            title: Row(
+              children: [
+                Image.asset('assets/logo/gmwf-1.webp', height: 32),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Gulzar Madina Madrassa',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: Colors.white,
+                            fontFamily: context.isUrdu ? 'Noori' : null,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 1),
+                      Text(
+                        () {
+                          for (final doc in allDocs) {
+                            final d = doc.data() as Map<String, dynamic>?;
+                            if (d != null) {
+                              final g = (d['guardianName'] ?? d['guardianFullName'] ?? d['fatherName'])?.toString().trim();
+                              if (g != null && g.isNotEmpty) {
+                                return context.isUrdu ? 'سرپرست: $g' : 'Guardian: $g';
                               }
                             }
-                            if (prevCumulativeLines == -1) {
-                              prevCumulativeLines = prevLines;
-                            }
-                            sabakDelta = (todayCumulativeLines - prevCumulativeLines).clamp(0, 8640);
                           }
-                        }
-
-                        final hasTodayLog = todayStudentLog != null;
-                        final attendance = todayStudentLog?['attendance']?.toString() ?? 'unknown';
-                        final uniformOk = todayStudentLog?['uniform'] == true;
-                        final replied = todayStudentLog?['parentReplied'] == true;
-                        final sabkiPara = todayStudentLog?['sabkiPara'] as int? ?? 0;
-                        final sabkiRatio = todayStudentLog?['sabkiRatio']?.toString() ?? '-';
-                        final manzilPara = todayStudentLog?['manzilPara'] as int? ?? 0;
-                        final manzilRatio = todayStudentLog?['manzilRatio']?.toString() ?? '-';
-
-                        String formatRatio(String? ratio) {
-                          if (ratio == '1/4') return context.t('Pao (1/4)');
-                          if (ratio == '1/2') return context.t('Nisf (1/2)');
-                          if (ratio == '3/4') return context.t('Salasa (3/4)');
-                          if (ratio == '1') return context.t('Para (1)');
-                          if (ratio == 'nahi_sunaya') return context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya';
-                          return ratio ?? '';
-                        }
-
-                        Widget buildStatusChip({
-                          required IconData icon,
-                          required String label,
-                          required Color color,
-                          required Color textColor,
-                        }) {
-                          return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: color.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: color.withValues(alpha: 0.2)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(icon, size: 14, color: color),
-                                const SizedBox(width: 4),
-                                Text(
-                                  label,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    color: textColor,
-                                    fontFamily: context.isUrdu ? 'Noori' : null,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-
-                        return NeumorphicContainer(
-                          radius: 20,
-                          color: Colors.white,
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 32,
-                                      backgroundColor: const Color(0xFF0F6C5A),
-                                      child: ClipOval(
-                                        child: () {
-                                          final str = photoUrl?.toString().trim();
-                                          final bytes = ImageUploadService.decodeBase64ToBytes(str);
-                                          if (bytes != null) {
-                                            return Image.memory(bytes, fit: BoxFit.cover, width: 64, height: 64);
-                                          } else if (str != null && str.startsWith('http')) {
-                                            return Image.network(str, fit: BoxFit.cover, width: 64, height: 64, errorBuilder: (_, __, ___) => Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)));
-                                          }
-                                          return Text(name.isNotEmpty ? name[0] : '?', style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold));
-                                        }(),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B))),
-                                          const SizedBox(height: 4),
-                                          Text('${context.t('Roll')}: $rollNumber • ${context.t('Class')}: ${context.t(className)}', style: const TextStyle(color: Color(0xFF64748B), fontSize: 13)),
-                                          const SizedBox(height: 12),
-                                          // Progress Bar
-                                          Row(
-                                            children: [
-                                              Expanded(
-                                                child: ClipRRect(
-                                                  borderRadius: BorderRadius.circular(4),
-                                                  child: LinearProgressIndicator(
-                                                    value: pct.clamp(0.0, 1.0),
-                                                    backgroundColor: const Color(0xFFF1F5F9),
-                                                    color: const Color(0xFF0F6C5A),
-                                                    minHeight: 8,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 12),
-                                              Text('${(pct * 100).toStringAsFixed(1)}%', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1E293B))),
-                                            ],
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            context.isUrdu 
-                                                ? 'کل $total میں سے لائن $totalMemorized مکمل'
-                                                : 'Line $totalMemorized of $total completed',
-                                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontFamily: context.isUrdu ? 'Noori' : null),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    ElevatedButton(
-                                      onPressed: () => onViewDetails(index),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF0F6C5A),
-                                        foregroundColor: Colors.white,
-                                        elevation: 0,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                      ),
-                                      child: Text(context.t('View Details')),
-                                    ),
-                                  ],
-                                ),
-                                
-                                const Divider(height: 24, color: Color(0xFFF1F5F9)),
-                                Text(
-                                  context.t("Today's Progress"),
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
-                                    color: const Color(0xFF475569),
-                                    fontFamily: context.isUrdu ? 'Noori' : null,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                if (!hasTodayLog)
-                                  Container(
-                                    width: double.infinity,
-                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade50,
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: Colors.grey.shade200),
-                                    ),
-                                    child: Text(
-                                      context.isUrdu 
-                                          ? 'آج کی کارکردگی ابھی اپ ڈیٹ نہیں ہوئی'
-                                          : 'Today\'s details not updated yet by teacher',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade600,
-                                        fontStyle: FontStyle.italic,
-                                        fontFamily: context.isUrdu ? 'Noori' : null,
-                                      ),
-                                    ),
-                                  )
-                                else ...[
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      if (attendance == 'present')
-                                        buildStatusChip(
-                                          icon: Icons.check_circle_outline,
-                                          label: context.t('Present'),
-                                          color: const Color(0xFF10B981),
-                                          textColor: const Color(0xFF065F46),
-                                        )
-                                      else if (attendance == 'leave')
-                                        buildStatusChip(
-                                          icon: Icons.mail_outline,
-                                          label: context.t('On Leave'),
-                                          color: Colors.orange,
-                                          textColor: Colors.orange.shade900,
-                                        )
-                                      else if (attendance == 'leave_requested')
-                                        buildStatusChip(
-                                          icon: Icons.mail_outline,
-                                          label: context.t('Leave Requested'),
-                                          color: Colors.amber.shade700,
-                                          textColor: Colors.amber.shade900,
-                                        )
-                                      else
-                                        buildStatusChip(
-                                          icon: Icons.cancel_outlined,
-                                          label: context.t('Absent'),
-                                          color: const Color(0xFFEF4444),
-                                          textColor: const Color(0xFF991B1B),
-                                        ),
-                                      
-                                      if (attendance == 'present') ...[
-                                        buildStatusChip(
-                                          icon: Icons.menu_book,
-                                          label: hasSabak && sabakDelta > 0
-                                              ? (context.isUrdu ? 'سبق: +$sabakDelta لائنیں' : 'Sabak: +$sabakDelta lines')
-                                              : context.t('No lines recorded'),
-                                          color: const Color(0xFF0F6C5A),
-                                          textColor: const Color(0xFF312E81),
-                                        ),
-                                        
-                                        buildStatusChip(
-                                          icon: Icons.repeat,
-                                          label: sabkiPara > 0 && sabkiRatio != '-' && sabkiRatio != 'nahi_sunaya'
-                                              ? (context.isUrdu ? 'سبقی: پارہ $sabkiPara (${formatRatio(sabkiRatio)})' : 'Sabki: Para $sabkiPara (${formatRatio(sabkiRatio)})')
-                                              : (sabkiRatio == 'nahi_sunaya'
-                                                  ? (context.isUrdu ? 'سبقی: نہیں سنایا' : 'Sabki: Nahi Sunaya')
-                                                  : (context.isUrdu ? 'سبقی: کوئی سبق نہیں' : 'Sabki: None')),
-                                          color: const Color(0xFFED6C02),
-                                          textColor: const Color(0xFF7E2D11),
-                                        ),
-                                        
-                                        buildStatusChip(
-                                          icon: Icons.track_changes,
-                                          label: manzilPara > 0 && manzilRatio != '-' && manzilRatio != 'nahi_sunaya'
-                                              ? (context.isUrdu ? 'منزل: پارہ $manzilPara (${formatRatio(manzilRatio)})' : 'Manzil: Para $manzilPara (${formatRatio(manzilRatio)})')
-                                              : (manzilRatio == 'nahi_sunaya'
-                                                  ? (context.isUrdu ? 'منزل: نہیں سنایا' : 'Manzil: Nahi Sunaya')
-                                                  : (context.isUrdu ? 'منزل: کوئی منزل نہیں' : 'Manzil: None')),
-                                          color: const Color(0xFF9C27B0),
-                                          textColor: const Color(0xFF4A0E4E),
-                                        ),
-                                        
-                                        buildStatusChip(
-                                          icon: Icons.checkroom,
-                                          label: uniformOk 
-                                              ? context.t('Uniform: Clean') 
-                                              : context.t('Uniform: Unclean'),
-                                          color: uniformOk ? Colors.blue : const Color(0xFFEF4444),
-                                          textColor: uniformOk ? Colors.blue.shade900 : const Color(0xFF991B1B),
-                                        ),
-                                        
-                                        buildStatusChip(
-                                          icon: Icons.reply,
-                                          label: replied 
-                                              ? context.t('Reply: Sent') 
-                                              : context.t('Reply: Pending'),
-                                          color: replied ? Colors.green : Colors.amber.shade800,
-                                          textColor: replied ? Colors.green.shade900 : Colors.amber.shade900,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
+                          final uName = userData?['name'] ?? userData?['username'] ?? '';
+                          if (uName.toString().isNotEmpty) {
+                            return context.isUrdu ? 'سرپرست: $uName' : 'Guardian: $uName';
+                          }
+                          return context.isUrdu ? 'پورٹل سرپرست' : 'Guardian Portal';
+                        }(),
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              // Dark Mode Toggle
+              IconButton(
+                icon: Icon(
+                  isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  color: isDark ? const Color(0xFFFDE047) : Colors.white,
+                  size: 20,
+                ),
+                tooltip: isDark ? (context.isUrdu ? 'لائٹ موڈ' : 'Light Mode') : (context.isUrdu ? 'ڈارک موڈ' : 'Dark Mode'),
+                onPressed: () async {
+                  await UserThemeService.toggleDarkMode();
+                },
+              ),
+              // Language selector
+              TextButton(
+                onPressed: () => onSelectLanguage(langCode == 'ur' ? 'en' : 'ur'),
+                child: Text(
+                  langCode == 'ur' ? 'English' : 'اردو',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: langCode != 'ur' ? 'Noori' : null,
+                  ),
                 ),
               ),
             ],
           ),
-        ),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // ── Islamic Pattern Background ──
+              Positioned.fill(
+                child: Opacity(
+                  opacity: isDark ? 0.085 : 0.11,
+                  child: Image.asset(
+                    'assets/images/islamic_pattern.webp',
+                    fit: BoxFit.cover,
+                    repeat: ImageRepeat.repeat,
+                    color: const Color(0xFFD4AF37),
+                    colorBlendMode: BlendMode.srcIn,
+                  ),
+                ),
+              ),
+              Center(
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 800),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 8),
+                        child: Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: textMuted,
+                            fontFamily: context.isUrdu ? 'Noori' : null,
+                          ),
+                        ),
+                      ),
+                      if (allDocs.length > 1) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12, left: 8, right: 8),
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            boxShadow: [
+                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+                            ],
+                          ),
+                          child: TextField(
+                            controller: _searchCtrl,
+                            onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                            style: TextStyle(color: textPrimary, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: context.isUrdu ? 'بچے کا نام یا رول نمبر تلاش کریں...' : 'Search student by name or roll number...',
+                              hintStyle: TextStyle(color: textMuted, fontSize: 13, fontFamily: context.isUrdu ? 'Noori' : null),
+                              prefixIcon: Icon(Icons.search_rounded, color: textMuted, size: 20),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear_rounded, size: 18),
+                                      onPressed: () {
+                                        _searchCtrl.clear();
+                                        setState(() => _searchQuery = '');
+                                      },
+                                    )
+                                  : null,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                            ),
+                          ),
+                        ),
+                      ],
+                      Expanded(
+                    child: StreamBuilder<QuerySnapshot>(
+                      stream: FirebaseFirestore.instance
+                          .collection('branches')
+                          .doc(branchId)
+                          .collection('madrassa_daily_logs')
+                          .snapshots(),
+                      builder: (context, logSnap) {
+                        if (logSnap.hasError) {
+                          debugPrint("[FamilySummaryView] Error loading daily logs: ${logSnap.error}");
+                        }
+                        final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+                        final rawDocs = logSnap.data?.docs ?? [];
+                        final logsDocs = [...rawDocs]..sort((a, b) => b.id.compareTo(a.id));
+                        
+                        QueryDocumentSnapshot? todayDoc;
+                        for (var doc in logsDocs) {
+                          if (doc.id == todayStr) {
+                            todayDoc = doc;
+                            break;
+                          }
+                        }
+                        final todayLogData = todayDoc != null && todayDoc.exists
+                            ? todayDoc.data() as Map<String, dynamic>? ?? {}
+                            : (MadrassaLocalStorage.getDailyLogCached(branchId, todayStr) ?? {});
+
+                        return ListView.separated(
+                          itemCount: filteredDocs.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 16),
+                          itemBuilder: (ctx, index) {
+                            final doc = filteredDocs[index];
+                            final d = doc.data() as Map<String, dynamic>? ?? {};
+                            final studentId = doc.id;
+                            final name = d['name'] ?? 'Student';
+                            final rollNumber = d['rollNumber'] ?? '?';
+                            final className = d['class'] ?? 'Hifz';
+                            final photoUrl = (d['photoBase64'] ??
+                                    d['photoUrl'] ??
+                                    d['photo'] ??
+                                    d['image'] ??
+                                    d['studentPhotoBase64'])
+                                ?.toString();
+
+                            int maxLogLines = 0;
+                            int sumSabakLogs = 0;
+                            for (var logDoc in logsDocs) {
+                              final map = logDoc.data() as Map<String, dynamic>? ?? {};
+                              final sLog = map[studentId] as Map<String, dynamic>?;
+                              if (sLog != null) {
+                                final sL = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
+                                if (sL != null && sL > 0) sumSabakLogs += sL;
+                                final cL = (sLog['currentLines'] as num?)?.toInt() ?? int.tryParse(sLog['currentLines']?.toString() ?? '');
+                                if (cL != null && cL > maxLogLines) maxLogLines = cL;
+                              }
+                            }
+                            final currentLinesProfile = int.tryParse(d['currentLines']?.toString() ?? '0') ?? 0;
+                            final currentLines = [currentLinesProfile, maxLogLines, sumSabakLogs].reduce(math.max);
+                            final prevLines = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
+                            final totalMemorized = (currentLines + prevLines).clamp(0, 8640);
+                            const total = 8640;
+                            final pct = totalMemorized / total;
+
+                            final todayStudentLog = todayLogData[studentId] as Map<String, dynamic>?;
+
+                            int sabakDelta = 0;
+                            bool hasSabak = false;
+                            if (todayStudentLog != null) {
+                              hasSabak = true;
+                              if (todayStudentLog.containsKey('sabakLines') && todayStudentLog['sabakLines'] != null) {
+                                sabakDelta = (todayStudentLog['sabakLines'] as num?)?.toInt() ?? 0;
+                              } else if (todayStudentLog.containsKey('currentLines')) {
+                                final todayCumulativeLines = todayStudentLog['currentLines'] as int? ?? currentLines;
+                                int prevCumulativeLines = -1;
+                                for (var logDoc in logsDocs) {
+                                  if (logDoc.id == todayStr) continue;
+                                  final map = logDoc.data() as Map<String, dynamic>? ?? {};
+                                  final sLog = map[studentId] as Map<String, dynamic>?;
+                                  if (sLog != null && sLog.containsKey('currentLines')) {
+                                    prevCumulativeLines = sLog['currentLines'] as int? ?? 0;
+                                    break;
+                                  }
+                                }
+                                if (prevCumulativeLines == -1) {
+                                  prevCumulativeLines = prevLines;
+                                }
+                                sabakDelta = (todayCumulativeLines - prevCumulativeLines).clamp(0, 8640);
+                              }
+                            }
+
+                            final hasTodayLog = todayStudentLog != null;
+                            final attendance = todayStudentLog?['attendance']?.toString() ?? 'unknown';
+                            final uniformOk = todayStudentLog?['uniform'] == true;
+                            final replied = todayStudentLog?['parentReplied'] == true;
+                            final sabkiPara = todayStudentLog?['sabkiPara'] as int? ?? 0;
+                            final sabkiRatio = todayStudentLog?['sabkiRatio']?.toString() ?? '-';
+                            final manzilPara = todayStudentLog?['manzilPara'] as int? ?? 0;
+                            final manzilRatio = todayStudentLog?['manzilRatio']?.toString() ?? '-';
+
+                            String formatRatio(String? ratio) {
+                              if (ratio == '1/4') return context.t('Pao (1/4)');
+                              if (ratio == '1/2') return context.t('Nisf (1/2)');
+                              if (ratio == '3/4') return context.t('Salasa (3/4)');
+                              if (ratio == '1') return context.t('Para (1)');
+                              if (ratio == 'nahi_sunaya') return context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya';
+                              return ratio ?? '';
+                            }
+
+                            Widget buildStatusChip({
+                              required IconData icon,
+                              required String label,
+                              required Color color,
+                              required Color textColor,
+                            }) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: isDark ? 0.2 : 0.1),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.2)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(icon, size: 14, color: color),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      label,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: isDark ? Colors.white : textColor,
+                                        fontFamily: context.isUrdu ? 'Noori' : null,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+
+                            return Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: cardBg,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                                    blurRadius: 16,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 32,
+                                        backgroundColor: accentColor,
+                                        child: ClipOval(
+                                          child: () {
+                                            final str = photoUrl?.toString().trim();
+                                            final bytes = ImageUploadService.decodeBase64ToBytes(str);
+                                            if (bytes != null) {
+                                              return Image.memory(bytes, fit: BoxFit.cover, width: 64, height: 64);
+                                            } else if (str != null && str.startsWith('http')) {
+                                              return Image.network(
+                                                str,
+                                                fit: BoxFit.cover,
+                                                width: 64,
+                                                height: 64,
+                                                errorBuilder: (_, __, ___) => Text(
+                                                  name.isNotEmpty ? name[0] : '?',
+                                                  style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                                                ),
+                                              );
+                                            }
+                                            return Text(
+                                              name.isNotEmpty ? name[0] : '?',
+                                              style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                                            );
+                                          }(),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              name,
+                                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              '${context.t('Roll')}: $rollNumber • ${context.t('Class')}: ${context.t(className)}',
+                                              style: TextStyle(color: textMuted, fontSize: 13),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            // Progress Bar
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: ClipRRect(
+                                                    borderRadius: BorderRadius.circular(4),
+                                                    child: LinearProgressIndicator(
+                                                      value: pct.clamp(0.0, 1.0),
+                                                      backgroundColor: progressTrack,
+                                                      color: accentColor,
+                                                      minHeight: 8,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Text(
+                                                  '${(pct * 100).toStringAsFixed(1)}%',
+                                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              context.isUrdu 
+                                                  ? 'کل $total میں سے لائن $totalMemorized مکمل'
+                                                  : 'Line $totalMemorized of $total completed',
+                                              style: TextStyle(color: textMuted, fontSize: 12, fontFamily: context.isUrdu ? 'Noori' : null),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 16),
+                                      ElevatedButton(
+                                        onPressed: () {
+                                          final origIndex = allDocs.indexOf(doc);
+                                          onViewDetails(origIndex >= 0 ? origIndex : index);
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: accentColor,
+                                          foregroundColor: Colors.white,
+                                          elevation: 0,
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                        ),
+                                        child: Text(context.t('View Details')),
+                                      ),
+                                    ],
+                                  ),
+                                  
+                                  Divider(height: 24, color: dividerColor),
+                                  Text(
+                                    context.t("Today's Progress"),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                      color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                      fontFamily: context.isUrdu ? 'Noori' : null,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  if (!hasTodayLog)
+                                    Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? const Color(0xFF334155).withValues(alpha: 0.5) : Colors.grey.shade50,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: isDark ? const Color(0xFF475569) : Colors.grey.shade200),
+                                      ),
+                                      child: Text(
+                                        context.isUrdu 
+                                            ? 'آج کی کارکردگی ابھی اپ ڈیٹ نہیں ہوئی'
+                                            : 'Today\'s details not updated yet by teacher',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: textMuted,
+                                          fontStyle: FontStyle.italic,
+                                          fontFamily: context.isUrdu ? 'Noori' : null,
+                                        ),
+                                      ),
+                                    )
+                                  else ...[
+                                    Wrap(
+                                      spacing: 8,
+                                      runSpacing: 8,
+                                      children: [
+                                        if (attendance == 'present')
+                                          buildStatusChip(
+                                            icon: Icons.check_circle_outline,
+                                            label: context.t('Present'),
+                                            color: const Color(0xFF10B981),
+                                            textColor: const Color(0xFF065F46),
+                                          )
+                                        else if (attendance == 'leave')
+                                          buildStatusChip(
+                                            icon: Icons.mail_outline,
+                                            label: context.t('On Leave'),
+                                            color: Colors.orange,
+                                            textColor: Colors.orange.shade900,
+                                          )
+                                        else if (attendance == 'leave_requested')
+                                          buildStatusChip(
+                                            icon: Icons.mail_outline,
+                                            label: context.t('Leave Requested'),
+                                            color: Colors.amber.shade700,
+                                            textColor: Colors.amber.shade900,
+                                          )
+                                        else
+                                          buildStatusChip(
+                                            icon: Icons.cancel_outlined,
+                                            label: context.t('Absent'),
+                                            color: const Color(0xFFEF4444),
+                                            textColor: const Color(0xFF991B1B),
+                                          ),
+                                        
+                                        if (attendance == 'present') ...[
+                                          buildStatusChip(
+                                            icon: Icons.menu_book,
+                                            label: hasSabak && sabakDelta > 0
+                                                ? (context.isUrdu ? 'سبق: +$sabakDelta لائنیں' : 'Sabak: +$sabakDelta lines')
+                                                : context.t('No lines recorded'),
+                                            color: const Color(0xFF0F6C5A),
+                                            textColor: const Color(0xFF312E81),
+                                          ),
+                                          
+                                          buildStatusChip(
+                                            icon: Icons.repeat,
+                                            label: sabkiPara > 0 && sabkiRatio != '-' && sabkiRatio != 'nahi_sunaya'
+                                                ? (context.isUrdu ? 'سبقی: پارہ $sabkiPara (${formatRatio(sabkiRatio)})' : 'Sabki: Para $sabkiPara (${formatRatio(sabkiRatio)})')
+                                                : (sabkiRatio == 'nahi_sunaya'
+                                                    ? (context.isUrdu ? 'سبقی: نہیں سنایا' : 'Sabki: Nahi Sunaya')
+                                                    : (context.isUrdu ? 'سبقی: کوئی سبق نہیں' : 'Sabki: None')),
+                                            color: const Color(0xFFED6C02),
+                                            textColor: const Color(0xFF7E2D11),
+                                          ),
+                                          
+                                          buildStatusChip(
+                                            icon: Icons.track_changes,
+                                            label: manzilPara > 0 && manzilRatio != '-' && manzilRatio != 'nahi_sunaya'
+                                                ? (context.isUrdu ? 'منزل: پارہ $manzilPara (${formatRatio(manzilRatio)})' : 'Manzil: Para $manzilPara (${formatRatio(manzilRatio)})')
+                                                : (manzilRatio == 'nahi_sunaya'
+                                                    ? (context.isUrdu ? 'منزل: نہیں سنایا' : 'Manzil: Nahi Sunaya')
+                                                    : (context.isUrdu ? 'منزل: کوئی منزل نہیں' : 'Manzil: None')),
+                                            color: const Color(0xFF9C27B0),
+                                            textColor: const Color(0xFF4A0E4E),
+                                          ),
+                                          
+                                          buildStatusChip(
+                                            icon: Icons.checkroom,
+                                            label: uniformOk 
+                                                ? context.t('Uniform: Clean') 
+                                                : context.t('Uniform: Unclean'),
+                                            color: uniformOk ? Colors.blue : const Color(0xFFEF4444),
+                                            textColor: uniformOk ? Colors.blue.shade900 : const Color(0xFF991B1B),
+                                          ),
+                                          
+                                          buildStatusChip(
+                                            icon: Icons.reply,
+                                            label: replied 
+                                                ? context.t('Reply: Sent') 
+                                                : context.t('Reply: Pending'),
+                                            color: replied ? Colors.green : Colors.amber.shade800,
+                                            textColor: replied ? Colors.green.shade900 : Colors.amber.shade900,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
+    );
+      },
     );
   }
 }
@@ -1125,32 +1351,53 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.link_off_rounded, size: 64, color: Color(0xFF0F6C5A)),
-              const SizedBox(height: 24),
-              Text(context.t('Account Not Linked'), style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null)),
-              const SizedBox(height: 8),
-              Text(context.t(message ?? 'Your account is not linked to any student.'), textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null)),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: onLogout,
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F6C5A), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-                  child: Text(context.t('Back to Login'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
-                ),
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, Box box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
+
+        return Scaffold(
+          backgroundColor: bg,
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.link_off_rounded, size: 64, color: Color(0xFF0F6C5A)),
+                  const SizedBox(height: 24),
+                  Text(
+                    context.t('Account Not Linked'),
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textPrimary, fontFamily: context.isUrdu ? 'Noori' : null),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    context.t(message ?? 'Your account is not linked to any student.'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: textMuted, fontFamily: context.isUrdu ? 'Noori' : null),
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: onLogout,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F6C5A),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: Text(context.t('Back to Login'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1176,91 +1423,106 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 420),
-          margin: const EdgeInsets.all(32),
-          padding: const EdgeInsets.all(40),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 32, offset: const Offset(0, 8)),
-            ],
-            border: Border.all(color: const Color(0xFFE8EAF0)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0F6C5A).withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.family_restroom_rounded, color: Color(0xFF0F6C5A), size: 36),
+    return ValueListenableBuilder(
+      valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
+      builder: (context, Box box, _) {
+        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
+        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+        final border = isDark ? const Color(0xFF334155) : const Color(0xFFE8EAF0);
+
+        return Scaffold(
+          backgroundColor: bg,
+          body: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 420),
+              margin: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
+                ],
+                border: Border.all(color: border),
               ),
-              const SizedBox(height: 24),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: Color(0xFF64748B), height: 1.5),
-              ),
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: onButtonPressed,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0F6C5A),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    elevation: 0,
-                  ),
-                  child: Text(buttonText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
-              ),
-              if (onChangeBranch != null) ...[
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: onChangeBranch,
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      side: const BorderSide(color: Color(0xFFE8EAF0)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F6C5A).withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
                     ),
-                    child: Text(changeBranchText ?? 'Change Branch', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF1E293B))),
+                    child: const Icon(Icons.family_restroom_rounded, color: Color(0xFF0F6C5A), size: 36),
                   ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: onLogout,
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.red,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  const SizedBox(height: 24),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textPrimary),
                   ),
-                  child: Text(context.t('Logout'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                ),
+                  const SizedBox(height: 12),
+                  Text(
+                    subtitle,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 14, color: textMuted, height: 1.5),
+                  ),
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: onButtonPressed,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0F6C5A),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: Text(buttonText, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                  if (onChangeBranch != null) ...[
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: onChangeBranch,
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          side: BorderSide(color: border),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        child: Text(
+                          changeBranchText ?? 'Change Branch',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: textPrimary),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: onLogout,
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: Text(context.t('Logout'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

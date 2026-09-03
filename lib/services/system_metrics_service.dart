@@ -44,7 +44,7 @@ class SystemMetricsService {
   Timer? _timer;
   bool _isQuerying = false;
 
-  void startMonitoring({Duration interval = const Duration(seconds: 6)}) {
+  void startMonitoring({Duration interval = const Duration(seconds: 60)}) {
     _timer?.cancel();
     _queryMetrics();
     _timer = Timer.periodic(interval, (_) => _queryMetrics());

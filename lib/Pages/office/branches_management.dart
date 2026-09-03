@@ -10,6 +10,7 @@ import '../admin/branch_facility_editor.dart';
 import '../branches_register.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/offline_auth_service.dart';
+import '../../services/finance_local_storage.dart';
 
 class BranchesManagementPage extends StatefulWidget {
   final String? currentUserRole;
@@ -288,6 +289,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
         ? List<Map<String, dynamic>>.from(branchData['schools'])
         : (defaults['schools'] ?? []);
 
+    final rawSessions = branchData['sessionsConfig'] is Map
+        ? Map<String, dynamic>.from(branchData['sessionsConfig'] as Map)
+        : null;
+
     final result = await BranchFacilityEditorDialog.show(
       context,
       branchId: branchId,
@@ -296,6 +301,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
       initialDasterkhwaans: rawDast,
       initialMadrassas: rawMadr,
       initialSchools: rawSch,
+      initialSessionsConfig: rawSessions,
     );
 
     if (result == true) {
@@ -303,7 +309,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     }
   }
 
-  // ── Offboard / Deactivate Branch (Offline First Soft Delete) ────────────────
+  // ── Offboard / Reactivate Branch (Offline First Soft Delete) ────────────────
   Future<void> _offboardBranch(BuildContext context, String branchId, String branchName, bool isCurrentlyOffboarded) async {
     final actionLabel = isCurrentlyOffboarded ? 'Reactivate' : 'Offboard & Archive';
     final authorized = await _verifyAdminPassword(context, '$actionLabel Branch "$branchName"');
@@ -311,13 +317,16 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
 
     if (!context.mounted) return;
 
+    final reasonCtrl = TextEditingController();
+
     final confirmText = isCurrentlyOffboarded
-        ? 'Reactivating branch "$branchName" will restore its active operational status.'
-        : 'Offboarding branch "$branchName" will mark it as non-functional and archive its operations.\n\nAll historical financial data, patient records, and donations will be PRESERVED completely.';
+        ? 'Reactivating branch "$branchName" will restore its active operational status across all departments (Dispensary, Dasterkhwaan, Madrassa, School).'
+        : 'Offboarding branch "$branchName" will mark it as non-functional and archive its operations.\n\nAll historical financial data, patient records, attendance, and donations will be PRESERVED completely.';
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Icon(
@@ -328,7 +337,23 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
             Text('$actionLabel Branch'),
           ],
         ),
-        content: Text(confirmText),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(confirmText, style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 14),
+            TextField(
+              controller: reasonCtrl,
+              decoration: InputDecoration(
+                labelText: isCurrentlyOffboarded ? 'Reactivation Remarks (Optional)' : 'Offboarding Justification (Optional)',
+                hintText: isCurrentlyOffboarded ? 'e.g. Operations resumed' : 'e.g. Facility relocation or seasonal closure',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -347,24 +372,54 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
 
     if (confirm != true) return;
 
+    final reason = reasonCtrl.text.trim();
+    final nowIso = DateTime.now().toIso8601String();
+    final currentUser = FirebaseAuth.instance.currentUser?.displayName ??
+        FirebaseAuth.instance.currentUser?.email ??
+        'Admin';
+
     try {
       // 1. OFFLINE FIRST: Update local Hive box immediately
-      if (Hive.isBoxOpen('local_branches')) {
-        final box = Hive.box('local_branches');
+      if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+        final box = Hive.box(LocalStorageService.branchesBox);
         final existing = box.get('branch:$branchId');
         final map = existing is Map ? Map<String, dynamic>.from(existing) : {'id': branchId, 'name': branchName};
         map['isOffboarded'] = !isCurrentlyOffboarded;
         map['status'] = isCurrentlyOffboarded ? 'active' : 'offboarded';
+        if (isCurrentlyOffboarded) {
+          map['reactivatedAt'] = nowIso;
+          map['reactivatedBy'] = currentUser;
+          map['offboardedAt'] = null;
+        } else {
+          map['offboardedAt'] = nowIso;
+          map['offboardedBy'] = currentUser;
+          map['offboardingReason'] = reason;
+        }
         await box.put('branch:$branchId', map);
       }
 
-      // 2. BACKGROUND SYNC: Update Firestore asynchronously
+      // 2. Log Audit Trail
+      await FinanceLocalStorage.logAction(
+        branchId: branchId,
+        entityType: 'branch',
+        entityId: branchId,
+        action: isCurrentlyOffboarded ? 'reactivate' : 'offboard',
+        performedBy: currentUser,
+        reason: isCurrentlyOffboarded
+            ? 'Reactivated branch "$branchName"${reason.isNotEmpty ? ": $reason" : ""}'
+            : 'Offboarded branch "$branchName"${reason.isNotEmpty ? ": $reason" : ""}',
+      );
+
+      // 3. BACKGROUND SYNC: Update Firestore asynchronously
       try {
         final updateData = <String, dynamic>{
           'isOffboarded': !isCurrentlyOffboarded,
           'status': isCurrentlyOffboarded ? 'active' : 'offboarded',
           'offboardedAt': isCurrentlyOffboarded ? null : FieldValue.serverTimestamp(),
+          'reactivatedAt': isCurrentlyOffboarded ? FieldValue.serverTimestamp() : null,
           'updatedAt': FieldValue.serverTimestamp(),
+          if (reason.isNotEmpty)
+            (isCurrentlyOffboarded ? 'reactivationRemarks' : 'offboardingReason'): reason,
         };
         await FirebaseFirestore.instance.collection('branches').doc(branchId).set(updateData, SetOptions(merge: true));
       } catch (cloudErr) {
@@ -769,6 +824,36 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 if (_isAdminOrExecutive) ...[
                                   const SizedBox(width: 10),
                                   ElevatedButton.icon(
+                                    onPressed: () async {
+                                      final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                      final next = !(current == true || current == 'true' || current == 1);
+                                      await LocalStorageService.setDonationBoxAllowed(branchId, next);
+                                      setState(() {});
+                                    },
+                                    icon: Icon(Icons.volunteer_activism_rounded, size: 16, color: Colors.white),
+                                    label: Text(
+                                      (() {
+                                        final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                        final enabled = current == true || current == 'true' || current == 1;
+                                        return enabled ? 'Donation Box ON' : 'Donation Box OFF';
+                                      })(),
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: (() {
+                                        final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                        final enabled = current == true || current == 'true' || current == 1;
+                                        return enabled ? Colors.green : Colors.red.shade700;
+                                      })(),
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  ),
+                                ],
+                                if (_isAdminOrExecutive) ...[
+                                  const SizedBox(width: 10),
+                                  ElevatedButton.icon(
                                     onPressed: () => _offboardBranch(context, branchId, branchName, isOffboarded),
                                     icon: Icon(
                                       isOffboarded ? Icons.unarchive_rounded : Icons.archive_rounded,
@@ -793,7 +878,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                             Divider(color: t.bgRule, height: 1),
                             const SizedBox(height: 14),
 
-                            // Facility Counters Row
+                            // Facility Counters & Operational Policy Row
                             Wrap(
                               spacing: 10,
                               runSpacing: 8,
@@ -802,6 +887,30 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 _buildBadge('🍽️ ${dastList.length} Dasterkhwaan(s)', Colors.orange, t),
                                 _buildBadge('📖 ${madrList.length} Madrassa(s)', Colors.teal, t),
                                 _buildBadge('🏫 ${schList.length} School(s)', Colors.indigo, t),
+                                () {
+                                  final allowVitals = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
+                                  return _buildBadge(
+                                    allowVitals ? '🩺 Vitals Token: ALLOWED 🟢' : '🩺 Vitals Token: DISALLOWED 🔴',
+                                    allowVitals ? Colors.teal : Colors.redAccent,
+                                    t,
+                                  );
+                                }(),
+                                () {
+                                  final allowDonationBox = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                  return _buildBadge(
+                                    allowDonationBox ? '💰 Donation Box: ALLOWED 🟢' : '💰 Donation Box: DISALLOWED 🔴',
+                                    allowDonationBox ? Colors.green : Colors.redAccent,
+                                    t,
+                                  );
+                                }(),
+                                if (madrList.isNotEmpty) () {
+                                  final feeEnabled = branch['madrassaFeeEnabled'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['madrassaFeeEnabled'] : null) ?? LocalStorageService.isMadrassaFeeEnabled(branchId);
+                                  return _buildBadge(
+                                    feeEnabled ? '💰 Madrassa: FEES ACTIVE 🟢' : '💰 Madrassa: FREE (NO FEES) 🟡',
+                                    feeEnabled ? Colors.green : Colors.amber.shade800,
+                                    t,
+                                  );
+                                }(),
                               ],
                             ),
 
@@ -812,10 +921,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 spacing: 6,
                                 runSpacing: 6,
                                 children: [
-                                  ...dispList.map((d) => _buildDetailChip((d['name'] ?? d['id'] ?? '').toString(), Icons.local_hospital_outlined, t.accent, t)),
-                                  ...dastList.map((d) => _buildDetailChip((d['name'] ?? d['id'] ?? '').toString(), Icons.restaurant_rounded, Colors.orange, t)),
-                                  ...madrList.map((d) => _buildDetailChip((d['name'] ?? d['id'] ?? '').toString(), Icons.menu_book_rounded, Colors.teal, t)),
-                                  ...schList.map((d)  => _buildDetailChip((d['name'] ?? d['id'] ?? '').toString(), Icons.school_rounded, Colors.indigo, t)),
+                                  ...dispList.map((d) => _buildDetailChip(d is Map ? d : {'name': d.toString()}, Icons.local_hospital_outlined, t.accent, t)),
+                                  ...dastList.map((d) => _buildDetailChip(d is Map ? d : {'name': d.toString()}, Icons.restaurant_rounded, Colors.orange, t)),
+                                  ...madrList.map((d) => _buildDetailChip(d is Map ? d : {'name': d.toString()}, Icons.menu_book_rounded, Colors.teal, t)),
+                                  ...schList.map((d)  => _buildDetailChip(d is Map ? d : {'name': d.toString()}, Icons.school_rounded, Colors.indigo, t)),
                                 ],
                               ),
                             ],
@@ -881,23 +990,45 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     );
   }
 
-  Widget _buildDetailChip(String name, IconData icon, Color color, RoleThemeData t) {
+  Widget _buildDetailChip(Map item, IconData icon, Color color, RoleThemeData t) {
+    final name = (item['name'] ?? item['id'] ?? '').toString();
+    final rawSessions = item['sessions'];
+    List<String> sessions = [];
+    if (rawSessions is List) {
+      sessions = rawSessions.map((e) => e.toString().toLowerCase()).toList();
+    }
+    String sessionIcons = '';
+    if (sessions.contains('morning')) sessionIcons += '☀️ ';
+    if (sessions.contains('evening')) sessionIcons += '🌅 ';
+    if (sessions.contains('night')) sessionIcons += '🌙 ';
+    if (sessions.contains('lunch')) sessionIcons += '🍲 ';
+    if (sessions.contains('dinner')) sessionIcons += '🍛 ';
+    if (sessions.contains('iftar')) sessionIcons += '🌙 ';
+    if (sessions.contains('afternoon')) sessionIcons += '🌅 ';
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: t.bgCardAlt,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: t.bgRule),
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 5),
           Text(
             name,
-            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: t.textSecondary),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary),
           ),
+          if (sessionIcons.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text(
+              sessionIcons.trim(),
+              style: const TextStyle(fontSize: 11),
+            ),
+          ],
         ],
       ),
     );

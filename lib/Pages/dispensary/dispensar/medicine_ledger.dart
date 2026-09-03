@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/services/master_proforma_service.dart';
 import 'dart:async';
 
 class MedicineLedgerPage extends StatefulWidget {
@@ -89,7 +90,20 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         filterByCamp: _selectedCampFilter != 'all',
       );
       setState(() {
-        _allMedicines = items.toList()
+        _allMedicines = items.map((m) {
+          final copy = Map<String, dynamic>.from(m);
+          final clean = MasterProformaService.cleanBrandToFormula(copy['name'] ?? copy['formula'] ?? '');
+          if (clean.isNotEmpty) {
+            copy['name'] = clean;
+            copy['formula'] = clean;
+          }
+          final rawCamp = (copy['campId'] ?? copy['dispensaryId'] ?? '').toString().toLowerCase();
+          if (rawCamp.contains('kapay')) {
+            copy['campId'] = 'saddar';
+            copy['dispensaryId'] = 'saddar';
+          }
+          return copy;
+        }).toList()
           ..sort((a, b) => (a['name'] ?? '').toString().toLowerCase().compareTo((b['name'] ?? '').toString().toLowerCase()));
         _isSearchingMeds = false;
       });
@@ -324,18 +338,52 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           }
         }
 
-        // 2. Query Firestore dispensary records
+        // 2. Query Firestore records (serials + legacy dispensary fallback)
         final firestoreRecords = <Map<String, dynamic>>[];
         try {
-          final dailySnap = await FirebaseFirestore.instance
+          final branchDoc = FirebaseFirestore.instance
               .collection('branches')
-              .doc(widget.branchId)
-              .collection('dispensary')
+              .doc(widget.branchId);
+
+          // Check serials collection for the date
+          final serialsDateSnap = await branchDoc
+              .collection('serials')
               .doc(dateKey)
-              .collection(dateKey)
               .get();
-          for (final doc in dailySnap.docs) {
-            firestoreRecords.add(doc.data());
+          
+          if (serialsDateSnap.exists) {
+            for (final qType in ['general', 'emergency', 'fasttrack', 'regular']) {
+              try {
+                final qSnap = await branchDoc
+                    .collection('serials')
+                    .doc(dateKey)
+                    .collection(qType)
+                    .where('dispenseStatus', isEqualTo: 'dispensed')
+                    .get();
+                for (final doc in qSnap.docs) {
+                  final data = doc.data();
+                  data['serial'] ??= doc.id;
+                  // Normalize prescriptions array from serial document structure
+                  if (data['prescription'] is Map && data['prescriptions'] == null) {
+                    final rxMap = data['prescription'] as Map;
+                    data['prescriptions'] = rxMap['medicines'] ?? rxMap['prescriptions'] ?? [];
+                  }
+                  firestoreRecords.add(data);
+                }
+              } catch (_) {}
+            }
+          }
+
+          // Legacy dispensary collection fallback if serials had no records
+          if (firestoreRecords.isEmpty) {
+            final dailySnap = await branchDoc
+                .collection('dispensary')
+                .doc(dateKey)
+                .collection(dateKey)
+                .get();
+            for (final doc in dailySnap.docs) {
+              firestoreRecords.add(doc.data());
+            }
           }
         } catch (_) {}
 
@@ -553,7 +601,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            _selectedMed?['name'] ?? 'All Stock Items (Consolidated)',
+                            MasterProformaService.cleanBrandToFormula(_selectedMed?['name']?.toString() ?? 'All Stock Items (Consolidated)'),
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
@@ -813,7 +861,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   ),
                 ),
                 Text(
-                  'Branch: ${widget.branchId.toUpperCase()}${_selectedCampFilter != 'all' ? ' • Camp: ${_selectedCampFilter.toUpperCase()}' : ' • All Camps'}',
+                  'Branch: ${widget.branchId.toUpperCase()}${_selectedCampFilter != 'all' ? ' • Camp: ${(CampSessionService.getCampLabel(_selectedCampFilter).toUpperCase().contains('KAPAY') ? 'SADDAR' : CampSessionService.getCampLabel(_selectedCampFilter).toUpperCase())}' : ' • All Camps'}',
                   style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : _textLight),
                 ),
               ],
@@ -839,7 +887,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     final Map<String, Map<String, dynamic>> groups = {};
 
     for (final l in logs) {
-      final name = l['medicineName']?.toString() ?? 'Unknown Medicine';
+      final rawName = l['medicineName']?.toString() ?? 'Unknown Medicine';
+      final name = MasterProformaService.cleanBrandToFormula(rawName);
       final type = l['type']?.toString() ?? 'removed';
       final qty = (l['qty'] as num?)?.toDouble() ?? 0.0;
       final patientId = l['patientCnic'] ?? l['patientName'] ?? '';
@@ -954,9 +1003,16 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   Widget _buildTransactionTile(Map<dynamic, dynamic> log) {
     final bool isAdded = log['type'] == 'added';
     final isProforma = log['isProforma'] == true;
-    final date = DateTime.tryParse(log['date']?.toString() ?? '') ?? DateTime.now();
     final isDark = _isDark;
-    final campTag = (log['campTag'] ?? '').toString().trim().toUpperCase();
+    final date = DateTime.tryParse(log['date']?.toString() ?? '') ?? DateTime.now();
+    final rawCampTag = (log['campTag'] ?? '').toString().trim().toUpperCase();
+    final campTag = (rawCampTag.contains('KAPAY') || rawCampTag == 'KAPAYYA' || rawCampTag == 'KAPAYA')
+        ? 'SADDAR'
+        : (rawCampTag.isNotEmpty ? CampSessionService.getCampLabel(rawCampTag).toUpperCase() : '');
+    final rawMedName = (log['medicineName'] ?? '').toString();
+    final medName = MasterProformaService.cleanBrandToFormula(rawMedName);
+    final rawMsg = (log['msg'] ?? (isAdded ? 'Restock' : 'Dispensed')).toString();
+    final msg = MasterProformaService.cleanBrandToFormula(rawMsg);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -1002,8 +1058,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                     Expanded(
                       child: Text(
                         isAdded
-                            ? (log['msg'] ?? 'Restock')
-                            : '${log['medicineName'] ?? ''} • ${log['patientName'] ?? 'Unknown Patient'}',
+                            ? msg
+                            : '$medName • ${log['patientName'] ?? 'Unknown Patient'}',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           color: isDark ? Colors.white : _textDark,
@@ -1238,12 +1294,13 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                     );
                   }
                   final med = _allMedicines[i - 1];
+                  final cleanName = MasterProformaService.cleanBrandToFormula(med['name'] ?? med['formula'] ?? '');
                   return ListTile(
                     leading: CircleAvatar(
                       backgroundColor: _teal.withValues(alpha: 0.1),
                       child: const Icon(Icons.medication_rounded, size: 16, color: _teal),
                     ),
-                    title: Text(med['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold)),
+                    title: Text(cleanName.isNotEmpty ? cleanName : (med['name'] ?? ''), style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text('${med['type']} • ${med['dose'] ?? 'No Dose'} • Qty: ${med['quantity']}'),
                     onTap: () {
                       Navigator.pop(ctx);

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
 
@@ -497,6 +498,9 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
+          inputFormatters: keyboardType == TextInputType.phone
+              ? [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)]
+              : null,
           maxLines: maxLines,
           onChanged: onChanged,
           validator: required ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null : null,

@@ -5,7 +5,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
-import '../services/device_info_service.dart';
 
 class DepartmentActivityWidget extends StatefulWidget {
   final String branchId;
@@ -136,8 +135,19 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                   final deptColor = dept['color'] as Color;
                   final deptEntries = _getDepartmentEntries(deptId);
 
-                  return StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance.collection('users').snapshots(),
+                  return FutureBuilder<QuerySnapshot>(
+                    future: () {
+                      final normalizedBranch = widget.branchId.trim().toLowerCase();
+                      if (normalizedBranch.isEmpty || normalizedBranch == 'all' || normalizedBranch == 'global') {
+                        return FirebaseFirestore.instance.collection('users').limit(200).get();
+                      }
+                      return FirebaseFirestore.instance
+                          .collection('branches')
+                          .doc(normalizedBranch)
+                          .collection('users')
+                          .limit(200)
+                          .get();
+                    }(),
                     builder: (context, snapshot) {
                       final allUsers = snapshot.data?.docs.map((d) => d.data() as Map<String, dynamic>).toList() ?? [];
 

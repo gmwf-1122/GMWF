@@ -2,7 +2,8 @@
 
 class BiometricCredential {
   final String id;
-  final String biometricPin; // Numeric PIN used on ZKTeco device e.g. "101"
+  final String biometricPin; // Current Numeric PIN used on ZKTeco device e.g. "101"
+  final List<String> pinHistory; // Historical / previous PINs e.g. ["101", "102"]
   final String entityId;     // Internal ID of Student / Employee
   final String entityName;   // Full name of Person
   final String entityType;   // 'employee', 'madrassa_student', 'school_student', 'dispensary_staff'
@@ -14,6 +15,7 @@ class BiometricCredential {
   BiometricCredential({
     required this.id,
     required this.biometricPin,
+    this.pinHistory = const [],
     required this.entityId,
     required this.entityName,
     required this.entityType,
@@ -24,9 +26,19 @@ class BiometricCredential {
   });
 
   factory BiometricCredential.fromMap(Map<dynamic, dynamic> map) {
+    final historyRaw = map['pinHistory'] ?? map['previousPins'];
+    final history = <String>[];
+    if (historyRaw is List) {
+      for (final p in historyRaw) {
+        if (p != null && p.toString().trim().isNotEmpty) {
+          history.add(p.toString().trim());
+        }
+      }
+    }
     return BiometricCredential(
       id: map['id']?.toString() ?? '',
       biometricPin: map['biometricPin']?.toString() ?? '',
+      pinHistory: history,
       entityId: map['entityId']?.toString() ?? '',
       entityName: map['entityName']?.toString() ?? 'User',
       entityType: map['entityType']?.toString() ?? 'employee',
@@ -43,6 +55,7 @@ class BiometricCredential {
     return {
       'id': id,
       'biometricPin': biometricPin,
+      'pinHistory': pinHistory,
       'entityId': entityId,
       'entityName': entityName,
       'entityType': entityType,

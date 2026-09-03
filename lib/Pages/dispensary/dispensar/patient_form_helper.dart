@@ -5,7 +5,13 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:arabic_reshaper/arabic_reshaper.dart';
 
+import 'package:intl/intl.dart';
+
 class PatientFormHelper {
+  static final Map<String, Uint8List> _assetCache = {};
+  static pw.Font? _cachedUrduFont;
+  static pw.Font? _cachedEnglishFont;
+
   static String _processUrduText(String text) {
     if (text.trim().isEmpty) return '';
     final hasArabicUrdu = RegExp(r'[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]').hasMatch(text);
@@ -89,7 +95,6 @@ class PatientFormHelper {
     final timing = med['timing']?.toString() ?? '';
     final quantity = med['quantity'] ?? 1;
     if (isInjectable(med)) return 'مقدار $quantity';
-    final totalPerDayVal = totalPerDay(timing);
     num dosePerTime = 1;
     final dosage = med['dosage']?.toString() ?? '';
     if (dosage.isNotEmpty) {
@@ -157,9 +162,12 @@ class PatientFormHelper {
 
   // ====================== ASSET LOADER ======================
   static Future<Uint8List> loadAssetBytes(String path) async {
+    if (_assetCache.containsKey(path)) return _assetCache[path]!;
     try {
       final data = await rootBundle.load(path);
-      return data.buffer.asUint8List();
+      final bytes = data.buffer.asUint8List();
+      _assetCache[path] = bytes;
+      return bytes;
     } catch (e) {
       debugPrint('Asset not found: $path');
       return Uint8List(0);
@@ -168,21 +176,26 @@ class PatientFormHelper {
 
   // ====================== FONT HELPERS ======================
   static Future<pw.Font> getNooriFont() async {
+    if (_cachedUrduFont != null) return _cachedUrduFont!;
     try {
       final data = await rootBundle.load('assets/fonts/Amiri-Regular.ttf');
-      return pw.Font.ttf(data);
+      _cachedUrduFont = pw.Font.ttf(data);
+      return _cachedUrduFont!;
     } catch (_) {
       try {
         final data = await rootBundle.load('assets/fonts/NooriNastaliq.ttf');
-        return pw.Font.ttf(data);
+        _cachedUrduFont = pw.Font.ttf(data);
+        return _cachedUrduFont!;
       } catch (_) {
-        return pw.Font.helvetica();
+        _cachedUrduFont = pw.Font.helvetica();
+        return _cachedUrduFont!;
       }
     }
   }
 
   static Future<pw.Font> getEnglishFont() async {
-    return pw.Font.helvetica();
+    _cachedEnglishFont ??= pw.Font.helvetica();
+    return _cachedEnglishFont!;
   }
 
   // =========================================================================
@@ -682,7 +695,7 @@ class PatientFormHelper {
     }).toList();
   }
 
-  // ====================== WhatsApp PDF (unchanged) =========================
+  // ====================== Modern WhatsApp Prescription PDF =========================
   static Future<Uint8List> generateWhatsAppPdf(
     Map<String, dynamic> data,
     String branchName,
@@ -693,8 +706,7 @@ class PatientFormHelper {
     final english = await getEnglishFont();
     final urdu = await getNooriFont();
     final logoBytes = await loadAssetBytes('assets/logo/gmwf-1.webp');
-    final moonBytes = await loadAssetBytes('assets/images/moon.webp');
-    final rxBytes = await loadAssetBytes('assets/images/rx.webp');
+
     final doctorName = data['doctorName']?.toString() ?? '';
     String patientName = 'Patient';
     final candidateNames = [data['patientName'], data['name'], data['patient_name']];
@@ -708,47 +720,471 @@ class PatientFormHelper {
       }
     }
     final diagnosis = data['diagnosis']?.toString() ?? '';
+    final serial = data['tokenNumber'] ?? data['serial'] ?? data['token'] ?? data['id'] ?? 'N/A';
     final labTests = (data['labResults'] ?? []) as List;
     final prescriptions = (data['prescriptions'] ?? []) as List;
-    final inventoryMeds =
-        prescriptions.where((m) => m['inventoryId'] != null && !isInjectable(m)).toList();
-    final inventoryInjectables =
-        prescriptions.where((m) => m['inventoryId'] != null && isInjectable(m)).toList();
-    final customMeds =
-        prescriptions.where((m) => m['inventoryId'] == null && !isInjectable(m)).toList();
-    final customInjectables =
-        prescriptions.where((m) => m['inventoryId'] == null && isInjectable(m)).toList();
 
     final isPhysio = data['isPhysiotherapist'] == true;
+    final tealDark = PdfColor.fromHex('#00695C');
+    final tealLight = PdfColor.fromHex('#E0F2F1');
+    final textDark = PdfColor.fromHex('#0F172A');
+    final textMuted = PdfColor.fromHex('#64748B');
+    final borderGrey = PdfColor.fromHex('#E2E8F0');
+    final bgLight = PdfColor.fromHex('#F8FAFC');
 
-    pdf.addPage(pw.Page(
-      pageFormat: PdfPageFormat.a4,
-      build: (_) => pw.Column(children: [
-        buildPdfHeader(english, urdu, logoBytes, moonBytes, doctorName,
-            isPrint: false, includeDoctor: true),
-        pw.SizedBox(height: 20),
-        pw.Divider(thickness: 1.5),
-        pw.SizedBox(height: 20),
-        pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          if (labTests.isNotEmpty)
-            pw.Expanded(
-                flex: 2,
-                child: buildPdfLabColumn(english, labTests, isPrint: false, isPhysio: isPhysio)),
-          if (labTests.isNotEmpty) pdfVerticalDivider(),
-          pw.Expanded(
-            flex: 8,
-            child: buildPdfRightColumn(english, urdu, rxBytes, patientName,
-                diagnosis, inventoryMeds, inventoryInjectables, customMeds,
-                customInjectables,
-                isPrint: false, gender: gender, age: age),
-          ),
-        ]),
-        pw.SizedBox(height: 40),
-        pw.Divider(color: PdfColors.grey),
-        pw.SizedBox(height: 10),
-        buildPdfFooter(english, branchName),
-      ]),
-    ));
+    final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now());
+
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(24),
+        build: (pw.Context ctx) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // ── 1. Modern Header ───────────────────────────────────────
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: pw.BoxDecoration(
+                  color: tealDark,
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(10)),
+                ),
+                child: pw.Row(
+                  children: [
+                    if (logoBytes.isNotEmpty)
+                      pw.Container(
+                        width: 44,
+                        height: 44,
+                        decoration: const pw.BoxDecoration(
+                          color: PdfColors.white,
+                          shape: pw.BoxShape.circle,
+                        ),
+                        padding: const pw.EdgeInsets.all(3),
+                        child: pw.Image(pw.MemoryImage(logoBytes)),
+                      ),
+                    if (logoBytes.isNotEmpty) pw.SizedBox(width: 12),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            'GULZAR-E-MADINA WELFARE FOUNDATION',
+                            style: pw.TextStyle(
+                              font: english,
+                              fontSize: 13,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          pw.SizedBox(height: 2),
+                          pw.Text(
+                            'Free Medical Dispensary & Clinical Welfare Services',
+                            style: pw.TextStyle(
+                              font: english,
+                              fontSize: 9.5,
+                              color: PdfColor.fromHex('#B2DFDB'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.white,
+                        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                      ),
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text(
+                            'PRESCRIPTION',
+                            style: pw.TextStyle(
+                              font: english,
+                              fontSize: 8.5,
+                              fontWeight: pw.FontWeight.bold,
+                              color: tealDark,
+                            ),
+                          ),
+                          pw.Text(
+                            'Slip #$serial',
+                            style: pw.TextStyle(
+                              font: english,
+                              fontSize: 8.5,
+                              fontWeight: pw.FontWeight.bold,
+                              color: textDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 10),
+
+              // ── 2. Patient & Clinical Metadata Card ───────────────────────
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: pw.BoxDecoration(
+                  color: bgLight,
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                  border: pw.Border.all(color: borderGrey, width: 1),
+                ),
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          _buildPdfMetaRow(english, 'Patient Name', patientName, isBoldValue: true),
+                          pw.SizedBox(height: 4),
+                          _buildPdfMetaRow(english, 'Age / Gender', '$age Yrs / ${gender.toUpperCase()}'),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          _buildPdfMetaRow(english, 'Dispensary', branchName),
+                          pw.SizedBox(height: 4),
+                          _buildPdfMetaRow(english, 'Visit Date', dateStr),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      flex: 3,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          _buildPdfMetaRow(english, 'Consultant Doctor', doctorName.isNotEmpty ? 'Dr. $doctorName' : 'Attending Physician', isBoldValue: true),
+                          pw.SizedBox(height: 4),
+                          _buildPdfMetaRow(english, 'Status', 'Verified Patient'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              if (diagnosis.isNotEmpty || labTests.isNotEmpty) ...[
+                pw.SizedBox(height: 10),
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    if (diagnosis.isNotEmpty)
+                      pw.Expanded(
+                        flex: 6,
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.all(10),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#F0FDF4'),
+                            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                            border: pw.Border.all(color: PdfColor.fromHex('#BBF7D0'), width: 0.8),
+                          ),
+                          child: pw.Row(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Container(
+                                padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: pw.BoxDecoration(
+                                  color: tealDark,
+                                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                                ),
+                                child: pw.Text(
+                                  'Rx',
+                                  style: pw.TextStyle(
+                                    font: english,
+                                    fontSize: 10,
+                                    fontWeight: pw.FontWeight.bold,
+                                    color: PdfColors.white,
+                                  ),
+                                ),
+                              ),
+                              pw.SizedBox(width: 8),
+                              pw.Expanded(
+                                child: pw.Column(
+                                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                  children: [
+                                    pw.Text(
+                                      'Clinical Diagnosis / Notes',
+                                      style: pw.TextStyle(
+                                        font: english,
+                                        fontSize: 8.5,
+                                        fontWeight: pw.FontWeight.bold,
+                                        color: tealDark,
+                                      ),
+                                    ),
+                                    pw.SizedBox(height: 2),
+                                    pw.Text(
+                                      diagnosis,
+                                      style: pw.TextStyle(
+                                        font: english,
+                                        fontSize: 9.5,
+                                        color: textDark,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (diagnosis.isNotEmpty && labTests.isNotEmpty) pw.SizedBox(width: 10),
+                    if (labTests.isNotEmpty)
+                      pw.Expanded(
+                        flex: 4,
+                        child: pw.Container(
+                          padding: const pw.EdgeInsets.all(10),
+                          decoration: pw.BoxDecoration(
+                            color: PdfColor.fromHex('#EFF6FF'),
+                            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                            border: pw.Border.all(color: PdfColor.fromHex('#BFDBFE'), width: 0.8),
+                          ),
+                          child: pw.Column(
+                            crossAxisAlignment: pw.CrossAxisAlignment.start,
+                            children: [
+                              pw.Text(
+                                isPhysio ? 'Prescribed Physiotherapy' : 'Prescribed Lab Tests',
+                                style: pw.TextStyle(
+                                  font: english,
+                                  fontSize: 8.5,
+                                  fontWeight: pw.FontWeight.bold,
+                                  color: PdfColor.fromHex('#1D4ED8'),
+                                ),
+                              ),
+                              pw.SizedBox(height: 3),
+                              ...labTests.map((t) => pw.Text(
+                                    '• ${t['name'] ?? ''}',
+                                    style: pw.TextStyle(
+                                      font: english,
+                                      fontSize: 8.5,
+                                      color: textDark,
+                                    ),
+                                  )),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+
+              pw.SizedBox(height: 10),
+
+              // ── 3. Prescribed Medicines Section ───────────────────────────
+              pw.Container(
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: borderGrey, width: 1),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                ),
+                child: pw.Column(
+                  children: [
+                    // Table Header
+                    pw.Container(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColor.fromHex('#F1F5F9'),
+                        borderRadius: const pw.BorderRadius.vertical(top: pw.Radius.circular(7)),
+                      ),
+                      child: pw.Row(
+                        children: [
+                          pw.SizedBox(
+                            width: 24,
+                            child: pw.Text('#', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: textMuted)),
+                          ),
+                          pw.Expanded(
+                            flex: 5,
+                            child: pw.Text('MEDICINE / FORMULATION', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: textMuted)),
+                          ),
+                          pw.Expanded(
+                            flex: 3,
+                            child: pw.Text('FREQUENCY / TIMING', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: textMuted)),
+                          ),
+                          pw.Expanded(
+                            flex: 2,
+                            child: pw.Text('QTY', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: textMuted)),
+                          ),
+                          pw.Expanded(
+                            flex: 5,
+                            child: pw.Text('INSTRUCTIONS & USAGE (ہدایات)', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: textMuted)),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Table Rows
+                    if (prescriptions.isEmpty)
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(16),
+                        child: pw.Center(
+                          child: pw.Text(
+                            'No prescription items recorded.',
+                            style: pw.TextStyle(font: english, fontSize: 9.5, color: textMuted),
+                          ),
+                        ),
+                      )
+                    else
+                      ...List.generate(prescriptions.length, (i) {
+                        final m = prescriptions[i];
+                        final isEven = i % 2 == 0;
+                        final rawName = m['name']?.toString() ?? '';
+                        final prefix = _getMedAbbrevStatic(m['type']);
+                        final dose = (m['dose'] ?? m['dosage'] ?? '').toString().trim();
+                        final nameWithDose = '$prefix$rawName${dose.isNotEmpty ? ' ($dose)' : ''}'.trim();
+                        final timing = m['timing']?.toString() ?? '';
+                        final qty = m['quantity'] ?? 1;
+                        final meal = (m['meal'] ?? '').toString().trim();
+                        final mealUrdu = getMealUrdu(meal);
+                        final urduDosage = buildUrduDosageLine(m);
+                        final isInj = isInjectable(m);
+
+                        return pw.Container(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: pw.BoxDecoration(
+                            color: isEven ? PdfColors.white : bgLight,
+                            border: i == prescriptions.length - 1
+                                ? null
+                                : pw.Border(bottom: pw.BorderSide(color: borderGrey, width: 0.5)),
+                          ),
+                          child: pw.Row(
+                            crossAxisAlignment: pw.CrossAxisAlignment.center,
+                            children: [
+                              pw.SizedBox(
+                                width: 24,
+                                child: pw.Text('${i + 1}', style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: tealDark)),
+                              ),
+                              pw.Expanded(
+                                flex: 5,
+                                child: pw.Text(
+                                  nameWithDose,
+                                  style: pw.TextStyle(font: english, fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: textDark),
+                                ),
+                              ),
+                              pw.Expanded(
+                                flex: 3,
+                                child: pw.Container(
+                                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: pw.BoxDecoration(
+                                    color: tealLight,
+                                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                                  ),
+                                  child: pw.Text(
+                                    isInj ? 'Single Dose' : (timing.isNotEmpty ? timing : '-'),
+                                    style: pw.TextStyle(font: english, fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: tealDark),
+                                  ),
+                                ),
+                              ),
+                              pw.Expanded(
+                                flex: 2,
+                                child: pw.Text(
+                                  '$qty',
+                                  style: pw.TextStyle(font: english, fontSize: 9, fontWeight: pw.FontWeight.bold, color: textDark),
+                                ),
+                              ),
+                              pw.Expanded(
+                                flex: 5,
+                                child: pw.Column(
+                                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                                  children: [
+                                    if (meal.isNotEmpty)
+                                      pw.Text(
+                                        meal,
+                                        style: pw.TextStyle(font: english, fontSize: 8.5, color: textMuted),
+                                      ),
+                                    if (urduDosage.isNotEmpty || mealUrdu.isNotEmpty)
+                                      pw.Text(
+                                        _processUrduText('$urduDosage ${mealUrdu.isNotEmpty ? '($mealUrdu)' : ''}'.trim()),
+                                        style: pw.TextStyle(font: urdu, fontSize: 8.5, color: tealDark),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
+                ),
+              ),
+
+              pw.Spacer(),
+
+              // ── 4. Islamic Healing Supplication & Security Watermark ────────
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: pw.BoxDecoration(
+                  color: PdfColor.fromHex('#F0FDFA'),
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+                  border: pw.Border.all(color: PdfColor.fromHex('#CCFBF1'), width: 0.8),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      _processUrduText('اَللّٰهُمَّ رَبَّ النَّاسِ أَذْهِبِ الْبَاسَ اشْفِ أَنْتَ الشَّافِي'),
+                      style: pw.TextStyle(font: urdu, fontSize: 10, fontWeight: pw.FontWeight.bold, color: tealDark),
+                    ),
+                    pw.Text(
+                      'Free Humanitarian Healthcare • Non-Commercial Record',
+                      style: pw.TextStyle(font: english, fontSize: 8, color: textMuted),
+                    ),
+                  ],
+                ),
+              ),
+
+              pw.SizedBox(height: 8),
+
+              // ── 5. Official Footer ──────────────────────────────────────────
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'Gulzar-e-Madina Free Dispensary ($branchName)',
+                    style: pw.TextStyle(font: english, fontSize: 8, fontWeight: pw.FontWeight.bold, color: textDark),
+                  ),
+                  pw.Text(
+                    'Official Portal: www.gulzarmadina.com  •  Helpline: +92 300 0000000',
+                    style: pw.TextStyle(font: english, fontSize: 8, color: textMuted),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
     return pdf.save();
+  }
+
+  static pw.Widget _buildPdfMetaRow(pw.Font font, String label, String value, {bool isBoldValue = false}) {
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(
+          '$label: ',
+          style: pw.TextStyle(font: font, fontSize: 8.5, color: PdfColor.fromHex('#64748B')),
+        ),
+        pw.Expanded(
+          child: pw.Text(
+            value,
+            style: pw.TextStyle(
+              font: font,
+              fontSize: 8.5,
+              fontWeight: isBoldValue ? pw.FontWeight.bold : pw.FontWeight.normal,
+              color: PdfColor.fromHex('#0F172A'),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }

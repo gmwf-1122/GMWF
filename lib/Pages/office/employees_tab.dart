@@ -16,8 +16,11 @@ import 'employee_form_sheet.dart';
 import 'employee_detail_page.dart';
 import 'finance_report_helper.dart';
 import 'employee_report_page.dart';
+import 'offboard_dialog.dart';
 import '../settings/biometric_device_manager_page.dart';
 import '../../services/zkteco_network_service.dart';
+import '../../services/user_theme_service.dart';
+import '../../services/staff_patient_link_service.dart';
 
 
 class EmployeesTab extends StatefulWidget {
@@ -70,15 +73,24 @@ class _EmployeesTabState extends State<EmployeesTab> {
   String _normalizeBranchKey(Map<String, dynamic> emp) {
     final raw = emp['branchId']?.toString().trim() ?? '';
     if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null') {
-      return 'Unassigned';
+      final allowed = emp['allowedBranches'] ?? emp['branches'];
+      if (allowed is List && allowed.isNotEmpty) {
+        return allowed.first.toString();
+      }
+      return 'Karachi';
     }
     return raw;
   }
 
   String _normalizeDepartmentKey(Map<String, dynamic> emp) {
     final raw = emp['department']?.toString().trim() ?? '';
-    if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null') {
-      return 'Unassigned';
+    if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null' || raw.toLowerCase() == 'unassigned') {
+      final role = (emp['role'] ?? '').toString().toLowerCase();
+      if (role.contains('doc') || role.contains('dispens') || role.contains('nurse')) return 'Dispensary';
+      if (role.contains('teach') || role.contains('school') || role.contains('madrassa')) return 'Education';
+      if (role.contains('account') || role.contains('cashier') || role.contains('finance')) return 'Finance';
+      if (role.contains('manager') || role.contains('admin') || role.contains('coord')) return 'Administration';
+      return 'General Staff';
     }
     return raw;
   }
@@ -97,29 +109,15 @@ class _EmployeesTabState extends State<EmployeesTab> {
   }
 
   bool get _isBranchScopedUser {
-    final role = widget.userRole.toLowerCase().trim();
-    if (role.contains('branch manager') || role.contains('branch_manager') || role == 'bm' || role == 'supervisor') {
-      return true;
-    }
-    if (Hive.isBoxOpen('local_users')) {
-      final curUser = Hive.box('local_users').values.firstOrNull;
-      if (curUser is Map) {
-        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
-        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
-          return true;
-        }
-      }
-    }
-    return false;
+    final role = widget.userRole.isNotEmpty ? widget.userRole.toLowerCase().trim() : LocalStorageService.getActiveUserRole();
+    return role == 'branch manager' || role == 'supervisor' || role == 'bm';
   }
 
   String _getEffectiveUserBranch() {
-    if (Hive.isBoxOpen('local_users')) {
-      final curUser = Hive.box('local_users').values.firstOrNull;
-      if (curUser is Map) {
-        final bId = (curUser['branchId']?.toString() ?? '').trim();
-        if (bId.isNotEmpty && bId != 'all') return bId;
-      }
+    final curUser = LocalStorageService.getActiveUserData();
+    if (curUser.isNotEmpty) {
+      final bId = (curUser['branchId']?.toString() ?? '').trim();
+      if (bId.isNotEmpty && bId != 'all' && bId != 'global') return bId;
     }
     return widget.branchId.isNotEmpty ? widget.branchId : 'karachi';
   }
@@ -130,6 +128,10 @@ class _EmployeesTabState extends State<EmployeesTab> {
     if (_isBranchScopedUser) {
       _branchFilter = _getEffectiveUserBranch();
     }
+    // Auto-sync users to employee profiles and purge non-user employees
+    FinanceLocalStorage.purgeEmployeesExceptUsers().then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -148,101 +150,147 @@ class _EmployeesTabState extends State<EmployeesTab> {
 
   @override
   Widget build(BuildContext context) {
-    final tOriginal = RoleThemeScope.dataOf(context);
-    final t = RoleThemeData(
-        roleLabel: tOriginal.roleLabel,
-      isDarkCanvas: false,
-        bg: const Color(0xFFFBFDFF),
-        bgCard: Colors.white,
-        bgCardAlt: const Color(0xFFF6F9F8),
-        bgRule: const Color(0xFFF1F5F9),
-        accent: const Color(0xFF0F9A7A),
-        accentLight: const Color(0xFF4CB79A),
-        accentMuted: const Color(0xFFE8F6F0),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
-      zakat: tOriginal.zakat,
-      nonZakat: tOriginal.nonZakat,
-      gmwf: tOriginal.gmwf,
-      cardFillTokens: tOriginal.cardFillTokens,
-      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
-      cardFillDispensary: tOriginal.cardFillDispensary,
-      chartBar1: tOriginal.chartBar1,
-      chartBar2: tOriginal.chartBar2,
-      chartBar3: tOriginal.chartBar3,
-      chartGrid: tOriginal.chartGrid,
-    );
+    return ValueListenableBuilder<Box>(
+      valueListenable: UserThemeService.listenable(),
+      builder: (context, _, __) {
+        final isDark = UserThemeService.isDarkMode();
+        final tOriginal = RoleThemeScope.dataOf(context);
+        final t = isDark
+            ? RoleThemeData(
+                roleLabel: tOriginal.roleLabel,
+                isDarkCanvas: true,
+                bg: const Color(0xFF0F172A),
+                bgCard: const Color(0xFF1E293B),
+                bgCardAlt: const Color(0xFF162032),
+                bgRule: const Color(0xFF334155),
+                accent: const Color(0xFF10B981),
+                accentLight: const Color(0xFF34D399),
+                accentMuted: const Color(0xFF064E3B).withValues(alpha: 0.3),
+                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                glassTint: const Color(0x1A10B981),
+                textPrimary: const Color(0xFFF8FAFC),
+                textSecondary: const Color(0xFF94A3B8),
+                textTertiary: const Color(0xFF64748B),
+                danger: const Color(0xFFEF4444),
+                zakat: tOriginal.zakat,
+                nonZakat: tOriginal.nonZakat,
+                gmwf: tOriginal.gmwf,
+                cardFillTokens: tOriginal.cardFillTokens,
+                cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+                cardFillDispensary: tOriginal.cardFillDispensary,
+                chartBar1: tOriginal.chartBar1,
+                chartBar2: tOriginal.chartBar2,
+                chartBar3: tOriginal.chartBar3,
+                chartGrid: tOriginal.chartGrid,
+              )
+            : RoleThemeData(
+                roleLabel: tOriginal.roleLabel,
+                isDarkCanvas: false,
+                bg: const Color(0xFFFBFDFF),
+                bgCard: Colors.white,
+                bgCardAlt: const Color(0xFFF6F9F8),
+                bgRule: const Color(0xFFF1F5F9),
+                accent: const Color(0xFF0F9A7A),
+                accentLight: const Color(0xFF4CB79A),
+                accentMuted: const Color(0xFFE8F6F0),
+                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                glassTint: const Color(0x1A10B981),
+                textPrimary: const Color(0xFF111827),
+                textSecondary: const Color(0xFF6B7280),
+                textTertiary: const Color(0xFF9CA3AF),
+                danger: const Color(0xFFEF4444),
+                zakat: tOriginal.zakat,
+                nonZakat: tOriginal.nonZakat,
+                gmwf: tOriginal.gmwf,
+                cardFillTokens: tOriginal.cardFillTokens,
+                cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+                cardFillDispensary: tOriginal.cardFillDispensary,
+                chartBar1: tOriginal.chartBar1,
+                chartBar2: tOriginal.chartBar2,
+                chartBar3: tOriginal.chartBar3,
+                chartGrid: tOriginal.chartGrid,
+              );
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      body: ValueListenableBuilder(
-        valueListenable: FinanceLocalStorage.employeesBox.listenable(),
-        builder: (context, Box box, _) {
-          final query = _searchCtrl.text.trim().toLowerCase();
-          final list = FinanceLocalStorage.getEmployees(widget.branchId).where((emp) {
-            final role = (emp['role'] ?? emp['linkedUserRole'] ?? emp['designation'] ?? '').toString().toLowerCase().trim();
-            final dept = (emp['department'] ?? emp['linkedDepartment'] ?? '').toString().toLowerCase().trim();
-            if (role.contains('guardian') || role.contains('patient') || dept.contains('guardian') || dept.contains('patient') || emp['isEmployee'] == false) {
-              return false;
-            }
+        return Scaffold(
+          backgroundColor: t.bg,
+          body: ValueListenableBuilder(
+            valueListenable: FinanceLocalStorage.employeesBox.listenable(),
+            builder: (context, Box box, _) {
+              final query = _searchCtrl.text.trim().toLowerCase();
+              final list = FinanceLocalStorage.getEmployees(widget.branchId).where((emp) {
+                final role = (emp['role'] ?? emp['linkedUserRole'] ?? emp['designation'] ?? '').toString().toLowerCase().trim();
+                final dept = (emp['department'] ?? emp['linkedDepartment'] ?? '').toString().toLowerCase().trim();
+                if (role.contains('guardian') || role.contains('patient') || dept.contains('guardian') || dept.contains('patient') || emp['isEmployee'] == false) {
+                  return false;
+                }
+                final empRawName = (emp['name'] ?? '').toString().trim().toLowerCase();
+                if (empRawName.startsWith('staff (pin') || empRawName == 'employee' || empRawName == '.') {
+                  return false;
+                }
 
-            // Apply role
-            if (_roleFilter != 'All' && emp['role'] != _roleFilter) return false;
-            // Apply dept
-            if (_deptFilter != 'All' && emp['department'] != _deptFilter) return false;
-            // Apply branch
-            if (_branchFilter != 'All') {
-              final String empBranch = (emp['branchId']?.toString() ?? '').toLowerCase();
-              final String selectedB = _branchFilter.toLowerCase();
-              if (selectedB.contains('karachi')) {
-                if (!empBranch.contains('karachi')) return false;
-              } else {
-                if (emp['branchId'] != _branchFilter) return false;
-              }
-            }
-            // Apply status
-            final isActive = emp['isActive'] as bool? ?? true;
-            final status = emp['status'] as String? ?? (isActive ? 'Active' : 'Left');
-            if (_statusFilter == 'Active' && status != 'Active') return false;
-            if (_statusFilter == 'Archived' && status != 'Archived') return false;
-            if (_statusFilter == 'Temporary Leave' && status != 'Temporary Leave') return false;
-            if (_statusFilter == 'Left' && status != 'Left') return false;
-            if (_statusFilter == 'Inactive' && status == 'Active') return false;
+                // Apply role
+                if (_roleFilter != 'All' && emp['role'] != _roleFilter) return false;
+                // Apply dept
+                if (_deptFilter != 'All' && emp['department'] != _deptFilter) return false;
+                // Apply branch
+                if (_branchFilter != 'All') {
+                  final String empBranch = (emp['branchId']?.toString() ?? '').toLowerCase();
+                  final String selectedB = _branchFilter.toLowerCase();
+                  final allowed = emp['allowedBranches'] ?? emp['branches'];
+                  bool matchAllowed = false;
+                  if (allowed is List) {
+                    matchAllowed = allowed.any((b) => b.toString().toLowerCase().contains(selectedB) || b.toString().toLowerCase() == 'all');
+                  } else if (allowed is String) {
+                    matchAllowed = allowed.toLowerCase().contains(selectedB) || allowed.toLowerCase() == 'all';
+                  }
 
-            // Apply Biometric Enrollment status
-            if (_enrollmentFilter != 'All') {
-              final empId = emp['localId']?.toString() ?? emp['id']?.toString() ?? '';
-              final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
-              final isEnrolled = cred != null && cred.active && cred.biometricPin.isNotEmpty;
-              if (_enrollmentFilter == 'Enrolled' && !isEnrolled) return false;
-              if (_enrollmentFilter == 'Not Enrolled' && isEnrolled) return false;
-            }
+                  if (selectedB.contains('karachi')) {
+                    if (!empBranch.contains('karachi') && empBranch != 'all' && empBranch != 'global' && !matchAllowed) return false;
+                  } else {
+                    if (emp['branchId'] != _branchFilter && empBranch != 'all' && empBranch != 'global' && !matchAllowed) return false;
+                  }
+                }
+                // Apply status
+                final isActive = emp['isActive'] as bool? ?? true;
+                final status = emp['status'] as String? ?? (isActive ? 'Active' : 'Left');
+                if (_statusFilter == 'Active' && status != 'Active') return false;
+                if (_statusFilter == 'Archived' && status != 'Archived') return false;
+                if (_statusFilter == 'Temporary Leave' && status != 'Temporary Leave') return false;
+                if (_statusFilter == 'Left' && status != 'Left') return false;
+                if (_statusFilter == 'Inactive' && status == 'Active') return false;
 
-            if (query.isNotEmpty) {
-              final name = emp['name']?.toString().toLowerCase() ?? '';
-              final cnic = emp['cnic']?.toString().toLowerCase() ?? '';
-              final phone = emp['phone']?.toString().toLowerCase() ?? '';
-              return name.contains(query) || cnic.contains(query) || phone.contains(query);
-            }
-            return true;
-          }).toList();
+                // Apply Biometric Enrollment status
+                if (_enrollmentFilter != 'All') {
+                  final empId = emp['localId']?.toString() ?? emp['id']?.toString() ?? '';
+                  final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+                  final isEnrolled = cred != null && cred.active && cred.biometricPin.isNotEmpty;
+                  if (_enrollmentFilter == 'Enrolled' && !isEnrolled) return false;
+                  if (_enrollmentFilter == 'Not Enrolled' && isEnrolled) return false;
+                }
 
-          return Column(
-            children: [
-              _buildFilterBar(t),
-              Expanded(
-                child: list.isEmpty
-                    ? _buildEmptyState(t)
-                    : _buildGroupedEmployeeList(t, list),
-              ),
-            ],
-          );
-        },
-      ),
+                if (query.isNotEmpty) {
+                  final name = emp['name']?.toString().toLowerCase() ?? '';
+                  final cnic = emp['cnic']?.toString().toLowerCase() ?? '';
+                  final phone = emp['phone']?.toString().toLowerCase() ?? '';
+                  return name.contains(query) || cnic.contains(query) || phone.contains(query);
+                }
+                return true;
+              }).toList();
+
+              return Column(
+                children: [
+                  _buildFilterBar(t),
+                  Expanded(
+                    child: list.isEmpty
+                        ? _buildEmptyState(t)
+                        : _buildGroupedEmployeeList(t, list),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -250,22 +298,94 @@ class _EmployeesTabState extends State<EmployeesTab> {
   // Redesign plan §3.C: collapse the 4 always-visible dropdowns into a single
   // "Filters" button (badge shows active count). Tapping opens a compact
   // panel; whatever is actively applied shows as a removable chip below,
-  // instead of eating a full row even when nothing's selected.
+  Widget _buildStageTabPill(String label, int count, bool isSelected, VoidCallback onTap, Color activeColor, RoleThemeData t) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor.withValues(alpha: 0.12) : t.bgCardAlt,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? activeColor.withValues(alpha: 0.5) : t.bgRule,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                color: isSelected ? activeColor : t.textSecondary,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isSelected ? activeColor.withValues(alpha: 0.2) : t.bgRule.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                "$count",
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? activeColor : t.textTertiary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFilterBar(RoleThemeData t) {
+    final allList = FinanceLocalStorage.getEmployees(widget.branchId).where((emp) {
+      final role = (emp['role'] ?? emp['linkedUserRole'] ?? emp['designation'] ?? '').toString().toLowerCase().trim();
+      final dept = (emp['department'] ?? emp['linkedDepartment'] ?? '').toString().toLowerCase().trim();
+      return !(role.contains('guardian') || role.contains('patient') || dept.contains('guardian') || dept.contains('patient') || emp['isEmployee'] == false);
+    }).toList();
+
+    final activeCount = allList.where((e) => (e['isActive'] as bool? ?? true) && (e['status'] ?? 'Active') == 'Active').length;
+    final leaveCount = allList.where((e) => (e['status'] ?? '') == 'Temporary Leave').length;
+    final leftCount = allList.where((e) => !(e['isActive'] as bool? ?? true) || (e['status'] ?? '') == 'Left' || (e['status'] ?? '') == 'Archived').length;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildStageTabPill('All Staff', allList.length, _statusFilter == 'All', () => setState(() => _statusFilter = 'All'), const Color(0xFF3B82F6), t),
+                const SizedBox(width: 8),
+                _buildStageTabPill('Active', activeCount, _statusFilter == 'Active', () => setState(() => _statusFilter = 'Active'), const Color(0xFF10B981), t),
+                const SizedBox(width: 8),
+                _buildStageTabPill('On Leave', leaveCount, _statusFilter == 'Temporary Leave', () => setState(() => _statusFilter = 'Temporary Leave'), const Color(0xFFF59E0B), t),
+                const SizedBox(width: 8),
+                _buildStageTabPill('Left / Inactive', leftCount, _statusFilter == 'Left' || _statusFilter == 'Inactive', () => setState(() => _statusFilter = 'Left'), const Color(0xFF6B7280), t),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: Container(
-                      height: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: t.bgCardAlt,
                     borderRadius: BorderRadius.circular(12),
@@ -352,6 +472,49 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId),
                         ),
                       );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Merge Duplicate Staff Profiles',
+                child: Container(
+                  height: 44,
+                  width: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F3FF),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.3)),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.merge_type_rounded, color: Color(0xFF7C3AED), size: 20),
+                    onPressed: () => _openMergeStaffDialog(context, t),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'Clean Up Staff: Keep Real Users Only',
+                child: Container(
+                  height: 44,
+                  width: 44,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.3)),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.cleaning_services_rounded, color: Color(0xFFDC2626), size: 20),
+                    onPressed: () async {
+                      final retained = await FinanceLocalStorage.purgeEmployeesExceptUsers();
+                      if (mounted) {
+                        setState(() {});
+                        showCustomSnackBar(
+                          context,
+                          '✅ Retained ${retained.length} staff profiles matching active users. All dummy non-user accounts removed.',
+                        );
+                      }
                     },
                   ),
                 ),
@@ -539,20 +702,30 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   ] else if (widget.branches.length > 1)
                     StatefulBuilder(
                       builder: (filterBranchCtx, setFilterBranchState) {
-                        final allBranches = FinanceLocalStorage.getAllBranches(widget.branches)
-                            .where((b) {
-                              final id = b['id']?.toString() ?? '';
-                              return id != 'karachi-2' && id != 'karachi2';
-                            }).toList();
-                        
-                        final List<String> dropdownItems = ['All', ...allBranches.map((b) => b['id']?.toString() ?? '')];
-                        if (!dropdownItems.contains('+ Add Custom Branch...')) {
-                          dropdownItems.add('+ Add Custom Branch...');
+                        final allBranches = FinanceLocalStorage.getAllBranches(widget.branches);
+                        final cleanBranches = <String, String>{};
+                        for (final b in allBranches) {
+                          final id = b['id']?.toString().trim() ?? '';
+                          final name = b['name']?.toString().trim() ?? id;
+                          if (id.isNotEmpty && id.toLowerCase() != 'all' && id != 'karachi-2' && id != 'karachi2') {
+                            cleanBranches[id] = (id == 'karachi-1' || id == 'karachi1') ? 'Karachi' : name;
+                          }
                         }
 
-                        if (!dropdownItems.contains(_branchFilter)) {
-                          _branchFilter = 'All';
-                        }
+                        final List<DropdownMenuItem<String>> menuItems = [
+                          const DropdownMenuItem(value: 'All', child: Text('All Branches')),
+                          ...cleanBranches.entries.map((e) => DropdownMenuItem(value: e.key, child: Text('${e.value} (${e.key})'))),
+                          const DropdownMenuItem(
+                            value: '+ Add Custom Branch...',
+                            child: Text('+ Add Custom Branch...', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ];
+
+                        final safeVal = menuItems.any((it) => it.value == _branchFilter)
+                            ? _branchFilter
+                            : (menuItems.any((it) => it.value?.toLowerCase() == _branchFilter.toLowerCase())
+                                ? menuItems.firstWhere((it) => it.value?.toLowerCase() == _branchFilter.toLowerCase()).value!
+                                : 'All');
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 10),
@@ -563,7 +736,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             border: Border.all(color: t.bgRule),
                           ),
                           child: DropdownButtonFormField<String>(
-                            value: _branchFilter,
+                            value: safeVal,
                             dropdownColor: t.bgCard,
                             decoration: InputDecoration(
                               labelText: 'Branch',
@@ -572,23 +745,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                               filled: false,
                             ),
                             style: TextStyle(color: t.textPrimary, fontSize: 13),
-                            items: dropdownItems.map((id) {
-                              if (id == 'All') {
-                                return const DropdownMenuItem(value: 'All', child: Text('All Branches'));
-                              }
-                              if (id == '+ Add Custom Branch...') {
-                                return const DropdownMenuItem(
-                                  value: '+ Add Custom Branch...',
-                                  child: Text('+ Add Custom Branch...', style: TextStyle(fontWeight: FontWeight.bold)),
-                                );
-                              }
-                              final b = allBranches.firstWhereOrNull((x) => x['id'] == id);
-                              String name = b?['name']?.toString() ?? id;
-                              if (id == 'karachi-1' || id == 'karachi1') {
-                                name = 'Karachi';
-                              }
-                              return DropdownMenuItem(value: id, child: Text('$name ($id)'));
-                            }).toList(),
+                            items: menuItems,
                             onChanged: (val) {
                               if (val == '+ Add Custom Branch...') {
                                 showCustomBranchDialog(
@@ -601,8 +758,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                     setState(() {});
                                   },
                                 );
-                              } else {
-                                setSheetState(() => _branchFilter = val!);
+                              } else if (val != null) {
+                                setSheetState(() => _branchFilter = val);
                                 setState(() {});
                               }
                             },
@@ -816,13 +973,28 @@ class _EmployeesTabState extends State<EmployeesTab> {
   // pill when non-zero — a zero balance is a null result and shouldn't
   // compete for attention with real ones.
   Widget _buildEmployeeRow(RoleThemeData t, Map<String, dynamic> emp) {
-    final name = emp['name']?.toString() ?? '';
-    final role = emp['role']?.toString() ?? '';
-    final dept = emp['department']?.toString() ?? '';
+    final rawName = emp['name']?.toString().trim() ?? '';
+    final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+    final name = (rawName.isNotEmpty && rawName != '.' && rawName.toLowerCase() != 'employee')
+        ? rawName
+        : (emp['username']?.toString().isNotEmpty == true
+            ? emp['username'].toString()
+            : (pin.isNotEmpty ? 'Staff (PIN $pin)' : 'Employee'));
+
+    final role = emp['role']?.toString().trim() ?? '';
+    final dept = emp['department']?.toString().trim() ?? '';
     final empId = emp['localId']?.toString() ?? '';
     final isActive = emp['isActive'] as bool? ?? true;
     final status = emp['status'] as String? ?? (isActive ? 'Active' : 'Left');
     final branchName = _getBranchName(emp['branchId']?.toString() ?? '');
+
+    final subtitleParts = [
+      if (role.isNotEmpty && role.toLowerCase() != 'staff') role,
+      if (dept.isNotEmpty && dept.toLowerCase() != 'unassigned' && dept.toLowerCase() != 'general') dept,
+    ];
+    final subtitle = subtitleParts.isNotEmpty
+        ? subtitleParts.join(' • ')
+        : (role.isNotEmpty ? role : (dept.isNotEmpty ? dept : (branchName.isNotEmpty ? branchName : 'Staff Member')));
 
     return Card(
       color: Colors.white,
@@ -882,7 +1054,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$role • $dept',
+                      subtitle,
                       style: TextStyle(fontSize: 12, color: t.textSecondary),
                     ),
                     const SizedBox(height: 4),
@@ -967,10 +1139,30 @@ class _EmployeesTabState extends State<EmployeesTab> {
               // Quick Actions: Edit & Offboard
               if (isActive) ...[
                 Tooltip(
+                  message: 'Merge Duplicate Staff Profiles ($name)',
+                  child: IconButton(
+                    icon: const Icon(Icons.merge_type_rounded, size: 18, color: Color(0xFF7C3AED)),
+                    onPressed: () => _showMergeDuplicateStaffDialog(context, emp, t),
+                  ),
+                ),
+                Tooltip(
                   message: 'Edit Employee',
                   child: IconButton(
                     icon: Icon(Icons.edit_outlined, size: 18, color: t.accent),
                     onPressed: () => widget.openEmployeeForm(context, empId),
+                  ),
+                ),
+                Tooltip(
+                  message: 'View Medical History ($name)',
+                  child: IconButton(
+                    icon: const Icon(Icons.medical_services_outlined, size: 18, color: Colors.teal),
+                    onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
+                      context,
+                      name: name,
+                      cnic: emp['cnic']?.toString(),
+                      branchId: emp['branchId']?.toString() ?? widget.branchId,
+                      role: role,
+                    ),
                   ),
                 ),
                 Tooltip(
@@ -1005,131 +1197,18 @@ class _EmployeesTabState extends State<EmployeesTab> {
     );
   }
 
-  void _showOffboardDialog(BuildContext context, Map<String, dynamic> emp) {
-    final empId = emp['localId']?.toString() ?? emp['employeeId']?.toString() ?? '';
-    DateTime exitDate = DateTime.now();
-    String reason = 'Resigned';
-
-    showDialog(
-      context: context,
-      builder: (dCtx) {
-        final t = RoleThemeScope.dataOf(context);
-        return StatefulBuilder(
-          builder: (dialogCtx, setDS) {
-            return AlertDialog(
-              backgroundColor: t.bgCard,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: Row(
-                children: [
-                  const Icon(Icons.person_off_outlined, color: Colors.redAccent),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Offboard ${emp['name'] ?? 'Employee'}',
-                      style: TextStyle(color: t.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Are you sure you want to offboard this employee? Active status will be terminated.',
-                    style: TextStyle(color: t.textSecondary, fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('Exit Date', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  InkWell(
-                    onTap: () async {
-                      final picked = await showDatePicker(
-                        context: dialogCtx,
-                        initialDate: exitDate,
-                        firstDate: DateTime(2000),
-                        lastDate: DateTime(2100),
-                      );
-                      if (picked != null) {
-                        setDS(() => exitDate = picked);
-                      }
-                    },
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: t.bgCardAlt,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: t.bgRule),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(DateFormat('dd MMM yyyy').format(exitDate), style: TextStyle(color: t.textPrimary, fontSize: 13)),
-                          Icon(Icons.calendar_today_outlined, size: 16, color: t.accent),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Offboarding Reason', style: TextStyle(color: t.textSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<String>(
-                    value: reason,
-                    dropdownColor: t.bgCard,
-                    style: TextStyle(color: t.textPrimary, fontSize: 13),
-                    decoration: InputDecoration(
-                      filled: true,
-                      fillColor: t.bgCardAlt,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'Resigned', child: Text('Resigned')),
-                      DropdownMenuItem(value: 'Terminated', child: Text('Terminated')),
-                      DropdownMenuItem(value: 'Contract Ended', child: Text('Contract Ended')),
-                      DropdownMenuItem(value: 'Retired', child: Text('Retired')),
-                      DropdownMenuItem(value: 'Other', child: Text('Other')),
-                    ],
-                    onChanged: (val) {
-                      if (val != null) setDS(() => reason = val);
-                    },
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dCtx),
-                  child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.redAccent,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () async {
-                    Navigator.pop(dCtx);
-                    await FinanceLocalStorage.syncBiDirectionalOffboarding(
-                      employeeId: empId,
-                      performedBy: widget.userRole,
-                    );
-                    if (mounted) {
-                      setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
-                      );
-                    }
-                  },
-                  child: const Text('Confirm Offboard'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+  void _showOffboardDialog(BuildContext context, Map<String, dynamic> emp) async {
+    final result = await OffboardDialog.show(
+      context,
+      employeeData: emp,
+      performedBy: widget.userRole,
     );
+    if (result == true && mounted) {
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
+      );
+    }
   }
 
   Map<String, dynamic> _previewProjectedArrears({
@@ -1187,7 +1266,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
     VoidCallback onUpdated,
   ) {
     final t = RoleThemeScope.dataOf(context);
-    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    final curUser = LocalStorageService.getActiveUsername();
 
     String adjustmentType = 'Percentage Raise (%)';
     final valueController = TextEditingController();
@@ -1436,7 +1515,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
 
   void _openAnnualIncrementsDialog(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    final curUser = LocalStorageService.getActiveUsername();
 
     int targetYear = DateTime.now().year;
     final percentCtrl = TextEditingController(text: '10');
@@ -1972,7 +2051,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       return;
                     }
                     try {
-                      final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                      final curUser = LocalStorageService.getActiveUsername();
                       final emp = FinanceLocalStorage.getEmployee(employeeId)!;
                       emp['isActive'] = false;
                       emp['status'] = selectedStatus;
@@ -2097,7 +2176,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           }
                           setDiagState(() => loading = true);
                           try {
-                            final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                            final curUser = LocalStorageService.getActiveUsername();
 
                             await FinanceLocalStorage.transferEmployee(
                               employeeId: employeeId,
@@ -2276,7 +2355,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 Navigator.pop(ctx);
                 Navigator.pop(context);
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
                   await FinanceLocalStorage.deleteEmployeePermanently(
                     branchId: widget.branchId,
                     employeeId: employeeId,
@@ -2314,7 +2393,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
 
   void _openBulkBackfillDialog(BuildContext context, String employeeId, String employeeName) {
     final t = RoleThemeScope.dataOf(context);
-    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    final curUser = LocalStorageService.getActiveUsername();
 
     int startMonthsAgo = 3;
     final salaryCtrl = TextEditingController();
@@ -2655,7 +2734,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 await FinanceLocalStorage.saveEmployee(
                   branchId: branchId,
                   data: emp,
-                  performedBy: Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin',
+                  performedBy: LocalStorageService.getActiveUsername(),
                 );
               }
               Navigator.pop(diagCtx);
@@ -2665,6 +2744,361 @@ class _EmployeesTabState extends State<EmployeesTab> {
             child: const Text('Save PIN'),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openMergeStaffDialog(BuildContext context, RoleThemeData theme) {
+    final allEmps = FinanceLocalStorage.getEmployees(widget.branchId);
+    if (allEmps.length < 2) {
+      showCustomSnackBar(context, 'At least 2 staff profiles are required to perform a merge.');
+      return;
+    }
+
+    // Find any duplicate names (like Iqra)
+    Map<String, dynamic>? candidateA;
+    Map<String, dynamic>? candidateB;
+
+    for (int i = 0; i < allEmps.length; i++) {
+      final nameI = (allEmps[i]['name'] ?? allEmps[i]['employeeName'] ?? '').toString().trim().toLowerCase();
+      if (nameI.isEmpty) continue;
+      for (int j = i + 1; j < allEmps.length; j++) {
+        final nameJ = (allEmps[j]['name'] ?? allEmps[j]['employeeName'] ?? '').toString().trim().toLowerCase();
+        if (nameI == nameJ || (nameI.length >= 3 && (nameI.contains(nameJ) || nameJ.contains(nameI)))) {
+          candidateA = allEmps[i];
+          candidateB = allEmps[j];
+          break;
+        }
+      }
+      if (candidateA != null) break;
+    }
+
+    if (candidateA != null && candidateB != null) {
+      _showMergeDuplicateStaffDialog(context, candidateA, theme, candidateB);
+    } else {
+      _showMergeDuplicateStaffDialog(context, allEmps[0], theme, allEmps[1]);
+    }
+  }
+
+  void _showMergeDuplicateStaffDialog(
+    BuildContext context,
+    Map<String, dynamic> emp,
+    RoleThemeData theme, [
+    Map<String, dynamic>? preselectedDuplicate,
+  ]) {
+    final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
+    final empName = (emp['name'] ?? emp['employeeName'] ?? '').toString().trim();
+    final allEmps = FinanceLocalStorage.getEmployees(widget.branchId);
+
+    // Find candidate duplicates matching name
+    final duplicates = allEmps.where((other) {
+      final oId = (other['localId'] ?? other['id'] ?? '').toString();
+      if (oId == empId) return false;
+      final oName = (other['name'] ?? other['employeeName'] ?? '').toString().trim().toLowerCase();
+      return oName == empName.toLowerCase() ||
+          (empName.length >= 3 && (oName.contains(empName.toLowerCase()) || empName.toLowerCase().contains(oName)));
+    }).toList();
+
+    Map<String, dynamic> secondary = preselectedDuplicate ??
+        (duplicates.isNotEmpty ? duplicates.first : allEmps.firstWhere((e) => (e['localId'] ?? e['id']) != empId, orElse: () => emp));
+
+    final empCred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+    final secId = (secondary['localId'] ?? secondary['id'] ?? '').toString();
+    final secCred = ZkTecoNetworkService.getCredentialByEntityId(secId);
+
+    final bestPin = (emp['biometricPin'] ?? empCred?.biometricPin ?? secondary['biometricPin'] ?? secCred?.biometricPin ?? '').toString().trim();
+    final roleA = (emp['role'] ?? 'Staff').toString().trim();
+    final roleB = (secondary['role'] ?? 'Staff').toString().trim();
+    final combinedRole = roleA.toLowerCase() == roleB.toLowerCase() ? roleA : '$roleA / $roleB';
+    final dept = (emp['department'] ?? secondary['department'] ?? 'Office').toString().trim();
+
+    final nameCtrl = TextEditingController(text: empName.isNotEmpty ? empName : (secondary['name']?.toString() ?? 'Staff'));
+    final roleCtrl = TextEditingController(text: combinedRole);
+    final pinCtrl = TextEditingController(text: bestPin);
+    final deptCtrl = TextEditingController(text: dept.isNotEmpty && dept.toLowerCase() != 'unassigned' ? dept : 'Office');
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          final curSecId = (secondary['localId'] ?? secondary['id'] ?? '').toString();
+          final curSecCred = ZkTecoNetworkService.getCredentialByEntityId(curSecId);
+          final curSecPin = (secondary['biometricPin'] ?? curSecCred?.biometricPin ?? '').toString().trim();
+          final curEmpCred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+          final curEmpPin = (emp['biometricPin'] ?? curEmpCred?.biometricPin ?? '').toString().trim();
+
+          return AlertDialog(
+            backgroundColor: theme.bgCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEDE9FE),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.merge_type_rounded, color: Color(0xFF7C3AED), size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Merge Staff Profiles', style: TextStyle(color: theme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+                      Text('Combine duplicate profiles into one unified record', style: TextStyle(color: theme.textSecondary, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SizedBox(
+              width: 520,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Profile Comparison Cards
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: theme.bgCardAlt,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: const [
+                                    Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 14),
+                                    SizedBox(width: 4),
+                                    Text('Keep (Primary)', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(emp['name']?.toString() ?? 'Staff', style: TextStyle(color: theme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                                Text('${emp['role'] ?? 'Staff'} • ${emp['department'] ?? 'Office'}', style: TextStyle(color: theme.textSecondary, fontSize: 11)),
+                                const SizedBox(height: 4),
+                                Text(curEmpPin.isNotEmpty ? 'PIN: $curEmpPin' : 'No PIN', style: TextStyle(color: curEmpPin.isNotEmpty ? const Color(0xFF059669) : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: theme.bgCardAlt,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: const [
+                                    Icon(Icons.remove_circle_outline_rounded, color: Colors.redAccent, size: 14),
+                                    SizedBox(width: 4),
+                                    Text('Remove (Duplicate)', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                if (allEmps.length > 2)
+                                  DropdownButton<String>(
+                                    value: curSecId,
+                                    isExpanded: true,
+                                    underline: const SizedBox(),
+                                    items: allEmps.where((e) => (e['localId'] ?? e['id']) != empId).map((d) {
+                                      final dId = (d['localId'] ?? d['id'] ?? '').toString();
+                                      final dName = (d['name'] ?? d['employeeName'] ?? 'Staff').toString();
+                                      final dRole = (d['role'] ?? 'Staff').toString();
+                                      return DropdownMenuItem(value: dId, child: Text('$dName ($dRole)', style: TextStyle(fontSize: 11.5, color: theme.textPrimary), overflow: TextOverflow.ellipsis));
+                                    }).toList(),
+                                    onChanged: (newId) {
+                                      if (newId != null) {
+                                        final matched = allEmps.firstWhere((d) => (d['localId'] ?? d['id']) == newId);
+                                        setDlgState(() {
+                                          secondary = matched;
+                                          final secP = (matched['biometricPin'] ?? '').toString().trim();
+                                          if (pinCtrl.text.isEmpty && secP.isNotEmpty) {
+                                            pinCtrl.text = secP;
+                                          }
+                                        });
+                                      }
+                                    },
+                                  )
+                                else ...[
+                                  Text(secondary['name']?.toString() ?? 'Staff', style: TextStyle(color: theme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                                  Text('${secondary['role'] ?? 'Staff'} • ${secondary['department'] ?? 'Office'}', style: TextStyle(color: theme.textSecondary, fontSize: 11)),
+                                  const SizedBox(height: 4),
+                                  Text(curSecPin.isNotEmpty ? 'PIN: $curSecPin' : 'No PIN', style: TextStyle(color: curSecPin.isNotEmpty ? const Color(0xFF059669) : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text('Merged Staff Details:', style: TextStyle(color: theme.textPrimary, fontSize: 12.5, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: nameCtrl,
+                      style: TextStyle(color: theme.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Staff Name',
+                        labelStyle: TextStyle(color: theme.textSecondary, fontSize: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: roleCtrl,
+                      style: TextStyle(color: theme.textPrimary, fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Combined Role / Designation',
+                        labelStyle: TextStyle(color: theme.textSecondary, fontSize: 12),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: pinCtrl,
+                            style: TextStyle(color: theme.textPrimary, fontSize: 13),
+                            decoration: InputDecoration(
+                              labelText: 'Biometric PIN',
+                              labelStyle: TextStyle(color: theme.textSecondary, fontSize: 12),
+                              prefixIcon: const Icon(Icons.fingerprint_rounded, size: 18, color: Color(0xFF10B981)),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: deptCtrl,
+                            style: TextStyle(color: theme.textPrimary, fontSize: 13),
+                            decoration: InputDecoration(
+                              labelText: 'Department',
+                              labelStyle: TextStyle(color: theme.textSecondary, fontSize: 12),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text('Cancel', style: TextStyle(color: theme.textSecondary)),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C3AED),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                icon: const Icon(Icons.check_rounded, size: 16),
+                label: const Text('Confirm & Merge Staff Profiles', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed: () async {
+                  final finalName = nameCtrl.text.trim();
+                  final finalRole = roleCtrl.text.trim();
+                  final finalPin = pinCtrl.text.trim();
+                  final finalDept = deptCtrl.text.trim();
+
+                  final primaryMap = Map<String, dynamic>.from(emp);
+                  final branch = (primaryMap['branchId'] ?? widget.branchId).toString();
+                  primaryMap['name'] = finalName;
+                  primaryMap['role'] = finalRole;
+                  primaryMap['department'] = finalDept;
+                  if (finalPin.isNotEmpty) {
+                    primaryMap['biometricPin'] = finalPin;
+                    primaryMap['pin'] = finalPin;
+                  }
+
+                  // Preserve user linking
+                  final linkedUser = primaryMap['userId'] ?? primaryMap['linkedUserId'] ?? secondary['userId'] ?? secondary['linkedUserId'];
+                  if (linkedUser != null && linkedUser.toString().isNotEmpty) {
+                    primaryMap['userId'] = linkedUser.toString();
+                    primaryMap['linkedUserId'] = linkedUser.toString();
+                  }
+
+                  // 1. Save unified primary profile
+                  await FinanceLocalStorage.saveEmployee(
+                    branchId: branch,
+                    data: primaryMap,
+                    performedBy: LocalStorageService.getActiveUsername(),
+                  );
+
+                  // 2. Assign PIN in ZKTeco credentials
+                  if (finalPin.isNotEmpty) {
+                    await ZkTecoNetworkService.assignPinToEntity(
+                      entityId: empId,
+                      entityName: finalName,
+                      entityType: 'employee',
+                      branchId: branch,
+                      customPin: finalPin,
+                    );
+                  }
+
+                  // 3. Link User record if exists
+                  if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+                    final uBox = Hive.box(LocalStorageService.usersBox);
+                    for (final uk in uBox.keys) {
+                      final uVal = uBox.get(uk);
+                      if (uVal is Map) {
+                        final uName = (uVal['name'] ?? uVal['username'] ?? '').toString().trim().toLowerCase();
+                        if (uName == finalName.toLowerCase() || (linkedUser != null && (uk.toString() == linkedUser.toString() || uVal['uid'] == linkedUser))) {
+                          final uMap = Map<String, dynamic>.from(uVal);
+                          uMap['linkedEmployeeId'] = empId;
+                          uMap['linkedEmployeeName'] = finalName;
+                          if (finalPin.isNotEmpty) uMap['biometricPin'] = finalPin;
+                          uMap['role'] = finalRole;
+                          await uBox.put(uk, uMap);
+                        }
+                      }
+                    }
+                  }
+
+                  // 4. Delete the duplicate profile
+                  final deleteId = (secondary['localId'] ?? secondary['id'] ?? '').toString();
+                  if (deleteId.isNotEmpty && deleteId != empId) {
+                    await FinanceLocalStorage.employeesBox.delete(deleteId);
+                    await LocalStorageService.enqueueSync({
+                      'type': 'delete_employee',
+                      'branchId': branch,
+                      'localId': deleteId,
+                      'data': {'id': deleteId, 'isDeleted': true},
+                    });
+                  }
+
+                  Navigator.pop(dialogCtx);
+                  setState(() {});
+                  showCustomSnackBar(context, '✅ Successfully merged profiles for $finalName! Combined role: $finalRole.');
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
   }

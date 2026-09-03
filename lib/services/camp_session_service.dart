@@ -1,8 +1,13 @@
-// lib/services/camp_session_service.dart
-
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 
 class CampSessionService {
   static const String _activeCampKey = 'active_camp_id';
@@ -106,6 +111,9 @@ class CampSessionService {
   static const String _boundCampKey    = 'bound_dispensary_id';
   static const String _serverOffsetKey = 'server_offset_ms';
 
+  /// ValueNotifier exposing detected clock drift between PC clock and authoritative server time.
+  static final ValueNotifier<ClockSkewInfo?> clockSkewNotifier = ValueNotifier<ClockSkewInfo?>(null);
+
   /// Get authoritative time adjusted by server clock offset
   static DateTime getAuthoritativeTime() {
     try {
@@ -119,16 +127,401 @@ class CampSessionService {
     return DateTime.now();
   }
 
-  /// Update server clock offset whenever cloud or LAN sync completes
+  /// Evaluates whether the local PC clock has drifted significantly from authoritative server time.
+  static void checkClockSkew() {
+    try {
+      final local = DateTime.now();
+      final auth = getAuthoritativeTime();
+      final diffMinutes = auth.difference(local).inMinutes;
+      final localSession = resolveShiftAndDateKey(local).session;
+      final authSession = resolveShiftAndDateKey(auth).session;
+      final mismatch = localSession != authSession;
+
+      if (diffMinutes.abs() >= 5 || mismatch) {
+        clockSkewNotifier.value = ClockSkewInfo(
+          localTime: local,
+          authoritativeTime: auth,
+          offsetMinutes: diffMinutes,
+          localSession: localSession,
+          authoritativeSession: authSession,
+          hasShiftMismatch: mismatch,
+        );
+      } else {
+        clockSkewNotifier.value = null;
+      }
+    } catch (e) {
+      debugPrint('[CampSessionService] checkClockSkew error: $e');
+    }
+  }
+
+  /// Update server clock offset whenever cloud or LAN sync completes and refresh skew notifier
   static Future<void> updateServerOffset(DateTime serverTime) async {
     try {
       final offset = serverTime.difference(DateTime.now()).inMilliseconds;
       if (Hive.isBoxOpen('app_settings')) {
         await Hive.box('app_settings').put(_serverOffsetKey, offset);
       }
+      checkClockSkew();
     } catch (e) {
       debugPrint('[CampSessionService] Error updating server offset: $e');
     }
+  }
+
+  /// Clear the saved server offset (resets to local PC clock)
+  static Future<void> clearServerOffset() async {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        await Hive.box('app_settings').delete(_serverOffsetKey);
+      }
+      checkClockSkew();
+    } catch (e) {
+      debugPrint('[CampSessionService] Error clearing server offset: $e');
+    }
+  }
+
+  /// Fetches authoritative Date and Time from reliable internet time sources
+  /// (HTTP Date header or Time APIs) and synchronizes internal clock offset.
+  static Future<DateTime?> syncInternetTime() async {
+    DateTime? resolvedTime;
+
+    // Source 1: Standard HTTP Date Header (Ultra fast, zero rate limit, universally available)
+    final probeUrls = [
+      'https://www.google.com',
+      'https://firebase.google.com',
+      'https://cloudflare.com',
+    ];
+
+    for (final url in probeUrls) {
+      try {
+        final res = await http.head(Uri.parse(url)).timeout(const Duration(seconds: 3));
+        final dateHeader = res.headers['date'];
+        if (dateHeader != null && dateHeader.isNotEmpty) {
+          final parsed = HttpDate.parse(dateHeader);
+          resolvedTime = parsed.toLocal();
+          break;
+        }
+      } catch (_) {}
+    }
+
+    // Source 2: TimeAPI fallback
+    if (resolvedTime == null) {
+      try {
+        final res = await http
+            .get(Uri.parse('https://timeapi.io/api/time/current/zone?timeZone=Asia/Karachi'))
+            .timeout(const Duration(seconds: 4));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map && data['dateTime'] != null) {
+            resolvedTime = DateTime.tryParse(data['dateTime'].toString());
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (resolvedTime != null) {
+      await updateServerOffset(resolvedTime);
+      debugPrint('[CampSessionService] Internet Date & Time synchronized: $resolvedTime (Offset: ${resolvedTime.difference(DateTime.now()).inMinutes} mins)');
+      return resolvedTime;
+    }
+
+    return null;
+  }
+
+  /// Re-aligns tokens created within the last 24 hours
+  /// into today's active dateKey and shift so Doctor & Dispenser can process them.
+  static Future<int> realignOrphanedTokens({
+    required String branchId,
+    bool includeCompleted = false,
+    String? targetShift,
+  }) async {
+    int fixedCount = 0;
+    try {
+      if (!Hive.isBoxOpen('local_entries')) {
+        await Hive.openBox('local_entries');
+      }
+      final box = Hive.box('local_entries');
+      final normBranch = branchId.toLowerCase().trim();
+      final currentShiftInfo = resolveShiftAndDateKey();
+      final activeDateKey = currentShiftInfo.dateKey;
+      final activeShift = targetShift ?? currentShiftInfo.session;
+
+      final now = getAuthoritativeTime();
+
+      for (final key in box.keys) {
+        final kStr = key.toString().toLowerCase();
+        if (!kStr.startsWith('$normBranch-')) continue;
+
+        final raw = box.get(key);
+        if (raw is! Map) continue;
+
+        final entry = Map<String, dynamic>.from(raw);
+        final status = (entry['status'] as String?)?.toLowerCase().trim() ?? '';
+        final hasPrescription = (entry['prescriptionId'] as String?)?.isNotEmpty == true;
+
+        // Realign waiting entries, or completed if includeCompleted is true
+        final isEligible = includeCompleted || ((status.isEmpty || status == 'waiting' || status == 'pending') && !hasPrescription);
+        if (isEligible) {
+          final entryDateKey = (entry['dateKey'] ?? '').toString().trim();
+          final entrySession = (entry['session'] ?? '').toString().trim().toLowerCase();
+
+          // Check timestamp age
+          final rawTime = entry['timestamp'] ?? entry['createdAt'] ?? entry['date'];
+          DateTime? entryTime;
+          if (rawTime != null) {
+            entryTime = DateTime.tryParse(rawTime.toString());
+          }
+
+          final isRecent = entryTime == null || now.difference(entryTime).inHours.abs() <= 24;
+
+          final hasValidSession = entrySession.isNotEmpty && entrySession != 'unknown' && entrySession != 'auto';
+          final needsDateFix = entryDateKey != activeDateKey;
+          final needsSessionFix = !hasValidSession;
+
+          if (isRecent && (needsDateFix || needsSessionFix)) {
+            if (needsDateFix) {
+              entry['dateKey'] = activeDateKey;
+            }
+            if (needsSessionFix) {
+              final effectiveTime = entryTime ?? now;
+              entry['session'] = getCurrentSession(effectiveTime, branchId);
+            }
+            entry['realignedAt'] = now.toIso8601String();
+            await box.put(key, entry);
+            fixedCount++;
+
+            // Broadcast via LAN & update Firestore
+            try {
+              RealtimeManager().sendMessage(RealtimeEvents.payload(
+                type: RealtimeEvents.saveEntry,
+                branchId: branchId,
+                data: entry,
+              ));
+            } catch (_) {}
+
+            final serial = (entry['serial'] ?? entry['id'])?.toString();
+            if (serial != null && serial.isNotEmpty) {
+              final queueType = _resolveQueueType(entry['queueType']?.toString() ?? entry['status']?.toString());
+              final campDocKey = getCampDateDocId(
+                branchId: branchId,
+                dateKey: activeDateKey,
+                campId: entry['campId']?.toString() ?? entry['dispensaryId']?.toString(),
+                dispensaryTag: entry['dispensaryTag']?.toString(),
+                serial: serial,
+              );
+              FirebaseFirestore.instance
+                  .collection('branches').doc(branchId)
+                  .collection('serials').doc(campDocKey)
+                  .collection(queueType).doc(serial)
+                  .set({'session': activeShift, 'dateKey': activeDateKey, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
+                  .catchError((_) {});
+            }
+          }
+        }
+      }
+      debugPrint('[CampSessionService] Re-aligned $fixedCount token(s) into shift: $activeShift, dateKey: $activeDateKey');
+    } catch (e) {
+      debugPrint('[CampSessionService] Error realigning tokens: $e');
+    }
+    return fixedCount;
+  }
+
+  /// Restores tokens that were accidentally realigned by auto-align
+  /// back to their original dateKey and shift extracted from their serial or creation timestamp.
+  static Future<int> restoreRealignedTokens({
+    required String branchId,
+  }) async {
+    int restoredCount = 0;
+    try {
+      if (!Hive.isBoxOpen('local_entries')) {
+        await Hive.openBox('local_entries');
+      }
+      final box = Hive.box('local_entries');
+      final normBranch = branchId.toLowerCase().trim();
+      final currentShiftInfo = resolveShiftAndDateKey();
+      final todayDateKey = currentShiftInfo.dateKey;
+
+      for (final key in box.keys) {
+        final kStr = key.toString().toLowerCase();
+        if (!kStr.startsWith('$normBranch-') && !kStr.contains(normBranch)) continue;
+
+        final raw = box.get(key);
+        if (raw is! Map) continue;
+
+        final entry = Map<String, dynamic>.from(raw);
+        final serial = (entry['serial'] ?? entry['id'] ?? '').toString().trim();
+        
+        // Extract true original dateKey from serial or createdAt
+        String? originalDateKey;
+        if (serial.isNotEmpty) {
+          final sDk = getDateKeyFromSerial(serial);
+          if (sDk.length == 6 && int.tryParse(sDk) != null) {
+            originalDateKey = sDk;
+          }
+        }
+        
+        if (originalDateKey == null) {
+          final rawTime = entry['createdAt'] ?? entry['timestamp'] ?? entry['date'];
+          if (rawTime != null) {
+            final dt = DateTime.tryParse(rawTime.toString());
+            if (dt != null) {
+              originalDateKey = DateFormat('ddMMyy').format(dt);
+            }
+          }
+        }
+
+        final currentDateKey = (entry['dateKey'] ?? '').toString().trim();
+        final wasRealigned = entry.containsKey('realignedAt') || (originalDateKey != null && originalDateKey != currentDateKey);
+
+        if (wasRealigned && originalDateKey != null && originalDateKey.isNotEmpty) {
+          // Resolve original session based on creation timestamp
+          String originalSession = (entry['originalSession'] ?? entry['session'] ?? 'morning').toString().trim().toLowerCase();
+          final rawTime = entry['createdAt'] ?? entry['timestamp'] ?? entry['date'];
+          if (rawTime != null) {
+            final dt = DateTime.tryParse(rawTime.toString());
+            if (dt != null) {
+              originalSession = resolveShiftAndDateKey(dt).session;
+            }
+          }
+
+          entry['dateKey'] = originalDateKey;
+          entry['session'] = originalSession;
+          entry.remove('realignedAt');
+          await box.put(key, entry);
+          restoredCount++;
+
+          // Broadcast LAN update
+          try {
+            RealtimeManager().sendMessage(RealtimeEvents.payload(
+              type: RealtimeEvents.saveEntry,
+              branchId: branchId,
+              data: entry,
+            ));
+          } catch (_) {}
+
+          // Update Firestore: Delete from today's dateKey collection if moved, and restore under original dateKey
+          if (serial.isNotEmpty) {
+            final queueType = _resolveQueueType(entry['queueType']?.toString() ?? entry['status']?.toString());
+            
+            if (currentDateKey == todayDateKey && currentDateKey != originalDateKey) {
+              final todayDocKey = getCampDateDocId(
+                branchId: branchId,
+                dateKey: todayDateKey,
+                campId: entry['campId']?.toString() ?? entry['dispensaryId']?.toString(),
+                dispensaryTag: entry['dispensaryTag']?.toString(),
+                serial: serial,
+              );
+              FirebaseFirestore.instance
+                  .collection('branches').doc(branchId)
+                  .collection('serials').doc(todayDocKey)
+                  .collection(queueType).doc(serial)
+                  .delete()
+                  .catchError((_) {});
+            }
+
+            final origDocKey = getCampDateDocId(
+              branchId: branchId,
+              dateKey: originalDateKey,
+              campId: entry['campId']?.toString() ?? entry['dispensaryId']?.toString(),
+              dispensaryTag: entry['dispensaryTag']?.toString(),
+              serial: serial,
+            );
+            FirebaseFirestore.instance
+                .collection('branches').doc(branchId)
+                .collection('serials').doc(origDocKey)
+                .collection(queueType).doc(serial)
+                .set({
+                  ...entry,
+                  'session': originalSession,
+                  'dateKey': originalDateKey,
+                  'updatedAt': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true))
+                .catchError((_) {});
+          }
+        }
+      }
+      debugPrint('[CampSessionService] Restored $restoredCount token(s) back to original dateKey for $branchId');
+    } catch (e) {
+      debugPrint('[CampSessionService] Error restoring tokens: $e');
+    }
+    return restoredCount;
+  }
+
+  static String _resolveQueueType(String? raw) {
+    final s = (raw ?? '').toLowerCase().trim();
+    if (s.contains('non')) return 'non-zakat';
+    if (s.contains('gmwf')) return 'gmwf';
+    return 'zakat';
+  }
+
+  /// Update the session / shift of a single specific token
+  static Future<bool> updateTokenSession({
+    required String branchId,
+    required String serial,
+    required String newSession,
+  }) async {
+    try {
+      if (!Hive.isBoxOpen('local_entries')) {
+        await Hive.openBox('local_entries');
+      }
+      final box = Hive.box('local_entries');
+      final normBranch = branchId.toLowerCase().trim();
+      final normSerial = serial.toLowerCase().trim();
+      final cleanSession = newSession.toLowerCase().trim();
+
+      Map<String, dynamic>? updatedEntry;
+
+      for (final key in box.keys) {
+        final kStr = key.toString().toLowerCase();
+        if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+          final raw = box.get(key);
+          if (raw is Map) {
+            final entry = Map<String, dynamic>.from(raw);
+            entry['session'] = cleanSession;
+            entry['sessionUpdatedAt'] = getAuthoritativeTime().toIso8601String();
+            await box.put(key, entry);
+            updatedEntry = entry;
+          }
+        }
+      }
+
+      if (updatedEntry != null) {
+        // Also put canonical key
+        await box.put('$normBranch-${serial.toUpperCase()}', updatedEntry);
+
+        // 1. Broadcast via LAN
+        try {
+          RealtimeManager().sendMessage(RealtimeEvents.payload(
+            type: RealtimeEvents.saveEntry,
+            branchId: branchId,
+            data: updatedEntry,
+          ));
+        } catch (_) {}
+
+        // 2. Persist to Firestore serials doc
+        try {
+          final dateKey = getDateKeyFromSerial(serial);
+          final queueType = _resolveQueueType(updatedEntry['queueType']?.toString() ?? updatedEntry['status']?.toString());
+          final campDocKey = getCampDateDocId(
+            branchId: branchId,
+            dateKey: dateKey,
+            campId: updatedEntry['campId']?.toString() ?? updatedEntry['dispensaryId']?.toString(),
+            dispensaryTag: updatedEntry['dispensaryTag']?.toString(),
+            serial: serial,
+          );
+          FirebaseFirestore.instance
+              .collection('branches').doc(branchId)
+              .collection('serials').doc(campDocKey)
+              .collection(queueType).doc(serial)
+              .set({'session': cleanSession, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
+              .catchError((_) {});
+        } catch (_) {}
+
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[CampSessionService] Error updating token session: $e');
+    }
+    return false;
   }
 
   /// Get hardware device-desk bound dispensary ID
@@ -173,34 +566,247 @@ class CampSessionService {
     return null;
   }
 
-  /// Canonical single source of truth resolver for Shift and DateKey.
-  /// Enforces that Night shifts (22:00 to 06:00 crossing midnight) assign 00:00–05:59:59 tokens
-  /// to yesterday's dateKey so a single continuous Night shift is never split across calendar dates.
-  static ({String session, String dateKey}) resolveShiftAndDateKey([DateTime? time]) {
-    final dt = time ?? getAuthoritativeTime();
-    final hour = dt.hour;
-    final formatter = DateFormat('ddMMyy');
+  /// Default session config fallback if not yet configured in branch settings.
+  /// Default session config fallback if not yet configured in branch settings.
+  static Map<String, dynamic> getDefaultSessionConfig([String? branchId, String? department]) {
+    final b = (branchId ?? '').toLowerCase().trim();
+    final dep = (department ?? '').toLowerCase().trim();
 
-    if (hour >= 6 && hour < 14) {
-      return (session: 'morning', dateKey: formatter.format(dt));
-    } else if (hour >= 14 && hour < 22) {
-      return (session: 'evening', dateKey: formatter.format(dt));
-    } else {
-      // Night shift: 22:00 to 05:59:59
-      if (hour < 6) {
-        // Between 00:00 and 05:59:59 — Night shift started yesterday evening!
-        final yesterday = dt.subtract(const Duration(days: 1));
-        return (session: 'night', dateKey: formatter.format(yesterday));
+    if (dep == 'dasterkhwaan' || dep == 'kitchen' || dep == 'food') {
+      return {
+        'morning': {'enabled': true, 'openTime': '06:00', 'closeTime': '10:00'},
+        'lunch':   {'enabled': true, 'openTime': '12:00', 'closeTime': '16:00'},
+        'dinner':  {'enabled': true, 'openTime': '18:00', 'closeTime': '22:00'},
+        'night':   {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'},
+      };
+    } else if (dep == 'madrassa') {
+      return {
+        'morning': {'enabled': true, 'openTime': '06:00', 'closeTime': '12:00'},
+        'evening': {'enabled': true, 'openTime': '14:00', 'closeTime': '18:00'},
+        'night':   {'enabled': false, 'openTime': '19:00', 'closeTime': '22:00'},
+      };
+    } else if (dep == 'school') {
+      return {
+        'morning': {'enabled': true, 'openTime': '07:30', 'closeTime': '13:30'},
+        'evening': {'enabled': false, 'openTime': '14:00', 'closeTime': '18:00'},
+        'night':   {'enabled': false, 'openTime': '18:30', 'closeTime': '21:30'},
+      };
+    }
+
+    // Default / Dispensary / Overall Branch
+    if (b.contains('sialkot')) {
+      return {
+        'morning': {'enabled': true, 'openTime': '09:00', 'closeTime': '14:00'},
+        'evening': {'enabled': true, 'openTime': '17:00', 'closeTime': '21:00'},
+        'night': {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'},
+      };
+    } else if (b.contains('karachi')) {
+      return {
+        'morning': {'enabled': true, 'openTime': '08:00', 'closeTime': '14:00'},
+        'evening': {'enabled': true, 'openTime': '16:00', 'closeTime': '22:00'},
+        'night': {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'},
+      };
+    }
+
+    return {
+      'morning': {'enabled': true, 'openTime': '08:00', 'closeTime': '14:00'},
+      'evening': {'enabled': true, 'openTime': '16:00', 'closeTime': '22:00'},
+      'night': {'enabled': false, 'openTime': '22:00', 'closeTime': '04:00'},
+    };
+  }
+
+  /// Returns the configured operational sessions and timing windows for a branch (and optional department).
+  static Map<String, dynamic> getSessionConfig(String? branchId, {String? department, String? facilityId}) {
+    final dep = (department ?? '').toLowerCase().trim();
+    if (branchId != null && branchId.trim().isNotEmpty && branchId != 'all' && branchId != 'global') {
+      final b = branchId.toLowerCase().trim();
+      try {
+        if (Hive.isBoxOpen('local_branches')) {
+          final raw = Hive.box('local_branches').get('branch:$b');
+          if (raw is Map && raw['sessionsConfig'] is Map) {
+            final conf = Map<String, dynamic>.from(raw['sessionsConfig'] as Map);
+            if (dep.isNotEmpty && conf[dep] is Map) {
+              return Map<String, dynamic>.from(conf[dep] as Map);
+            }
+            return conf;
+          }
+        }
+      } catch (_) {}
+      return getDefaultSessionConfig(b, dep);
+    }
+    return getDefaultSessionConfig('default', dep);
+  }
+
+  /// Returns the list of enabled session keys for a branch and optional department/facility/user.
+  static List<String> getAllowedSessions(String? branchId, {String? department, String? facilityId, Map<String, dynamic>? userData}) {
+    final dep = (department ?? '').toLowerCase().trim();
+    final config = getSessionConfig(branchId, department: dep, facilityId: facilityId);
+    final List<String> allowed = [];
+
+    // 1. Get enabled sessions from configuration
+    final knownSessions = dep == 'dasterkhwaan' || dep == 'kitchen' || dep == 'food'
+        ? ['morning', 'lunch', 'dinner', 'night']
+        : ['morning', 'evening', 'night'];
+
+    for (final s in knownSessions) {
+      final sConf = config[s];
+      if (sConf is Map) {
+        if (sConf['enabled'] == true) {
+          allowed.add(s);
+        }
+      } else if (s != 'night') {
+        allowed.add(s);
+      }
+    }
+
+    if (allowed.isEmpty) {
+      allowed.addAll(dep == 'dasterkhwaan' ? ['lunch', 'dinner'] : ['morning', 'evening']);
+    }
+
+    // 2. Facility filter if specified
+    if (facilityId != null && facilityId.isNotEmpty && branchId != null) {
+      try {
+        if (Hive.isBoxOpen('local_branches')) {
+          final raw = Hive.box('local_branches').get('branch:${branchId.toLowerCase().trim()}');
+          if (raw is Map) {
+            final facCategories = ['dispensaries', 'dasterkhwaans', 'madrassas', 'schools'];
+            for (final cat in facCategories) {
+              if (raw[cat] is List) {
+                for (final f in raw[cat]) {
+                  if (f is Map && (f['id'] == facilityId || f['name'] == facilityId)) {
+                    if (f['sessions'] is List) {
+                      final fSessions = (f['sessions'] as List).map((e) => e.toString().toLowerCase().trim()).toSet();
+                      allowed.removeWhere((s) => !fSessions.contains(s));
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. User permission filter if specified
+    if (userData != null) {
+      final userSessions = getUserAllowedSessions(userData);
+      if (!userSessions.contains('all') && userSessions.isNotEmpty) {
+        allowed.removeWhere((s) => !userSessions.contains(s));
+      }
+    }
+
+    return allowed.isNotEmpty ? allowed : ['morning', 'evening'];
+  }
+
+  /// Checks whether a specific session is allowed for this branch and context.
+  static bool isSessionAllowed(String session, String? branchId, {String? department, String? facilityId, Map<String, dynamic>? userData}) {
+    final s = session.toLowerCase().trim();
+    if (s == 'all' || s == 'auto') return true;
+    return getAllowedSessions(branchId, department: department, facilityId: facilityId, userData: userData).contains(s);
+  }
+
+  /// Helper to convert "HH:mm" to minutes from midnight
+  static int _timeStrToMinutes(String? timeStr, int fallbackMinutes) {
+    if (timeStr == null || timeStr.isEmpty) return fallbackMinutes;
+    final parts = timeStr.trim().split(':');
+    if (parts.length >= 2) {
+      final h = int.tryParse(parts[0]) ?? 0;
+      final m = int.tryParse(parts[1]) ?? 0;
+      return h * 60 + m;
+    }
+    return fallbackMinutes;
+  }
+
+  /// Evaluates whether the given time falls within the open-close operational window of any enabled session.
+  static bool isWithinOperationalHours(String? branchId, {String? department, String? facilityId, DateTime? time}) {
+    final dt = time ?? getAuthoritativeTime();
+    final currentMinutes = dt.hour * 60 + dt.minute;
+    final config = getSessionConfig(branchId, department: department, facilityId: facilityId);
+    final allowed = getAllowedSessions(branchId, department: department, facilityId: facilityId);
+
+    for (final s in allowed) {
+      final sConf = config[s] is Map ? config[s] as Map : null;
+      if (sConf == null) continue;
+
+      int openMin = _timeStrToMinutes(sConf['openTime']?.toString(), s == 'morning' ? 480 : (s == 'evening' || s == 'lunch' ? 720 : 1080));
+      int closeMin = _timeStrToMinutes(sConf['closeTime']?.toString(), s == 'morning' ? 840 : (s == 'evening' || s == 'dinner' ? 1320 : 240));
+
+      if (openMin < closeMin) {
+        if (currentMinutes >= openMin && currentMinutes <= closeMin) return true;
       } else {
-        // Between 22:00 and 23:59:59 — Night shift started today!
+        // Crosses midnight (e.g. 22:00 to 04:00)
+        if (currentMinutes >= openMin || currentMinutes <= closeMin) return true;
+      }
+    }
+    return false;
+  }
+
+  /// Canonical single source of truth resolver for Shift and DateKey, factoring in branch-specific session windows.
+  static ({String session, String dateKey}) resolveShiftAndDateKey([DateTime? time, String? branchId, String? department, String? facilityId]) {
+    final dt = (time != null ? time.toLocal() : getAuthoritativeTime());
+    final formatter = DateFormat('ddMMyy');
+    final currentMinutes = dt.hour * 60 + dt.minute;
+
+    final allowed = getAllowedSessions(branchId, department: department, facilityId: facilityId);
+    final config = getSessionConfig(branchId, department: department, facilityId: facilityId);
+
+    // If only 1 session is enabled, resolve directly to it
+    if (allowed.length == 1) {
+      final s = allowed.first;
+      if (s == 'night' && dt.hour < 6) {
+        return (session: s, dateKey: formatter.format(dt.subtract(const Duration(days: 1))));
+      }
+      return (session: s, dateKey: formatter.format(dt));
+    }
+
+    // Check configured time windows for allowed sessions
+    for (final s in allowed) {
+      final sConf = config[s] is Map ? config[s] as Map : null;
+      if (sConf == null) continue;
+
+      int openMin = _timeStrToMinutes(sConf['openTime']?.toString(), s == 'morning' ? 480 : (s == 'evening' ? 960 : (s == 'lunch' ? 720 : 1080)));
+      int closeMin = _timeStrToMinutes(sConf['closeTime']?.toString(), s == 'morning' ? 840 : (s == 'evening' ? 1320 : (s == 'lunch' ? 960 : 1320)));
+
+      if (openMin < closeMin) {
+        if (currentMinutes >= openMin && currentMinutes < closeMin) {
+          return (session: s, dateKey: formatter.format(dt));
+        }
+      } else {
+        // Crosses midnight
+        if (currentMinutes >= openMin || currentMinutes < closeMin) {
+          if (dt.hour < 6) {
+            return (session: s, dateKey: formatter.format(dt.subtract(const Duration(days: 1))));
+          }
+          return (session: s, dateKey: formatter.format(dt));
+        }
+      }
+    }
+
+    // Fallback if between windows:
+    final hour = dt.hour;
+    if (allowed.contains('morning') && (hour >= 6 && hour < 14 || !allowed.contains('evening'))) {
+      return (session: 'morning', dateKey: formatter.format(dt));
+    } else if (allowed.contains('lunch') && hour >= 11 && hour < 16) {
+      return (session: 'lunch', dateKey: formatter.format(dt));
+    } else if (allowed.contains('dinner') && hour >= 16 && hour < 23) {
+      return (session: 'dinner', dateKey: formatter.format(dt));
+    } else if (allowed.contains('evening') && (hour >= 14 && hour < 22 || !allowed.contains('night'))) {
+      return (session: 'evening', dateKey: formatter.format(dt));
+    } else if (allowed.contains('night')) {
+      if (hour < 6) {
+        return (session: 'night', dateKey: formatter.format(dt.subtract(const Duration(days: 1))));
+      } else {
         return (session: 'night', dateKey: formatter.format(dt));
       }
     }
+
+    final fallback = allowed.isNotEmpty ? allowed.first : 'morning';
+    return (session: fallback, dateKey: formatter.format(dt));
   }
 
-  /// Returns 'morning' (06:00 to 14:00), 'evening' (14:00 to 22:00), or 'night' (22:00 to 06:00) for a given DateTime or current local time.
-  static String getCurrentSession([DateTime? time]) {
-    return resolveShiftAndDateKey(time).session;
+  /// Returns 'morning', 'evening', or 'night' for a given DateTime and branch.
+  static String getCurrentSession([DateTime? time, String? branchId]) {
+    return resolveShiftAndDateKey(time, branchId).session;
   }
 
   /// Returns the Firestore `serials` date document ID.
@@ -444,8 +1050,8 @@ class CampSessionService {
     final ser = (serial ?? '').trim().toUpperCase();
 
     // 1. Immutable Serial / Tag Check (Highest Priority — never overridden by host PC activeCamp)
-    final isExplicitSaddar = ser.contains('-SADD-') || ser.contains('-KAP-') || ser.contains('-KAPAYYA-') || tag == 'SADD' || tag == 'KAP' || tag == 'SADDAR' || tag == 'KAPAYYA';
-    final isExplicitHaji   = ser.contains('-HAJI-') || ser.contains('-HAJ-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || tag == 'HAJICAMP';
+    final isExplicitSaddar = ser.contains('-SADD-') || ser.contains('-KAP-') || ser.contains('-KAPAYYA-') || ser.contains('KAPAYYA') || ser.contains('SADDAR') || tag == 'SADD' || tag == 'KAP' || tag == 'SADDAR' || tag == 'KAPAYYA';
+    final isExplicitHaji   = ser.contains('-HAJI-') || ser.contains('-HAJ-') || ser.contains('-HC-') || ser.contains('HAJI') || tag == 'HAJI' || tag == 'HC' || tag == 'HAJICAMP';
 
     if (isExplicitSaddar) {
       return isSaddar;
@@ -836,5 +1442,34 @@ class CampSessionService {
       }
     } catch (_) {}
     return null;
+  }
+}
+
+/// Data class representing detected drift between the local computer clock and server time.
+class ClockSkewInfo {
+  final DateTime localTime;
+  final DateTime authoritativeTime;
+  final int offsetMinutes;
+  final String localSession;
+  final String authoritativeSession;
+  final bool hasShiftMismatch;
+
+  const ClockSkewInfo({
+    required this.localTime,
+    required this.authoritativeTime,
+    required this.offsetMinutes,
+    required this.localSession,
+    required this.authoritativeSession,
+    required this.hasShiftMismatch,
+  });
+
+  bool get isSignificantDrift => offsetMinutes.abs() >= 5 || hasShiftMismatch;
+
+  String get formattedOffset {
+    final absMin = offsetMinutes.abs();
+    final h = absMin ~/ 60;
+    final m = absMin % 60;
+    final timeStr = h > 0 ? '$h hrs $m mins' : '$m mins';
+    return offsetMinutes > 0 ? '$timeStr behind' : '$timeStr ahead';
   }
 }

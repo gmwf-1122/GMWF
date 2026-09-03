@@ -143,8 +143,14 @@ class DonationPaginationNotifier
       if (snapshot.docs.isEmpty) {
         _hasMore = false;
         _loading = false;
-        // Keep existing state; nothing new to add
-        if (state is AsyncLoading) state = const AsyncValue.data([]);
+        debugPrint('[DonPagination] Firestore returned empty (branchId=$branchId). Keeping local data.');
+        // When Firestore is empty, keep showing local Hive data
+        // This handles offline scenarios where donations are only in local cache
+        if (state is AsyncLoading) {
+          // Get the local data that was shown before
+          final local = DonationsLocalStorage.getAllDonations(branchId);
+          state = local.isEmpty ? const AsyncValue.data([]) : AsyncValue.data(local);
+        }
         return;
       }
 

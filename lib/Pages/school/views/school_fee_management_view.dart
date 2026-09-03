@@ -1,6 +1,5 @@
 // lib/pages/school/views/school_fee_management_view.dart
 
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../services/image_upload_service.dart';
@@ -174,51 +173,61 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     required double outstandingDues,
     required int defaultersCount,
   }) {
+    final isMobile = MediaQuery.of(context).size.width < 750;
+
+    final cards = [
+      _buildSummaryTile(
+        label: 'Total Expected Fee',
+        value: 'PKR ${totalExpected.toStringAsFixed(0)}',
+        icon: Icons.account_balance_wallet_rounded,
+        color: const Color(0xFF6366F1),
+        bgColor: const Color(0xFFEEF2FF),
+      ),
+      _buildSummaryTile(
+        label: 'Total Fee Collected',
+        value: 'PKR ${totalCollected.toStringAsFixed(0)}',
+        icon: Icons.payments_rounded,
+        color: const Color(0xFF10B981),
+        bgColor: const Color(0xFFD1FAE5),
+      ),
+      _buildSummaryTile(
+        label: 'Outstanding Dues',
+        value: 'PKR ${outstandingDues.toStringAsFixed(0)}',
+        icon: Icons.pending_actions_rounded,
+        color: const Color(0xFFEF4444),
+        bgColor: const Color(0xFFFEE2E2),
+      ),
+      _buildSummaryTile(
+        label: 'Defaulters Count',
+        value: '$defaultersCount Students',
+        icon: Icons.person_off_rounded,
+        color: const Color(0xFFF59E0B),
+        bgColor: const Color(0xFFFEF3C7),
+      ),
+    ];
+
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        color: Colors.white,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final cardWidth = (constraints.maxWidth - 10) / 2;
+            return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: cards.map((c) => SizedBox(width: cardWidth, child: c)).toList(),
+            );
+          },
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(16),
       color: Colors.white,
       child: Row(
-        children: [
-          Expanded(
-            child: _buildSummaryTile(
-              label: 'Total Expected Fee',
-              value: 'PKR ${totalExpected.toStringAsFixed(0)}',
-              icon: Icons.account_balance_wallet_rounded,
-              color: const Color(0xFF6366F1),
-              bgColor: const Color(0xFFEEF2FF),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildSummaryTile(
-              label: 'Total Fee Collected',
-              value: 'PKR ${totalCollected.toStringAsFixed(0)}',
-              icon: Icons.payments_rounded,
-              color: const Color(0xFF10B981),
-              bgColor: const Color(0xFFD1FAE5),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildSummaryTile(
-              label: 'Outstanding Dues',
-              value: 'PKR ${outstandingDues.toStringAsFixed(0)}',
-              icon: Icons.pending_actions_rounded,
-              color: const Color(0xFFEF4444),
-              bgColor: const Color(0xFFFEE2E2),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _buildSummaryTile(
-              label: 'Defaulters Count',
-              value: '$defaultersCount Students',
-              icon: Icons.person_off_rounded,
-              color: const Color(0xFFF59E0B),
-              bgColor: const Color(0xFFFEF3C7),
-            ),
-          ),
-        ],
+        children: cards.map((c) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: c))).toList(),
       ),
     );
   }
@@ -231,7 +240,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     required Color bgColor,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(14),
@@ -240,22 +249,22 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, color: color, size: 22),
+            child: Icon(icon, color: color, size: 20),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 12, fontWeight: FontWeight.w500)),
+                Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 11, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
-                Text(value, style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                Text(value, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
               ],
             ),
           ),
@@ -265,6 +274,54 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
   }
 
   Widget _buildFilterToolbar() {
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        color: const Color(0xFFF8FAFC),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _searchCtrl,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Search student by name or roll number...',
+                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1), size: 20),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _buildDropdown('Class:', _selectedGrade, _grades, (v) => setState(() => _selectedGrade = v!)),
+                _buildDropdown('Section:', _selectedSection, _sections, (v) => setState(() => _selectedSection = v!)),
+                _buildDropdown('Status:', _selectedStatus, _statuses, (v) => setState(() => _selectedStatus = v!)),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  icon: const Icon(Icons.download_rounded, size: 16),
+                  label: const Text('Export Fee Report', style: TextStyle(fontSize: 12)),
+                  onPressed: _exportFeeReport,
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: const Color(0xFFF8FAFC),

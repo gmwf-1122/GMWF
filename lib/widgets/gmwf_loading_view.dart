@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import '../constants/navigator_key.dart';
 
 class GmwfLoadingView extends StatefulWidget {
@@ -176,8 +177,8 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                     return Transform.scale(
                       scale: _logoScale.value,
                       child: Container(
-                        width: logoSize + 32,
-                        height: logoSize + 32,
+                        width: logoSize + 28,
+                        height: logoSize + 28,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           boxShadow: [
@@ -191,39 +192,29 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                         child: Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isDark ? const Color(0xFF02140F) : const Color(0xFFF8FAFC),
+                            color: isDark ? const Color(0xFF02140F) : Colors.white,
                             border: Border.all(
                               color: glowColor.withValues(alpha: 0.4 + 0.3 * _pulseAnim.value),
                               width: 2,
                             ),
                           ),
-                          padding: const EdgeInsets.all(8),
+                          padding: const EdgeInsets.all(12),
                           child: child,
                         ),
                       ),
                     );
                   },
-                  child: ClipOval(
-                    child: Container(
-                      color: Colors.white,
-                      padding: const EdgeInsets.all(8),
-                      child: AspectRatio(
-                        aspectRatio: 1.0,
-                        child: Hero(
-                          tag: 'gmwf_app_logo',
-                          child: Image.asset(
-                            'assets/logo/gmwf-1.webp',
-                            width: logoSize,
-                            height: logoSize,
-                            cacheWidth: 400,
-                            fit: BoxFit.contain,
-                            errorBuilder: (_, _, _) => Icon(
-                              Icons.local_pharmacy,
-                              size: logoSize * 0.6,
-                              color: glowColor,
-                            ),
-                          ),
-                        ),
+                  child: Hero(
+                    tag: 'gmwf_app_logo',
+                    child: Image.asset(
+                      'assets/logo/gmwf-1.webp',
+                      width: logoSize,
+                      height: logoSize,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, _, _) => Icon(
+                        Icons.local_pharmacy,
+                        size: logoSize * 0.6,
+                        color: glowColor,
                       ),
                     ),
                   ),
@@ -279,35 +270,49 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
 
-                // ── Shimmer Progress Bar ─────────────────────────────────
+                // ── Lottie Animation Loading Bar ───────────────────────────
                 SizedBox(
-                  width: isTablet ? 220 : 180,
-                  child: AnimatedBuilder(
-                    animation: _shimmerController,
-                    builder: (_, _) {
-                      return Container(
-                        height: 3.5,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(2),
-                          color: shimmerTrack,
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(2),
-                          child: CustomPaint(
-                            painter: _ShimmerBarPainter(
-                              progress: _shimmerAnim.value,
-                              color: shimmerColor,
-                            ),
+                  width: isTablet ? 260 : 220,
+                  height: 64,
+                  child: Lottie.asset(
+                    'assets/animations/loading (2).json',
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => Lottie.asset(
+                      'assets/animations/loading (1).json',
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => Center(
+                        child: SizedBox(
+                          width: isTablet ? 220 : 180,
+                          child: AnimatedBuilder(
+                            animation: _shimmerController,
+                            builder: (_, _) {
+                              return Container(
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(2),
+                                  color: shimmerTrack,
+                                ),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(2),
+                                  child: CustomPaint(
+                                    painter: _ShimmerBarPainter(
+                                      progress: _shimmerAnim.value,
+                                      color: shimmerColor,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
                         ),
-                      );
-                    },
+                      ),
+                    ),
                   ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 8),
 
                 // ── Status Message ────────────────────────────────────────
                 AnimatedSwitcher(

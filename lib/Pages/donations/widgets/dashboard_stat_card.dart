@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import '../../../theme/app_theme.dart';
+import '../../../theme/role_theme_provider.dart';
+import '../../../services/user_theme_service.dart';
 
 class DashboardStatCard extends StatefulWidget {
   final String label;
@@ -7,6 +9,8 @@ class DashboardStatCard extends StatefulWidget {
   final IconData icon;
   final Color accentColor;
   final Color barColor;
+  final String? trendText;
+  final bool isPositiveTrend;
 
   const DashboardStatCard({
     super.key,
@@ -15,6 +19,8 @@ class DashboardStatCard extends StatefulWidget {
     required this.icon,
     required this.accentColor,
     required this.barColor,
+    this.trendText,
+    this.isPositiveTrend = true,
   });
 
   @override
@@ -26,28 +32,22 @@ class _DashboardStatCardState extends State<DashboardStatCard> {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
     final cleanLabel = widget.label.toUpperCase();
-    final Color bgColor;
-    final Color indicatorColor;
-    final Color labelColor;
-    final Color valueColor = Colors.white;
+
+    final Color badgeColor;
     final String footerText;
 
     if (cleanLabel.contains('TOTAL')) {
-      bgColor = const Color(0xFF1D4ED8); // Vibrant Royal Blue / Blue 700
-      indicatorColor = const Color(0xFF93C5FD); // Soft Sky Blue
-      labelColor = const Color(0xFFEFF6FF); // Crisp Light Blue
-      footerText = 'All-time volume tracked';
+      badgeColor = const Color(0xFF6366F1); // Indigo
+      footerText = widget.trendText ?? 'All-time volume tracked';
     } else if (cleanLabel.contains('RECEIVED')) {
-      bgColor = const Color(0xFF047857); // Vibrant Emerald / Green 700
-      indicatorColor = const Color(0xFF6EE7B7); // Soft Mint Green
-      labelColor = const Color(0xFFECFDF5); // Crisp Light Green
-      footerText = 'Successfully received';
+      badgeColor = const Color(0xFF10B981); // Emerald Green
+      footerText = widget.trendText ?? 'Successfully received';
     } else {
-      bgColor = const Color(0xFFB45309); // Vibrant Warm Amber / Amber 700
-      indicatorColor = const Color(0xFFFDE68A); // Soft Gold
-      labelColor = const Color(0xFFFFFBEB); // Crisp Light Amber
-      footerText = 'Awaiting verification';
+      badgeColor = const Color(0xFFF59E0B); // Amber / Orange
+      footerText = widget.trendText ?? 'Awaiting verification';
     }
 
     return MouseRegion(
@@ -55,151 +55,123 @@ class _DashboardStatCardState extends State<DashboardStatCard> {
       onExit: (_) => setState(() => _isHovered = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        clipBehavior: Clip.antiAlias,
+        padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: bgColor,
+          color: t.bgCard,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _isHovered
-                ? Colors.white.withOpacity(0.24)
-                : Colors.white.withOpacity(0.12),
-            width: 1.2,
+            color: _isHovered ? badgeColor.withValues(alpha: 0.4) : t.bgRule,
+            width: _isHovered ? 1.5 : 1.0,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(_isHovered ? 0.20 : 0.12),
-              blurRadius: _isHovered ? 20 : 12,
-              offset: Offset(0, _isHovered ? 8 : 4),
+              color: isDark
+                  ? Colors.black.withValues(alpha: _isHovered ? 0.4 : 0.25)
+                  : Colors.black.withValues(alpha: _isHovered ? 0.06 : 0.02),
+              blurRadius: _isHovered ? 14 : 10,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
-        child: Stack(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Subtle Top-Right Sheen Gradient
-            Positioned(
-              top: -40,
-              right: -40,
-              child: Container(
-                width: 160,
-                height: 160,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      Colors.white.withOpacity(_isHovered ? 0.08 : 0.04),
-                      Colors.white.withOpacity(0.0),
-                    ],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Icon(widget.icon, color: badgeColor, size: 22),
                 ),
-              ),
-            ),
-            // Left Vertical Accent Bar (replaces the vintage bottom bar)
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: _isHovered ? 6 : 4,
-                decoration: BoxDecoration(
-                  color: indicatorColor,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    bottomLeft: Radius.circular(16),
-                  ),
-                ),
-              ),
-            ),
-            // Content with uniform padding and breathing space
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         widget.label,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 10,
+                        style: TextStyle(
+                          fontSize: 11.5,
                           fontWeight: FontWeight.w700,
-                          color: labelColor.withOpacity(0.8),
-                          letterSpacing: 0.8,
+                          color: t.textSecondary,
+                          letterSpacing: 0.5,
                         ),
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      AnimatedScale(
-                        scale: _isHovered ? 1.15 : 1.0,
-                        duration: const Duration(milliseconds: 200),
-                        curve: Curves.easeOutCubic,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withOpacity(_isHovered ? 0.20 : 0.12),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(_isHovered ? 0.25 : 0.15),
-                              width: 1,
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            'PKR ',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: t.textTertiary,
                             ),
                           ),
-                          child: Icon(
-                            widget.icon,
-                            size: 15,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text(
-                          'PKR ',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: labelColor.withOpacity(0.6),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        Expanded(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              widget.value,
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w800,
-                                color: valueColor,
-                                letterSpacing: -0.5,
+                          Expanded(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                widget.value,
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  color: t.textPrimary,
+                                  letterSpacing: -0.5,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    // Descriptive footer context subtitle replacing progress bar
-                    Text(
-                      footerText,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        color: labelColor.withOpacity(0.5),
+                        ],
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: badgeColor.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(6),
               ),
-            ],
-          ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    widget.isPositiveTrend ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
+                    size: 11,
+                    color: badgeColor,
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      footerText,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: badgeColor,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
+      ),
     );
   }
 }

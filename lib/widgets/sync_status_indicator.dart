@@ -18,44 +18,39 @@ class SyncStatusIndicator extends StatelessWidget {
         final pendingCount = box.length;
         final isSynced = pendingCount == 0;
 
-        return Tooltip(
-          message: isSynced
-              ? 'All data is synced to cloud'
-              : '$pendingCount items waiting to sync...',
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: isSynced
+                ? Colors.white.withOpacity(0.1)
+                : Colors.orange.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
               color: isSynced
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.orange.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isSynced
-                    ? Colors.transparent
-                    : Colors.orange.withOpacity(0.5),
+                  ? Colors.transparent
+                  : Colors.orange.withOpacity(0.5),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isSynced ? Icons.cloud_done : Icons.sync,
+                size: 14,
+                color: isSynced ? Colors.greenAccent : Colors.orangeAccent,
               ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  isSynced ? Icons.cloud_done : Icons.sync,
-                  size: 14,
-                  color: isSynced ? Colors.greenAccent : Colors.orangeAccent,
-                ),
-                if (!isSynced) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    pendingCount.toString(),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
+              if (!isSynced) ...[
+                const SizedBox(width: 6),
+                Text(
+                  pendingCount.toString(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   ),
-                ],
+                ),
               ],
-            ),
+            ],
           ),
         );
       },

@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/connection_manager.dart';
+import '../services/user_theme_service.dart';
 
 class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -229,8 +230,7 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
                                 ? 'Switch to Light Mode'
                                 : 'Switch to Dark Mode',
                             onTap: () async {
-                              await Hive.box('app_settings')
-                                  .put('is_dark_mode', !isDark);
+                              await UserThemeService.setDarkMode(!isDark);
                             },
                             child: Icon(
                               isDark
@@ -245,14 +245,14 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
                           const SizedBox(width: 6),
                         ],
 
-                        // Logout Button
-                        if (onLogout != null) ...[
-                          _buildLogoutButton(isDark, isMobile),
-                          const SizedBox(width: 8),
+                          // Logout Button (for Dispensary screens)
+                          if (onLogout != null) ...[
+                            _buildLogoutButton(isDark, isMobile),
+                            const SizedBox(width: 8),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
               if (bottom != null) ...[
                 const SizedBox(height: 6),
                 bottom!,

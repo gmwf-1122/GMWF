@@ -29,17 +29,8 @@ class _ExpensesTabState extends State<ExpensesTab> {
   DateTime _selectedDate = DateTime.now();
   bool _viewAllBranches = false;
   bool get _isBranchScopedUser {
-    if (widget.branchId.isNotEmpty && widget.branchId != 'all') return true;
-    if (Hive.isBoxOpen('local_users')) {
-      final curUser = Hive.box('local_users').values.firstOrNull;
-      if (curUser is Map) {
-        final r = (curUser['role']?.toString() ?? '').toLowerCase().trim();
-        if (r.contains('branch manager') || r.contains('branch_manager') || r == 'bm' || r == 'supervisor') {
-          return true;
-        }
-      }
-    }
-    return false;
+    final role = LocalStorageService.getActiveUserRole();
+    return role == 'branch manager' || role == 'supervisor' || role == 'bm';
   }
 
   final List<String> _categories = [
@@ -307,9 +298,9 @@ class _ExpensesTabState extends State<ExpensesTab> {
                           }
 
                           // Retrieve Current User
-                          final userMap = Hive.box('local_users').values.firstOrNull;
-                          final username = userMap?['name']?.toString() ?? userMap?['username']?.toString() ?? 'Admin';
-                          final userId = userMap?['uid']?.toString() ?? userMap?['id']?.toString() ?? 'unknown';
+                          final userMap = LocalStorageService.getActiveUserData();
+                          final username = LocalStorageService.getActiveUsername();
+                          final userId = userMap['uid']?.toString() ?? userMap['id']?.toString() ?? 'admin';
 
                           final bId = widget.branchId == 'all' ? 'hq' : widget.branchId;
 
@@ -395,8 +386,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
                 }
 
                 // Retrieve Current User
-                final userMap = Hive.box('local_users').values.firstOrNull;
-                final username = userMap?['name']?.toString() ?? userMap?['username']?.toString() ?? 'Admin';
+                final username = LocalStorageService.getActiveUsername();
 
                 final bId = expense['branchId']?.toString() ?? widget.branchId;
 

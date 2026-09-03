@@ -12,10 +12,17 @@ import '../utils/localization_helper.dart';
 import '../services/local_storage_service.dart';
 import '../utils/formatters.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
+import '../services/auth_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/image_upload_service.dart';
+import '../services/user_theme_service.dart';
 import '../widgets/update_dialog_widget.dart';
+import '../realtime/realtime_events.dart';
+import '../realtime/realtime_manager.dart';
 import 'settings/biometric_device_manager_page.dart';
+import 'settings/python_terminal_screen.dart';
+import 'school/views/school_about_view.dart';
+import 'support_page.dart';
 
 
 class SettingsPage extends StatefulWidget {
@@ -90,6 +97,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
     await LocalStorageService.saveLocalUser(widget.userData);
     await offline_auth.OfflineAuthService.updateCachedUserData(widget.userData);
+
+    // Sync over LAN Server if connected
+    try {
+      final bId = widget.userData['branchId']?.toString() ?? 'all';
+      RealtimeManager().sendMessage(
+        RealtimeEvents.payload(
+          type: RealtimeEvents.saveUser,
+          branchId: bId,
+          data: Map<String, dynamic>.from(widget.userData),
+        ),
+      );
+    } catch (e) {
+      debugPrint('[SettingsPage] Realtime sync error: $e');
+    }
 
     try {
       final uid = (FirebaseAuth.instance.currentUser?.uid ?? widget.userData['uid'] ?? widget.userData['id'])?.toString();
@@ -532,6 +553,20 @@ class _SettingsPageState extends State<SettingsPage> {
                 userData: userData,
               );
 
+              // Sync over LAN Server if connected
+              try {
+                final bId = userData['branchId']?.toString() ?? 'all';
+                RealtimeManager().sendMessage(
+                  RealtimeEvents.payload(
+                    type: RealtimeEvents.saveUser,
+                    branchId: bId,
+                    data: Map<String, dynamic>.from(userData),
+                  ),
+                );
+              } catch (e) {
+                debugPrint('[SettingsPage] Realtime sync error: $e');
+              }
+
               // Update online in Firebase Firestore
               try {
                 final uid = (FirebaseAuth.instance.currentUser?.uid ?? userData['uid'] ?? userData['id'])?.toString();
@@ -779,6 +814,20 @@ class _SettingsPageState extends State<SettingsPage> {
                       userData: widget.userData
                     );
 
+                    // Sync over LAN Server if connected
+                    try {
+                      final bId = widget.userData['branchId']?.toString() ?? 'all';
+                      RealtimeManager().sendMessage(
+                        RealtimeEvents.payload(
+                          type: RealtimeEvents.saveUser,
+                          branchId: bId,
+                          data: Map<String, dynamic>.from(widget.userData),
+                        ),
+                      );
+                    } catch (e) {
+                      debugPrint('[SettingsPage] Realtime sync error: $e');
+                    }
+
                     if (context.mounted) {
                       Navigator.pop(context);
                       ScaffoldMessenger.of(context).showSnackBar(
@@ -821,6 +870,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final roleStr = (widget.userData['role'] as String? ?? 'admin').toLowerCase().trim();
+    final isChairmanOrHq = ['chairman', 'hq manager', 'hq_manager', 'hq', 'headquarters manager', 'admin', 'global admin', 'super admin', 'ceo'].contains(roleStr);
     final roleTheme = RoleThemeData.fromString(roleStr);
 
     return RoleThemeScope(
@@ -1167,40 +1217,224 @@ class _SettingsPageState extends State<SettingsPage> {
                           ),
                         ),
 
-                        // HARDWARE & BIOMETRICS SECTION
-                        _sectionLabel(t, 'HARDWARE & BIOMETRICS'),
-                        RoleCard(
-                          child: ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: Container(
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: t.accent.withValues(alpha: 0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Icon(Icons.fingerprint_rounded, color: t.accent, size: 24),
-                            ),
-                            title: Text(
-                              'ZKTeco Biometric Devices & Attendance',
-                              style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
-                            ),
-                            subtitle: Text(
-                              'View connected Wi-Fi/Ethernet readers, building assignments, live logs, and employee PINs.',
-                              style: TextStyle(color: t.textSecondary, fontSize: 12),
-                            ),
-                            trailing: Icon(Icons.arrow_forward_ios_rounded, color: t.textTertiary, size: 14),
-                            onTap: () {
-                              final branchId = widget.userData['branchId'] as String? ?? 'main';
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => BiometricDeviceManagerPage(branchId: branchId),
+                        // HARDWARE & BIOMETRICS SECTION (Strictly for Chairman / HQ Manager)
+                        if (isChairmanOrHq) ...[
+                          _sectionLabel(t, 'HARDWARE & BIOMETRICS'),
+                          RoleCard(
+                            child: ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: t.accent.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(10),
                                 ),
-                              );
-                            },
+                                child: Icon(Icons.fingerprint_rounded, color: t.accent, size: 24),
+                              ),
+                              title: Text(
+                                'ZKTeco Biometric Devices & Attendance',
+                                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              subtitle: Text(
+                                'View connected Wi-Fi/Ethernet readers, building assignments, live logs, and employee PINs.',
+                                style: TextStyle(color: t.textSecondary, fontSize: 12),
+                              ),
+                              trailing: Icon(Icons.arrow_forward_ios_rounded, color: t.textTertiary, size: 14),
+                              onTap: () {
+                                final branchId = widget.userData['branchId'] as String? ?? 'main';
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => BiometricDeviceManagerPage(branchId: branchId),
+                                  ),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 16),
+                          const SizedBox(height: 10),
+
+                          RoleCard(
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                              leading: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.terminal_rounded, color: Color(0xFF0284C7), size: 22),
+                              ),
+                              title: Text(
+                                'Python Biometric & Hardware Terminal',
+                                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              subtitle: Text(
+                                'Live interactive terminal to run ZKTeco daemons, diagnostic pings, and punch deduplication scripts.',
+                                style: TextStyle(color: t.textSecondary, fontSize: 12),
+                              ),
+                              trailing: Icon(Icons.arrow_forward_ios_rounded, color: t.textTertiary, size: 14),
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const PythonTerminalScreen(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        // SCHOOL PROFILE & ABOUT (Only for School-specific users)
+                        if (roleStr.contains('school') ||
+                            roleStr.contains('teacher') ||
+                            roleStr.contains('principal') ||
+                            roleStr.contains('headmaster') ||
+                            roleStr.contains('headmistress') ||
+                            roleStr.contains('educator')) ...[
+                          _sectionLabel(t, 'School & Institution Details'),
+                          RoleCard(
+                            showGlow: true,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Container(
+                                    width: 48,
+                                    height: 48,
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.06),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Image.asset('assets/logo/twt.webp', fit: BoxFit.contain),
+                                  ),
+                                  title: Text(
+                                    'Taleem-o-Tarbiyat School System',
+                                    style: TextStyle(
+                                      color: t.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14.5,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'A Project of Gulzar-e-Madina Welfare Foundation (GMWF)',
+                                    style: TextStyle(
+                                      color: t.textSecondary,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(Icons.info_outline_rounded, size: 18),
+                                    label: const Text(
+                                      'About Taleem-o-Tarbiyat School',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: t.accent,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    onPressed: () {
+                                      final bId = widget.userData['branchId']?.toString() ?? 'all';
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => Scaffold(
+                                            appBar: AppBar(
+                                              title: const Text('About Taleem-o-Tarbiyat School', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                              leading: const BackButton(),
+                                            ),
+                                            body: SchoolAboutView(branchId: bId),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ] else ...[
+                          // HELP & SUPPORT (For non-school users like Office Boy, Kitchen, Receptionist, etc.)
+                          _sectionLabel(t, 'Support & Help'),
+                          RoleCard(
+                            showGlow: true,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  leading: Container(
+                                    width: 48,
+                                    height: 48,
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: t.accent.withValues(alpha: 0.25)),
+                                    ),
+                                    child: Icon(Icons.support_agent_rounded, color: t.accent, size: 26),
+                                  ),
+                                  title: Text(
+                                    'Support & Help Center',
+                                    style: TextStyle(
+                                      color: t.textPrimary,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14.5,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    'Need assistance, FAQs, or want to report an issue? Contact our technical helpdesk.',
+                                    style: TextStyle(
+                                      color: t.textSecondary,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(Icons.help_outline_rounded, size: 18),
+                                    label: const Text(
+                                      'Open Support & Help Center',
+                                      style: TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: t.accent,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => const SupportPage(),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
 
                         // PERSONALIZATION SECTION
                         _sectionLabel(t, 'personalization'),
@@ -1208,133 +1442,136 @@ class _SettingsPageState extends State<SettingsPage> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // 1. Accent Color presets
-                              Row(
-                                children: [
-                                  Icon(Icons.color_lens_outlined, color: t.accent),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    context.tr('theme_color'),
-                                    style: _getStyle(t, size: 14, weight: FontWeight.bold),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: Row(
+                              // Advanced Theme Colors & Scaling (Only for Chairman & HQ Manager)
+                              if (isChairmanOrHq) ...[
+                                // 1. Accent Color presets
+                                Row(
                                   children: [
-                                    _buildColorPill(t, 'Role Default', null, t.accentGradient.colors.first),
-                                    _buildColorPill(t, 'CEO Steel Blue', '#4A7FB5', const Color(0xFF4A7FB5)),
-                                    _buildColorPill(t, 'Gold Authority', '#B8860B', const Color(0xFFB8860B)),
-                                    _buildColorPill(t, 'Electric Blue', '#0047AB', const Color(0xFF0047AB)),
-                                    _buildColorPill(t, 'Sapphire Indigo', '#2C4A8F', const Color(0xFF2C4A8F)),
-                                    _buildColorPill(t, 'Midnight Slate', '#3A5178', const Color(0xFF3A5178)),
-                                    _buildColorPill(t, 'Emerald Mint', '#00A86B', const Color(0xFF00A86B)),
-                                    _buildColorPill(t, 'Forest Sage', '#2E7D5B', const Color(0xFF2E7D5B)),
-                                    _buildColorPill(t, 'Executive Teal', '#0E6E63', const Color(0xFF0E6E63)),
-                                    _buildColorPill(t, 'Clinical Cyan', '#0E7C90', const Color(0xFF0E7C90)),
-                                    _buildColorPill(t, 'Royal Indigo', '#4B0082', const Color(0xFF4B0082)),
-                                    _buildColorPill(t, 'Clinical Teal', '#008080', const Color(0xFF008080)),
-                                    _buildColorPill(t, 'Slate Plum', '#5E5490', const Color(0xFF5E5490)),
-                                    _buildColorPill(t, 'Warm Rose', '#C2185B', const Color(0xFFC2185B)),
-                                    _buildColorPill(t, 'Sunset Amber', '#D97706', const Color(0xFFD97706)),
-                                    _buildColorPill(t, 'Crimson Red', '#DC2626', const Color(0xFFDC2626)),
-                                    _buildCustomHexColorPill(t),
+                                    Icon(Icons.color_lens_outlined, color: t.accent),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      context.tr('theme_color'),
+                                      style: _getStyle(t, size: 14, weight: FontWeight.bold),
+                                    ),
                                   ],
                                 ),
-                              ),
-                              _divider(t),
-
-                              // 2. Card corner radius choices
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  _buildSegmentedSelector<double>(
-                                    t, 
-                                    'card_radius', 
-                                    activeRadius, 
-                                    {
-                                      8.0: 'sharp',
-                                      16.0: 'medium',
-                                      24.0: 'round',
-                                    }, 
-                                    (radius) async {
-                                      await box.put('card_radius', radius);
-                                      setState(() {});
-                                    }
+                                const SizedBox(height: 12),
+                                SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: Row(
+                                    children: [
+                                      _buildColorPill(t, 'Role Default', null, t.accentGradient.colors.first),
+                                      _buildColorPill(t, 'CEO Steel Blue', '#4A7FB5', const Color(0xFF4A7FB5)),
+                                      _buildColorPill(t, 'Gold Authority', '#B8860B', const Color(0xFFB8860B)),
+                                      _buildColorPill(t, 'Electric Blue', '#0047AB', const Color(0xFF0047AB)),
+                                      _buildColorPill(t, 'Sapphire Indigo', '#2C4A8F', const Color(0xFF2C4A8F)),
+                                      _buildColorPill(t, 'Midnight Slate', '#3A5178', const Color(0xFF3A5178)),
+                                      _buildColorPill(t, 'Emerald Mint', '#00A86B', const Color(0xFF00A86B)),
+                                      _buildColorPill(t, 'Forest Sage', '#2E7D5B', const Color(0xFF2E7D5B)),
+                                      _buildColorPill(t, 'Executive Teal', '#0E6E63', const Color(0xFF0E6E63)),
+                                      _buildColorPill(t, 'Clinical Cyan', '#0E7C90', const Color(0xFF0E7C90)),
+                                      _buildColorPill(t, 'Royal Indigo', '#4B0082', const Color(0xFF4B0082)),
+                                      _buildColorPill(t, 'Clinical Teal', '#008080', const Color(0xFF008080)),
+                                      _buildColorPill(t, 'Slate Plum', '#5E5490', const Color(0xFF5E5490)),
+                                      _buildColorPill(t, 'Warm Rose', '#C2185B', const Color(0xFFC2185B)),
+                                      _buildColorPill(t, 'Sunset Amber', '#D97706', const Color(0xFFD97706)),
+                                      _buildColorPill(t, 'Crimson Red', '#DC2626', const Color(0xFFDC2626)),
+                                      _buildCustomHexColorPill(t),
+                                    ],
                                   ),
-                                  const SizedBox(height: 12),
-                                  AnimatedContainer(
-                                    duration: const Duration(milliseconds: 250),
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: t.accent.withValues(alpha: 0.08),
-                                      borderRadius: BorderRadius.circular(activeRadius),
-                                      border: Border.all(color: t.accent.withValues(alpha: 0.3), width: 1.5),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Container(
-                                          padding: const EdgeInsets.all(8),
-                                          decoration: BoxDecoration(
-                                            color: t.accent,
-                                            borderRadius: BorderRadius.circular((activeRadius / 2).clamp(4.0, 12.0)),
-                                          ),
-                                          child: const Icon(Icons.rounded_corner_rounded, color: Colors.white, size: 20),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                'Card Radius Preview (${activeRadius.toInt()}px)',
-                                                style: TextStyle(
-                                                  color: t.textPrimary,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 13.5,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                'Cards, dialogs, and UI cards adjust live across the app.',
-                                                style: TextStyle(
-                                                  color: t.textSecondary,
-                                                  fontSize: 11.5,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              _divider(t),
+                                ),
+                                _divider(t),
 
-                              // 3. Text scaling scale slider/selector
-                              _buildSegmentedSelector<double>(
-                                t, 
-                                'font_scale', 
-                                activeFontScale, 
-                                {
-                                  0.85: 'small',
-                                  1.0: 'medium',
-                                  1.15: 'large',
-                                  1.30: 'extra_large',
-                                }, 
-                                (scale) => box.put('font_scale', scale)
-                              ),
-                              _divider(t),
+                                // 2. Card corner radius choices
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    _buildSegmentedSelector<double>(
+                                      t, 
+                                      'card_radius', 
+                                      activeRadius, 
+                                      {
+                                        8.0: 'sharp',
+                                        16.0: 'medium',
+                                        24.0: 'round',
+                                      }, 
+                                      (radius) async {
+                                        await box.put('card_radius', radius);
+                                        setState(() {});
+                                      }
+                                    ),
+                                    const SizedBox(height: 12),
+                                    AnimatedContainer(
+                                      duration: const Duration(milliseconds: 250),
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: t.accent.withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(activeRadius),
+                                        border: Border.all(color: t.accent.withValues(alpha: 0.3), width: 1.5),
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: t.accent,
+                                              borderRadius: BorderRadius.circular((activeRadius / 2).clamp(4.0, 12.0)),
+                                            ),
+                                            child: const Icon(Icons.rounded_corner_rounded, color: Colors.white, size: 20),
+                                          ),
+                                          const SizedBox(width: 14),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  'Card Radius Preview (${activeRadius.toInt()}px)',
+                                                  style: TextStyle(
+                                                    color: t.textPrimary,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13.5,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  'Cards, dialogs, and UI cards adjust live across the app.',
+                                                  style: TextStyle(
+                                                    color: t.textSecondary,
+                                                    fontSize: 11.5,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                _divider(t),
+
+                                // 3. Text scaling scale slider/selector
+                                _buildSegmentedSelector<double>(
+                                  t, 
+                                  'font_scale', 
+                                  activeFontScale, 
+                                  {
+                                    0.85: 'small',
+                                    1.0: 'medium',
+                                    1.15: 'large',
+                                    1.30: 'extra_large',
+                                  }, 
+                                  (scale) => box.put('font_scale', scale)
+                                ),
+                                _divider(t),
+                              ],
 
                               // 4. Dark Mode / Light Mode Toggle
                               SwitchListTile(
                                 value: isDarkMode,
                                 activeThumbColor: t.accent,
                                 onChanged: (val) async {
-                                  await box.put('is_dark_mode', val);
+                                  await UserThemeService.setDarkMode(val);
                                   setState(() {});
                                 },
                                 secondary: Container(
@@ -1361,20 +1598,8 @@ class _SettingsPageState extends State<SettingsPage> {
                               ),
                               _divider(t),
 
-                              // 5. App Language Selector
-                              _buildSegmentedSelector<String>(
-                                t, 
-                                'language', 
-                                activeLanguage, 
-                                {
-                                  'en': 'English 🇬🇧',
-                                  'ur': 'اردو 🇵🇰',
-                                }, 
-                                (lang) async {
-                                  await box.put('language', lang);
-                                  setState(() {});
-                                }
-                              ),
+                              // 5. Logout Button
+                              _LogoutTile(t: t),
                             ],
                           ),
                         ),
@@ -1395,6 +1620,167 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOGOUT TILE
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _LogoutTile extends StatefulWidget {
+  final RoleThemeData t;
+  const _LogoutTile({required this.t});
+
+  @override
+  State<_LogoutTile> createState() => _LogoutTileState();
+}
+
+class _LogoutTileState extends State<_LogoutTile> {
+  bool _loading = false;
+
+  Future<void> _confirmAndLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.5),
+      builder: (ctx) {
+        final t = widget.t;
+        return AlertDialog(
+          backgroundColor: t.bgCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.logout_rounded, color: Colors.red, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Text('Sign Out',
+                  style: TextStyle(
+                    color: t.textPrimary,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  )),
+            ],
+          ),
+          content: Text(
+            'Are you sure you want to sign out of your account?',
+            style: TextStyle(color: t.textSecondary, fontSize: 14, height: 1.5),
+          ),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: t.textSecondary,
+                side: BorderSide(color: t.bgRule),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+              child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.logout_rounded, size: 16),
+              label: const Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w700)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _loading = true);
+    try {
+      await AuthService().signOut();
+    } catch (e) {
+      debugPrint('[SettingsPage] Logout error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sign-out failed. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.t;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: _loading ? null : _confirmAndLogout,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.15)),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.red,
+                          ),
+                        )
+                      : const Icon(Icons.logout_rounded, color: Colors.red, size: 20),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Sign Out',
+                        style: TextStyle(
+                          color: t.textPrimary,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Log out of your current session',
+                        style: TextStyle(color: t.textSecondary, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: Colors.red.withValues(alpha: 0.5), size: 20),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

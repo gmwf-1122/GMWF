@@ -29,7 +29,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
         .collection('branches')
         .doc(widget.branchId)
         .collection('notifications')
-        .orderBy('timestamp', descending: true);
+        .orderBy('timestamp', descending: true)
+        .limit(50);
 
     if (widget.role == 'admin') return coll.snapshots();
 

@@ -131,6 +131,38 @@ class GlobalFilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final depts = FinanceLedgerStorage.getDepartments();
 
+    final uniqueBranches = <String, Map<String, dynamic>>{};
+    for (final b in branches) {
+      final id = b['id']?.toString().trim() ?? '';
+      if (id.isNotEmpty && id.toLowerCase() != 'all') {
+        uniqueBranches[id] = b;
+      }
+    }
+    final branchItems = [
+      const DropdownMenuItem(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
+      ...uniqueBranches.values.map((b) => DropdownMenuItem(
+        value: b['id']?.toString() ?? '',
+        child: Text(b['name']?.toString() ?? b['id']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
+      )),
+    ];
+    final safeBranchValue = branchItems.any((it) => it.value == selectedBranchId) ? selectedBranchId : 'all';
+
+    final uniqueDepts = <String, Map<String, dynamic>>{};
+    for (final d in depts) {
+      final id = d['id']?.toString().toUpperCase().trim() ?? '';
+      if (id.isNotEmpty && id != 'ALL') {
+        uniqueDepts[id] = d;
+      }
+    }
+    final deptItems = [
+      const DropdownMenuItem(value: 'ALL', child: Text('All Departments', style: TextStyle(fontSize: 11))),
+      ...uniqueDepts.values.map((d) => DropdownMenuItem(
+        value: d['id']?.toString().toUpperCase() ?? '',
+        child: Text(d['name']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
+      )),
+    ];
+    final safeDeptValue = deptItems.any((it) => it.value == selectedDeptId.toUpperCase()) ? selectedDeptId.toUpperCase() : 'ALL';
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: const BoxDecoration(
@@ -148,14 +180,8 @@ class GlobalFilterBar extends StatelessWidget {
           if (branches.isNotEmpty) ...[
             _buildDropdown<String>(
               label: 'Branch',
-              value: selectedBranchId,
-              items: [
-                const DropdownMenuItem(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-                ...branches.map((b) => DropdownMenuItem(
-                  value: b['id']?.toString() ?? '',
-                  child: Text(b['name']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
-                )),
-              ],
+              value: safeBranchValue,
+              items: branchItems,
               onChanged: (v) { if (v != null) onBranchChanged(v); },
             ),
             const SizedBox(width: 12),
@@ -164,14 +190,8 @@ class GlobalFilterBar extends StatelessWidget {
           // Department Filter
           _buildDropdown<String>(
             label: 'Department',
-            value: selectedDeptId.toUpperCase(),
-            items: [
-              const DropdownMenuItem(value: 'ALL', child: Text('All Departments', style: TextStyle(fontSize: 11))),
-              ...depts.map((d) => DropdownMenuItem(
-                value: d['id']?.toString().toUpperCase() ?? '',
-                child: Text(d['name']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
-              )),
-            ],
+            value: safeDeptValue,
+            items: deptItems,
             onChanged: (v) { if (v != null) onDeptChanged(v); },
           ),
 
@@ -200,6 +220,15 @@ class GlobalFilterBar extends StatelessWidget {
     required List<DropdownMenuItem<T>> items,
     required ValueChanged<T?> onChanged,
   }) {
+    final uniqueItems = <T, DropdownMenuItem<T>>{};
+    for (final it in items) {
+      if (it.value != null && !uniqueItems.containsKey(it.value)) {
+        uniqueItems[it.value as T] = it;
+      }
+    }
+    final dedupedItems = uniqueItems.values.toList();
+    final safeValue = dedupedItems.any((it) => it.value == value) ? value : (dedupedItems.isNotEmpty ? dedupedItems.first.value : null);
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -215,10 +244,10 @@ class GlobalFilterBar extends StatelessWidget {
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<T>(
-              value: value,
+              value: safeValue,
               dropdownColor: Colors.white,
               style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-              items: items,
+              items: dedupedItems,
               onChanged: onChanged,
             ),
           ),

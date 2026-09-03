@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:uuid/uuid.dart';
+import 'package:collection/collection.dart';
 
-import '../../../constants/colors.dart';
 import '../../../models/donation_models.dart';
+import '../../../models/donation_box_models.dart';
 import '../../../services/donations_local_storage.dart';
+import '../../../services/donation_box_storage.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/role_theme_provider.dart';
+import '../../../utils/keyboard_focus_utils.dart';
 import '../donations_shared.dart';
+
+enum DonorType { walkIn, registered, box }
 
 class AddDonationWizard extends StatefulWidget {
   final String branchId;
@@ -29,28 +36,31 @@ class AddDonationWizard extends StatefulWidget {
 }
 
 class _AddDonationWizardState extends State<AddDonationWizard> {
-  final PageController _pageController = PageController();
-  final ScrollController _scrollController = ScrollController();
+  final _formKey = GlobalKey<FormState>();
+
+  // Wizard step: 0 = Donor, 1 = Cause, 2 = Amount & Review
   int _currentStep = 0;
-  final int _totalSteps = 4;
 
-  final _formKeyIdentity = GlobalKey<FormState>();
-  final _formKeyDetails  = GlobalKey<FormState>();
+  // Donor type
+  DonorType _donorType = DonorType.walkIn;
 
-  // Step 1: Identity
+  // Walk-in / Registered Donor fields
+  final _nameCtrl = TextEditingController(text: 'Walk-in Donor');
   final _phoneCtrl = TextEditingController();
-  final _nameCtrl  = TextEditingController();
   final _donorIdCtrl = TextEditingController();
   DonorRecord? _selectedDonor;
-  List<DonorRecord> _searchResults = [];
-  bool _isAnonymous = false;
+  List<DonorRecord> _registeredDonors = [];
 
-  // Step 2: Category
+  // Donation Box fields
+  List<DonationBox> _availableBoxes = [];
+  DonationBox? _selectedBox;
+
+  // Category & Subtype
   DonationCategory _category = DonationCategory.gmwf;
   GmwfSubCategory? _gmwfSub = GmwfSubCategory.dasterkhwaan;
   DonationSubtype? _subtype = DonationSubtype.sadqaAtyaat;
 
-  // Step 3: Contribution
+  // Contribution details
   final _amountCtrl = TextEditingController();
   final _goodsItemCtrl = TextEditingController();
   final _unitCtrl = TextEditingController();
@@ -64,12 +74,38 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   bool _saving = false;
   String? _error;
 
+  final List<double> _quickAmounts = [500, 1000, 2000, 5000, 10000, 25000, 50000];
+
+  List<DonorRecord> _matchingSuggestions = [];
+  bool _showSuggestions = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+    _nameCtrl.addListener(_onDonorInputsChanged);
+    _phoneCtrl.addListener(_onDonorInputsChanged);
+  }
+
+  void _loadData() {
+    try {
+      _registeredDonors = DonationsLocalStorage.getAllDonors();
+    } catch (_) {}
+
+    try {
+      _availableBoxes = DonationBoxStorage.getBoxes(widget.branchId);
+      if (_availableBoxes.isNotEmpty) {
+        _selectedBox = _availableBoxes.first;
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
-    _pageController.dispose();
-    _scrollController.dispose();
-    _phoneCtrl.dispose();
+    _nameCtrl.removeListener(_onDonorInputsChanged);
+    _phoneCtrl.removeListener(_onDonorInputsChanged);
     _nameCtrl.dispose();
+    _phoneCtrl.dispose();
     _donorIdCtrl.dispose();
     _amountCtrl.dispose();
     _goodsItemCtrl.dispose();
@@ -80,38 +116,128 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
     super.dispose();
   }
 
-  void _onPhoneChanged(String val) {
-    if (val.length >= 7) {
-      final donor = DonationsLocalStorage.findDonorByPhone(val);
-      if (donor != null) {
+  void _onDonorTypeChanged(DonorType type) {
+    setState(() {
+      _donorType = type;
+      _error = null;
+      _matchingSuggestions = [];
+      if (type == DonorType.walkIn) {
+        _nameCtrl.text = 'Walk-in Donor';
+        _phoneCtrl.clear();
+        _donorIdCtrl.clear();
+        _selectedDonor = null;
+      } else if (type == DonorType.registered) {
+        if (_selectedDonor != null) {
+          _nameCtrl.text = _selectedDonor!.name;
+          _phoneCtrl.text = _selectedDonor!.phones.isNotEmpty ? _selectedDonor!.phones.first : '';
+          _donorIdCtrl.text = _selectedDonor!.id;
+        } else {
+          _nameCtrl.clear();
+          _phoneCtrl.clear();
+          _donorIdCtrl.clear();
+        }
+      } else if (type == DonorType.box) {
+        // Auto lock to GMWF category
+        _category = DonationCategory.gmwf;
+        _gmwfSub = GmwfSubCategory.dasterkhwaan;
+        _subtype = DonationSubtype.sadqaAtyaat;
+        if (_selectedBox != null) {
+          _nameCtrl.text = '${_selectedBox!.boxNumber} (${_selectedBox!.holderName})';
+          _phoneCtrl.text = _selectedBox!.holderPhone;
+        } else {
+          _nameCtrl.text = 'Donation Box';
+        }
+      }
+    });
+  }
+
+  void _onDonorInputsChanged() {
+    if (_donorType != DonorType.registered) return;
+
+    final nameText = _nameCtrl.text.trim();
+    final phoneText = _phoneCtrl.text.trim();
+
+    // 1. Check exact match for BOTH name and phone
+    if (nameText.isNotEmpty && phoneText.isNotEmpty) {
+      final cleanPhone = phoneText.replaceAll(RegExp(r'\D'), '');
+      final exactMatch = _registeredDonors.firstWhereOrNull((d) {
+        final nameMatch = d.name.trim().toLowerCase() == nameText.toLowerCase();
+        final phoneMatch = d.phones.any((p) => p.replaceAll(RegExp(r'\D'), '') == cleanPhone);
+        return nameMatch && phoneMatch;
+      });
+
+      if (exactMatch != null && _selectedDonor?.id != exactMatch.id) {
         setState(() {
-          _selectedDonor = donor;
-          _nameCtrl.text = donor.name;
-          _donorIdCtrl.text = donor.id;
-          _searchResults = [];
+          _selectedDonor = exactMatch;
+          _donorIdCtrl.text = exactMatch.id;
+          _matchingSuggestions = [];
+        });
+        return;
+      }
+    }
+
+    // 2. Check 11-digit exact phone match if no donor selected yet
+    if (phoneText.length == 11 && _selectedDonor == null) {
+      final cleanPhone = phoneText.replaceAll(RegExp(r'\D'), '');
+      final phoneMatch = _registeredDonors.firstWhereOrNull((d) {
+        return d.phones.any((p) => p.replaceAll(RegExp(r'\D'), '') == cleanPhone);
+      });
+
+      if (phoneMatch != null) {
+        setState(() {
+          _selectedDonor = phoneMatch;
+          _donorIdCtrl.text = phoneMatch.id;
+          if (nameText.isEmpty) {
+            _nameCtrl.text = phoneMatch.name;
+          }
+          _matchingSuggestions = [];
+        });
+        return;
+      }
+    }
+
+    // 3. If selected donor's name or phone was completely cleared or changed, un-link
+    if (_selectedDonor != null) {
+      final nameMatches = _selectedDonor!.name.trim().toLowerCase() == nameText.toLowerCase();
+      final cleanPhone = phoneText.replaceAll(RegExp(r'\D'), '');
+      final phoneMatches = phoneText.isEmpty || _selectedDonor!.phones.any((p) => p.replaceAll(RegExp(r'\D'), '') == cleanPhone);
+      if (!nameMatches && !phoneMatches) {
+        setState(() {
+          _selectedDonor = null;
+          _donorIdCtrl.clear();
         });
       }
     }
+
+    // 4. Calculate live suggestions
+    _updateSuggestions(nameText, phoneText);
   }
 
-  void _onNameChanged(String val) {
-    if (_selectedDonor != null && val != _selectedDonor!.name) {
-      setState(() {
-        _selectedDonor = null;
-        _donorIdCtrl.clear();
-      });
+  void _updateSuggestions(String nameText, String phoneText) {
+    if (_registeredDonors.isEmpty) {
+      if (_matchingSuggestions.isNotEmpty) setState(() => _matchingSuggestions = []);
+      return;
     }
 
-    if (val.length >= 3) {
-      final results = DonationsLocalStorage.findDonorsByName(val);
-      setState(() {
-        _searchResults = results.where((d) => d.id != _donorIdCtrl.text).toList();
-      });
-    } else {
-      setState(() {
-        _searchResults = [];
-      });
+    if (nameText.length < 2 && phoneText.length < 3) {
+      if (_matchingSuggestions.isNotEmpty) setState(() => _matchingSuggestions = []);
+      return;
     }
+
+    final queryName = nameText.toLowerCase();
+    final cleanPhone = phoneText.replaceAll(RegExp(r'\D'), '');
+
+    final results = _registeredDonors.where((d) {
+      if (_selectedDonor != null && d.id == _selectedDonor!.id) return false;
+      final matchName = queryName.length >= 2 && d.name.toLowerCase().contains(queryName);
+      final matchPhone = cleanPhone.length >= 3 && d.phones.any((p) => p.replaceAll(RegExp(r'\D'), '').contains(cleanPhone));
+      return matchName || matchPhone;
+    }).take(4).toList();
+
+    setState(() {
+      _matchingSuggestions = results;
+      _showSuggestions = true;
+    });
   }
 
   void _selectDonor(DonorRecord donor) {
@@ -120,780 +246,930 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
       _nameCtrl.text = donor.name;
       _phoneCtrl.text = donor.phones.isNotEmpty ? donor.phones.first : '';
       _donorIdCtrl.text = donor.id;
-      _searchResults = [];
+      _matchingSuggestions = [];
+      _showSuggestions = false;
+      _error = null;
     });
   }
 
-  void _nextStep() {
+  void _unlinkDonor() {
+    setState(() {
+      _selectedDonor = null;
+      _donorIdCtrl.clear();
+      _matchingSuggestions = [];
+    });
+  }
+
+  Future<void> _showDonorPickerDialog() async {
+    final selected = await showDialog<DonorRecord>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => _DonorPickerDialog(
+        donors: _registeredDonors,
+        currentlySelectedId: _selectedDonor?.id,
+      ),
+    );
+
+    if (selected != null) {
+      _selectDonor(selected);
+    }
+  }
+
+  bool _validateStep(int step) {
     setState(() => _error = null);
-
-    if (_currentStep == 0) {
-      if (!_isAnonymous) {
+    if (step == 0) {
+      if (_donorType == DonorType.registered) {
         if (_nameCtrl.text.trim().isEmpty) {
-          _setError('Donor name is required for registered entries');
-          return;
+          setState(() => _error = 'Please enter or select a registered donor name.');
+          return false;
         }
-        if (!(_formKeyIdentity.currentState?.validate() ?? false)) return;
+      } else if (_donorType == DonorType.box) {
+        if (_availableBoxes.isNotEmpty && _selectedBox == null) {
+          setState(() => _error = 'Please select a donation box.');
+          return false;
+        }
       }
-    }
-    if (_currentStep == 1) {
+      return true;
+    } else if (step == 1) {
       if (_category == DonationCategory.gmwf && _gmwfSub == null) {
-        _setError('Please select a department (e.g. Madrisa, School)');
-        return;
+        setState(() => _error = 'Please select a department/project.');
+        return false;
       }
-      if (_subtype == null) {
-        _setError('Please select a purpose/sub-type (e.g. Zakat, General)');
-        return;
-      }
+      return true;
     }
-    if (_currentStep == 2) {
-      if (!(_formKeyDetails.currentState?.validate() ?? false)) {
-        _setError('Please fill in all required contribution details');
-        return;
-      }
-    }
-
-    if (_currentStep < _totalSteps - 1) {
-      setState(() { _currentStep++; });
-      _scrollController.jumpTo(0);
-      _pageController.nextPage(duration: const Duration(milliseconds: 400), curve: Curves.easeInOutCubic);
-    } else {
-      _submit();
-    }
+    return true;
   }
 
-  void _setError(String msg) {
-    setState(() => _error = msg);
-    _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+  void _goNext() {
+    if (!_validateStep(_currentStep)) return;
+    setState(() {
+      if (_donorType == DonorType.box && _currentStep == 0) {
+        // Skip cause selection for box, jump straight to amount
+        _currentStep = 2;
+      } else {
+        _currentStep++;
+      }
+    });
   }
 
-  void _prevStep() {
-    if (_currentStep > 0) {
-      setState(() { _currentStep--; _error = null; });
-      _scrollController.jumpTo(0);
-      _pageController.previousPage(duration: const Duration(milliseconds: 400), curve: Curves.easeInOutCubic);
-    }
+  void _goBack() {
+    setState(() {
+      _error = null;
+      if (_donorType == DonorType.box && _currentStep == 2) {
+        _currentStep = 0;
+      } else if (_currentStep > 0) {
+        _currentStep--;
+      }
+    });
   }
 
   Future<void> _submit() async {
+    setState(() => _error = null);
+
     final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
     if (_entryType == 'cash' && amount <= 0) {
-      _setError('Amount must be greater than 0.');
+      setState(() => _error = 'Please enter a valid donation amount greater than 0.');
       return;
     }
 
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    if (_selectedDate.isAfter(today)) {
-      _setError('Donation date cannot be in the future.');
+    final selectedDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
+    if (selectedDay.isAfter(today)) {
+      setState(() => _error = 'Donation date cannot be in the future.');
       return;
     }
 
     final manualReceipt = _bookReceiptNoCtrl.text.trim();
     if (manualReceipt.isNotEmpty && DonationsLocalStorage.isReceiptNoDuplicate(manualReceipt)) {
-      _setError('Duplicate receipt number not allowed.');
+      setState(() => _error = 'Duplicate manual receipt number not allowed.');
       return;
     }
 
-    setState(() { _saving = true; _error = null; });
+    setState(() => _saving = true);
 
     try {
-      final data = {
-        'donorName': _isAnonymous ? 'Walk-in Donor' : _nameCtrl.text.trim(),
-        'phone': _isAnonymous ? '' : _phoneCtrl.text.trim(),
-        'donorId': _isAnonymous ? '' : _donorIdCtrl.text.trim(),
-        'isAnonymous': _isAnonymous,
-        'amount': double.tryParse(_amountCtrl.text) ?? 0.0,
+      final isBox = _donorType == DonorType.box;
+      final donorName = isBox
+          ? (_selectedBox != null ? '${_selectedBox!.boxNumber} - ${_selectedBox!.holderName}' : 'Donation Box')
+          : (_donorType == DonorType.walkIn ? (_nameCtrl.text.trim().isEmpty ? 'Walk-in Donor' : _nameCtrl.text.trim()) : _nameCtrl.text.trim());
+
+      final data = <String, dynamic>{
+        'donorName': donorName,
+        'phone': isBox ? (_selectedBox?.holderPhone ?? '') : _phoneCtrl.text.trim(),
+        'donorId': isBox ? (_selectedBox?.id ?? '') : (_donorType == DonorType.registered ? _donorIdCtrl.text.trim() : ''),
+        'isAnonymous': _donorType == DonorType.walkIn,
+        'isBoxDonation': isBox,
+        'boxId': isBox ? _selectedBox?.id : null,
+        'boxNumber': isBox ? _selectedBox?.boxNumber : null,
+        'amount': amount,
         'probableAmount': double.tryParse(_probableAmountCtrl.text),
-        'categoryId': _category.name,
-        'gmwfSubCategoryId': _gmwfSub?.name,
-        'subtypeId': _subtype?.name,
+        'categoryId': isBox ? DonationCategory.gmwf.name : _category.name,
+        'gmwfSubCategoryId': isBox ? GmwfSubCategory.dasterkhwaan.name : (_category == DonationCategory.gmwf ? _gmwfSub?.name : null),
+        'subtypeId': isBox ? DonationSubtype.sadqaAtyaat.name : _subtype?.name,
         'entryType': _entryType,
         'goodsItem': _goodsItemCtrl.text.trim(),
         'unit': _unitCtrl.text.trim(),
         'paymentMethod': _paymentMethod,
-        'notes': _notesCtrl.text.trim(),
+        'notes': isBox
+            ? ('Donation Box Collection: ${_selectedBox?.boxNumber ?? ""} ${_notesCtrl.text.trim()}'.trim())
+            : _notesCtrl.text.trim(),
         'recordedBy': widget.currentUsername,
         'collectorId': widget.userId,
         'recordedByRole': widget.currentUserRole.name,
         'status': widget.currentUserRole.canMarkReceived ? DonationStatus.received : DonationStatus.pending,
         'date': DateFormat('yyyy-MM-dd').format(_selectedDate),
-        'timestamp': DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day, DateTime.now().hour, DateTime.now().minute, DateTime.now().second).toIso8601String(),
+        'timestamp': DateTime(
+          _selectedDate.year,
+          _selectedDate.month,
+          _selectedDate.day,
+          DateTime.now().hour,
+          DateTime.now().minute,
+          DateTime.now().second,
+        ).toIso8601String(),
         if (_bookReceiptNoCtrl.text.trim().isNotEmpty) 'bookReceiptNo': _bookReceiptNoCtrl.text.trim(),
         'branchName': widget.branchName,
       };
+
+      // If Box collection, record opening in DonationBoxStorage
+      if (isBox && _selectedBox != null && amount > 0) {
+        try {
+          final opening = BoxOpening(
+            id: const Uuid().v4(),
+            boxId: _selectedBox!.id,
+            boxNumber: _selectedBox!.boxNumber,
+            branchId: widget.branchId,
+            branchName: widget.branchName,
+            openDate: DateFormat('yyyy-MM-dd').format(_selectedDate),
+            amount: amount,
+            collectedBy: widget.currentUsername,
+            notes: 'Recorded via New Receipt',
+          );
+          await DonationBoxStorage.saveOpening(opening);
+        } catch (boxErr) {
+          debugPrint('[AddDonationWizard] Failed to record box opening: $boxErr');
+        }
+      }
 
       final record = await DonationsLocalStorage.saveDonation(
         branchId: widget.branchId,
         data: data,
       );
 
-      if (mounted) Navigator.pop(context, record);
+      if (mounted) {
+        Navigator.pop(context, record);
+      }
     } catch (e) {
-      setState(() { _saving = false; _error = e.toString(); });
+      setState(() {
+        _saving = false;
+        _error = e.toString();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
       child: Container(
         width: 600,
-        height: 700,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.90,
+        ),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(28),
+          color: t.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: t.bgRule, width: 1.5),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20, offset: const Offset(0, 10)),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 28,
+              offset: const Offset(0, 10),
+            ),
           ],
         ),
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(28),
+          borderRadius: BorderRadius.circular(20),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
+              // ── Top Header Bar ──
               _buildHeader(t),
-              _buildProgressBar(),
-              Expanded(
-                child: PageView(
-                  controller: _pageController,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    _stepIdentity(),
-                    _stepCategory(),
-                    _stepContribution(),
-                    _stepConfirmation(),
-                  ],
+
+              // ── Step Progress Indicator ──
+              _buildStepProgress(t),
+
+              // ── Main Step Body ──
+              Flexible(
+                child: FormKeyboardNavigation(
+                  onFormSubmit: _currentStep == 2 ? (_saving ? null : _submit) : _goNext,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (_error != null) _buildErrorBanner(t),
+                          if (_currentStep == 0) _buildStep1Donor(t),
+                          if (_currentStep == 1) _buildStep2Cause(t),
+                          if (_currentStep == 2) _buildStep3AmountAndReview(t),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              _buildFooter(t),
+
+              // ── Bottom Action Navigation Footer ──
+              _buildWizardFooter(t),
             ],
           ),
         ),
       ),
     );
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // UI Component Builders
+  // ───────────────────────────────────────────────────────────────────────────
 
   Widget _buildHeader(RoleThemeData t) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(32, 28, 32, 16),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.volunteer_activism_rounded, color: AppColors.primary, size: 24),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('New Donation Entry', 
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.gray900, letterSpacing: -0.5)),
-                    Text(widget.branchName, 
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray400)),
-                  ],
-                ),
-              ),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close_rounded, color: AppColors.gray400),
-                style: IconButton.styleFrom(backgroundColor: AppColors.gray100),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          _buildStepProgress(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStepProgress() {
-    final steps = [
-      {'label': 'Identity', 'icon': Icons.person_outline_rounded},
-      {'label': 'Allocation', 'icon': Icons.category_outlined},
-      {'label': 'Details', 'icon': Icons.receipt_long_rounded},
-      {'label': 'Confirm', 'icon': Icons.check_circle_outline_rounded},
-    ];
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: List.generate(steps.length, (i) {
-        final isActive = i == _currentStep;
-        final isCompleted = i < _currentStep;
-        
-        return Expanded(
-          child: Row(
-            children: [
-              Column(
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                      color: isCompleted ? AppColors.primary : (isActive ? AppColors.primary.withValues(alpha: 0.1) : Colors.white),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: (isActive || isCompleted) ? AppColors.primary : AppColors.gray200,
-                        width: 2,
-                      ),
-                    ),
-                    child: Center(
-                      child: isCompleted 
-                        ? const Icon(Icons.check_rounded, color: Colors.white, size: 20)
-                        : Text('${i + 1}', style: TextStyle(
-                            fontSize: 14, 
-                            fontWeight: FontWeight.w900, 
-                            color: isActive ? AppColors.primary : AppColors.gray400
-                          )),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(steps[i]['label'] as String, style: TextStyle(
-                    fontSize: 10, 
-                    fontWeight: FontWeight.w800, 
-                    color: (isActive || isCompleted) ? AppColors.gray900 : AppColors.gray400,
-                    letterSpacing: 0.5
-                  )),
-                ],
-              ),
-              if (i < steps.length - 1)
-                Expanded(
-                  child: Container(
-                    height: 2,
-                    margin: const EdgeInsets.only(bottom: 20, left: 8, right: 8),
-                    color: isCompleted ? AppColors.primary : AppColors.gray100,
-                  ),
-                ),
-            ],
-          ),
-        );
-      }),
-    );
-  }
-
-  String _getStepTitle() {
-    switch (_currentStep) {
-      case 0: return 'Donor Identity';
-      case 1: return 'Allocation';
-      case 2: return 'Contribution Details';
-      case 3: return 'Confirmation';
-      default: return '';
-    }
-  }
-
-  Widget _buildProgressBar() => const SizedBox.shrink(); // Replaced by _buildStepProgress
-
-  Widget _buildFooter(RoleThemeData t) {
-    return Container(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
-        color: AppColors.gray50.withValues(alpha: 0.5),
-        border: Border(top: BorderSide(color: AppColors.gray100)),
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule, width: 1)),
       ),
       child: Row(
         children: [
-          if (_currentStep > 0)
-            OutlinedButton(
-              onPressed: _saving ? null : _prevStep,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                side: const BorderSide(color: AppColors.gray300),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: const Text('Back', style: TextStyle(color: AppColors.gray700, fontWeight: FontWeight.w700)),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
             ),
-          const Spacer(),
-          ElevatedButton(
-            onPressed: _saving ? null : _nextStep,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              elevation: 0,
-            ),
-            child: _saving
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-              : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(_currentStep == _totalSteps - 1 ? 'Finish & Save' : 'Continue', 
-                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward_rounded, size: 18),
-                  ],
-                ),
+            child: Icon(Icons.receipt_long_rounded, color: t.accent, size: 20),
           ),
-        ],
-      ),
-    );
-  }
-
-  // ── STEP 1: IDENTITY ───────────────────────────────────────────────────────
-
-  Widget _stepIdentity() {
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(32),
-      child: Form(
-        key: _formKeyIdentity,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: 'WHO IS DONATING?'),
-            if (_error != null) _buildErrorBanner(),
-            const SizedBox(height: 24),
-            
-            _buildSelectionCard(
-              title: 'Walk-in Donor',
-              subtitle: 'Do not record any personal identification',
-              icon: Icons.no_accounts_rounded,
-              isSelected: _isAnonymous,
-              onTap: () => setState(() => _isAnonymous = true),
-            ),
-            const SizedBox(height: 12),
-            _buildSelectionCard(
-              title: 'Registered / Identified',
-              subtitle: 'Record name and contact details',
-              icon: Icons.person_search_rounded,
-              isSelected: !_isAnonymous,
-              onTap: () => setState(() => _isAnonymous = false),
-            ),
-
-            if (!_isAnonymous) ...[
-              const SizedBox(height: 32),
-              const Text('Search or Add New Donor', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-              const SizedBox(height: 16),
-              _buildTextField(
-                label: 'Phone Number (Optional)',
-                controller: _phoneCtrl,
-                icon: Icons.phone_android_rounded,
-                hint: '03xx-xxxxxxx',
-                onChanged: _onPhoneChanged,
-                keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 20),
-              _buildTextField(
-                label: 'Full Name',
-                controller: _nameCtrl,
-                icon: Icons.person_outline_rounded,
-                hint: 'Enter donor name',
-                required: true,
-                onChanged: _onNameChanged,
-              ),
-              if (_searchResults.isNotEmpty)
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  constraints: const BoxConstraints(maxHeight: 200),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.gray200),
-                  ),
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    itemCount: _searchResults.length,
-                    separatorBuilder: (ctx, i) => const Divider(height: 1),
-                    itemBuilder: (ctx, i) {
-                      final d = _searchResults[i];
-                      return ListTile(
-                        onTap: () => _selectDonor(d),
-                        leading: const Icon(Icons.person_rounded, size: 20, color: AppColors.gray400),
-                        title: Text(d.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                        subtitle: Text(d.phones.isNotEmpty ? d.phones.first : 'No phone', style: const TextStyle(fontSize: 12)),
-                        trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.gray300),
-                      );
-                    },
-                  ),
-                ),
-              if (_selectedDonor != null)
-                Container(
-                  margin: const EdgeInsets.only(top: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.green.shade100)),
-                  child: Row(children: [
-                    const Icon(Icons.verified_user_rounded, color: Colors.green, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text('Selected: ${_selectedDonor!.name} (${_selectedDonor!.id})', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w700, fontSize: 13))),
-                  ]),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── STEP 2: CATEGORY ───────────────────────────────────────────────────────
-
-  Widget _stepCategory() {
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionTitle(title: 'WHERE SHOULD THIS GO?'),
-          if (_error != null) _buildErrorBanner(),
-          const SizedBox(height: 24),
-          
-          Row(
-            children: [
-              Expanded(child: _categoryCard(DonationCategory.gmwf)),
-              const SizedBox(width: 16),
-              Expanded(child: _categoryCard(DonationCategory.jamia)),
-            ],
-          ),
-
-          if (_category == DonationCategory.gmwf) ...[
-            const SizedBox(height: 32),
-            const Text('Department', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-            const SizedBox(height: 12),
-            _buildGmwfSubGrid(),
-          ],
-
-          const SizedBox(height: 32),
-          const Text('Specific Purpose', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-          const SizedBox(height: 12),
-          _buildSubtypeGrid(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorBanner() {
-    return Container(
-      margin: const EdgeInsets.only(top: 24),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppColors.red.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.red.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 20),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              _error!,
-              style: const TextStyle(color: AppColors.red, fontSize: 13, fontWeight: FontWeight.w700),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'New Donation Receipt',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: t.textPrimary,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+                Text(
+                  widget.branchName.isNotEmpty ? widget.branchName : 'GMWF Donations Hub',
+                  style: TextStyle(fontSize: 11.5, color: t.textSecondary),
+                ),
+              ],
             ),
           ),
           IconButton(
-            onPressed: () => setState(() => _error = null),
-            icon: const Icon(Icons.close_rounded, size: 16, color: AppColors.red),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
+            onPressed: () => Navigator.pop(context),
+            icon: Icon(Icons.close_rounded, color: t.textSecondary, size: 20),
+            tooltip: 'Close',
+            splashRadius: 20,
           ),
         ],
       ),
     );
   }
 
-  // ── STEP 3: CONTRIBUTION ───────────────────────────────────────────────────
+  Widget _buildStepProgress(RoleThemeData t) {
+    final steps = [
+      {'num': '1', 'title': 'Donor'},
+      if (_donorType != DonorType.box) {'num': '2', 'title': 'Cause'},
+      {'num': _donorType == DonorType.box ? '2' : '3', 'title': 'Payment'},
+    ];
 
-  Widget _stepContribution() {
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(32),
-      child: Form(
-        key: _formKeyDetails,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: 'WHAT IS BEING DONATED?'),
-            if (_error != null) _buildErrorBanner(),
-            const SizedBox(height: 24),
-            
-            Row(
+    final int effectiveIndex = (_donorType == DonorType.box && _currentStep == 2) ? 1 : _currentStep;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: t.isDarkCanvas ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        border: Border(bottom: BorderSide(color: t.bgRule)),
+      ),
+      child: Row(
+        children: List.generate(steps.length, (idx) {
+          final isCompleted = idx < effectiveIndex;
+          final isCurrent = idx == effectiveIndex;
+          final item = steps[idx];
+
+          return Expanded(
+            child: Row(
               children: [
-                _entryTypeButton('cash', 'Cash (PKR)', Icons.payments_rounded),
-                const SizedBox(width: 12),
-                _entryTypeButton('goods', 'Goods / Ajnas', Icons.inventory_2_rounded),
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isCompleted
+                        ? const Color(0xFF10B981)
+                        : (isCurrent ? t.accent : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))),
+                  ),
+                  child: Center(
+                    child: isCompleted
+                        ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                        : Text(
+                            item['num']!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isCurrent ? Colors.white : t.textSecondary,
+                            ),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    item['title']!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                      color: isCurrent ? t.textPrimary : t.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (idx < steps.length - 1)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.chevron_right_rounded, size: 16, color: t.textTertiary),
+                  ),
               ],
             ),
+          );
+        }),
+      ),
+    );
+  }
 
-            const SizedBox(height: 32),
-            if (_entryType == 'cash') ...[
-              _buildTextField(
-                label: 'Amount (PKR)',
-                controller: _amountCtrl,
-                icon: Icons.account_balance_wallet_rounded,
-                hint: '0.00',
-                keyboardType: TextInputType.number,
-                required: true,
-              ),
-              const SizedBox(height: 24),
-              const Text('Payment Method', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-              const SizedBox(height: 12),
-              _buildPaymentMethodSelector(),
-            ] else ...[
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: _buildTextField(
-                      label: 'Item Name',
-                      controller: _goodsItemCtrl,
-                      icon: Icons.shopping_bag_outlined,
-                      hint: 'e.g. Flour Bag',
-                      required: true,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildTextField(
-                      label: 'Unit',
-                      controller: _unitCtrl,
-                      hint: 'kg/pc',
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _buildTextField(
-                label: 'Estimated Value (Optional)',
-                controller: _probableAmountCtrl,
-                icon: Icons.calculate_outlined,
-                hint: '0.00',
-                keyboardType: TextInputType.number,
-              ),
-            ],
+  Widget _buildErrorBanner(RoleThemeData t) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _error!,
+              style: const TextStyle(color: Colors.red, fontSize: 12.5, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-            const SizedBox(height: 32),
-            Row(
+  // ───────────────────────────────────────────────────────────────────────────
+  // Step 1: Donor Selection
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildStep1Donor(RoleThemeData t) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Step 1: Who is making this donation?',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary),
+        ),
+        const SizedBox(height: 12),
+
+        // 3 Visual Selection Cards with improved sizing so nothing is cut off
+        Row(
+          children: [
+            _buildBigDonorCard(
+              t: t,
+              type: DonorType.walkIn,
+              title: 'Walk-in Donor',
+              subtitle: 'Anonymous',
+              icon: Icons.directions_walk_rounded,
+            ),
+            const SizedBox(width: 8),
+            _buildBigDonorCard(
+              t: t,
+              type: DonorType.registered,
+              title: 'Registered',
+              subtitle: 'Saved Donor',
+              icon: Icons.badge_rounded,
+            ),
+            const SizedBox(width: 8),
+            _buildBigDonorCard(
+              t: t,
+              type: DonorType.box,
+              title: 'Donation Box',
+              subtitle: 'Box Collection',
+              icon: Icons.inventory_2_rounded,
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // Details based on choice
+        if (_donorType == DonorType.walkIn) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.bgRule),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: t.accent.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
                     children: [
-                      const Text('Donation Date', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-                      const SizedBox(height: 10),
-                      InkWell(
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            initialDate: _selectedDate,
-                            firstDate: DateTime(2000),
-                            lastDate: DateTime.now(),
-                          );
-                          if (picked != null) {
-                            setState(() => _selectedDate = picked);
-                          }
-                        },
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                          decoration: BoxDecoration(
-                            color: AppColors.gray50,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.calendar_today_rounded, size: 20, color: AppColors.gray400),
-                              const SizedBox(width: 12),
-                              Text(
-                                DateFormat('dd MMM yyyy').format(_selectedDate),
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                              ),
-                            ],
-                          ),
+                      Icon(Icons.verified_user_rounded, size: 20, color: t.accent),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Anonymous Walk-in Donor',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textPrimary),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Standard walk-in record. No new donor profile will be created in the database.',
+                              style: TextStyle(fontSize: 11.5, color: t.textSecondary),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildTextField(
-                    label: 'Book Receipt # (Manual)',
-                    controller: _bookReceiptNoCtrl,
-                    icon: Icons.confirmation_number_outlined,
-                    hint: 'e.g. B-12345',
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(11),
+                  ],
+                  style: TextStyle(color: t.textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    labelText: 'Phone Number (Optional for WhatsApp Receipt)',
+                    hintText: '03001234567 (11 digits)',
+                    labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+                    prefixIcon: Icon(Icons.phone_outlined, color: t.accent, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   ),
                 ),
               ],
             ),
-
-            const SizedBox(height: 32),
-            _buildTextField(
-              label: 'Additional Notes',
-              controller: _notesCtrl,
-              icon: Icons.notes_rounded,
-              hint: 'Any specific instructions...',
-              maxLines: 3,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ── STEP 4: CONFIRMATION ────────────────────────────────────────────────────
-
-  Widget _stepConfirmation() {
-    final amt = double.tryParse(_amountCtrl.text) ?? 0;
-    final prob = double.tryParse(_probableAmountCtrl.text) ?? 0;
-    
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SectionTitle(title: 'REVIEW DETAILS'),
-          if (_error != null) _buildErrorBanner(),
-          const SizedBox(height: 24),
-          
+          ),
+        ] else if (_donorType == DonorType.registered) ...[
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.gray50,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.gray200),
+              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.bgRule),
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _confirmRow('Donor', _isAnonymous ? 'Walk-in Donor' : _nameCtrl.text),
-                if (!_isAnonymous && _phoneCtrl.text.isNotEmpty) _confirmRow('Contact', _phoneCtrl.text),
-                _confirmRow('Branch', widget.branchName),
-                const Divider(height: 32),
-                _confirmRow('Category', _category.label),
-                if (_gmwfSub != null) _confirmRow('Dept', _gmwfSub!.label),
-                _confirmRow('Purpose', _subtype?.label ?? 'General'),
-                const Divider(height: 32),
-                if (_entryType == 'cash')
-                  _confirmRow('Amount', 'PKR ${NumberFormat('#,##0').format(amt)}', isBold: true, color: AppColors.primary)
-                else ...[
-                  _confirmRow('Goods', _goodsItemCtrl.text),
-                  if (prob > 0) _confirmRow('Est. Value', 'PKR ${NumberFormat('#,##0').format(prob)}'),
+                // ── Linked Donor Banner or Search Trigger Card ──
+                if (_selectedDonor != null)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF10B981),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.check_rounded, color: Colors.white, size: 14),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      _selectedDonor!.name,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: t.textPrimary,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'LINKED DONOR',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        color: Color(0xFF047857),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (_selectedDonor!.phones.isNotEmpty)
+                                Text(
+                                  _selectedDonor!.phones.join(', '),
+                                  style: TextStyle(fontSize: 11, color: t.textSecondary),
+                                ),
+                            ],
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _showDonorPickerDialog,
+                          icon: const Icon(Icons.search_rounded, size: 14),
+                          label: const Text('Change', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: TextButton.styleFrom(
+                            foregroundColor: t.accent,
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _unlinkDonor,
+                          icon: const Icon(Icons.close_rounded, size: 16),
+                          color: t.textTertiary,
+                          tooltip: 'Unlink',
+                          splashRadius: 16,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  InkWell(
+                    onTap: _showDonorPickerDialog,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: t.accent.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: t.accent.withValues(alpha: 0.25), width: 1.2),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.search_rounded, color: t.accent, size: 20),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Search & Select Registered Donor',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                    color: t.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${_registeredDonors.length} registered donors available • Tap to open search dialog',
+                                  style: TextStyle(fontSize: 11, color: t.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: t.accent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'Search',
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // ── Donor Full Name Input ──
+                TextFormField(
+                  controller: _nameCtrl,
+                  style: TextStyle(color: t.textPrimary, fontSize: 13.5, fontWeight: FontWeight.bold),
+                  decoration: InputDecoration(
+                    labelText: 'Donor Full Name *',
+                    hintText: 'Type name or select from search...',
+                    labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+                    prefixIcon: Icon(Icons.person_outline_rounded, color: t.accent, size: 20),
+                    suffixIcon: _selectedDonor != null
+                        ? const Padding(
+                            padding: EdgeInsets.only(right: 10),
+                            child: Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 18),
+                          )
+                        : null,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Donor Name is required' : null,
+                ),
+                const SizedBox(height: 12),
+
+                // ── Phone Number Input ──
+                TextFormField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(11),
+                  ],
+                  style: TextStyle(color: t.textPrimary, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    labelText: 'Phone Number (11 digits)',
+                    hintText: '03001234567',
+                    labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+                    prefixIcon: Icon(Icons.phone_outlined, color: t.accent, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+
+                // ── Live Matching Suggestions Dropdown/List ──
+                if (_matchingSuggestions.isNotEmpty && _showSuggestions) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: t.bgCard,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.lightbulb_outline_rounded, size: 14, color: t.accent),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Matching Registered Donors (${_matchingSuggestions.length}):',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: t.accent,
+                              ),
+                            ),
+                            const Spacer(),
+                            InkWell(
+                              onTap: () => setState(() => _showSuggestions = false),
+                              child: Icon(Icons.close_rounded, size: 14, color: t.textTertiary),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        ..._matchingSuggestions.map((donor) {
+                          final phoneStr = donor.phones.isNotEmpty ? donor.phones.first : '';
+                          return InkWell(
+                            onTap: () => _selectDonor(donor),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: t.accent.withValues(alpha: 0.2),
+                                    child: Text(
+                                      donor.name.isNotEmpty ? donor.name[0].toUpperCase() : 'D',
+                                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.accent),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          donor.name,
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: t.textPrimary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (phoneStr.isNotEmpty)
+                                          Text(
+                                            phoneStr,
+                                            style: TextStyle(fontSize: 10.5, color: t.textSecondary),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: t.accent,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'Select',
+                                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
                 ],
-                _confirmRow('Method', _paymentMethod),
+              ],
+            ),
+          ),
+        ] else if (_donorType == DonorType.box) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: t.bgRule),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_availableBoxes.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline_rounded, color: Colors.amber, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'No active donation boxes found for this branch. Enter box details manually:',
+                            style: TextStyle(color: t.textPrimary, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  DropdownButtonFormField<DonationBox>(
+                    value: _selectedBox,
+                    dropdownColor: t.bgCard,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: 'Select Donation Box *',
+                      labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+                      prefixIcon: Icon(Icons.inventory_2_rounded, color: t.accent, size: 20),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    ),
+                    items: _availableBoxes.map((box) {
+                      return DropdownMenuItem<DonationBox>(
+                        value: box,
+                        child: Text(
+                          '${box.boxNumber} — ${box.holderName} (${box.holderAddress.isNotEmpty ? box.holderAddress : "Active"})',
+                          style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (box) {
+                      setState(() {
+                        _selectedBox = box;
+                        if (box != null) {
+                          _nameCtrl.text = '${box.boxNumber} (${box.holderName})';
+                          _phoneCtrl.text = box.holderPhone;
+                        }
+                      });
+                    },
+                  ),
               ],
             ),
           ),
         ],
-      ),
+      ],
     );
   }
 
-  // ── HELPER WIDGETS ─────────────────────────────────────────────────────────
+  Widget _buildBigDonorCard({
+    required RoleThemeData t,
+    required DonorType type,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    final isSelected = _donorType == type;
 
-  Widget _confirmRow(String label, String value, {bool isBold = false, Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 13, color: AppColors.gray500, fontWeight: FontWeight.w600)),
-          Text(value, style: TextStyle(
-            fontSize: 14, 
-            fontWeight: isBold ? FontWeight.w900 : FontWeight.w700, 
-            color: color ?? AppColors.gray900
-          )),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSelectionCard({required String title, required String subtitle, required IconData icon, required bool isSelected, required VoidCallback onTap}) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary.withValues(alpha: 0.05) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isSelected ? AppColors.primary : AppColors.gray200, width: 2),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: isSelected ? AppColors.primary.withValues(alpha: 0.1) : AppColors.gray100, borderRadius: BorderRadius.circular(12)),
-              child: Icon(icon, color: isSelected ? AppColors.primary : AppColors.gray400),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: isSelected ? AppColors.primary : AppColors.gray900)),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.gray500, fontWeight: FontWeight.w500)),
-                ],
-              ),
-            ),
-            if (isSelected) const Icon(Icons.check_circle_rounded, color: AppColors.primary),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _categoryCard(DonationCategory cat) {
-    final sel = _category == cat;
-    return GestureDetector(
-      onTap: () => setState(() {
-        _category = cat;
-        _subtype = null;
-        if (cat == DonationCategory.jamia) {
-          _gmwfSub = null;
-        } else {
-          _gmwfSub ??= GmwfSubCategory.general;
-        }
-      }),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(vertical: 24),
-        decoration: BoxDecoration(
-          color: sel ? cat.color.withValues(alpha: 0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: sel ? cat.color : AppColors.gray200, width: 2),
-        ),
-        child: Column(
-          children: [
-            Icon(cat.icon, color: sel ? cat.color : AppColors.gray400, size: 32),
-            const SizedBox(height: 12),
-            Text(cat.label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: sel ? cat.color : AppColors.gray700)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _entryTypeButton(String type, String label, IconData icon) {
-    final sel = _entryType == type;
     return Expanded(
-      child: GestureDetector(
-        onTap: () => setState(() => _entryType = type),
+      child: InkWell(
+        onTap: () => _onDonorTypeChanged(type),
+        borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 16),
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          constraints: const BoxConstraints(minHeight: 78),
           decoration: BoxDecoration(
-            color: sel ? AppColors.primary.withValues(alpha: 0.1) : Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: sel ? AppColors.primary : AppColors.gray200, width: 2),
+            color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? t.accent : t.bgRule,
+              width: isSelected ? 2 : 1,
+            ),
           ),
-          child: Row(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 20, color: sel ? AppColors.primary : AppColors.gray400),
-              const SizedBox(width: 10),
-              Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: sel ? AppColors.primary : AppColors.gray600)),
+              Icon(icon, size: 22, color: isSelected ? t.accent : t.textSecondary),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.bold,
+                  color: isSelected ? t.accent : t.textPrimary,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(fontSize: 9.5, color: t.textSecondary),
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -901,113 +1177,825 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
     );
   }
 
-  Widget _buildGmwfSubGrid() {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: GmwfSubCategory.values.map((s) {
-        final sel = _gmwfSub == s;
-        return ChoiceChip(
-          label: Text(s.label),
-          selected: sel,
-          onSelected: (v) => setState(() { _gmwfSub = s; _subtype = null; }),
-          selectedColor: s.color,
-          labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: sel ? Colors.white : AppColors.gray600),
-          backgroundColor: AppColors.gray100,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          showCheckmark: false,
-        );
-      }).toList(),
-    );
-  }
 
-  Widget _buildSubtypeGrid() {
-    final list = subtypesFor(category: _category, entryType: DonationEntryType.cash, gmwfSub: _gmwfSub);
-    if (list.isEmpty) return const Text('N/A', style: TextStyle(color: AppColors.gray400, fontSize: 12));
-    
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: list.map((s) {
-        final sel = _subtype == s;
-        return ChoiceChip(
-          label: Text(s.label),
-          selected: sel,
-          onSelected: (v) => setState(() => _subtype = s),
-          selectedColor: s.color,
-          labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: sel ? Colors.white : AppColors.gray600),
-          backgroundColor: AppColors.gray100,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          showCheckmark: false,
-        );
-      }).toList(),
-    );
-  }
+  // ───────────────────────────────────────────────────────────────────────────
+  // Step 2: Cause & Category Selection
+  // ───────────────────────────────────────────────────────────────────────────
 
-  Widget _buildPaymentMethodSelector() {
-    final methods = ['Cash', 'Cheque', 'Bank Deposit'];
-    return Row(
-      children: methods.map((m) {
-        final sel = _paymentMethod == m;
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text(m),
-              selected: sel,
-              onSelected: (v) { if (v) setState(() => _paymentMethod = m); },
-              selectedColor: AppColors.primary,
-              labelStyle: TextStyle(color: sel ? Colors.white : AppColors.gray700, fontSize: 12, fontWeight: FontWeight.w800),
-              backgroundColor: AppColors.gray100,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              showCheckmark: false,
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildTextField({
-    required String label,
-    required TextEditingController controller,
-    IconData? icon,
-    String? hint,
-    bool required = false,
-    TextInputType keyboardType = TextInputType.text,
-    int maxLines = 1,
-    Function(String)? onChanged,
-  }) {
+  Widget _buildStep2Cause(RoleThemeData t) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.gray700)),
-        const SizedBox(height: 10),
-        TextFormField(
-          controller: controller,
-          keyboardType: keyboardType,
-          maxLines: maxLines,
-          onChanged: onChanged,
-          validator: required ? (v) => (v == null || v.trim().isEmpty) ? 'Required' : null : null,
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-          decoration: InputDecoration(
-            hintText: hint,
-            hintStyle: const TextStyle(color: AppColors.gray300, fontSize: 14),
-            prefixIcon: icon != null ? Icon(icon, size: 20, color: AppColors.gray400) : null,
-            filled: true,
-            fillColor: AppColors.gray50,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        Text(
+          'Step 2: Select Project & Fund Category',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary),
+        ),
+        const SizedBox(height: 12),
+
+        // Main Category Selector
+        Row(
+          children: [
+            Expanded(
+              child: _buildCategoryPill(
+                t: t,
+                title: 'GMWF Projects',
+                icon: Icons.account_tree_rounded,
+                isSelected: _category == DonationCategory.gmwf,
+                onTap: () {
+                  setState(() {
+                    _category = DonationCategory.gmwf;
+                    _gmwfSub = GmwfSubCategory.dasterkhwaan;
+                  });
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _buildCategoryPill(
+                t: t,
+                title: 'Jamia / Masjid',
+                icon: Icons.mosque_rounded,
+                isSelected: _category == DonationCategory.jamia,
+                onTap: () {
+                  setState(() {
+                    _category = DonationCategory.jamia;
+                    _gmwfSub = null;
+                  });
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        // Department Dropdown (if GMWF)
+        if (_category == DonationCategory.gmwf) ...[
+          DropdownButtonFormField<GmwfSubCategory>(
+            value: _gmwfSub,
+            dropdownColor: t.bgCard,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Department / Project *',
+              labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+              prefixIcon: Icon(Icons.apartment_rounded, color: t.accent, size: 20),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+            items: const [
+              DropdownMenuItem(value: GmwfSubCategory.dasterkhwaan, child: Text('Dasterkhwaan (Free Food)')),
+              DropdownMenuItem(value: GmwfSubCategory.madrisa, child: Text('Madrassa (Islamic Education)')),
+              DropdownMenuItem(value: GmwfSubCategory.school, child: Text('School (Primary & Secondary)')),
+              DropdownMenuItem(value: GmwfSubCategory.dispensary, child: Text('Dispensary (Medical Relief)')),
+              DropdownMenuItem(value: GmwfSubCategory.libaas, child: Text('Libaas (Clothing Distribution)')),
+              DropdownMenuItem(value: GmwfSubCategory.rashan, child: Text('Food / Rashan Bags')),
+              DropdownMenuItem(value: GmwfSubCategory.general, child: Text('General Welfare & Relief')),
+            ],
+            onChanged: (sub) => setState(() => _gmwfSub = sub),
           ),
+          const SizedBox(height: 12),
+        ],
+
+        // Sub-Type / Purpose Dropdown
+        DropdownButtonFormField<DonationSubtype>(
+          value: _subtype,
+          dropdownColor: t.bgCard,
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: 'Purpose / Fund Type *',
+            labelStyle: TextStyle(color: t.textSecondary, fontSize: 12),
+            prefixIcon: Icon(Icons.label_outline_rounded, color: t.accent, size: 20),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          ),
+          items: const [
+            DropdownMenuItem(value: DonationSubtype.sadqaAtyaat, child: Text('Sadqa & Atyaat')),
+            DropdownMenuItem(value: DonationSubtype.zakat, child: Text('Zakat Eligible')),
+            DropdownMenuItem(value: DonationSubtype.sadqaWajiba, child: Text('Sadqa Wajiba')),
+            DropdownMenuItem(value: DonationSubtype.fitrana, child: Text('Fitrana')),
+            DropdownMenuItem(value: DonationSubtype.fidya, child: Text('Fidya / Kaffarah')),
+            DropdownMenuItem(value: DonationSubtype.iftar, child: Text('Iftar Support')),
+            DropdownMenuItem(value: DonationSubtype.construction, child: Text('Construction')),
+            DropdownMenuItem(value: DonationSubtype.maintenance, child: Text('Maintenance')),
+            DropdownMenuItem(value: DonationSubtype.general, child: Text('General Contribution')),
+          ],
+          onChanged: (sub) => setState(() => _subtype = sub),
         ),
       ],
     );
   }
+
+  Widget _buildCategoryPill({
+    required RoleThemeData t,
+    required String title,
+    required IconData icon,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? t.accent : t.bgRule, width: isSelected ? 2 : 1),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 20, color: isSelected ? t.accent : t.textSecondary),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isSelected ? t.accent : t.textPrimary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Step 3: Amount, Payment Method & Instant Review
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildStep3AmountAndReview(RoleThemeData t) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Step 3: Enter Amount & Complete',
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary),
+        ),
+        const SizedBox(height: 12),
+
+        // Prominent Amount Field
+        TextFormField(
+          controller: _amountCtrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+          autofocus: true,
+          style: TextStyle(
+            color: t.textPrimary,
+            fontSize: 22,
+            fontWeight: FontWeight.w900,
+          ),
+          decoration: InputDecoration(
+            labelText: 'Donation Amount (PKR) *',
+            labelStyle: TextStyle(color: t.textSecondary, fontSize: 13),
+            prefixText: 'PKR  ',
+            prefixStyle: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: 18),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 10),
+
+        // Quick Preset Buttons Wrap
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: _quickAmounts.map((amt) {
+            final fmt = NumberFormat('#,##0').format(amt);
+            final isSelected = _amountCtrl.text == amt.toInt().toString();
+            return InkWell(
+              onTap: () {
+                setState(() {
+                  _amountCtrl.text = amt.toInt().toString();
+                });
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isSelected ? t.accent : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: isSelected ? t.accent : t.bgRule),
+                ),
+                child: Text(
+                  'PKR $fmt',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                    color: isSelected ? Colors.white : t.textPrimary,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 14),
+
+        // Payment Method & Date in Row
+        Row(
+          children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _paymentMethod,
+                dropdownColor: t.bgCard,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Payment Method',
+                  labelStyle: TextStyle(color: t.textSecondary, fontSize: 11.5),
+                  prefixIcon: Icon(Icons.payment_rounded, color: t.accent, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'Cash', child: Text('Cash', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'Bank Transfer', child: Text('Bank Transfer', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'Cheque', child: Text('Cheque', overflow: TextOverflow.ellipsis)),
+                  DropdownMenuItem(value: 'Online', child: Text('Online', overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (m) {
+                  if (m != null) setState(() => _paymentMethod = m);
+                },
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) setState(() => _selectedDate = picked);
+                },
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: t.bgRule),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded, size: 16, color: t.accent),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Date', style: TextStyle(fontSize: 9.5, color: t.textSecondary)),
+                            Text(
+                              DateFormat('dd MMM yyyy').format(_selectedDate),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textPrimary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        // Optional manual receipt & remarks
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _bookReceiptNoCtrl,
+                style: TextStyle(color: t.textPrimary, fontSize: 12.5),
+                decoration: InputDecoration(
+                  labelText: 'Manual Receipt # (Optional)',
+                  labelStyle: TextStyle(color: t.textSecondary, fontSize: 11),
+                  prefixIcon: Icon(Icons.bookmark_border_rounded, color: t.accent, size: 16),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TextFormField(
+                controller: _notesCtrl,
+                style: TextStyle(color: t.textPrimary, fontSize: 12.5),
+                decoration: InputDecoration(
+                  labelText: 'Remarks / Notes (Optional)',
+                  labelStyle: TextStyle(color: t.textSecondary, fontSize: 11),
+                  prefixIcon: Icon(Icons.notes_rounded, color: t.accent, size: 16),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+
+        // Instant Live Receipt Summary Card
+        _buildReceiptPreviewSummary(t),
+      ],
+    );
+  }
+
+  Widget _buildReceiptPreviewSummary(RoleThemeData t) {
+    final donorDisplay = _donorType == DonorType.box
+        ? (_selectedBox != null ? '${_selectedBox!.boxNumber} (${_selectedBox!.holderName})' : 'Donation Box')
+        : (_nameCtrl.text.trim().isEmpty ? 'Walk-in Donor' : _nameCtrl.text.trim());
+
+    final causeDisplay = _donorType == DonorType.box
+        ? 'GMWF Dasterkhwaan — Sadqa & Atyaat'
+        : (_category == DonationCategory.gmwf
+            ? 'GMWF ${_gmwfSub != null ? _gmwfSub!.name.toUpperCase() : "PROJECTS"} (${_subtype != null ? _subtype!.name : ""})'
+            : 'Jamia / Masjid (${_subtype != null ? _subtype!.name : ""})');
+
+    final amountVal = double.tryParse(_amountCtrl.text) ?? 0.0;
+    final amountDisplay = 'PKR ${NumberFormat('#,##0').format(amountVal)}';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF10B981).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.verified_rounded, size: 16, color: Color(0xFF10B981)),
+              const SizedBox(width: 6),
+              const Text('Receipt Summary Preview', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Donor: $donorDisplay', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textPrimary)),
+              Text(_paymentMethod, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textSecondary)),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(child: Text('Cause: $causeDisplay', style: TextStyle(fontSize: 11.5, color: t.textSecondary), overflow: TextOverflow.ellipsis)),
+              Text(amountDisplay, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF10B981))),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // Bottom Footer with Step Navigation
+  // ───────────────────────────────────────────────────────────────────────────
+
+  Widget _buildWizardFooter(RoleThemeData t) {
+    final isLastStep = _currentStep == 2;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(top: BorderSide(color: t.bgRule, width: 1)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          if (_currentStep > 0)
+            OutlinedButton.icon(
+              onPressed: _saving ? null : _goBack,
+              icon: const Icon(Icons.arrow_back_rounded, size: 16),
+              label: const Text('Back', style: TextStyle(fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: t.textPrimary,
+                side: BorderSide(color: t.bgRule),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: _saving ? null : () => Navigator.pop(context),
+              child: Text('Cancel', style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.bold)),
+            ),
+          const SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: _saving ? null : (isLastStep ? _submit : _goNext),
+            icon: _saving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : Icon(
+                    isLastStep ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+            label: Text(
+              _saving ? 'Saving...' : (isLastStep ? 'Record & Issue Receipt' : 'Next Step'),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.white),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isLastStep ? const Color(0xFF10B981) : t.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _SectionTitle extends StatelessWidget {
-  final String title;
-  const _SectionTitle({required this.title});
+// ─────────────────────────────────────────────────────────────────────────────
+// SEARCHABLE DONOR PICKER DIALOG
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DonorPickerDialog extends StatefulWidget {
+  final List<DonorRecord> donors;
+  final String? currentlySelectedId;
+
+  const _DonorPickerDialog({
+    required this.donors,
+    this.currentlySelectedId,
+  });
+
   @override
-  Widget build(BuildContext context) => Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.gray400, letterSpacing: 1.5));
+  State<_DonorPickerDialog> createState() => _DonorPickerDialogState();
 }
+
+class _DonorPickerDialogState extends State<_DonorPickerDialog> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  List<DonorRecord> _filtered = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.donors;
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.removeListener(_onSearchChanged);
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    final q = _searchCtrl.text.trim().toLowerCase();
+    final cleanQ = q.replaceAll(RegExp(r'\D'), '');
+
+    setState(() {
+      if (q.isEmpty) {
+        _filtered = widget.donors;
+      } else {
+        _filtered = widget.donors.where((d) {
+          final nameMatch = d.name.toLowerCase().contains(q);
+          final idMatch = d.id.toLowerCase().contains(q);
+          final cnicMatch = d.cnic != null && d.cnic!.toLowerCase().contains(q);
+          final addressMatch = d.address.toLowerCase().contains(q);
+          final phoneMatch = cleanQ.isNotEmpty && d.phones.any((p) => p.replaceAll(RegExp(r'\D'), '').contains(cleanQ));
+          return nameMatch || idMatch || phoneMatch || cnicMatch || addressMatch;
+        }).toList();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      child: Container(
+        width: 540,
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        decoration: BoxDecoration(
+          color: t.bgCard,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: t.bgRule, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.2),
+              blurRadius: 30,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // ── Dialog Header ──
+            Container(
+              padding: const EdgeInsets.fromLTRB(20, 16, 16, 14),
+              decoration: BoxDecoration(
+                color: t.bgCard,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border(bottom: BorderSide(color: t.bgRule)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: t.accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.person_search_rounded, color: t.accent, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              'Select Registered Donor',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: t.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: t.accent.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${_filtered.length}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: t.accent,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Search by donor name, phone number, CNIC, or ID',
+                          style: TextStyle(fontSize: 11.5, color: t.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.close_rounded, color: t.textSecondary, size: 20),
+                    tooltip: 'Close',
+                    splashRadius: 18,
+                  ),
+                ],
+              ),
+            ),
+
+            // ── Search Bar ──
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+              child: TextField(
+                controller: _searchCtrl,
+                autofocus: true,
+                style: TextStyle(color: t.textPrimary, fontSize: 13.5),
+                decoration: InputDecoration(
+                  hintText: 'Search donor name, 0300..., or ID...',
+                  hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
+                  prefixIcon: Icon(Icons.search_rounded, color: t.accent, size: 20),
+                  suffixIcon: _searchCtrl.text.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.clear_rounded, color: t.textTertiary, size: 18),
+                          onPressed: () => _searchCtrl.clear(),
+                          splashRadius: 16,
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: t.bgRule),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: t.bgRule),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: t.accent, width: 1.5),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+            ),
+
+            // ── Donors List ──
+            Flexible(
+              child: _filtered.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(36),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.search_off_rounded, size: 48, color: t.textTertiary),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No matching donors found',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: t.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Try searching with a different name or phone number.',
+                            style: TextStyle(fontSize: 12, color: t.textSecondary),
+                            textAlign: TextAlign.center,
+                          ),
+                          if (_searchCtrl.text.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            OutlinedButton.icon(
+                              onPressed: () => _searchCtrl.clear(),
+                              icon: const Icon(Icons.clear_all_rounded, size: 16),
+                              label: const Text('Clear Search', style: TextStyle(fontSize: 12)),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: t.accent,
+                                side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      itemCount: _filtered.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 6),
+                      itemBuilder: (ctx, idx) {
+                        final donor = _filtered[idx];
+                        final isSelected = donor.id == widget.currentlySelectedId;
+                        final phoneStr = donor.phones.isNotEmpty ? donor.phones.join(', ') : 'No phone';
+
+                        return InkWell(
+                          onTap: () => Navigator.pop(context, donor),
+                          borderRadius: BorderRadius.circular(12),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? t.accent.withValues(alpha: 0.1)
+                                  : (t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.6) : const Color(0xFFF8FAFC)),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected ? t.accent : t.bgRule,
+                                width: isSelected ? 1.5 : 1.0,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: isSelected ? t.accent : t.accent.withValues(alpha: 0.15),
+                                  child: Text(
+                                    donor.name.isNotEmpty ? donor.name[0].toUpperCase() : 'D',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected ? Colors.white : t.accent,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              donor.name,
+                                              style: TextStyle(
+                                                fontSize: 13.5,
+                                                fontWeight: FontWeight.bold,
+                                                color: isSelected ? t.accent : t.textPrimary,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          if (donor.phones.isNotEmpty) ...[
+                                            const SizedBox(width: 6),
+                                            const Icon(Icons.verified_rounded, size: 14, color: Color(0xFF10B981)),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.phone_outlined, size: 12, color: t.textSecondary),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            phoneStr,
+                                            style: TextStyle(fontSize: 11.5, color: t.textSecondary),
+                                          ),
+                                          if (donor.address.isNotEmpty) ...[
+                                            const SizedBox(width: 8),
+                                            Text('•', style: TextStyle(fontSize: 11, color: t.textTertiary)),
+                                            const SizedBox(width: 8),
+                                            Flexible(
+                                              child: Text(
+                                                donor.address,
+                                                style: TextStyle(fontSize: 11, color: t.textTertiary),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                if (isSelected)
+                                  Container(
+                                    padding: const EdgeInsets.all(4),
+                                    decoration: BoxDecoration(
+                                      color: t.accent,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.check_rounded, size: 14, color: Colors.white),
+                                  )
+                                else
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: t.accent.withValues(alpha: 0.08),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      'Select',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: t.accent,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+
+            // ── Dialog Footer ──
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: t.bgCard,
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
+                border: Border(top: BorderSide(color: t.bgRule)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text('Cancel', style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

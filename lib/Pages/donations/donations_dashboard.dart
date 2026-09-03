@@ -13,6 +13,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:archive/archive.dart';
 import 'package:collection/collection.dart';
 import '../../constants/colors.dart';
+import '../../theme/role_theme_provider.dart';
 import 'donations_shared.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'widgets/transaction_card.dart';
@@ -1283,11 +1284,13 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
   }
 
   Widget _buildSearchAndFilterBar() {
+    final t = RoleThemeScope.dataOf(context);
     final bool hasFilters = _paymentMethodFilter != 'All' ||
         _minAmount != null ||
         _maxAmount != null ||
         _startDate != null ||
         _endDate != null;
+    final isMobile = MediaQuery.of(context).size.width < 600;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Row(
@@ -1296,18 +1299,18 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
             child: Container(
               height: 50,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: t.bgCard,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: _searchHasFocus
-                      ? const Color(0xFF0D5C3A) // Emerald focus color
-                      : const Color(0x0A000000),
+                      ? t.accent
+                      : t.bgRule,
                   width: _searchHasFocus ? 1.5 : 1.0,
                 ),
                 boxShadow: [
                   BoxShadow(
                     color: _searchHasFocus
-                        ? const Color(0xFF0D5C3A).withValues(alpha: 0.08) // Soft glowing green focus shadow
+                        ? t.accent.withValues(alpha: 0.08)
                         : Colors.black.withValues(alpha: 0.02),
                     blurRadius: _searchHasFocus ? 12 : 8,
                     offset: const Offset(0, 3),
@@ -1317,16 +1320,17 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
               child: TextField(
                 controller: _searchCtrl,
                 focusNode: _searchFocusNode,
+                style: TextStyle(color: t.textPrimary, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Search by donor, receipt #, or goods...',
-                  hintStyle: const TextStyle(
-                      fontSize: 14, color: AppColors.gray400),
-                  prefixIcon: const Icon(Icons.search_rounded,
-                      color: AppColors.gray400, size: 20),
+                  hintStyle: TextStyle(
+                      fontSize: 14, color: t.textTertiary),
+                  prefixIcon: Icon(Icons.search_rounded,
+                      color: t.textTertiary, size: 20),
                   suffixIcon: _searchCtrl.text.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(Icons.clear_rounded,
-                              size: 18, color: AppColors.gray400),
+                          icon: Icon(Icons.clear_rounded,
+                              size: 18, color: t.textTertiary),
                           onPressed: () => _searchCtrl.clear())
                       : null,
                   border: InputBorder.none,
@@ -1346,25 +1350,27 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: hasFilters
-                        ? AppColors.primary.withValues(alpha: 0.12)
-                        : AppColors.gray100,
+                        ? t.accent.withValues(alpha: 0.12)
+                        : t.bgCardAlt,
                   ),
                   child: Icon(
                     Icons.tune_rounded,
                     size: 14,
-                    color: hasFilters ? AppColors.primary : AppColors.gray600,
+                    color: hasFilters ? t.accent : t.textSecondary,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  'Filters',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: hasFilters ? AppColors.primary : AppColors.gray700,
-                    letterSpacing: 0.2,
+                if (!isMobile) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    'Filters',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: hasFilters ? t.accent : t.textPrimary,
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -1375,26 +1381,28 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: AppColors.gray100,
+                    color: t.bgCardAlt,
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.swap_vert_rounded,
                     size: 14,
-                    color: AppColors.gray600,
+                    color: t.textSecondary,
                   ),
                 ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Sort',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.gray700,
-                    letterSpacing: 0.2,
+                if (!isMobile) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    'Sort',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: t.textPrimary,
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),
@@ -1404,13 +1412,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
   }
 
   void _showSortDialog() {
+    final t = RoleThemeScope.dataOf(context);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (_) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        decoration: BoxDecoration(
+          color: t.bgCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
         child: Column(
@@ -1422,15 +1431,15 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                      color: AppColors.gray300,
+                      color: t.bgRule,
                       borderRadius: BorderRadius.circular(2))),
             ),
             const SizedBox(height: 20),
-            const Text('Sort By',
+            Text('Sort By',
                 style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w900,
-                    color: AppColors.gray900)),
+                    color: t.textPrimary)),
             const SizedBox(height: 16),
             _sortOption(Icons.arrow_downward_rounded, 'Newest First',
                 () { setState(() => _sortMode = 'newestFirst'); Navigator.pop(context); }, isActive: _sortMode == 'newestFirst'),

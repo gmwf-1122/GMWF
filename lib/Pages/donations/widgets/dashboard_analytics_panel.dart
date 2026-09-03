@@ -207,17 +207,21 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
       sortedDonors.sort((a, b) => a.value.firstSeen.compareTo(b.value.firstSeen));
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isMobile = MediaQuery.of(context).size.width < 800;
+
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+      insetPadding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 24, vertical: isMobile ? 16 : 32),
       child: Container(
         width: 1100,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.94),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAFC),
-          borderRadius: BorderRadius.circular(32),
+          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 40, offset: const Offset(0, 20)),
+            BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.2), blurRadius: 40, offset: const Offset(0, 20)),
           ],
         ),
         child: Column(
@@ -227,7 +231,7 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
             // ── Scrollable Body ─────────────────────────────────────────────
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(32),
+                padding: EdgeInsets.all(isMobile ? 16 : 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -240,13 +244,13 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                       catTotals: catTotals,
                       donations: widget.currentDonations,
                     ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 24),
 
                     // ── KPI Cards ───────────────────────────────────────────
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _KPICard(
+                    if (isMobile)
+                      Column(
+                        children: [
+                          _KPICard(
                             label: 'TOTAL REVENUE',
                             value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
                             subValue: 'Cash: PKR ${NumberFormat('#,###').format(totalCash)} | Goods: PKR ${NumberFormat('#,###').format(totalGoods)}',
@@ -254,60 +258,176 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                             color: const Color(0xFF0F172A),
                             isPrimary: true,
                           ),
-                        ),
-                        const SizedBox(width: 24),
-                        Expanded(
-                          child: _KPICard(
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              _KPICard(
+                                label: 'TOTAL RECEIPTS',
+                                value: totalCount.toString(),
+                                icon: Icons.receipt_long_rounded,
+                                color: const Color(0xFF6366F1),
+                              ),
+                              const SizedBox(width: 12),
+                              _KPICard(
+                                label: 'AVERAGE VALUE',
+                                value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
+                                icon: Icons.analytics_rounded,
+                                color: const Color(0xFF0D9488),
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          _KPICard(
+                            label: 'TOTAL REVENUE',
+                            value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
+                            subValue: 'Cash: PKR ${NumberFormat('#,###').format(totalCash)} | Goods: PKR ${NumberFormat('#,###').format(totalGoods)}',
+                            icon: Icons.payments_rounded,
+                            color: const Color(0xFF0F172A),
+                            isPrimary: true,
+                          ),
+                          const SizedBox(width: 24),
+                          _KPICard(
                             label: 'TOTAL RECEIPTS',
                             value: totalCount.toString(),
                             icon: Icons.receipt_long_rounded,
                             color: const Color(0xFF6366F1),
                           ),
-                        ),
-                        const SizedBox(width: 24),
-                        Expanded(
-                          child: _KPICard(
+                          const SizedBox(width: 24),
+                          _KPICard(
                             label: 'AVERAGE VALUE',
                             value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
                             icon: Icons.analytics_rounded,
                             color: const Color(0xFF0D9488),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 32),
+                        ],
+                      ),
+                    const SizedBox(height: 28),
 
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ── Left Column: Categories & Branches ────────────────
-                        Expanded(
-                          flex: 4,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _ChartSection(
-                                title: 'Allocation Breakdown',
-                                subtitle: 'Comprehensive program distribution',
-                                child: _CombinedDonutChart(
-                                  catTotals: catTotals,
-                                  subCatTotals: subCatTotals,
-                                  natureTotals: natureTotals,
-                                ),
-                              ),
-                            ],
+                    // ── Chart Rows / Columns ─────────────────────────────
+                    if (isMobile)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _ChartSection(
+                            title: 'Allocation Breakdown',
+                            subtitle: 'Comprehensive program distribution',
+                            child: _CombinedDonutChart(
+                              catTotals: catTotals,
+                              subCatTotals: subCatTotals,
+                              natureTotals: natureTotals,
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 32),
+                          const SizedBox(height: 20),
+                          GestureDetector(
+                            onTap: () {
+                              if (_selectedTrendKey != null) {
+                                setState(() => _selectedTrendKey = null);
+                              }
+                            },
+                            behavior: HitTestBehavior.translucent,
+                            child: _ChartSection(
+                              title: 'Contribution Trends',
+                              subtitle: _selectedPeriod == TrendPeriod.day
+                                  ? 'Active week — Mon to Sun'
+                                  : _selectedPeriod == TrendPeriod.week
+                                      ? 'Active month — ${DateFormat('MMMM yyyy').format(refDate)}'
+                                      : _selectedPeriod == TrendPeriod.month
+                                          ? 'Active year — ${refDate.year}'
+                                          : 'All time record',
+                              trailing: Row(
+                                children: TrendPeriod.values.map((p) {
+                                  final isActive = _selectedPeriod == p;
+                                  return GestureDetector(
+                                    onTap: () => setState(() {
+                                      _selectedPeriod = p;
+                                      _selectedTrendKey = null;
+                                    }),
+                                    child: Container(
+                                      margin: const EdgeInsets.only(left: 6),
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: isActive ? AppColors.primary : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: isActive ? AppColors.primary : (isDark ? const Color(0xFF475569) : AppColors.gray200)),
+                                      ),
+                                      child: Text(
+                                        p.name.toUpperCase(),
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w800,
+                                          color: isActive ? Colors.white : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }).toList(),
+                              ),
+                              child: Column(
+                                children: [
+                                  _TrendLineChart(
+                                    sortedTrends: sortedTrends,
+                                    period: _selectedPeriod,
+                                    referenceDate: refDate,
+                                    selectedKey: _selectedTrendKey,
+                                    onPointSelected: (key) {
+                                      setState(() {
+                                        _selectedTrendKey = _selectedTrendKey == key ? null : key;
+                                      });
+                                    },
+                                  ),
+                                  if (_selectedTrendKey != null && trendTotals.containsKey(_selectedTrendKey)) ...[
+                                    const SizedBox(height: 16),
+                                    _TrendSelectionSummary(
+                                      selectedKey: _selectedTrendKey!,
+                                      period: _selectedPeriod,
+                                      selectedTotal: trendTotals[_selectedTrendKey!] ?? 0,
+                                      catBreakdown: trendCatBreakdown[_selectedTrendKey!] ?? {},
+                                      allTrendTotals: trendTotals,
+                                      referenceDate: refDate,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // ── Left Column: Categories & Branches ────────────────
+                          Expanded(
+                            flex: 4,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _ChartSection(
+                                  title: 'Allocation Breakdown',
+                                  subtitle: 'Comprehensive program distribution',
+                                  child: _CombinedDonutChart(
+                                    catTotals: catTotals,
+                                    subCatTotals: subCatTotals,
+                                    natureTotals: natureTotals,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 32),
 
-                        // ── Right Column: Trends & Donors ─────────────────────
-                        Expanded(
-                          flex: 6,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              GestureDetector(
-                                onTap: () {
+                          // ── Right Column: Trends & Donors ─────────────────────
+                          Expanded(
+                            flex: 6,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
                                   if (_selectedTrendKey != null) {
                                     setState(() => _selectedTrendKey = null);
                                   }
@@ -421,35 +541,45 @@ class _DialogHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(32, 32, 24, 24),
+      padding: const EdgeInsets.fromLTRB(28, 24, 20, 20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        border: Border(bottom: BorderSide(color: AppColors.gray100, width: 1.5)),
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : AppColors.gray100, width: 1.5)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.1),
+              color: AppColors.primary.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(16),
             ),
             child: const Icon(Icons.insights_rounded, color: AppColors.primary, size: 28),
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Intelligence Dashboard', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.gray900, letterSpacing: -0.5)),
+                Text(
+                  'Intelligence Dashboard',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    color: isDark ? Colors.white : AppColors.gray900,
+                    letterSpacing: -0.5,
+                  ),
+                ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
                     Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
                     const SizedBox(width: 8),
-                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.gray500, letterSpacing: 1)),
+                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: isDark ? const Color(0xFF94A3B8) : AppColors.gray500, letterSpacing: 1)),
                   ],
                 ),
               ],
@@ -457,7 +587,7 @@ class _DialogHeader extends StatelessWidget {
           ),
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close_rounded, color: AppColors.gray400, size: 28),
+            icon: Icon(Icons.close_rounded, color: isDark ? Colors.white70 : AppColors.gray400, size: 26),
           ),
         ],
       ),
@@ -484,47 +614,88 @@ class _KPICard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: isPrimary ? color : Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: isPrimary ? color : AppColors.gray200.withValues(alpha: 0.6)),
-          boxShadow: [
-            BoxShadow(color: isPrimary ? color.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.04), blurRadius: 20, offset: const Offset(0, 8)),
-          ],
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: isPrimary
+            ? (isDark ? const Color(0xFF1E1B4B) : color)
+            : (isDark ? const Color(0xFF1E293B) : Colors.white),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isPrimary
+              ? (isDark ? const Color(0xFF6366F1) : color)
+              : (isDark ? const Color(0xFF334155) : AppColors.gray200.withValues(alpha: 0.6)),
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isPrimary ? Colors.white.withValues(alpha: 0.15) : color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Icon(icon, color: isPrimary ? Colors.white : color, size: 24),
+        boxShadow: [
+          BoxShadow(
+            color: isPrimary
+                ? color.withValues(alpha: 0.3)
+                : Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isPrimary ? Colors.white.withValues(alpha: 0.15) : color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
             ),
-            const SizedBox(width: 20),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: isPrimary ? Colors.white.withValues(alpha: 0.8) : AppColors.gray500, letterSpacing: 1)),
-                  const SizedBox(height: 6),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: isPrimary ? Colors.white : AppColors.gray900, letterSpacing: -0.5)),
+            child: Icon(icon, color: isPrimary ? Colors.white : color, size: 22),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    color: isPrimary
+                        ? Colors.white.withValues(alpha: 0.8)
+                        : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                    letterSpacing: 1,
                   ),
-                  if (subValue != null) ...[
-                    const SizedBox(height: 4),
-                    Text(subValue!, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: isPrimary ? Colors.white.withOpacity(0.7) : AppColors.gray500)),
-                  ],
+                ),
+                const SizedBox(height: 4),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: isPrimary
+                          ? Colors.white
+                          : (isDark ? Colors.white : AppColors.gray900),
+                      letterSpacing: -0.5,
+                    ),
+                  ),
+                ),
+                if (subValue != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subValue!,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: isPrimary
+                          ? Colors.white.withValues(alpha: 0.7)
+                          : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                    ),
+                  ),
                 ],
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -539,12 +710,14 @@ class _ChartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppColors.gray200.withValues(alpha: 0.6)),
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : AppColors.gray200.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -552,18 +725,33 @@ class _ChartSection extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.gray900)),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.gray500)),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : AppColors.gray900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? const Color(0xFF94A3B8) : AppColors.gray500,
+                      ),
+                    ),
+                  ],
+                ),
               ),
               if (trailing != null) trailing!,
             ],
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           child,
         ],
       ),

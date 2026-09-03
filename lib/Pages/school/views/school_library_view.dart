@@ -534,59 +534,124 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
       children: [
         // Catalog Toolbar
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           color: Colors.white,
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchCtrl,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    hintText: 'Search books by title, author, or ISBN...',
-                    prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
-                    filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 650;
+              if (isNarrow) {
+                return Column(
+                  children: [
+                    TextField(
+                      controller: _searchCtrl,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Search books by title, author, or ISBN...',
+                        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1), size: 20),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedCategory,
+                                isExpanded: true,
+                                items: _categories.map((c) {
+                                  return DropdownMenuItem(value: c, child: Text('Cat: $c', style: const TextStyle(fontSize: 12)));
+                                }).toList(),
+                                onChanged: (v) {
+                                  if (v != null) setState(() => _selectedCategory = v);
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: () => _openAddBookDialog(),
+                          icon: const Icon(Icons.add_rounded, size: 16),
+                          label: const Text('Add Book', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF6366F1),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchCtrl,
+                      onChanged: (_) => setState(() {}),
+                      decoration: InputDecoration(
+                        hintText: 'Search books by title, author, or ISBN...',
+                        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
+                        filled: true,
+                        fillColor: const Color(0xFFF8FAFC),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              DropdownButtonHideUnderline(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(10),
+                  const SizedBox(width: 12),
+                  DropdownButtonHideUnderline(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: DropdownButton<String>(
+                        value: _selectedCategory,
+                        items: _categories.map((c) {
+                          return DropdownMenuItem(value: c, child: Text('Category: $c'));
+                        }).toList(),
+                        onChanged: (v) {
+                          if (v != null) setState(() => _selectedCategory = v);
+                        },
+                      ),
+                    ),
                   ),
-                  child: DropdownButton<String>(
-                    value: _selectedCategory,
-                    items: _categories.map((c) {
-                      return DropdownMenuItem(value: c, child: Text('Category: $c'));
-                    }).toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => _selectedCategory = v);
-                    },
+                  const SizedBox(width: 16),
+                  ElevatedButton.icon(
+                    onPressed: () => _openAddBookDialog(),
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Add Book'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF6366F1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              ElevatedButton.icon(
-                onPressed: () => _openAddBookDialog(),
-                icon: const Icon(Icons.add_rounded),
-                label: const Text('Add Book'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6366F1),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ],
+                ],
+              );
+            },
           ),
         ),
         const Divider(height: 1),

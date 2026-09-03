@@ -424,7 +424,7 @@ Widget buildInitialsAvatar({
       radius: radius,
       backgroundColor: theme.accentMuted,
       child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        (name.isNotEmpty && name.trim() != '.') ? name.trim()[0].toUpperCase() : '?',
         style: TextStyle(color: theme.accent, fontWeight: FontWeight.bold, fontSize: radius * 0.77),
       ),
     );

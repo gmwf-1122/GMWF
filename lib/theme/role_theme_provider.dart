@@ -3,16 +3,17 @@
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'app_theme.dart';
+import '../services/user_theme_service.dart';
 
 
-class RoleThemeScope extends InheritedWidget {
+class RoleThemeScope extends InheritedNotifier<ValueNotifier<bool>> {
   final RoleTheme role;
 
-  const RoleThemeScope({
+  RoleThemeScope({
     super.key,
     required this.role,
-    required super.child,
-  });
+    required Widget child,
+  }) : super(notifier: UserThemeService.currentThemeNotifier, child: child);
 
   static RoleTheme of(BuildContext context) {
     final scope = context.dependOnInheritedWidgetOfExactType<RoleThemeScope>();
@@ -22,7 +23,7 @@ class RoleThemeScope extends InheritedWidget {
   static RoleTheme roleOf(BuildContext context) => of(context);
 
 
-  static RoleThemeData dataOf(BuildContext context, [Color? customColor]) {
+  static RoleThemeData dataOf(BuildContext context, [Color? customColor, String? explicitUserKey]) {
     Color? resolvedColor = customColor;
     if (resolvedColor == null && Hive.isBoxOpen('app_settings')) {
       final prefColorStr = Hive.box('app_settings').get('custom_accent_color') as String?;
@@ -34,19 +35,17 @@ class RoleThemeScope extends InheritedWidget {
       }
     }
     RoleThemeData data = RoleThemeData.of(of(context), resolvedColor);
-    if (Hive.isBoxOpen('app_settings')) {
-      final isDarkMode = Hive.box('app_settings').get('is_dark_mode', defaultValue: false) as bool;
-      if (isDarkMode) {
-        data = data.toDarkMode();
-      } else {
-        data = data.toLightMode();
-      }
+    final isDarkMode = UserThemeService.isDarkMode(explicitUserKey);
+    if (isDarkMode) {
+      data = data.toDarkMode();
+    } else {
+      data = data.toLightMode();
     }
     return data;
   }
 
   @override
-  bool updateShouldNotify(RoleThemeScope oldWidget) => role != oldWidget.role;
+  bool updateShouldNotify(RoleThemeScope oldWidget) => role != oldWidget.role || notifier != oldWidget.notifier;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

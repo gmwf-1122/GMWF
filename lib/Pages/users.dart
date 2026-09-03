@@ -6,7 +6,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
-import '../services/role_simulator_service.dart';
 import 'dispensary/patient_detail_screen.dart';
 import 'user_detail_screen.dart';
 import 'register.dart';
@@ -14,6 +13,7 @@ import 'dart:async';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../services/local_storage_service.dart';
+import '../services/offline_auth_service.dart';
 import '../services/image_upload_service.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
@@ -21,6 +21,9 @@ import '../widgets/device_badge_widget.dart';
 import '../utils/formatters.dart';
 import '../services/user_module_access_service.dart';
 import '../services/device_info_service.dart';
+import 'office/offboard_dialog.dart';
+import '../services/finance_local_storage.dart';
+import '../services/staff_patient_link_service.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
@@ -54,30 +57,41 @@ class _UsersScreenState extends State<UsersScreen>
   String _selectedCategoryFilter = 'all';
   Box? _localBox;
   bool _filtersExpanded = false;
+  final Set<String> _syncedBranches = {};
 
   @override
   void initState() {
     super.initState();
-    _loadBranches();
-    _initHive();
+    _initAndLoad();
+  }
+
+  Future<void> _initAndLoad() async {
+    await _initHive();
+    await _loadBranches();
   }
 
   Future<void> _initHive() async => _localBox = await Hive.openBox('local');
 
   Future<void> _loadBranches() async {
+    // 1. Instant load from local cache if available
     try {
-      final snap = await FirebaseFirestore.instance.collection('branches').get();
-
-      // Clean up bogus 'all' or 'global' documents from Firestore if present
-      for (final doc in snap.docs) {
-        final idLower = doc.id.toLowerCase().trim();
-        final nameLower = (doc.data()['name'] as String? ?? '').toLowerCase().trim();
-        if (idLower == 'all' || idLower == 'global' || nameLower == 'all' || nameLower == 'global') {
-          try {
-            await FirebaseFirestore.instance.collection('branches').doc(doc.id).delete();
-          } catch (_) {}
+      if (_localBox != null && _localBox!.containsKey('cached_branches_list')) {
+        final cached = _localBox!.get('cached_branches_list');
+        if (cached is List && cached.isNotEmpty) {
+          final list = cached.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          if (mounted && _branches.isEmpty) {
+            setState(() {
+              _branches = list;
+              _tabController = TabController(length: list.length, vsync: this);
+            });
+          }
         }
       }
+    } catch (_) {}
+
+    // 2. Fetch fresh branches in background
+    try {
+      final snap = await FirebaseFirestore.instance.collection('branches').get();
 
       var branches = snap.docs.where((d) {
         final idLower = d.id.toLowerCase().trim();
@@ -100,20 +114,30 @@ class _UsersScreenState extends State<UsersScreen>
       }
 
       branches.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+
+      // Cache branches locally
+      try {
+        _localBox?.put('cached_branches_list', branches);
+      } catch (_) {}
+
       if (mounted) {
+        final oldLen = _tabController?.length ?? 0;
+        if (oldLen != branches.length) {
+          _tabController?.dispose();
+          _tabController = TabController(length: branches.length, vsync: this);
+        }
         setState(() {
           _branches = branches;
-          _tabController = TabController(length: branches.length, vsync: this);
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Failed to load branches: $e'),
-          backgroundColor: Colors.red.shade700,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ));
+      if (mounted && _branches.isEmpty) {
+        // Fallback default branch if completely offline with no cache
+        final fallbackBranch = widget.branchId ?? 'main';
+        setState(() {
+          _branches = [{'id': fallbackBranch, 'name': fallbackBranch.toUpperCase()}];
+          _tabController = TabController(length: 1, vsync: this);
+        });
       }
     }
   }
@@ -419,7 +443,11 @@ class _UsersScreenState extends State<UsersScreen>
 
   Widget _buildList(String branchId, RoleThemeData t) {
     if (widget.isPatientMode) {
-      _syncPatientsForBranch(branchId);
+      // Sync in background only once per branch per screen lifecycle
+      if (!_syncedBranches.contains(branchId)) {
+        _syncedBranches.add(branchId);
+        _syncPatientsForBranch(branchId);
+      }
       return ValueListenableBuilder<Box>(
         valueListenable: Hive.box(LocalStorageService.patientsBox).listenable(),
         builder: (context, box, _) {
@@ -486,15 +514,11 @@ class _UsersScreenState extends State<UsersScreen>
       );
     }
 
-    // Staff path (original StreamBuilder)
+    // Staff path (Local-first + background Firestore stream)
     final collection = 'users';
     return StreamBuilder<QuerySnapshot>(
       stream: _getFilteredStream(branchId, collection),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
-          return Center(child: CircularProgressIndicator(color: t.accent));
-        }
-
         final Map<String, Map<String, dynamic>> mergedMap = {};
 
         String getDedupKey(Map<String, dynamic> u, String defaultId) {
@@ -510,7 +534,7 @@ class _UsersScreenState extends State<UsersScreen>
           return 'id:$uid';
         }
 
-        // 1. Add Hive local users first (preserves offline-created users)
+        // 1. Add Hive local users first (instant offline display)
         try {
           if (Hive.isBoxOpen('local_users')) {
             final box = Hive.box('local_users');
@@ -528,13 +552,29 @@ class _UsersScreenState extends State<UsersScreen>
           debugPrint('Error reading local users: $e');
         }
 
-        // 2. Overlay Firestore users on top
+        // 2. Overlay Firestore users on top & cache to Hive
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
           for (final doc in snapshot.data!.docs) {
             final Map<String, dynamic> u = {'id': doc.id, ...doc.data() as Map<String, dynamic>};
             final key = getDedupKey(u, doc.id);
             mergedMap[key] = u;
+
+            // Auto-cache to Hive for instant loading next time
+            try {
+              if (Hive.isBoxOpen('local_users')) {
+                final box = Hive.box('local_users');
+                final cacheKey = u['email'] != null && (u['email'] as String).isNotEmpty
+                    ? 'user:${(u['email'] as String).toLowerCase().trim()}'
+                    : 'user:${doc.id}';
+                box.put(cacheKey, u);
+              }
+            } catch (_) {}
           }
+        }
+
+        // Only show spinner if we have ZERO local data AND Firestore is still loading
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData && mergedMap.isEmpty) {
+          return Center(child: CircularProgressIndicator(color: t.accent));
         }
 
         var list = mergedMap.values.toList();
@@ -1056,6 +1096,24 @@ class _UsersScreenState extends State<UsersScreen>
                             ),
                           ),
                         ],
+                        if (widget.isPatientMode) ...[
+                          Builder(builder: (_) {
+                            final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
+                              cnic: data['cnic']?.toString() ?? data['guardianCnic']?.toString(),
+                              name: name,
+                            );
+                            if (staffInfo != null) {
+                              return Padding(
+                                padding: const EdgeInsets.only(left: 6),
+                                child: StaffPatientLinkService.buildStaffBadge(
+                                  staffInfo,
+                                  isDark: Theme.of(context).brightness == Brightness.dark,
+                                ),
+                              );
+                            }
+                            return const SizedBox.shrink();
+                          }),
+                        ],
                         if (status != 'active' && status.isNotEmpty) ...[
                           const SizedBox(width: 6),
                           Container(
@@ -1160,6 +1218,30 @@ class _UsersScreenState extends State<UsersScreen>
                         tooltip: 'Update Student / Guardian Status',
                         onPressed: () => _showGuardianStatusDialog(data, branchId, t),
                       ),
+                    const SizedBox(width: 4),
+
+                    // Medical History Button
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      icon: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.teal.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.teal, width: 0.8),
+                        ),
+                        child: const Icon(Icons.medical_services_outlined, size: 16, color: Colors.teal),
+                      ),
+                      tooltip: 'View Medical History',
+                      onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
+                        context,
+                        name: name,
+                        cnic: data['cnic']?.toString(),
+                        branchId: branchId,
+                        role: data['role']?.toString(),
+                      ),
+                    ),
                     const SizedBox(width: 4),
 
                     // Edit Profile Button
@@ -1579,24 +1661,35 @@ class _UsersScreenState extends State<UsersScreen>
     if (confirm != true) return;
 
     try {
-      final targetEmail = (data['email'] ?? '').toString();
-      final targetPass = (data['password'] ?? '112233').toString();
+      final targetEmail = (data['email'] ?? '').toString().trim();
+      final targetPass = (data['password'] ?? '').toString().trim();
+      bool authDeleted = false;
 
-      if (targetEmail.isNotEmpty) {
+      if (targetEmail.isNotEmpty && targetPass.isNotEmpty) {
         try {
-          final appName = 'TempAuthApp_${DateTime.now().millisecondsSinceEpoch}';
-          final secondaryApp = await Firebase.initializeApp(
-            name: appName,
-            options: Firebase.app().options,
-          );
+          const appName = 'AdminDeleteAuthApp';
+          FirebaseApp? secondaryApp;
+          try {
+            secondaryApp = Firebase.app(appName);
+          } catch (_) {
+            secondaryApp = await Firebase.initializeApp(
+              name: appName,
+              options: Firebase.app().options,
+            );
+          }
+
           final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
           final creds = await secondaryAuth.signInWithEmailAndPassword(email: targetEmail, password: targetPass);
-          if (creds.user != null) {
-            await creds.user!.delete();
+          final targetUser = creds.user;
+          if (targetUser == null) {
+            throw Exception('Firebase Auth user not found for $targetEmail.');
           }
-          await secondaryApp.delete();
+          await targetUser.delete();
+          await OfflineAuthService.clearCredentialsForUser(targetEmail);
+          await secondaryAuth.signOut();
+          authDeleted = true;
         } catch (e) {
-          debugPrint('[QuickDelete] Auth deletion note: $e');
+          debugPrint('[UsersPage] Auth delete skipped or failed: $e');
         }
       }
 
@@ -1627,6 +1720,21 @@ class _UsersScreenState extends State<UsersScreen>
         }
       }
 
+      await LocalStorageService.deleteUserOffline(
+        uid: targetUid,
+        branchId: branchId,
+        email: email,
+        username: usernameLower,
+      );
+
+      // Bi-directional Employee & Biometric purge
+      await FinanceLocalStorage.syncBiDirectionalOffboarding(
+        userId: targetUid,
+        cnic: (data['cnic'] ?? data['identification'])?.toString(),
+        performedBy: widget.currentUserRole ?? 'UserAdmin',
+      );
+      await FinanceLocalStorage.purgeEmployeeForDeletedUser(targetUid);
+
       // Purge from Firestore
       final firestore = FirebaseFirestore.instance;
       if (targetUid.isNotEmpty) {
@@ -1644,10 +1752,14 @@ class _UsersScreenState extends State<UsersScreen>
         }
       }
 
+      final deleteMessage = authDeleted
+          ? 'Account "$userName" has been permanently deleted.'
+          : 'Account "$userName" was removed from the app and server records. Firebase Auth cleanup was skipped because the stored password was missing or invalid.';
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Account "$userName" has been permanently deleted.'),
+            content: Text(deleteMessage),
             backgroundColor: Colors.red.shade800,
           ),
         );
@@ -1688,10 +1800,23 @@ class _UsersScreenState extends State<UsersScreen>
         status == 'revoked' ||
         data['isActive'] == false;
 
-    String selectedCategory = isRevoked ? 'Active' : 'Resigned';
+    if (!isRevoked) {
+      final offboardResult = await OffboardDialog.show(
+        context,
+        employeeData: data,
+        performedBy: widget.currentUserRole ?? 'Admin',
+      );
+      if (offboardResult == true && mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('@${data['username'] ?? 'User'} has been offboarded.')),
+        );
+      }
+      return;
+    }
+
     final reasonCtrl = TextEditingController();
     final passwordCtrl = TextEditingController();
-    final categories = ['Resigned', 'Terminated', 'Retired', 'Suspended', 'Offboarded', 'Inactive'];
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -1711,12 +1836,12 @@ class _UsersScreenState extends State<UsersScreen>
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: (isRevoked ? Colors.green : Colors.red).withValues(alpha: 0.12),
+                          color: Colors.green.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          isRevoked ? Icons.lock_open_rounded : Icons.no_accounts_rounded,
-                          color: isRevoked ? Colors.green : Colors.red,
+                        child: const Icon(
+                          Icons.lock_open_rounded,
+                          color: Colors.green,
                           size: 24,
                         ),
                       ),
@@ -1726,13 +1851,11 @@ class _UsersScreenState extends State<UsersScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isRevoked ? 'Re-Enable App Access' : 'Revoke App Access',
+                              'Re-Enable App Access',
                               style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: t.textPrimary),
                             ),
                             Text(
-                              isRevoked
-                                  ? 'Restore access for @${data['username'] ?? 'User'}'
-                                  : 'Offboard @${data['username'] ?? 'User'}',
+                              'Restore access for @${data['username'] ?? 'User'}',
                               style: TextStyle(fontSize: 12, color: t.textTertiary),
                             ),
                           ],
@@ -1741,38 +1864,13 @@ class _UsersScreenState extends State<UsersScreen>
                     ],
                   ),
                   const SizedBox(height: 18),
-                  if (!isRevoked) ...[
-                    Text('Revocation Category', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textSecondary)),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: t.bg,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: t.bgRule),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          value: selectedCategory,
-                          isExpanded: true,
-                          dropdownColor: t.bgCard,
-                          style: TextStyle(fontSize: 14, color: t.textPrimary, fontWeight: FontWeight.w600),
-                          items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                          onChanged: (v) {
-                            if (v != null) setS(() => selectedCategory = v);
-                          },
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                  ],
-                  Text(isRevoked ? 'Restoration Remarks (Optional)' : 'Reason / Remarks (Optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textSecondary)),
+                  Text('Restoration Remarks (Optional)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textSecondary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: reasonCtrl,
                     style: TextStyle(fontSize: 13, color: t.textPrimary),
                     decoration: InputDecoration(
-                      hintText: isRevoked ? 'e.g. Access restored by HQ Manager' : 'e.g. Resigned voluntarily / End of contract',
+                      hintText: 'e.g. Access restored by HQ Manager',
                       hintStyle: TextStyle(color: t.textTertiary, fontSize: 12),
                       filled: true,
                       fillColor: t.bg,
@@ -1820,10 +1918,10 @@ class _UsersScreenState extends State<UsersScreen>
                             }
                             Navigator.pop(ctx, true);
                           },
-                          icon: Icon(isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded, size: 16),
-                          label: Text(isRevoked ? 'Restore' : 'Revoke'),
+                          icon: const Icon(Icons.lock_open_rounded, size: 16),
+                          label: const Text('Restore'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isRevoked ? Colors.green : Colors.red,
+                            backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
@@ -1842,26 +1940,16 @@ class _UsersScreenState extends State<UsersScreen>
     if (confirm != true) return;
 
     final reason = reasonCtrl.text.trim();
-    final Map<String, dynamic> updates;
 
-    if (isRevoked) {
-      updates = <String, dynamic>{
-        'status': 'active',
-        'accountStatus': 'active',
-        'isActive': true,
-        'revocationReason': null,
-        'revokedAt': null,
-        'restoredAt': FieldValue.serverTimestamp(),
-      };
-    } else {
-      updates = <String, dynamic>{
-        'status': selectedCategory,
-        'accountStatus': selectedCategory,
-        'isActive': false,
-        'revocationReason': reason.isNotEmpty ? reason : 'Access revoked by admin ($selectedCategory)',
-        'revokedAt': FieldValue.serverTimestamp(),
-      };
-    }
+    final updates = <String, dynamic>{
+      'status': 'active',
+      'accountStatus': 'active',
+      'isActive': true,
+      'revocationReason': null,
+      'revokedAt': null,
+      'restoredAt': FieldValue.serverTimestamp(),
+      if (reason.isNotEmpty) 'restorationRemarks': reason,
+    };
 
     try {
       await LocalStorageService.saveUserOffline(
@@ -1881,9 +1969,7 @@ class _UsersScreenState extends State<UsersScreen>
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isRevoked
-                ? 'App access restored for @${data['username'] ?? 'User'}'
-                : 'Access revoked for @${data['username'] ?? 'User'} ($selectedCategory)'),
+            content: Text('App access restored for @${data['username'] ?? 'User'}'),
             backgroundColor: Colors.green.shade700,
           ),
         );
@@ -2037,11 +2123,22 @@ class _UsersScreenState extends State<UsersScreen>
 
   // ── Stream ──
 
+  Future<QuerySnapshot> _loadUsersSnapshot(String branchId) async {
+    final normalizedBranch = branchId.trim().toLowerCase();
+    if (normalizedBranch.isEmpty || normalizedBranch == 'all' || normalizedBranch == 'global') {
+      return FirebaseFirestore.instance.collection('users').limit(200).get();
+    }
+    return FirebaseFirestore.instance
+        .collection('branches')
+        .doc(normalizedBranch)
+        .collection('users')
+        .limit(200)
+        .get();
+  }
+
   Stream<QuerySnapshot> _getFilteredStream(String branchId, String collection) {
     if (collection == 'users') {
-      // Query ALL users from top-level /users collection so system & executive accounts
-      // (Chairman, Global Admin, CEO, HQ Manager) are never excluded by server queries.
-      return FirebaseFirestore.instance.collection('users').snapshots();
+      return Stream.fromFuture(_loadUsersSnapshot(branchId));
     }
     Query<Map<String, dynamic>> q = FirebaseFirestore.instance
         .collection('branches').doc(branchId).collection(collection);
@@ -2139,7 +2236,7 @@ class _UsersScreenState extends State<UsersScreen>
                     child: photoUrl != null && photoUrl.trim().isNotEmpty
                         ? (bytes != null
                             ? Image.memory(bytes, fit: BoxFit.cover, width: 320, height: 320)
-                            : Image.network(photoUrl, fit: BoxFit.cover, width: 320, height: 320, errorBuilder: (_, __, ___) => _buildFallbackAvatar(name, t, size: 320)))
+                            : Image.network(photoUrl, fit: BoxFit.cover, width: 320, height: 320, errorBuilder: (_, _, _) => _buildFallbackAvatar(name, t, size: 320)))
                         : _buildFallbackAvatar(name, t, size: 320),
                   ),
                 ),
@@ -2270,6 +2367,19 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
     _tabCtrl = TabController(length: 2, vsync: this);
   }
 
+  Future<QuerySnapshot> _loadUsersSnapshot([String branchId = 'all']) async {
+    final normalizedBranch = branchId.trim().toLowerCase();
+    if (normalizedBranch.isEmpty || normalizedBranch == 'all' || normalizedBranch == 'global') {
+      return FirebaseFirestore.instance.collection('users').limit(200).get();
+    }
+    return FirebaseFirestore.instance
+        .collection('branches')
+        .doc(normalizedBranch)
+        .collection('users')
+        .limit(200)
+        .get();
+  }
+
   @override
   void dispose() {
     _tabCtrl.dispose();
@@ -2379,8 +2489,8 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
           ),
         ),
         Expanded(
-          child: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('users').snapshots(),
+          child: FutureBuilder<QuerySnapshot>(
+            future: _loadUsersSnapshot('all'),
             builder: (ctx, snap) {
               if (!snap.hasData) {
                 return const Center(child: CircularProgressIndicator());
@@ -2518,14 +2628,16 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                                   ),
                                   onSelected: (val) async {
                                     final newBlocked = !isBlocked;
+                                    final messenger = ScaffoldMessenger.maybeOf(context);
                                     await UserModuleAccessService.setModuleAccessForUser(
                                       userId: userId,
                                       moduleId: modId,
                                       isBlocked: newBlocked,
                                       performedBy: 'Chairman',
                                     );
+                                    if (!mounted) return;
                                     setState(() {});
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    messenger?.showSnackBar(
                                       SnackBar(
                                         content: Text(newBlocked
                                             ? 'Blocked $modName for $name'

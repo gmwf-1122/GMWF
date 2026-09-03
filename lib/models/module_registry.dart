@@ -19,6 +19,7 @@ import '../pages/office/branches_management.dart';
 import '../pages/Dasterkhwaan/office_boy.dart';
 import '../pages/Dasterkhwaan/kitchen.dart';
 import '../pages/Dasterkhwaan/stock.dart';
+import '../pages/dasterkhwaan/food_log_screen.dart';
 import '../pages/branches_register.dart';
 import '../pages/register.dart';
 import '../pages/dispensary/patient_detail_screen.dart';
@@ -100,6 +101,61 @@ class AppModule {
 
 class ModuleRegistry {
   static final List<AppModule> allModules = [
+    // ── OFFICE MODULES (Exact Hierarchy Sequence) ──
+    // 1. Finance Overview
+    AppModule(
+      id: 'finance',
+      title: 'Finance Overview',
+      description: 'Comprehensive financial health, ledger summaries, cash flow & budget tracking',
+      icon: Icons.monetization_on_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => CashFlowPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 2. Donations
+    AppModule(
+      id: 'donations',
+      title: 'Donations',
+      description: 'Track and manage charitable contributions',
+      icon: Icons.volunteer_activism_outlined,
+      requiredPermission: AppPermission.viewDonations,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => DonationsScreen.embedded(
+        branchId: data['branchId'] ?? 'all',
+        username: data['name'] ?? 'User',
+        userId:   data['uid'] ?? '',
+        role:     UserRoleX.fromString(data['role'] ?? 'staff'),
+      ),
+      category: ModuleCategory.office,
+      isFeatured: true,
+    ),
+
+    // 3. Branches Management
+    AppModule(
+      id: 'branches_management',
+      title: 'Branches Management',
+      description: 'Register, edit sub-facilities, and manage all organization branches',
+      icon: Icons.domain_rounded,
+      requiredPermission: AppPermission.viewBranchSpecificStats,
+      isFeatured: true,
+      builder: (context, data) {
+        return BranchesManagementPage(
+          currentUserRole: data['role']?.toString(),
+          userBranchId: data['branchId']?.toString(),
+        );
+      },
+      category: ModuleCategory.office,
+    ),
+
+    // 4. User Management
     AppModule(
       id: 'users',
       title: 'User Management',
@@ -119,6 +175,42 @@ class ModuleRegistry {
       },
       category: ModuleCategory.office,
     ),
+
+    // 5. Employee Management
+    AppModule(
+      id: 'employees',
+      title: 'Employee Management',
+      description: 'Staff directory, profile management, onboarding, salary history',
+      icon: Icons.badge_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => EmployeesPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 6. Employee Attendance
+    AppModule(
+      id: 'employee_attendance',
+      title: 'Employee Attendance',
+      description: 'Staff daily attendance, check-in/out logs & ZKTeco biometric sync',
+      icon: Icons.fingerprint_rounded,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => EmployeeAttendancePage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 7. Register Staff
     AppModule(
       id: 'register_user',
       title: 'Register Staff',
@@ -131,6 +223,8 @@ class ModuleRegistry {
       },
       category: ModuleCategory.office,
     ),
+
+    // 8. Dashboard Overview
     AppModule(
       id: 'executive_dashboard',
       title: 'Dashboard Overview',
@@ -147,15 +241,176 @@ class ModuleRegistry {
       category: ModuleCategory.office,
       isFeatured: true,
     ),
+
+    // 9. Ramadan Rations & Libaas
+    AppModule(
+      id: 'ramadan_welfare',
+      title: 'Ramadan Rations & Libaas',
+      description: 'Welfare data entry, CNIC scanner & dynamic winner lucky draw',
+      icon: Icons.card_giftcard_rounded,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: false,
+      builder: (context, data) => RamadanWelfareScreen(
+        branchId: data['branchId'] ?? 'sialkot',
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 10. Downloads
+    AppModule(
+      id: 'reports',
+      title: 'Downloads',
+      description: 'Generate and export operational data',
+      icon: Icons.cloud_download_rounded,
+      requiredPermission: AppPermission.downloadData,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) {
+        final role = (data['role'] as String? ?? '').toLowerCase();
+        final isScoped = role == 'branch manager' || role == 'supervisor';
+        return DownloadScreen(
+          lockedBranchId: isScoped ? (data['branchId'] as String?) : null,
+        );
+      },
+      category: ModuleCategory.office,
+    ),
+
+    // 11. Branch Registration
+    AppModule(
+      id: 'register_branch',
+      title: 'Branch Registration',
+      description: 'Setup and configure new organizational branches',
+      icon: Icons.add_business_rounded,
+      requiredPermission: AppPermission.manageBranches,
+      isBranchDependent: false,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => const BranchesRegister(),
+      category: ModuleCategory.office,
+    ),
+
+    // 12. Cash Flow & Treasury
+    AppModule(
+      id: 'cash_flow',
+      title: 'Cash Flow & Treasury',
+      description: 'Live double-entry general ledger summary, cash flow, audit logs & system history',
+      icon: Icons.account_balance_wallet_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => CashFlowPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 13. Payroll
+    AppModule(
+      id: 'payroll',
+      title: 'Payroll',
+      description: 'Monthly payroll, salary breakdown, pay slips & disbursements',
+      icon: Icons.payments_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      isFeatured: true,
+      builder: (context, data) => PayrollPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 14. Loans & Advances
+    AppModule(
+      id: 'loans',
+      title: 'Loans & Advances',
+      description: 'Employee salary advances, loans, installment plans & balances',
+      icon: Icons.credit_card_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => LoansPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 15. Expenses
+    AppModule(
+      id: 'expenses',
+      title: 'Expenses',
+      description: 'Organizational operational expense vouchers & category tracking',
+      icon: Icons.receipt_long_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => ExpensesPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 16. Finance Reports & Reconcile
+    AppModule(
+      id: 'finance_reports',
+      title: 'Finance Reports & Reconcile',
+      description: 'General ledger reports, bank reconciliations & custom exports',
+      icon: Icons.assessment_outlined,
+      requiredPermission: AppPermission.manageFinance,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => FinanceReportsPage(
+        branchId: data['branchId'] ?? 'all',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 17. Server Control
+    AppModule(
+      id: 'server_sync',
+      title: 'Server Control',
+      description: 'System-wide data synchronization and monitoring',
+      icon: Icons.dns_rounded,
+      requiredPermission: AppPermission.viewExecutiveDashboard,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => ServerDashboardWithSync(
+        branchId: data['branchId'] ?? 'unknown',
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // 18. Office Boy
+    AppModule(
+      id: 'office_boy',
+      title: 'Office Boy',
+      description: 'Office token issuing and management',
+      icon: Icons.room_service_rounded,
+      requiredPermission: AppPermission.generateFoodTokens,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      builder: (context, data) => DasterkhwaanOfficeBoy(
+        branchId: data['branchId'] ?? 'unknown',
+        userName: data['name'] ?? 'User',
+        role: data['role'] ?? 'Office Boy',
+      ),
+      category: ModuleCategory.office,
+    ),
+
+    // ── DISPENSARY / MEDICAL MODULES ──
     AppModule(
       id: 'branches',
       title: 'Branches Summary',
       description: 'Manage and monitor all branch activities',
       icon: Icons.account_balance_outlined,
-      // viewBranchSpecificStats is held by branch manager & supervisor;
-      // global roles hold all permissions so they also pass this check.
       requiredPermission: AppPermission.viewBranchSpecificStats,
-      isBranchDependent: true,  // wrapper locks branch-scoped roles to own branch
+      isBranchDependent: true,
       supportsGlobalWrapper: true,
       builder: (context, data) {
         final role = (data['role'] as String? ?? '').toLowerCase().trim();
@@ -171,39 +426,6 @@ class ModuleRegistry {
       isFeatured: true,
     ),
     AppModule(
-      id: 'branches_management',
-      title: 'Branches Management',
-      description: 'Register, edit sub-facilities, and manage all organization branches',
-      icon: Icons.domain_rounded,
-      requiredPermission: AppPermission.viewBranchSpecificStats,
-      isFeatured: true,
-      builder: (context, data) {
-        return BranchesManagementPage(
-          currentUserRole: data['role']?.toString(),
-          userBranchId: data['branchId']?.toString(),
-        );
-      },
-      category: ModuleCategory.office,
-    ),
-    // Removed branch_manager_dashboard as it now uses the unified OverviewScreen
-    AppModule(
-      id: 'donations',
-      title: 'Donations',
-      description: 'Track and manage charitable contributions',
-      icon: Icons.volunteer_activism_outlined,
-      requiredPermission: AppPermission.viewDonations,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => DonationsScreen.embedded(
-        branchId: data['branchId'] ?? 'all',
-        username: data['name'] ?? 'User',
-        userId:   data['uid'] ?? '',
-        role:     UserRoleX.fromString(data['role'] ?? 'staff'),
-      ),
-      category: ModuleCategory.office,
-      isFeatured: true,
-    ),
-    AppModule(
       id: 'patients_registration',
       title: 'Reception',
       description: 'Patient onboarding and token issuance',
@@ -211,7 +433,7 @@ class ModuleRegistry {
       requiredPermission: AppPermission.registerPatients,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      hideFromExecutives: true, // Operational-only: goes through direct routing for receptionists
+      hideFromExecutives: true,
       builder: (context, data) => ReceptionistScreen(
         branchId: data['branchId'] ?? 'unknown',
         receptionistId: data['uid'] ?? 'unknown',
@@ -228,7 +450,7 @@ class ModuleRegistry {
       requiredPermission: AppPermission.prescribeMedicine,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      hideFromExecutives: true, // Operational-only: goes through direct routing for doctors
+      hideFromExecutives: true,
       builder: (context, data) => DoctorScreen(
         branchId: data['branchId'] ?? 'unknown',
         doctorId: data['uid'] ?? 'unknown',
@@ -245,7 +467,7 @@ class ModuleRegistry {
       requiredPermission: AppPermission.dispenseMedicine,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      hideFromExecutives: true, // Operational-only: goes through direct routing for dispensers
+      hideFromExecutives: true,
       builder: (context, data) => DispensarScreen(
         branchId: data['branchId'] ?? 'unknown',
         isEmbedded: true,
@@ -315,19 +537,6 @@ class ModuleRegistry {
       category: ModuleCategory.dispensary,
     ),
     AppModule(
-      id: 'ramadan_welfare',
-      title: 'Ramadan Rations & Libaas',
-      description: 'Welfare data entry, CNIC scanner & dynamic winner lucky draw',
-      icon: Icons.card_giftcard_rounded,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      isFeatured: false,
-      builder: (context, data) => RamadanWelfareScreen(
-        branchId: data['branchId'] ?? 'sialkot',
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
       id: 'patients_list',
       title: 'Patients',
       description: 'Complete patient medical records database',
@@ -346,20 +555,41 @@ class ModuleRegistry {
       category: ModuleCategory.dispensary,
     ),
     AppModule(
-      id: 'office_boy',
-      title: 'Office Boy',
-      description: 'Office token issuing and management',
-      icon: Icons.room_service_rounded,
-      requiredPermission: AppPermission.generateFoodTokens,
+      id: 'patient_register_standalone',
+      title: 'Patient Registration',
+      description: 'Independent patient registration entry',
+      icon: Icons.app_registration_rounded,
+      requiredPermission: AppPermission.registerPatients,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
-      builder: (context, data) => DasterkhwaanOfficeBoy(
+      hideFromExecutives: true,
+      builder: (context, data) => PatientRegisterPage(
         branchId: data['branchId'] ?? 'unknown',
-        userName: data['name'] ?? 'User',
-        role: data['role'] ?? 'Office Boy',
+        receptionistId: data['uid'] ?? 'unknown',
       ),
-      category: ModuleCategory.office,
+      category: ModuleCategory.dispensary,
     ),
+    AppModule(
+      id: 'patient_details',
+      title: 'Patient Records',
+      description: 'Search and view detailed patient medical history',
+      icon: Icons.assignment_ind_rounded,
+      requiredPermission: AppPermission.viewPatients,
+      isBranchDependent: true,
+      supportsGlobalWrapper: true,
+      hideFromExecutives: true,
+      builder: (context, data) => PatientDetailScreen(
+        patientId: '',
+        isOnline: true,
+        localBox: Hive.box('local'),
+        branchId: data['branchId'] ?? 'unknown',
+        doctorId: data['uid'] ?? 'unknown',
+        isAdmin: true,
+      ),
+      category: ModuleCategory.dispensary,
+    ),
+
+    // ── DASTERKHWAAN MODULES ──
     AppModule(
       id: 'kitchen',
       title: 'Kitchen',
@@ -369,7 +599,7 @@ class ModuleRegistry {
       isBranchDependent: true,
       supportsGlobalWrapper: true,
       builder: (context, data) => DasterkhwaanKitchen(
-        branchId: data['branchId'] ?? 'all', // Shared view for executives
+        branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? 'Executive',
       ),
       category: ModuleCategory.dasterkhwaan,
@@ -388,162 +618,22 @@ class ModuleRegistry {
       category: ModuleCategory.dasterkhwaan,
     ),
     AppModule(
-      id: 'server_sync',
-      title: 'Server Control',
-      description: 'System-wide data synchronization and monitoring',
-      icon: Icons.dns_rounded,
-      requiredPermission: AppPermission.viewExecutiveDashboard,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => ServerDashboardWithSync(
-        branchId: data['branchId'] ?? 'unknown',
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'reports',
-      title: 'Downloads',
-      description: 'Generate and export operational data',
-      icon: Icons.cloud_download_rounded,
-      requiredPermission: AppPermission.downloadData,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) {
-        final role = (data['role'] as String? ?? '').toLowerCase();
-        final isScoped = role == 'branch manager' || role == 'supervisor';
-        return DownloadScreen(
-          lockedBranchId: isScoped ? (data['branchId'] as String?) : null,
-        );
-      },
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'cash_flow',
-      title: 'Cash Flow & Treasury',
-      description: 'Live double-entry general ledger summary, cash flow, audit logs & system history',
-      icon: Icons.account_balance_wallet_outlined,
-      requiredPermission: AppPermission.manageFinance,
+      id: 'dasterkhwaan_food_log',
+      title: 'Food Log',
+      description: 'Track daily food prepared by cook or received from outside hotels',
+      icon: Icons.restaurant_menu_rounded,
+      requiredPermission: AppPermission.manageKitchen,
       isBranchDependent: true,
       supportsGlobalWrapper: true,
       isFeatured: true,
-      builder: (context, data) => CashFlowPage(
+      builder: (context, data) => DasterkhwaanFoodLogScreen(
         branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
+        userName: data['name'] ?? 'Staff',
       ),
-      category: ModuleCategory.office,
+      category: ModuleCategory.dasterkhwaan,
     ),
-    AppModule(
-      id: 'employee_attendance',
-      title: 'Employee Attendance',
-      description: 'Staff daily attendance, check-in/out logs & ZKTeco biometric sync',
-      icon: Icons.fingerprint_rounded,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      isFeatured: true,
-      builder: (context, data) => EmployeeAttendancePage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'employees',
-      title: 'Employees',
-      description: 'Staff directory, profile management, onboarding, salary history',
-      icon: Icons.badge_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      isFeatured: true,
-      builder: (context, data) => EmployeesPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'payroll',
-      title: 'Payroll',
-      description: 'Monthly payroll, salary breakdown, pay slips & disbursements',
-      icon: Icons.payments_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      isFeatured: true,
-      builder: (context, data) => PayrollPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'loans',
-      title: 'Loans & Advances',
-      description: 'Employee salary advances, loans, installment plans & balances',
-      icon: Icons.credit_card_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => LoansPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'expenses',
-      title: 'Expenses',
-      description: 'Organizational operational expense vouchers & category tracking',
-      icon: Icons.receipt_long_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => ExpensesPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'finance_reports',
-      title: 'Finance Reports & Reconcile',
-      description: 'General ledger reports, bank reconciliations & custom exports',
-      icon: Icons.assessment_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => FinanceReportsPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'finance',
-      title: 'Finance Overview',
-      description: 'Employees, Staff Attendance, Loans & Advances, Payroll & Expenses',
-      icon: Icons.monetization_on_outlined,
-      requiredPermission: AppPermission.manageFinance,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => CashFlowPage(
-        branchId: data['branchId'] ?? 'all',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.office,
-    ),
-    AppModule(
-      id: 'register_branch',
-      title: 'Branch Registration',
-      description: 'Setup and configure new organizational branches',
-      icon: Icons.add_business_rounded,
-      requiredPermission: AppPermission.manageBranches,
-      isBranchDependent: false,
-      supportsGlobalWrapper: true,
-      builder: (context, data) => const BranchesRegister(),
-      category: ModuleCategory.office,
-    ),
+
+    // ── MADRASSA MODULES ──
     AppModule(
       id: 'madrassa',
       title: 'Madrassa',
@@ -582,40 +672,7 @@ class ModuleRegistry {
       category: ModuleCategory.madrassa,
     ),
 
-    AppModule(
-      id: 'patient_register_standalone',
-      title: 'Patient Registration',
-      description: 'Independent patient registration entry',
-      icon: Icons.app_registration_rounded,
-      requiredPermission: AppPermission.registerPatients,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      hideFromExecutives: true, // Operational-only
-      builder: (context, data) => PatientRegisterPage(
-        branchId: data['branchId'] ?? 'unknown',
-        receptionistId: data['uid'] ?? 'unknown',
-      ),
-      category: ModuleCategory.dispensary,
-    ),
-    AppModule(
-      id: 'patient_details',
-      title: 'Patient Records',
-      description: 'Search and view detailed patient medical history',
-      icon: Icons.assignment_ind_rounded,
-      requiredPermission: AppPermission.viewPatients,
-      isBranchDependent: true,
-      supportsGlobalWrapper: true,
-      hideFromExecutives: true, // Operational-only
-      builder: (context, data) => PatientDetailScreen(
-        patientId: '',
-        isOnline: true,
-        localBox: Hive.box('local'),
-        branchId: data['branchId'] ?? 'unknown',
-        doctorId: data['uid'] ?? 'unknown',
-        isAdmin: true,
-      ),
-      category: ModuleCategory.dispensary,
-    ),
+    // ── SCHOOL MODULES ──
     AppModule(
       id: 'school_module',
       title: 'Taleem-o-Tarbiyat School',
@@ -728,7 +785,17 @@ class ModuleRegistry {
       return ps.hasPermission(role, m.requiredPermission!);
     }).toList();
 
-    // 2. Role-specific strict overrides (Supervisor & Branch Manager)
+    // 2. HQ Manager specific exclusions: Remove 'server_sync' (Server Control) and 'office_boy' (Office Boy)
+    final isHqManager = normalizedRole == 'hq manager' ||
+        normalizedRole == 'hq_manager' ||
+        normalizedRole == 'headquarters manager' ||
+        normalizedRole == 'hqmanager' ||
+        normalizedRole == 'hq';
+    if (isHqManager) {
+      modules.removeWhere((m) => m.id == 'server_sync' || m.id == 'office_boy');
+    }
+
+    // 3. Role-specific strict overrides (Supervisor & Branch Manager)
     if (normalizedRole == 'supervisor' || normalizedRole == 'branch manager') {
       final isBM = normalizedRole == 'branch manager';
       
@@ -745,6 +812,7 @@ class ModuleRegistry {
         allowedIds.addAll([
           'kitchen',
           'dasterkhwaan_inventory',
+          'dasterkhwaan_food_log',
           'office_boy',
           'donations',
           'patients_list',
@@ -791,7 +859,6 @@ class ModuleRegistry {
           .where((m) => allowedIds.contains(m.id))
           .map((m) {
             var updated = m.copyWith(title: renameMap[m.id]);
-
 
             // Override Inventory builder for supervisor/BM to use InventoryPage in read-only mode
             if (m.id == 'inventory') {

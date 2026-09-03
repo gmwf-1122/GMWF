@@ -210,6 +210,11 @@ class SchoolLocalStorage {
         .toList();
   }
 
+  static Stream<List<Map<String, dynamic>>> streamBooksCached(String branchId) async* {
+    yield getAllBooksCached(branchId);
+    yield* _getBooksBox().watch().map((_) => getAllBooksCached(branchId));
+  }
+
   static Future<void> cacheBookLoan(String branchId, String loanId, Map<String, dynamic> data) async {
     final key = _bookLoanKey(branchId, loanId);
     final box = _getBookLoansBox();
@@ -229,6 +234,11 @@ class SchoolLocalStorage {
         })
         .whereType<Map<String, dynamic>>()
         .toList();
+  }
+
+  static Stream<List<Map<String, dynamic>>> streamBookLoansCached(String branchId) async* {
+    yield getAllBookLoansCached(branchId);
+    yield* _getBookLoansBox().watch().map((_) => getAllBookLoansCached(branchId));
   }
 
   // ── Attendance Logs Cache ──────────────────────────────────────────────────
@@ -746,7 +756,7 @@ class SchoolLocalStorage {
       if (teacherId != null && tid == teacherId) {
         t['homeroomGrade'] = grade;
         t['homeroomSection'] = section;
-        t['designation'] = 'Class Incharge (${grade} - ${section})';
+        t['designation'] = 'Class Incharge ($grade - $section)';
         await saveTeacher(branchId: branchId, teacherId: tid, teacherData: t);
       } else if (curGrade == grade && curSec == section && tid != teacherId) {
         // Remove previous homeroom assignment from other teacher

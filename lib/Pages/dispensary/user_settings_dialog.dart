@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/offline_auth_service.dart';
+import '../../services/user_theme_service.dart';
 
 class DispensaryUserSettingsDialog {
   static Future<void> show(
@@ -250,9 +251,7 @@ class DispensaryUserSettingsDialog {
                                         }
 
                                         // 2. Save dark mode preference
-                                        if (Hive.isBoxOpen('app_settings')) {
-                                          await Hive.box('app_settings').put('is_dark_mode', isDarkMode);
-                                        }
+                                        await UserThemeService.setDarkMode(isDarkMode);
 
                                         // 3. Name update if changed
                                         if (newName != initialName && newName.isNotEmpty) {

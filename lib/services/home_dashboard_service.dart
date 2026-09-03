@@ -52,15 +52,25 @@ bool _isSameDate(dynamic rawDate, String ymd, String dmyy) {
 }
 
 bool _isMatchingBranch(String docBranchId, String targetBranchId) {
-  final b1 = docBranchId.toLowerCase().trim();
-  final b2 = targetBranchId.toLowerCase().trim();
-  if (b2 == 'all' || b2 == 'hq' || b2 == 'gujrat') return true;
-  return b1 == b2 || b1.isEmpty || b1 == 'all';
+  final b1 = docBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+  final b2 = targetBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
+  if (b2 == 'all' || b2 == 'global') return true;
+  if (b1.isEmpty) return false;
+  if (b1 == b2) return true;
+  if (b2 == 'karachi') {
+    return b1.contains('karachi') || b1.contains('haji') || b1.contains('kapaya') || b1.contains('saddar');
+  }
+  if (b2.contains('karachi') || b2.contains('haji') || b2.contains('saddar') || b2.contains('kapaya')) {
+    if (b2.contains('haji')) return b1.contains('haji');
+    if (b2.contains('saddar') || b2.contains('kapaya')) return b1.contains('saddar') || b1.contains('kapaya') || (b1 == 'karachi');
+    return b1.contains('karachi');
+  }
+  return b1 == b2;
 }
 
 /// Computes branch statistics from local Hive data (local_entries, local_donations, and historical branch cache).
-/// Falls back to Firestore only if local data is completely empty, with a short timeout.
-Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async {
+/// Pure instantaneous local retrieval by default (0-2ms).
+Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool allowRemoteFallback = false}) async {
   final bId = branchId.toLowerCase().trim();
   final dateKeyYmd = DateFormat('yyyy-MM-dd').format(date);
   final cacheTTLKey = '$bId|$dateKeyYmd';
@@ -118,7 +128,7 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
 
           final b = (e['branchId'] as String? ?? '').toLowerCase().trim();
           final dk = e['dateKey']?.toString();
-          if ((bId == 'all' || b == bId) && dk == dateKeyDmyy) {
+          if (_isMatchingBranch(b, bId) && dk == dateKeyDmyy) {
             final rawSerial = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? k).toString().trim().toLowerCase();
             final parts = rawSerial.split('-');
             final sNum = parts.length > 1 ? parts.last : rawSerial;
@@ -216,7 +226,7 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
           final val = box.get(key);
           if (val is Map) {
             final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
-            if (bId == 'all' || b == bId || b.isEmpty) {
+            if (_isMatchingBranch(b, bId)) {
               final status = val['status']?.toString().toLowerCase();
               if (status == 'present' || status == 'late' || status == 'overtime') {
                 empAttendance++;
@@ -246,8 +256,8 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date) async 
     employeeAttendance: empAttendance,
   );
 
-  // If all local numbers are 0 (e.g. fresh Chrome Web session without offline Hive storage), attempt a quick Firestore fetch
-  if (z == 0 && nz == 0 && donTotal == 0 && dispRev == 0 && empAttendance == 0) {
+  // If all local numbers are 0 and remote fallback is explicitly allowed, attempt a quick Firestore fetch
+  if (allowRemoteFallback && z == 0 && nz == 0 && donTotal == 0 && dispRev == 0 && empAttendance == 0) {
     try {
       final fsRes = await _fetchFirestoreBranchStats(bId, date);
       if (fsRes != null) {
@@ -270,14 +280,14 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
     int z = 0, nz = 0, gm = 0, das = 0, dispensed = 0, dispRev = 0;
     int zRev = 0, nzRev = 0, gmRev = 0;
 
-    // 1. Donations
+    // 1. Donations for today (targeted branch query with short timeout)
     try {
       final donSnap = await FirebaseFirestore.instance
           .collection('branches').doc(bId).collection('donations')
           .where('date', isGreaterThanOrEqualTo: dateKeyYmd)
           .where('date', isLessThanOrEqualTo: dateKeyYmd)
           .get()
-          .timeout(const Duration(milliseconds: 1500));
+          .timeout(const Duration(milliseconds: 1200));
       for (final doc in donSnap.docs) {
         final val = doc.data();
         final status = val['status']?.toString().toLowerCase();
@@ -291,67 +301,51 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
       }
     } catch (_) {}
 
-    // Fallback: try top-level donations collection if branch-level found nothing
-    if (donTotal == 0) {
-      try {
-        final donSnap = await FirebaseFirestore.instance
-            .collection('donations')
-            .get()
-            .timeout(const Duration(seconds: 4));
-        for (final doc in donSnap.docs) {
-          final val = doc.data();
-          final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
-          final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
-          if (_isMatchingBranch(b, bId) && _isSameDate(d, dateKeyYmd, dateKeyDmyy)) {
-            final status = val['status']?.toString().toLowerCase();
-            if (status == 'deleted') continue;
-            final amt = val['amount'];
-            final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-            donTotal += amtDouble.toInt();
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 2. Serials (zakat, non-zakat, gmwf) + dispensary + dasterkhwaan
+    // 2. Serials (zakat, non-zakat, gmwf) + dispensary
     try {
       final base = FirebaseFirestore.instance
-          .collection('branches').doc(bId).collection('serials').doc(dateKeyDmyy);
+          .collection('branches').doc(bId).collection('serials');
 
       final results = await Future.wait([
-        base.collection('zakat').get(),
-        base.collection('non-zakat').get(),
-        base.collection('gmwf').get(),
-        base.collection('dasterkhwan').get(),
-        FirebaseFirestore.instance.collection('branches/$bId/dispensary/$dateKeyDmyy/$dateKeyDmyy').get(),
-      ]).timeout(const Duration(seconds: 6));
+        base.doc(dateKeyDmyy).collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dateKeyDmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dateKeyDmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dateKeyDmyy).collection('dasterkhwan').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dateKeyDmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+      ]).timeout(const Duration(milliseconds: 2000));
 
-      // Zakat patients
-      for (final doc in (results[0] as QuerySnapshot).docs) {
-        z++;
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        final rev = 20 * d.toInt();
-        dispRev += rev;
-        zRev += rev;
+      // Zakat patients (root + saddar + haji)
+      for (final i in [0, 4, 7]) {
+        for (final doc in (results[i] as QuerySnapshot).docs) {
+          z++;
+          final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+          final rev = 20 * d.toInt();
+          dispRev += rev;
+          zRev += rev;
+        }
       }
 
-      // Non-zakat patients
-      for (final doc in (results[1] as QuerySnapshot).docs) {
-        nz++;
-        final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
-        final rev = 100 * d.toInt();
-        dispRev += rev;
-        nzRev += rev;
+      // Non-zakat patients (root + saddar + haji)
+      for (final i in [1, 5, 8]) {
+        for (final doc in (results[i] as QuerySnapshot).docs) {
+          nz++;
+          final d = (doc.data() as Map<String, dynamic>?)?['daysOfMedicine'] as num? ?? 1;
+          final rev = 100 * d.toInt();
+          dispRev += rev;
+          nzRev += rev;
+        }
       }
 
       // GMWF patients
-      gm = (results[2] as QuerySnapshot).size;
+      gm = (results[2] as QuerySnapshot).size + (results[6] as QuerySnapshot).size + (results[9] as QuerySnapshot).size;
 
       // Dasterkhwaan tokens
       das = (results[3] as QuerySnapshot).size;
-
-      // Dispensed patients
-      dispensed = (results[4] as QuerySnapshot).size;
     } catch (_) {}
 
     // Fallback: check branches/$bId/entries collection if serials subcollection was empty
@@ -361,7 +355,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
             .collection('branches').doc(bId).collection('entries')
             .where('dateKey', isEqualTo: dateKeyYmd)
             .get()
-            .timeout(const Duration(seconds: 4));
+            .timeout(const Duration(milliseconds: 1500));
         for (final doc in entriesSnap.docs) {
           final data = doc.data();
           final status = data['status']?.toString().toLowerCase();
@@ -410,7 +404,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
       gmwfRevenue: gmRev,
       employeeAttendance: empAtt,
     );
-  } catch (_) {
+  } catch (e) {
     return null;
   }
 }
@@ -474,12 +468,12 @@ class TodayVsYesterday {
 /// stat tiles (aggregated) and the branch table (per-row) are built from
 /// this single fetch so we don't hit Firestore/cache twice.
 Future<Map<String, TodayVsYesterday>> fetchTodayVsYesterdayPerBranch(
-    List<String> ids) async {
+    List<String> ids, {bool allowRemoteFallback = false}) async {
   if (ids.isEmpty) return {};
   final yesterday = DateTime.now().subtract(const Duration(days: 1));
 
-  final todayResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, DateTime.now())));
-  final yestResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, yesterday)));
+  final todayResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, DateTime.now(), allowRemoteFallback: allowRemoteFallback)));
+  final yestResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, yesterday, allowRemoteFallback: false)));
 
   final out = <String, TodayVsYesterday>{};
   for (var i = 0; i < ids.length; i++) {
@@ -553,11 +547,21 @@ class KarachiCampBreakdown {
   int get totalPatients => hajiCampPatients + kapayaPatients;
 }
 
+KarachiCampBreakdown? _cachedKarachiCampBreakdown;
+DateTime? _lastKarachiCampBreakdownTime;
+String? _cachedKarachiCampDateKey;
+
 Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
-  _localStatsTTLCache.clear();
   final targetDate = date ?? DateTime.now();
   final ymd = DateFormat('yyyy-MM-dd').format(targetDate);
   final dmyy = DateFormat('ddMMyy').format(targetDate);
+
+  if (_cachedKarachiCampBreakdown != null &&
+      _cachedKarachiCampDateKey == ymd &&
+      _lastKarachiCampBreakdownTime != null &&
+      DateTime.now().difference(_lastKarachiCampBreakdownTime!).inSeconds < 45) {
+    return _cachedKarachiCampBreakdown!;
+  }
 
   int hajiMZ = 0, hajiMNZ = 0, hajiMGM = 0;
   int hajiEZ = 0, hajiENZ = 0, hajiEGM = 0;
@@ -589,7 +593,7 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
     }
   }
 
-  // 1. Local entries across all possible Hive keys
+  // 1. Local entries strictly belonging to Karachi
   try {
     if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
       final box = Hive.box(LocalStorageService.entriesBox);
@@ -599,7 +603,7 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
           final e = Map<String, dynamic>.from(val);
           final b = (e['branchId'] ?? '').toString().toLowerCase().trim();
           final kStr = k.toString().toLowerCase();
-          if (b.isEmpty || b == 'all' || b.contains('karachi') || b.contains('haji') || b.contains('kapaya') || b.contains('saddar') ||
+          if ((b.isNotEmpty && (b.contains('karachi') || b.contains('haji') || b.contains('kapaya') || b.contains('saddar'))) ||
               kStr.contains('karachi') || kStr.contains('haji') || kStr.contains('kapaya') || kStr.contains('saddar')) {
             addEntryIfValid(e, k);
           }
@@ -608,20 +612,84 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
     }
   } catch (_) {}
 
-  // 2. Cloud entries fallback only if local entries were not found
+  // 2. Cloud entries fallback from Firestore serials
   if (entryMap.isEmpty) {
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('branches')
-          .doc('karachi')
-          .collection('entries')
-          .where('dateKey', isEqualTo: ymd)
-          .limit(500)
-          .get()
-          .timeout(const Duration(seconds: 4));
+      final base = FirebaseFirestore.instance.collection('branches').doc('karachi').collection('serials');
+      final fsResults = await Future.wait([
+        base.doc('${dmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc('${dmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dmyy).collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
+        base.doc(dmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
+      ]).timeout(const Duration(milliseconds: 2000));
 
-      for (final doc in snap.docs) {
-        addEntryIfValid(doc.data(), doc.id);
+      for (final doc in (fsResults[0] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'zakat';
+        data['branchId'] = 'karachi_saddar';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[1] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'non-zakat';
+        data['branchId'] = 'karachi_saddar';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[2] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'gmwf';
+        data['branchId'] = 'karachi_saddar';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[3] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'zakat';
+        data['branchId'] = 'karachi_haji';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[4] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'non-zakat';
+        data['branchId'] = 'karachi_haji';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[5] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'gmwf';
+        data['branchId'] = 'karachi_haji';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[6] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'zakat';
+        data['branchId'] = 'karachi';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[7] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'non-zakat';
+        data['branchId'] = 'karachi';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
+      }
+      for (final doc in (fsResults[8] as QuerySnapshot).docs) {
+        final data = Map<String, dynamic>.from(doc.data() as Map);
+        data['category'] = 'gmwf';
+        data['branchId'] = 'karachi';
+        data['dateKey'] = ymd;
+        addEntryIfValid(data, doc.id);
       }
     } catch (_) {}
   }
@@ -641,14 +709,25 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
       serial: (e['serial'] ?? e['id'])?.toString(),
     );
 
-    final sTag = e['session']?.toString().toLowerCase().trim();
-    bool isEvening = sTag == 'evening';
-    if (sTag == null || sTag.isEmpty) {
-      final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
+    final sTag = (e['session'] ?? e['shift'] ?? e['campSession'] ?? e['slot'] ?? '').toString().toLowerCase().trim();
+    bool isEvening = sTag == 'evening' || sTag == 'night';
+    if (sTag == 'morning') {
+      isEvening = false;
+    } else if (sTag.isEmpty || sTag == 'day') {
+      final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['time'] ?? e['dispensedAt'] ?? e['date'] ?? e['lastUpdatedAt'];
       if (rawTime != null) {
         try {
-          final dt = DateTime.parse(rawTime.toString());
-          isEvening = dt.hour >= 14;
+          DateTime? dt;
+          if (rawTime is Timestamp) {
+            dt = rawTime.toDate().toLocal();
+          } else if (rawTime is DateTime) {
+            dt = rawTime.toLocal();
+          } else {
+            dt = DateTime.tryParse(rawTime.toString())?.toLocal();
+          }
+          if (dt != null) {
+            isEvening = dt.hour >= 14 || dt.hour < 6;
+          }
         } catch (_) {
           isEvening = false;
         }
@@ -697,7 +776,7 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
   final kapayaNZ = kapayaMNZ + kapayaENZ;
   final kapayaGM = kapayaMGM + kapayaEGM;
 
-  return KarachiCampBreakdown(
+  final res = KarachiCampBreakdown(
     hajiCampPatients: hajiZ + hajiNZ + hajiGM,
     hajiCampZakat: hajiZ,
     hajiCampNonZakat: hajiNZ,
@@ -730,6 +809,11 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
     kapayaEveningNonZakat: kapayaENZ,
     kapayaEveningGmwf: kapayaEGM,
   );
+
+  _cachedKarachiCampBreakdown = res;
+  _cachedKarachiCampDateKey = ymd;
+  _lastKarachiCampBreakdownTime = DateTime.now();
+  return res;
 }
 
 /// Fetches daily revenue total for the past [days] days for the list of branches,
@@ -940,35 +1024,29 @@ class RecentActivityService {
       } catch (_) {}
 
       try {
-        final entriesSnap = await FirebaseFirestore.instance
-            .collectionGroup('entries')
-            .limit(limit)
-            .get()
-            .timeout(const Duration(seconds: 4));
-        for (final doc in entriesSnap.docs) {
-          final data = doc.data();
-          final bId = (data['branchId'] as String? ?? '').toLowerCase().trim();
-          if (branchId != null && bId != branchId.toLowerCase().trim() && branchId != 'all') continue;
-
-          final dtStr = data['createdAt'] ?? data['timestamp'];
+        final bId = (branchId != null && branchId != 'all') ? branchId : 'default';
+        final localEntries = LocalStorageService.getLocalEntries(bId);
+        for (final data in localEntries.take(limit)) {
+          final dtStr = data['createdAt'] ?? data['timestamp'] ?? data['date'];
           DateTime dt = DateTime.now();
           if (dtStr != null) {
             dt = DateTime.tryParse(dtStr.toString()) ?? DateTime.now();
           }
 
-          final serial = data['serial']?.toString() ?? doc.id;
+          final serial = data['serial']?.toString() ?? data['id']?.toString() ?? 'N/A';
           final pName = data['patientName']?.toString() ?? 'Unknown Patient';
           final qType = (data['queueType'] as String? ?? 'zakat').toUpperCase();
           final status = data['status']?.toString() ?? 'issued';
+          final entryBranch = (data['branchId'] as String? ?? bId).toLowerCase().trim();
 
           list.add(RecentActivity(
-            id: 'tok_${doc.id}',
+            id: 'tok_$serial',
             title: 'Token #$serial Issued',
             subtitle: 'Patient: $pName ($qType)',
             timestamp: dt,
             type: 'token',
-            branchId: bId,
-            branchName: resolveBranchName(bId),
+            branchId: entryBranch,
+            branchName: resolveBranchName(entryBranch),
             status: status,
           ));
         }
@@ -1060,17 +1138,18 @@ class HomeLineChartPoint {
   });
 }
 
-Future<List<HomeLineChartPoint>> fetchChartPoints(List<String> branchIds, {int weeks = 5}) async {
+Future<List<HomeLineChartPoint>> fetchChartPoints(List<String> branchIds, {int months = 5}) async {
   if (branchIds.isEmpty) return [];
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
 
-  final weekFutures = List.generate(weeks, (i) async {
-    final endOfWeek = today.subtract(Duration(days: (weeks - 1 - i) * 7));
-    final startOfWeek = endOfWeek.subtract(const Duration(days: 6));
+  final monthFutures = List.generate(months, (i) async {
+    final monthStart = DateTime(today.year, today.month - (months - 1 - i), 1);
+    final nextMonth = DateTime(monthStart.year, monthStart.month + 1, 1);
+    final endOfMonth = nextMonth.subtract(const Duration(days: 1));
 
-    final dayFutures = List.generate(7, (d) async {
-      final date = startOfWeek.add(Duration(days: d));
+    final dayFutures = List.generate(nextMonth.difference(monthStart).inDays, (d) async {
+      final date = monthStart.add(Duration(days: d));
       final results = await Future.wait(branchIds.map((id) => fetchHistoricalDayStats(id, date)));
       final combined = combineBranchStats(results);
 
@@ -1104,59 +1183,106 @@ Future<List<HomeLineChartPoint>> fetchChartPoints(List<String> branchIds, {int w
     }
 
     return HomeLineChartPoint(
-      date: endOfWeek,
+      date: endOfMonth,
       patientsRevenue: totalRevenue,
       donations: totalDonations,
       tokens: totalTokens,
-      employeesPresent: (totalEmployeesPresent / 7).round(),
+      employeesPresent: (totalEmployeesPresent / daysData.length).round(),
     );
   });
 
-  return await Future.wait(weekFutures);
+  return await Future.wait(monthFutures);
 }
 
-Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {int weeks = 5}) async {
+Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {int months = 5}) async {
   if (branchIds.isEmpty) return [];
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
 
-  final List<HomeLineChartPoint> points = [];
+  final monthFutures = List.generate(months, (i) async {
+    final monthStart = DateTime(today.year, today.month - (months - 1 - i), 1);
+    final nextMonth = DateTime(monthStart.year, monthStart.month + 1, 1);
+    final endOfMonth = nextMonth.subtract(const Duration(days: 1));
 
-  for (int i = 0; i < weeks; i++) {
-    final endOfWeek = today.subtract(Duration(days: (weeks - 1 - i) * 7));
-    final startOfWeek = endOfWeek.subtract(const Duration(days: 6));
-
-    int totalRevenue = 0, totalDonations = 0, totalTokens = 0, totalEmployeesPresent = 0;
-
-    for (int d = 0; d < 7; d++) {
-      final date = startOfWeek.add(Duration(days: d));
+    final dayFutures = List.generate(nextMonth.difference(monthStart).inDays, (d) async {
+      final date = monthStart.add(Duration(days: d));
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
 
-      for (final id in branchIds) {
-        final stats = await fetchLocalBranchStats(id, date);
-        totalRevenue += stats.dispensaryRevenue;
-        totalDonations += stats.donations;
-        totalTokens += stats.zakat + stats.nonZakat + stats.gmwf + stats.dasterkhwaan;
+      int dRevenue = 0, dDonations = 0, dTokens = 0, dEmployeesPresent = 0;
 
+      final branchFutures = branchIds.map((id) async {
+        final stats = await fetchLocalBranchStats(id, date, allowRemoteFallback: false);
+        int empCount = 0;
         try {
           final atts = FinanceLocalStorage.getAttendanceForDate(id, dateStr);
           for (final att in atts) {
-            if (att['status'] == 'present') totalEmployeesPresent++;
+            if (att['status'] == 'present') empCount++;
           }
         } catch (_) {}
+
+        return (
+          revenue: stats.dispensaryRevenue,
+          donations: stats.donations,
+          tokens: stats.zakat + stats.nonZakat + stats.gmwf + stats.dasterkhwaan,
+          emp: empCount,
+        );
+      });
+
+      final branchStatsList = await Future.wait(branchFutures);
+      for (final bs in branchStatsList) {
+        dRevenue += bs.revenue;
+        dDonations += bs.donations;
+        dTokens += bs.tokens;
+        dEmployeesPresent += bs.emp;
       }
+
+      return _DayPointData(
+        revenue: dRevenue,
+        donations: dDonations,
+        tokens: dTokens,
+        employeesPresent: dEmployeesPresent,
+      );
+    });
+
+    final daysData = await Future.wait(dayFutures);
+
+    int totalRevenue = 0, totalDonations = 0, totalTokens = 0, totalEmployeesPresent = 0;
+    for (final dd in daysData) {
+      totalRevenue += dd.revenue;
+      totalDonations += dd.donations;
+      totalTokens += dd.tokens;
+      totalEmployeesPresent += dd.employeesPresent;
     }
 
-    points.add(HomeLineChartPoint(
-      date: endOfWeek,
+    return HomeLineChartPoint(
+      date: endOfMonth,
       patientsRevenue: totalRevenue,
       donations: totalDonations,
       tokens: totalTokens,
-      employeesPresent: (totalEmployeesPresent / 7).round(),
-    ));
-  }
+      employeesPresent: (totalEmployeesPresent / daysData.length).round(),
+    );
+  });
 
-  return points;
+  return await Future.wait(monthFutures);
+}
+
+Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds) async {
+  final today = DateTime.now();
+  final dates = List.generate(7, (index) {
+    final date = today.subtract(Duration(days: 6 - index));
+    return DateTime(date.year, date.month, date.day);
+  });
+  final result = <String, int>{};
+  for (final branchId in branchIds) {
+    final daily = await Future.wait(
+      dates.map((date) => fetchHistoricalDayStats(branchId, date)),
+    );
+    result[branchId] = daily.fold<int>(
+      0,
+      (total, stats) => total + stats.zakat + stats.nonZakat + stats.gmwf,
+    );
+  }
+  return result;
 }
 
 class _DayPointData {
@@ -1165,4 +1291,4 @@ class _DayPointData {
   final int tokens;
   final int employeesPresent;
   const _DayPointData({required this.revenue, required this.donations, required this.tokens, required this.employeesPresent});
-}
+}

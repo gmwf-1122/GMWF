@@ -12,6 +12,7 @@ class BiometricDeviceConfig {
   final DateTime? lastHeartbeat;
   final DateTime? lastSyncTimestamp;
   final bool enabled;
+  final String? pollingOwner; // [FIX-1.4] 'dart' | 'python' | null (default/auto)
 
   BiometricDeviceConfig({
     required this.deviceId,
@@ -25,6 +26,7 @@ class BiometricDeviceConfig {
     this.lastHeartbeat,
     this.lastSyncTimestamp,
     this.enabled = true,
+    this.pollingOwner,
   });
 
   factory BiometricDeviceConfig.fromMap(Map<dynamic, dynamic> map) {
@@ -40,6 +42,7 @@ class BiometricDeviceConfig {
       lastHeartbeat: map['lastHeartbeat'] != null ? DateTime.tryParse(map['lastHeartbeat'].toString()) : null,
       lastSyncTimestamp: map['lastSyncTimestamp'] != null ? DateTime.tryParse(map['lastSyncTimestamp'].toString()) : null,
       enabled: map['enabled'] != false,
+      pollingOwner: map['pollingOwner']?.toString(),
     );
   }
 
@@ -56,6 +59,7 @@ class BiometricDeviceConfig {
       'lastHeartbeat': lastHeartbeat?.toIso8601String(),
       'lastSyncTimestamp': lastSyncTimestamp?.toIso8601String(),
       'enabled': enabled,
+      'pollingOwner': pollingOwner,
     };
   }
 
@@ -71,6 +75,7 @@ class BiometricDeviceConfig {
     DateTime? lastHeartbeat,
     DateTime? lastSyncTimestamp,
     bool? enabled,
+    String? pollingOwner,
   }) {
     return BiometricDeviceConfig(
       deviceId: deviceId ?? this.deviceId,
@@ -84,6 +89,7 @@ class BiometricDeviceConfig {
       lastHeartbeat: lastHeartbeat ?? this.lastHeartbeat,
       lastSyncTimestamp: lastSyncTimestamp ?? this.lastSyncTimestamp,
       enabled: enabled ?? this.enabled,
+      pollingOwner: pollingOwner ?? this.pollingOwner,
     );
   }
 }

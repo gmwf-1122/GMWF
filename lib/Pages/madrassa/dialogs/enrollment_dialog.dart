@@ -12,6 +12,8 @@ import '../../../../services/image_upload_service.dart';
 import '../../../../services/zkteco_network_service.dart';
 import '../../../../widgets/media_upload_tile.dart';
 import '../../../utils/formatters.dart';
+import '../utils/madrassa_local_storage.dart';
+import '../../../services/user_theme_service.dart';
 
 void showAddStudentDialog(
   BuildContext context,
@@ -70,6 +72,7 @@ void showAddStudentDialog(
 
   String? bFormBase64 = studentData?['bFormUrl'] ?? studentData?['bFormBase64'];
   String? guardianCnicBase64 = studentData?['guardianCnicUrl'] ?? studentData?['guardianCnicBase64'];
+  String? hifzCertificateBase64 = studentData?['hifzCertificateUrl'] ?? studentData?['hifzCertificateBase64'];
 
   String? nameError;
   String? rollError;
@@ -260,11 +263,16 @@ void showAddStudentDialog(
           });
         }
 
+        final isDark = UserThemeService.isDarkMode(username);
+        final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+
         return AlertDialog(
+          backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           title: Text(
             isEdit ? 'Edit Student Details' : context.l.enrollNewStudent,
-            style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+            style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: textPrimary)),
           ),
           content: SingleChildScrollView(
             child: Column(
@@ -525,6 +533,14 @@ void showAddStudentDialog(
                   initialValue: bFormBase64,
                   isDocument: true,
                   onChanged: (val) => setDs(() => bFormBase64 = val),
+                ),
+                const SizedBox(height: 8),
+                MediaUploadTile(
+                  label: 'Certificate of Hifz Completion',
+                  icon: Icons.workspace_premium_outlined,
+                  initialValue: hifzCertificateBase64,
+                  isDocument: true,
+                  onChanged: (val) => setDs(() => hifzCertificateBase64 = val),
                 ),
                 
                 const SizedBox(height: 16),
@@ -948,66 +964,54 @@ void showAddStudentDialog(
                     'hasPrevMadrassa': hasPrevMadrassa,
                     'prevMadrassaName': prevMadrassaCtrl.text.trim(),
                     'prevHifzLines': int.tryParse(prevHifzCtrl.text.trim()) ?? 0,
-                    'lastUpdatedAt': FieldValue.serverTimestamp(),
                     'photoUrl': photoUrl,
                     'bFormUrl': bFormBase64 ?? '',
+                    'bFormBase64': bFormBase64 ?? '',
                     'guardianCnicUrl': guardianCnicBase64 ?? '',
+                    'guardianCnicBase64': guardianCnicBase64 ?? '',
+                    'hifzCertificateUrl': hifzCertificateBase64 ?? '',
+                    'hifzCertificateBase64': hifzCertificateBase64 ?? '',
                   };
 
-                  if (isEdit) {
-                    await FirebaseFirestore.instance
-                        .collection('branches')
-                        .doc(branchId)
-                        .collection('madrassa_students')
-                        .doc(studentId)
-                        .set(finalData, SetOptions(merge: true));
-
-                    // Write central audit log
-                    await MadrassaAuditService.logAction(
-                      branchId: branchId,
-                      editor: username,
-                      role: role,
-                      type: 'student_edit',
-                      message: 'Updated details for student ${finalData['name']} (Roll: ${finalData['rollNumber']})',
-                      studentId: studentId,
-                      studentName: finalData['name'] as String?,
-                    );
-                  } else {
-                    final now = DateTime.now();
-                    sRef = await FirebaseFirestore.instance
-                        .collection('branches')
-                        .doc(branchId)
-                        .collection('madrassa_students')
-                        .add({
+                  final now = DateTime.now();
+                  final finalStudentId = await MadrassaLocalStorage.saveStudentLocalAndSync(
+                    branchId: branchId,
+                    studentId: isEdit ? studentId : '',
+                    data: {
                       ...finalData,
                       'branchId': branchId,
-                      'status': 'active',
-                      'auditLog': [
-                        {
-                          'status': 'active',
-                          'type': 'enrollment',
-                          'date': Timestamp.fromDate(joinDate),
-                          'reason': 'Initial Enrollment'
-                        }
-                      ],
-                      'currentLines': 0,
-                      'enrolledMonth': DateFormat('yyyy-MM').format(now),
-                      'createdAt': FieldValue.serverTimestamp(),
-                    });
+                      'status': studentData?['status'] ?? 'active',
+                      'batch': studentData?['batch'] ?? 'active',
+                      if (!isEdit) ...{
+                        'currentLines': 0,
+                        'enrolledMonth': DateFormat('yyyy-MM').format(now),
+                        'createdAt': now.toIso8601String(),
+                        'auditLog': [
+                          {
+                            'status': 'active',
+                            'type': 'enrollment',
+                            'date': joinDate.toIso8601String(),
+                            'reason': 'Initial Enrollment',
+                          }
+                        ],
+                      },
+                    },
+                    isNew: !isEdit,
+                  );
 
-                    // Write central audit log
-                    await MadrassaAuditService.logAction(
-                      branchId: branchId,
-                      editor: username,
-                      role: role,
-                      type: 'student_enrollment',
-                      message: 'Enrolled new student ${finalData['name']} (Roll: ${finalData['rollNumber']})',
-                      studentId: sRef.id,
-                      studentName: finalData['name'] as String?,
-                    );
-                  }
+                  // Write central audit log
+                  await MadrassaAuditService.logAction(
+                    branchId: branchId,
+                    editor: username,
+                    role: role,
+                    type: isEdit ? 'student_edit' : 'student_enrollment',
+                    message: isEdit
+                        ? 'Updated details for student ${finalData['name']} (Roll: ${finalData['rollNumber']})'
+                        : 'Enrolled new student ${finalData['name']} (Roll: ${finalData['rollNumber']})',
+                    studentId: finalStudentId,
+                    studentName: finalData['name'] as String?,
+                  );
 
-                  final finalStudentId = isEdit ? studentId : sRef!.id;
                   if (enteredPin.isNotEmpty) {
                     await ZkTecoNetworkService.assignPinToEntity(
                       entityId: finalStudentId,

@@ -496,10 +496,11 @@ class OfflineAuthService {
 
       await _secure.delete(key: _pwKey(canonicalUid));
       await _secure.delete(key: _dataKey(canonicalUid));
+      await _secure.delete(key: _aliasMapKey(key));
+      await _secure.delete(key: _aliasMapKey(canonicalUid));
       if (canonicalUid != key) {
         await _secure.delete(key: _pwKey(key));
         await _secure.delete(key: _dataKey(key));
-        await _secure.delete(key: _aliasMapKey(key));
       }
 
       final prefs = await SharedPreferences.getInstance();

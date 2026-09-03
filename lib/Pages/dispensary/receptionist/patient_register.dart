@@ -7,6 +7,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import 'package:gmwf/services/firestore_service.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/utils/formatters.dart';
 
 class PatientRegisterPage extends StatefulWidget {
   final String branchId;
@@ -82,6 +83,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   @override
   void initState() {
     super.initState();
+    if (_isKarachi && _visitType == 'Non-Zakat') {
+      _visitType = 'Zakat';
+    }
     _addFocusListeners();
     _cnicController.addListener(() {
       _checkIfAdultExistsForCnic(_cnicController.text);
@@ -149,8 +153,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       setState(() => _calculatedAge = 0);
       return;
     }
-    final p     = dob.split('-');
-    final birth = DateTime(int.parse(p[2]), int.parse(p[1]), int.parse(p[0]));
+    final birth = parseDobDateTime(dob);
+    if (birth == null) {
+      setState(() => _calculatedAge = 0);
+      return;
+    }
     final today = DateTime.now();
     int age     = today.year - birth.year;
     if (today.month < birth.month ||
@@ -185,9 +192,15 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     setState(() => _isSaving = true);
 
     try {
-      final parts = _dobController.text.split('-');
-      final dob   = DateTime(
-          int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
+      final dob = parseDobDateTime(_dobController.text);
+      if (dob == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please enter a valid date of birth')),
+          );
+        }
+        return;
+      }
 
       final patientMap = <String, dynamic>{
         'branchId':    widget.branchId,
@@ -198,7 +211,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         'dob':         dob,
         'gender':      _selectedGender,
         'bloodGroup':  _selectedBloodGroup ?? 'N/A',
-        'status':      _visitType,
+        'status':      (_isKarachi && _visitType == 'Non-Zakat') ? 'Zakat' : _visitType,
         'phone':       _phoneController.text.trim().isNotEmpty
             ? _phoneController.text.trim()
             : null,
@@ -319,23 +332,24 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           }
           if (_bloodGroupNode.hasFocus) {
             String? bg;
-            if (event.logicalKey == LogicalKeyboardKey.keyN || event.logicalKey == LogicalKeyboardKey.digit0) {
+            final key = event.logicalKey;
+            if (key == LogicalKeyboardKey.keyN || key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
               bg = 'N/A';
-            } else if (event.logicalKey == LogicalKeyboardKey.keyA || event.logicalKey == LogicalKeyboardKey.digit1) {
+            } else if (key == LogicalKeyboardKey.keyA || key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
               bg = 'A+';
-            } else if (event.logicalKey == LogicalKeyboardKey.digit2) {
+            } else if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
               bg = 'A-';
-            } else if (event.logicalKey == LogicalKeyboardKey.keyB || event.logicalKey == LogicalKeyboardKey.digit3) {
+            } else if (key == LogicalKeyboardKey.keyB || key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
               bg = 'B+';
-            } else if (event.logicalKey == LogicalKeyboardKey.digit4) {
+            } else if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
               bg = 'B-';
-            } else if (event.logicalKey == LogicalKeyboardKey.keyO || event.logicalKey == LogicalKeyboardKey.digit5) {
+            } else if (key == LogicalKeyboardKey.keyO || key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) {
               bg = 'O+';
-            } else if (event.logicalKey == LogicalKeyboardKey.digit6) {
+            } else if (key == LogicalKeyboardKey.digit6 || key == LogicalKeyboardKey.numpad6) {
               bg = 'O-';
-            } else if (event.logicalKey == LogicalKeyboardKey.keyX || event.logicalKey == LogicalKeyboardKey.digit7) {
+            } else if (key == LogicalKeyboardKey.keyX || key == LogicalKeyboardKey.digit7 || key == LogicalKeyboardKey.numpad7) {
               bg = 'AB+';
-            } else if (event.logicalKey == LogicalKeyboardKey.digit8) {
+            } else if (key == LogicalKeyboardKey.digit8 || key == LogicalKeyboardKey.numpad8) {
               bg = 'AB-';
             }
             if (bg != null) {
@@ -349,7 +363,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
               setState(() => _visitType = 'Zakat');
               return KeyEventResult.handled;
             } else if (event.logicalKey == LogicalKeyboardKey.keyN) {
-              setState(() => _visitType = 'Non-Zakat');
+              if (!_isKarachi) {
+                setState(() => _visitType = 'Non-Zakat');
+              }
               return KeyEventResult.handled;
             } else if (event.logicalKey == LogicalKeyboardKey.keyG) {
               setState(() => _visitType = 'GMWF');

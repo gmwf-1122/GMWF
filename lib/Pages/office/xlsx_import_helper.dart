@@ -87,10 +87,10 @@ class XlsxImportHelper {
               if (previewRows.isEmpty) return;
               setDiagState(() { isImporting = true; statusMessage = 'Importing...'; });
 
-              final curUserMap = Hive.box('local_users').values.firstOrNull;
-              final curUser = curUserMap?['username']?.toString() ?? 'Admin';
-              final performedByName = curUserMap?['name']?.toString() ?? curUserMap?['username']?.toString() ?? 'Admin';
-              final performedBy = curUserMap?['uid']?.toString() ?? curUserMap?['id']?.toString() ?? 'unknown';
+              final curUserMap = LocalStorageService.getActiveUserData();
+              final curUser = LocalStorageService.getActiveUsername();
+              final performedByName = curUserMap['name']?.toString() ?? curUser;
+              final performedBy = curUserMap['uid']?.toString() ?? curUserMap['id']?.toString() ?? 'admin';
 
               try {
                 if (importType == 'school_students') {

@@ -16,6 +16,7 @@ import '../settings/biometric_device_manager_page.dart';
 import 'bulk_attendance_dialog.dart';
 import 'bulk_individual_attendance_dialog.dart';
 import 'shared_widgets.dart';
+import '../../services/user_theme_service.dart';
 
 class AttendanceTab extends StatefulWidget {
   final String branchId;
@@ -69,14 +70,22 @@ class _AttendanceTabState extends State<AttendanceTab> {
     try {
       final date = targetDate ?? widget.date;
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
-      // Pull latest from hardware scanners
-      await ZkTecoNetworkService.syncAllDevices();
-      // Push all local recorded attendance to Cloud Firestore
-      await ZkTecoNetworkService.syncAllRecordedAttendanceToFirestore();
-      // Download branch attendance records
+      // 1. Download employees from cloud so active staff roster is immediately loaded
+      await FinanceLocalStorage.downloadEmployees(widget.branchId, force: true);
+      // 2. Download attendance records from cloud (force fresh pull for target date)
       await FinanceLocalStorage.downloadAttendance(widget.branchId, specificDateStr: dateStr, force: true);
-      // Re-route any unmapped punches
+      // 3. Re-route any pending unmapped punches
       await ZkTecoNetworkService.processPendingUnmappedPunches();
+      if (mounted) setState(() {});
+      
+      // 4. Hardware device pull & cloud punch sync in background
+      unawaited(Future(() async {
+        try {
+          await ZkTecoNetworkService.syncAllDevices();
+          await ZkTecoNetworkService.syncAllRecordedAttendanceToFirestore();
+          if (mounted) setState(() {});
+        } catch (_) {}
+      }));
     } catch (e) {
       debugPrint('[AttendanceTab] _syncPunches error: $e');
     } finally {
@@ -107,46 +116,100 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
   @override
   Widget build(BuildContext context) {
-    final tOriginal = RoleThemeScope.dataOf(context);
-    final t = RoleThemeData(
-      roleLabel: tOriginal.roleLabel,
-      isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF8FAFC),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF0F766E),
-      accentLight: const Color(0xFF14B8A6),
-      accentMuted: const Color(0xFFCCFBF1),
-      accentGradient: const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF0D9488)]),
-      glassTint: const Color(0x1A0F766E),
-      textPrimary: const Color(0xFF0F172A),
-      textSecondary: const Color(0xFF475569),
-      textTertiary: const Color(0xFF94A3B8),
-      danger: const Color(0xFFEF4444),
-      zakat: tOriginal.zakat,
-      nonZakat: tOriginal.nonZakat,
-      gmwf: tOriginal.gmwf,
-      cardFillTokens: tOriginal.cardFillTokens,
-      cardFillPrescriptions: tOriginal.cardFillPrescriptions,
-      cardFillDispensary: tOriginal.cardFillDispensary,
-      chartBar1: tOriginal.chartBar1,
-      chartBar2: tOriginal.chartBar2,
-      chartBar3: tOriginal.chartBar3,
-      chartGrid: tOriginal.chartGrid,
-    );
-    final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
+    return ValueListenableBuilder<Box>(
+      valueListenable: UserThemeService.listenable(),
+      builder: (context, _, __) {
+        final isDark = UserThemeService.isDarkMode();
+        final tOriginal = RoleThemeScope.dataOf(context);
+        final t = isDark
+            ? RoleThemeData(
+                roleLabel: tOriginal.roleLabel,
+                isDarkCanvas: true,
+                bg: const Color(0xFF0F172A),
+                bgCard: const Color(0xFF1E293B),
+                bgCardAlt: const Color(0xFF162032),
+                bgRule: const Color(0xFF334155),
+                accent: const Color(0xFF10B981),
+                accentLight: const Color(0xFF34D399),
+                accentMuted: const Color(0xFF064E3B).withValues(alpha: 0.3),
+                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                glassTint: const Color(0x1A10B981),
+                textPrimary: const Color(0xFFF8FAFC),
+                textSecondary: const Color(0xFF94A3B8),
+                textTertiary: const Color(0xFF64748B),
+                danger: const Color(0xFFEF4444),
+                zakat: tOriginal.zakat,
+                nonZakat: tOriginal.nonZakat,
+                gmwf: tOriginal.gmwf,
+                cardFillTokens: tOriginal.cardFillTokens,
+                cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+                cardFillDispensary: tOriginal.cardFillDispensary,
+                chartBar1: tOriginal.chartBar1,
+                chartBar2: tOriginal.chartBar2,
+                chartBar3: tOriginal.chartBar3,
+                chartGrid: tOriginal.chartGrid,
+              )
+            : RoleThemeData(
+                roleLabel: tOriginal.roleLabel,
+                isDarkCanvas: false,
+                bg: const Color(0xFFFBFDFF),
+                bgCard: Colors.white,
+                bgCardAlt: const Color(0xFFF6F9F8),
+                bgRule: const Color(0xFFF1F5F9),
+                accent: const Color(0xFF0F9A7A),
+                accentLight: const Color(0xFF4CB79A),
+                accentMuted: const Color(0xFFE8F6F0),
+                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                glassTint: const Color(0x1A10B981),
+                textPrimary: const Color(0xFF111827),
+                textSecondary: const Color(0xFF6B7280),
+                textTertiary: const Color(0xFF9CA3AF),
+                danger: const Color(0xFFEF4444),
+                zakat: tOriginal.zakat,
+                nonZakat: tOriginal.nonZakat,
+                gmwf: tOriginal.gmwf,
+                cardFillTokens: tOriginal.cardFillTokens,
+                cardFillPrescriptions: tOriginal.cardFillPrescriptions,
+                cardFillDispensary: tOriginal.cardFillDispensary,
+                chartBar1: tOriginal.chartBar1,
+                chartBar2: tOriginal.chartBar2,
+                chartBar3: tOriginal.chartBar3,
+                chartGrid: tOriginal.chartGrid,
+              );
+        final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
-      body: Column(
-        children: [
-          _buildDatePickerStrip(t),
-          Expanded(
-            child: ValueListenableBuilder(
-              valueListenable: FinanceLocalStorage.attendanceBox.listenable(),
-              builder: (ctx, Box box, _) {
-                final allEmployeesOfBranch = FinanceLocalStorage.getEmployees(widget.branchId).where((e) => e['isActive'] == true).toList();
+        return Scaffold(
+          backgroundColor: t.bg,
+          body: Column(
+            children: [
+              _buildDatePickerStrip(t),
+              Expanded(
+                child: ValueListenableBuilder(
+                  valueListenable: FinanceLocalStorage.employeesBox.listenable(),
+                  builder: (ctx, Box empBox, _) {
+                    return ValueListenableBuilder(
+                      valueListenable: FinanceLocalStorage.attendanceBox.listenable(),
+                      builder: (ctx, Box box, _) {
+                    final allEmployeesOfBranch = FinanceLocalStorage.getEmployees(widget.branchId).where((e) {
+                  final isActive = e['isActive'] as bool? ?? true;
+                  if (!isActive) return false;
+                  if (e['isDeleted'] == true || e['deleted'] == true) return false;
+                  final status = (e['status'] ?? e['employeeStatus'] ?? '').toString().trim().toLowerCase();
+                  if (status == 'left' ||
+                      status == 'offboarded' ||
+                      status == 'kicked' ||
+                      status == 'terminated' ||
+                      status == 'archived' ||
+                      status == 'inactive' ||
+                      status == 'deleted' ||
+                      status.contains('left') ||
+                      status.contains('offboard') ||
+                      status.contains('kick') ||
+                      status.contains('terminat')) {
+                    return false;
+                  }
+                  return true;
+                }).toList();
 
                 final activeEmployees = allEmployeesOfBranch.where((e) {
                   if (widget.departmentFilter != 'all') {
@@ -244,7 +307,12 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
                   final altId = emp['id']?.toString() ?? '';
                   final empDept = emp['department']?.toString() ?? '';
-                  final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+                  
+                  // Live credential lookup from ZkTecoNetworkService takes top priority
+                  final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
+                  final pin = cred?.biometricPin.isNotEmpty == true 
+                      ? cred!.biometricPin.trim() 
+                      : (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
                   
                   final dbRec = dbRecords.firstWhereOrNull((r) =>
                       r['employeeId']?.toString() == empId ||
@@ -272,12 +340,19 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     'halfDayType': null,
                   });
 
-                  // Ensure presence is recognized if punch times exist
+                  // Ensure presence is recognized if ANY punch times exist
                   final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
-                  final curStatus = (record['status']?.toString() ?? '').toLowerCase();
-                  if ((curStatus.isEmpty || curStatus == 'absent' || curStatus == 'unmarked') &&
-                      checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') {
+                  final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
+                  final lastPunch = record['lastPunchTime']?.toString();
+                  final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
+                  final hasPunch = (checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') ||
+                      (checkOut != null && checkOut.isNotEmpty && checkOut != '--:--') ||
+                      (lastPunch != null && lastPunch.isNotEmpty) ||
+                      (shifts != null && shifts.isNotEmpty);
+
+                  if (hasPunch) {
                     record['status'] = 'present';
+                    record['leaveType'] = null;
                   }
 
                   record['name'] = emp['name']; // cache name for drawing card
@@ -293,14 +368,39 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 int present = allRecords.where((r) {
                   final s = (r['status']?.toString() ?? '').toLowerCase();
                   final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
-                  return s == 'present' || (inTime != null && inTime.isNotEmpty && inTime != '--:--');
+                  final outTime = r['checkOutTime']?.toString() ?? r['departureTime']?.toString();
+                  final lastPunch = r['lastPunchTime']?.toString();
+                  final shifts = r['shifts'] is Map ? (r['shifts'] as Map) : null;
+                  final hasPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+                      (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
+                      (lastPunch != null && lastPunch.isNotEmpty) ||
+                      (shifts != null && shifts.isNotEmpty);
+                  return s == 'present' || hasPunch;
                 }).length;
                 int late = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'late').length;
-                int leave = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'leave').length;
+                int leave = allRecords.where((r) {
+                  final s = (r['status']?.toString() ?? '').toLowerCase();
+                  final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
+                  final outTime = r['checkOutTime']?.toString() ?? r['departureTime']?.toString();
+                  final lastPunch = r['lastPunchTime']?.toString();
+                  final shifts = r['shifts'] is Map ? (r['shifts'] as Map) : null;
+                  final hasPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+                      (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
+                      (lastPunch != null && lastPunch.isNotEmpty) ||
+                      (shifts != null && shifts.isNotEmpty);
+                  return s == 'leave' && !hasPunch;
+                }).length;
                 int absent = allRecords.where((r) {
                   final s = (r['status']?.toString() ?? '').toLowerCase();
                   final inTime = r['checkInTime']?.toString() ?? r['arrivalTime']?.toString();
-                  return s == 'absent' && (inTime == null || inTime.isEmpty || inTime == '--:--');
+                  final outTime = r['checkOutTime']?.toString() ?? r['departureTime']?.toString();
+                  final lastPunch = r['lastPunchTime']?.toString();
+                  final shifts = r['shifts'] is Map ? (r['shifts'] as Map) : null;
+                  final hasPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+                      (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
+                      (lastPunch != null && lastPunch.isNotEmpty) ||
+                      (shifts != null && shifts.isNotEmpty);
+                  return (s == 'absent' || s.isEmpty) && !hasPunch;
                 }).length;
                 int overtime = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'overtime').length;
                 int holiday = allRecords.where((r) => (r['status']?.toString() ?? '').toLowerCase() == 'holiday').length;
@@ -322,18 +422,17 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
                   // 2. Search Query Filter
                   if (_searchQuery.isNotEmpty) {
-                    final q = _searchQuery.toLowerCase();
+                    final q = _searchQuery.toLowerCase().trim();
                     final name = (r['name'] ?? '').toString().toLowerCase();
                     final role = (r['role'] ?? '').toString().toLowerCase();
                     final dept = (r['department'] ?? '').toString().toLowerCase();
                     final pin = (r['biometricPin'] ?? r['pin'] ?? '').toString().toLowerCase();
-                    final id = (r['employeeId'] ?? '').toString().toLowerCase();
 
                     final matches = name.contains(q) ||
                         role.contains(q) ||
                         dept.contains(q) ||
-                        pin.contains(q) ||
-                        id.contains(q);
+                        pin == q ||
+                        pin.contains(q);
                     if (!matches) return false;
                   }
 
@@ -344,7 +443,6 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   return Column(
                     children: [
                       _buildCrossBranchAuthorizationBanner(t, dateStr),
-                      _buildUnmappedPunchesBanner(t),
                       _buildSummaryStrip(
                         total: allRecords.length,
                         p: present,
@@ -429,8 +527,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
                 return Column(
                   children: [
-                    _buildCrossBranchAuthorizationBanner(t, dateStr),
                     _buildUnmappedPunchesBanner(t),
+                    _buildCrossBranchAuthorizationBanner(t, dateStr),
                     _buildSummaryStrip(
                       total: allRecords.length,
                       p: present,
@@ -484,10 +582,14 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   ],
                 );
               },
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
+    ],
+  ),
+);
+      },
     );
   }
 
@@ -1040,9 +1142,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 1)),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(bottom: BorderSide(color: t.bgRule, width: 1)),
       ),
       child: LayoutBuilder(builder: (_, constraints) {
         final isNarrow = constraints.maxWidth < 960;
@@ -1052,9 +1154,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
           children: [
             Container(
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: t.bgCardAlt,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: t.bgRule),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1062,7 +1164,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                    icon: const Icon(Icons.chevron_left_rounded, color: Color(0xFF475569), size: 20),
+                    icon: Icon(Icons.chevron_left_rounded, color: t.textSecondary, size: 20),
                     onPressed: () {
                       _draftRecords.clear();
                       widget.onDateChanged(widget.date.subtract(const Duration(days: 1)));
@@ -1087,11 +1189,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.calendar_today_rounded, color: Color(0xFF0F766E), size: 14),
+                          Icon(Icons.calendar_today_rounded, color: t.accent, size: 14),
                           const SizedBox(width: 6),
                           Text(
                             DateFormat('EEE, d MMM yyyy').format(widget.date),
-                            style: const TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold, fontSize: 13),
+                            style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 13),
                           ),
                         ],
                       ),
@@ -1100,7 +1202,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                    icon: const Icon(Icons.chevron_right_rounded, color: Color(0xFF475569), size: 20),
+                    icon: Icon(Icons.chevron_right_rounded, color: t.textSecondary, size: 20),
                     onPressed: () {
                       _draftRecords.clear();
                       widget.onDateChanged(widget.date.add(const Duration(days: 1)));
@@ -1175,16 +1277,13 @@ class _AttendanceTabState extends State<AttendanceTab> {
           children: [
             _actionChip('Leave Range', Icons.date_range_outlined, () => _openLeaveRangeDialog(context, t)),
             _actionChip('Monthly Grid', Icons.table_chart_outlined, () => BulkAttendanceDialog.open(context: context, branchId: widget.branchId, theme: t, onSaved: () => setState(() {}))),
-            _actionChip('Biometric PINs', Icons.fingerprint_rounded, () async {
-              await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
-              if (context.mounted) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId),
-                  ),
-                );
-              }
+            _actionChip('Biometric PINs', Icons.fingerprint_rounded, () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId),
+                ),
+              );
             }),
             ElevatedButton.icon(
               onPressed: widget.onAddEmployee,
@@ -1422,7 +1521,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
   // ── "Mark All Present" Shortcut ───────────────────────────────────────────
   Future<void> _markAllPresent(List<Map<String, dynamic>> records) async {
-    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    final curUser = LocalStorageService.getActiveUsername();
     int count = 0;
 
     for (final r in records) {
@@ -1535,7 +1634,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       ),
                       Builder(builder: (_) {
                         final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
-                        final currentPin = cred?.biometricPin ?? (record['biometricPin']?.toString() ?? '');
+                        final currentPin = cred?.biometricPin.isNotEmpty == true 
+                            ? cred!.biometricPin 
+                            : (record['biometricPin']?.toString() ?? '');
                         return InkWell(
                           onTap: () => _showEditEmployeePinDialog(empId, name, currentPin),
                           borderRadius: BorderRadius.circular(4),
@@ -1765,7 +1866,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
                           Text('$role • $dept', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                           Builder(builder: (_) {
                             final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
-                            final currentPin = cred?.biometricPin ?? (record['biometricPin']?.toString() ?? '');
+                            final currentPin = cred?.biometricPin.isNotEmpty == true 
+                                ? cred!.biometricPin 
+                                : (record['biometricPin']?.toString() ?? '');
                             return InkWell(
                               onTap: () => _showEditEmployeePinDialog(empId, name, currentPin),
                               borderRadius: BorderRadius.circular(4),
@@ -2153,7 +2256,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
   Future<void> _saveRecordInstantly(String empId, Map<String, dynamic> record) async {
     try {
-      final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+      final curUser = LocalStorageService.getActiveUsername();
       await FinanceLocalStorage.saveAttendanceRecord(
         branchId: widget.branchId,
         data: record,
@@ -2169,7 +2272,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
   }
 
   void _openLeaveRangeDialog(BuildContext context, RoleThemeData t) {
-    final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+    final curUser = LocalStorageService.getActiveUsername();
     final employees = FinanceLocalStorage.getEmployees(widget.branchId).where((e) => e['isActive'] == true).toList();
     
     if (employees.isEmpty) {

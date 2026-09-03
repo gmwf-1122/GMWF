@@ -58,29 +58,23 @@ class _TransactionCardState extends State<TransactionCard> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         curve: Curves.easeInOut,
-        transform: Matrix4.identity()..scale(_isHovered ? 1.015 : 1.0),
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: _isHovered
-                ? displayColor.withValues(alpha: 0.5)
-                : (isEdited ? Colors.orange.shade200 : const Color(0x0A000000)),
+                ? displayColor.withValues(alpha: 0.4)
+                : (isEdited ? Colors.orange.shade200 : const Color(0xFFE8EEF4)),
             width: _isHovered || isEdited ? 1.5 : 1.0,
           ),
           boxShadow: [
             BoxShadow(
               color: _isHovered
-                  ? displayColor.withValues(alpha: 0.12)
-                  : displayColor.withValues(alpha: 0.04),
-              blurRadius: _isHovered ? 16 : 10,
-              offset: Offset(0, _isHovered ? 6 : 4),
-            ),
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.01),
-              blurRadius: 2,
-              offset: const Offset(0, 1),
+                  ? displayColor.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.04),
+              blurRadius: _isHovered ? 12 : 6,
+              offset: Offset(0, _isHovered ? 4 : 2),
             ),
           ],
         ),
@@ -88,14 +82,14 @@ class _TransactionCardState extends State<TransactionCard> {
           color: Colors.transparent,
           child: InkWell(
             onTap: () => _showDetailsDialog(context, dateStr),
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             hoverColor: displayColor.withValues(alpha: 0.02),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Category Icon with Gradient background
+                  // Category Icon
                   Container(
                     width: 44, height: 44,
                     decoration: BoxDecoration(
@@ -113,28 +107,27 @@ class _TransactionCardState extends State<TransactionCard> {
                       child: Icon(displayIcon, color: displayColor, size: 20),
                     ),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Top row: category chip + edited badge (constrained to not overflow)
                         Row(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: displayColor.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: displayColor.withValues(alpha: 0.15),
-                                  width: 1.0,
+                            Flexible(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: displayColor.withValues(alpha: 0.09),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: displayColor.withValues(alpha: 0.18)),
                                 ),
-                              ),
-                              child: Text(
-                                _getCategoryLabel(),
-                                style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: displayColor, letterSpacing: 0.6),
-                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                                child: Text(
+                                  _getCategoryLabel(),
+                                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: displayColor, letterSpacing: 0.4),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ),
                             if (isEdited) ...[
@@ -144,47 +137,53 @@ class _TransactionCardState extends State<TransactionCard> {
                           ],
                         ),
                         const SizedBox(height: 6),
+                        // Donor name row
                         Row(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Flexible(
                               child: Text(
-                                donation.donorName, 
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.gray900, letterSpacing: -0.2),
+                                donation.donorName,
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.gray900, letterSpacing: -0.2),
                                 maxLines: 1, overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             if (donation.donorId != 'anonymous' && !donation.donorId.startsWith('guest_') && donation.donorName.trim().isNotEmpty && donation.phone.trim().isNotEmpty)
                               const Padding(
                                 padding: EdgeInsets.only(left: 4),
-                                child: Icon(Icons.verified_rounded, size: 14, color: AppColors.primary),
+                                child: Icon(Icons.verified_rounded, size: 13, color: AppColors.primary),
                               ),
                           ],
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         Text(
                           '${cleanReceiptNumber(donation.receiptNo)} • ${donation.branchName.isNotEmpty ? donation.branchName : donation.branchId}',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w500, color: AppColors.gray500),
+                          style: const TextStyle(fontSize: 10, color: AppColors.gray500),
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 10),
+                  // Right: amount + status (fixed width column)
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       if (donation.isGoods)
-                        Text(
-                          (donation.probableAmount ?? 0) > 0 ? '${donation.goodsItem ?? 'Goods'} (Est. PKR ${NumberFormat('#,##0').format(donation.probableAmount)})' : (donation.goodsItem ?? 'Goods'),
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: cat.color),
+                        SizedBox(
+                          width: 90,
+                          child: Text(
+                            donation.goodsItem ?? 'Goods',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: cat.color),
+                            maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.end,
+                          ),
                         )
                       else
                         Text(
                           'PKR ${NumberFormat('#,##0').format(donation.amount)}',
-                          style: GoogleFonts.dmMono(fontSize: 15, fontWeight: FontWeight.w900, color: AppColors.gray900),
+                          style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w900, color: AppColors.gray900),
                         ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
                       _statusPill(donation.isGoods ? DonationStatus.received : donation.status),
                     ],
                   ),

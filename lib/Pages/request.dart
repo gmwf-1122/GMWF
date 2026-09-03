@@ -11,6 +11,7 @@ import '../services/local_storage_service.dart';
 import '../services/camp_session_service.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
+import '../utils/formatters.dart';
 
 class RequestUtils {
   static String getTitle(String type, String patient) {
@@ -50,6 +51,72 @@ class RequestUtils {
         'token_exception'     => isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800,
         _                     => isDark ? Colors.grey.shade300 : Colors.grey.shade800,
       };
+
+  static String resolveRequestCampName(Map<String, dynamic> data, [String defaultBranch = 'karachi']) {
+    // 1. Check direct fields
+    String? rawCamp = data['campName']?.toString() ??
+        data['campLabel']?.toString() ??
+        data['campId']?.toString() ??
+        data['dispensaryId']?.toString() ??
+        data['camp']?.toString();
+
+    // 2. Check draftItems / items
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final items = data['items'] ?? data['draftItems'];
+      if (items is List && items.isNotEmpty && items.first is Map) {
+        rawCamp = items.first['campId']?.toString() ??
+            items.first['dispensaryId']?.toString() ??
+            items.first['campName']?.toString();
+      }
+    }
+
+    // 3. Check originalData
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final orig = data['originalData'];
+      if (orig is Map) {
+        rawCamp = orig['campId']?.toString() ??
+            orig['dispensaryId']?.toString() ??
+            orig['campName']?.toString();
+      }
+    }
+
+    // 4. Check docId e.g. "saddar--..." or "kapayya--..." or "haji-camp--..."
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final docId = (data['docId'] ?? data['id'] ?? '').toString().toLowerCase();
+      if (docId.contains('saddar') || docId.contains('sadd') || docId.contains('kapay')) {
+        rawCamp = 'saddar';
+      } else if (docId.contains('haji')) {
+        rawCamp = 'haji_camp';
+      }
+    }
+
+    // 5. Check serial e.g. "KHI-SADD-1234", "KHI-KAP-1234", "KHI-HAJI-1234"
+    if (rawCamp == null || rawCamp.isEmpty || rawCamp == 'all') {
+      final serial = (data['serial'] ?? data['tokenSerial'] ?? '').toString().toUpperCase();
+      if (serial.contains('-SADD-') || serial.contains('-KAP-') || serial.contains('SADDAR') || serial.contains('KAPAYYA')) {
+        rawCamp = 'saddar';
+      } else if (serial.contains('-HAJI-') || serial.contains('HAJI')) {
+        rawCamp = 'haji_camp';
+      }
+    }
+
+    if (rawCamp != null && rawCamp.isNotEmpty && rawCamp != 'all') {
+      if (rawCamp.toLowerCase().contains('kapay')) {
+        rawCamp = 'saddar';
+      }
+      return CampSessionService.getCampLabel(rawCamp);
+    }
+
+    final branch = (data['branchId'] ?? defaultBranch).toString().toLowerCase();
+    if (CampSessionService.hasCampsForBranch(branch)) {
+      final active = CampSessionService.getActiveCamp();
+      if (active != null && active.isNotEmpty && active != 'all') {
+        return CampSessionService.getCampLabel(active);
+      }
+      return 'Saddar Camp';
+    }
+    return branch.toUpperCase();
+  }
 
   static String generateDocId(
     String name,
@@ -559,6 +626,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final canApproveAsSupervisor = isSupervisorRole && requestType != 'token_exception';
     final canApproveAsDoctor = isDoctor && requestType == 'token_exception';
 
+    final campLabel = RequestUtils.resolveRequestCampName(data, widget.branchId);
+
     return Card(
       color: isDark ? const Color(0xFF1E293B) : Colors.white,
       elevation: widget.status == 'pending' ? (isDark ? 3 : 5) : 1,
@@ -585,6 +654,33 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   ),
                 ),
               ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0284C7).withValues(alpha: 0.25) : const Color(0xFFE0F2FE),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF38BDF8).withValues(alpha: 0.4) : const Color(0xFFBAE6FD),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.holiday_village_rounded, size: 14, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1)),
+                    const SizedBox(width: 5),
+                    Text(
+                      campLabel.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1),
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 6),
@@ -622,14 +718,27 @@ class _StableRequestTabState extends State<_StableRequestTab>
               Icon(Icons.location_on_rounded, size: 16, color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade800),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'Facility: ${CampSessionService.getBranchAndCampDisplayName(branchName: (data['branchId'] ?? widget.branchId).toString().toUpperCase(), branchId: (data['branchId'] ?? widget.branchId).toString(), campId: data['dispensaryId']?.toString() ?? data['campId']?.toString())}',
-                  style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade900,
+                child: RichText(
+                  text: TextSpan(
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                    children: [
+                      const TextSpan(text: 'Facility Camp: '),
+                      TextSpan(
+                        text: campLabel,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade900,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' (${(data['branchId'] ?? widget.branchId).toString().toUpperCase()})',
+                        style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white38 : Colors.grey.shade600),
+                      ),
+                    ],
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ]),
@@ -1770,12 +1879,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
               ),
               onPressed: () async {
                 DateTime? dob;
-                if (dobCtrl.text.isNotEmpty &&
-                    RegExp(r'^\d{2}-\d{2}-\d{4}$')
-                        .hasMatch(dobCtrl.text)) {
-                  final p = dobCtrl.text.split('-');
-                  dob = DateTime(
-                      int.parse(p[2]), int.parse(p[1]), int.parse(p[0]));
+                if (dobCtrl.text.isNotEmpty) {
+                  dob = parseDobDateTime(dobCtrl.text);
                 }
                 final newProposed = <String, dynamic>{
                   'name': nameCtrl.text.trim(),

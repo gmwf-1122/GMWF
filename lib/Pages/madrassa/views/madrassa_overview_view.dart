@@ -30,21 +30,20 @@ class MadrassaOverviewView extends ConsumerWidget {
     try {
       final box = Hive.box(LocalStorageService.madrassaLogsBox);
       final prefix = '${branchId.toLowerCase().trim()}__log__';
+      final now = DateTime.now();
       
       final logsList = <MapEntry<DateTime, int>>[];
-      for (final key in box.keys) {
-        if (key.toString().startsWith(prefix)) {
-          final datePart = key.toString().substring(prefix.length);
-          final date = DateTime.tryParse(datePart);
-          if (date == null) continue;
-          
-          final logVal = box.get(key);
-          if (logVal is Map && logVal.containsKey(studentId)) {
-            final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
-            final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
-            if (currentLines != null && currentLines > 0) {
-              logsList.add(MapEntry(date, currentLines));
-            }
+      // Direct lookup of recent 35 days instead of scanning entire historical Hive box
+      for (int i = 0; i < 35; i++) {
+        final d = now.subtract(Duration(days: i));
+        final datePart = DateFormat('yyyy-MM-dd').format(d);
+        final key = '$prefix$datePart';
+        final logVal = box.get(key);
+        if (logVal is Map && logVal.containsKey(studentId)) {
+          final studentLog = Map<String, dynamic>.from(logVal[studentId] as Map);
+          final currentLines = (studentLog['currentLines'] as num?)?.toInt() ?? int.tryParse(studentLog['currentLines']?.toString() ?? '');
+          if (currentLines != null && currentLines > 0) {
+            logsList.add(MapEntry(d, currentLines));
           }
         }
       }
@@ -185,12 +184,12 @@ class MadrassaOverviewView extends ConsumerWidget {
       decoration: BoxDecoration(
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.grey.withOpacity(0.12)),
+        border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF1A1C1E).withOpacity(0.04),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 16,
-            offset: const Offset(0, 8),
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -200,20 +199,69 @@ class MadrassaOverviewView extends ConsumerWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                context.isUrdu ? 'روزانہ کی کارکردگی کا خلاصہ' : 'Daily Progress Summary',
-                style: context.urduStyle(
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.indigo.shade900,
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.auto_graph_rounded, color: Color(0xFF10B981), size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        context.isUrdu ? 'روزانہ کی کارکردگی کا خلاصہ' : 'Daily Progress Summary',
+                        style: context.urduStyle(
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        context.isUrdu ? 'حاضری اور آج کے اسباق کی تازہ ترین تفصیلات' : 'Live attendance & memorization progress for today',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              if (totalLinesToday > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.bolt_rounded, color: Color(0xFF10B981), size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        context.isUrdu ? '+$totalLinesToday لائنیں' : '+$totalLinesToday lines today',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF047857),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const Icon(Icons.auto_graph_rounded, color: Color(0xFF10B981)),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           Row(
             children: [
               _pillIndicator(context, context.isUrdu ? 'حاضر: $present' : 'Present: $present', const Color(0xFF10B981), const Color(0xFFD1FAE5)),
@@ -232,59 +280,90 @@ class MadrassaOverviewView extends ConsumerWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white70 : Colors.grey[800],
+                color: isDark ? Colors.white70 : const Color(0xFF334155),
               ),
             ),
           ),
           const SizedBox(height: 12),
           if (progressList.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12.0),
+              padding: const EdgeInsets.symmetric(vertical: 14.0),
               child: Center(
-                child: Text(
-                  context.isUrdu ? 'آج ابھی تک کوئی کارکردگی درج نہیں ہوئی۔' : 'No daily progress updates recorded yet today.',
-                  style: context.urduStyle(style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.history_toggle_off_rounded, color: Colors.grey.shade400, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      context.isUrdu ? 'آج ابھی تک کوئی کارکردگی درج نہیں ہوئی۔' : 'No daily progress updates recorded yet today.',
+                      style: context.urduStyle(style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                    ),
+                  ],
                 ),
               ),
             )
           else ...[
-            Text(
-              context.isUrdu ? 'مجموعی لائنیں: +$totalLinesToday لائنیں' : 'Total lines memorized today: +$totalLinesToday lines',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
-            ),
-            const SizedBox(height: 8),
-            ListView.builder(
+            ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: progressList.length,
+              separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF1F5F9)),
               itemBuilder: (context, idx) {
                 final p = progressList[idx];
                 return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6.0),
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        '${p['name']} (${p['rollNumber']})',
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      Row(
+                        children: [
+                          Container(
+                            width: 32,
+                            height: 32,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                (p['name'] as String).isNotEmpty ? (p['name'] as String)[0].toUpperCase() : '?',
+                                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F766E), fontSize: 13),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${p['name']}',
+                                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                              ),
+                              Text(
+                                'Roll #${p['rollNumber']}',
+                                style: TextStyle(fontSize: 11, color: isDark ? Colors.white54 : const Color(0xFF64748B)),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                       Row(
                         children: [
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                             decoration: BoxDecoration(
                               color: const Color(0xFFD1FAE5),
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               '+${p['diff']} lines',
-                              style: const TextStyle(color: Color(0xFF065F46), fontWeight: FontWeight.bold, fontSize: 11),
+                              style: const TextStyle(color: Color(0xFF065F46), fontWeight: FontWeight.bold, fontSize: 11.5),
                             ),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           Text(
-                            'Total: ${p['currentLines']} lines',
-                            style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                            'Total: ${p['currentLines']}',
+                            style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white60 : Colors.grey.shade600, fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -301,20 +380,31 @@ class MadrassaOverviewView extends ConsumerWidget {
 
   Widget _pillIndicator(BuildContext context, String text, Color color, Color bg) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(
-        text,
-        style: context.urduStyle(
-          style: TextStyle(
-            color: color,
-            fontSize: 11.5,
-            fontWeight: FontWeight.bold,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
-        ),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: context.urduStyle(
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -366,9 +456,7 @@ class MadrassaOverviewView extends ConsumerWidget {
     }
 
     if (allLogs.isEmpty) return 0;
-
-    final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
-      ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+    final sortedLogs = allLogs;
 
     if (timeframe == 'Daily') {
       final latestLog = sortedLogs.last;
@@ -439,17 +527,19 @@ class MadrassaOverviewView extends ConsumerWidget {
         final bestCard = _buildInsightsCard(
           context: context,
           title: context.isUrdu ? 'بہترین کارکردگی (ٹاپ 5)' : 'Top Performers (Best 5)',
+          subtitle: context.isUrdu ? 'ہفتہ وار سب سے زیادہ حفظ کرنے والے' : 'Highest weekly memorization gain',
           students: topPerformers,
           isGood: true,
-          gradient: const [Color(0xFF0F766E), Color(0xFF115E59)],
+          gradient: const [Color(0xFF065F46), Color(0xFF0F766E)],
         );
 
         final worstCard = _buildInsightsCard(
           context: context,
           title: context.isUrdu ? 'توجہ طلب طالب علم (آخری 5)' : 'Needs Attention (Worst 5)',
+          subtitle: context.isUrdu ? 'کم رفتار یا اضافی مدد کے ضرورت مند' : 'Slow pace or requiring teacher support',
           students: struggling,
           isGood: false,
-          gradient: const [Color(0xFFBE123C), Color(0xFF9F1239)],
+          gradient: const [Color(0xFF991B1B), Color(0xFFBE123C)],
         );
 
         if (isMobile) {
@@ -476,23 +566,24 @@ class MadrassaOverviewView extends ConsumerWidget {
   Widget _buildInsightsCard({
     required BuildContext context,
     required String title,
+    required String subtitle,
     required List<Map<String, dynamic>> students,
     required bool isGood,
     required List<Color> gradient,
   }) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: gradient,
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withOpacity(0.3),
-            blurRadius: 12,
+            color: gradient.first.withValues(alpha: 0.35),
+            blurRadius: 14,
             offset: const Offset(0, 6),
           ),
         ],
@@ -501,24 +592,59 @@ class MadrassaOverviewView extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                isGood ? Icons.stars_rounded : Icons.warning_amber_rounded,
-                color: Colors.white,
-                size: 20,
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isGood ? Icons.stars_rounded : Icons.warning_amber_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.white.withValues(alpha: 0.8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${students.length} ${context.isUrdu ? 'طلبہ' : 'Students'}',
+                  style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           if (students.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 24),
@@ -539,9 +665,9 @@ class MadrassaOverviewView extends ConsumerWidget {
                 color: Colors.transparent,
                 child: InkWell(
                   onTap: () => _showStudentProgressDialog(context, std),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8.0),
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8.0),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -549,29 +675,31 @@ class MadrassaOverviewView extends ConsumerWidget {
                           child: Row(
                             children: [
                               Container(
-                                width: 22,
-                                height: 22,
+                                width: 24,
+                                height: 24,
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.2),
+                                  color: isGood && idx == 0
+                                      ? const Color(0xFFFBBF24)
+                                      : Colors.white.withValues(alpha: 0.22),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Center(
                                   child: Text(
                                     '${idx + 1}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
+                                    style: TextStyle(
+                                      color: isGood && idx == 0 ? const Color(0xFF78350F) : Colors.white,
+                                      fontSize: 11.5,
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 10),
+                              const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
                                   std['name']?.toString() ?? '',
                                   style: const TextStyle(
-                                    fontSize: 13,
+                                    fontSize: 13.5,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.white,
                                   ),
@@ -582,15 +710,15 @@ class MadrassaOverviewView extends ConsumerWidget {
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.25),
-                            borderRadius: BorderRadius.circular(6),
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             '+$progress ${context.isUrdu ? 'لائنیں' : 'lines'}',
                             style: const TextStyle(
-                              fontSize: 11,
+                              fontSize: 11.5,
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
                             ),
@@ -646,10 +774,14 @@ class MadrassaOverviewView extends ConsumerWidget {
                           : (statusVal == 'active');
                     }).toList();
 
+                    // Sort logs once outside the loop for high performance
+                    final sortedLogs = List<Map<String, dynamic>>.from(allLogs)
+                      ..sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+
                     // Calculate progress for each active student (Weekly timeframe)
                     final List<Map<String, dynamic>> processedStudents = [];
                     for (final std in activeStudents) {
-                      final progress = _calculateProgress(std, allLogs, 'Weekly');
+                      final progress = _calculateProgress(std, sortedLogs, 'Weekly');
                       processedStudents.add({
                         ...std,
                         'calculatedProgress': progress,
@@ -705,35 +837,38 @@ class MadrassaOverviewView extends ConsumerWidget {
       width: double.infinity,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0F766E), Color(0xFF10B981)],
+          colors: [Color(0xFF064E3B), Color(0xFF0F766E), Color(0xFF059669)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F766E).withOpacity(0.3),
-            blurRadius: 16,
+            color: const Color(0xFF0F766E).withValues(alpha: 0.35),
+            blurRadius: 18,
             offset: const Offset(0, 8),
           ),
         ],
       ),
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isMobile = constraints.maxWidth < kMobileBreakpoint;
 
           final mosqueBadge = Container(
-            width: 54,
-            height: 54,
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
-              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 1.5),
             ),
-            child: const Icon(
-              Icons.mosque,
-              color: Colors.white,
-              size: 28,
+            child: const Center(
+              child: Icon(
+                Icons.mosque_rounded,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
           );
 
@@ -741,29 +876,42 @@ class MadrassaOverviewView extends ConsumerWidget {
             context.l.overviewTitle,
             style: context.urduStyle(
               style: const TextStyle(
-                fontSize: 22,
+                fontSize: 24,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
+                letterSpacing: -0.5,
               ),
             ),
           );
 
-          final subtitleText = Text(
-            context.l.appSubtitle,
-            style: context.urduStyle(
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.white.withOpacity(0.85),
+          final subtitleText = Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Color(0xFF34D399),
+                  shape: BoxShape.circle,
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              Text(
+                'Principal Executive Dashboard • Branch Overview',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+              ),
+            ],
           );
 
           final dateChip = Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -778,7 +926,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                   formattedDate,
                   style: context.urduStyle(
                     style: const TextStyle(
-                      fontSize: 12,
+                      fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
                     ),
@@ -820,7 +968,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                   child: Row(
                     children: [
                       mosqueBadge,
-                      const SizedBox(width: 16),
+                      const SizedBox(width: 18),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -857,7 +1005,7 @@ class MadrassaOverviewView extends ConsumerWidget {
            borderRadius: BorderRadius.circular(20),
            boxShadow: [
              BoxShadow(
-               color: const Color(0xFF1A1C1E).withOpacity(0.06),
+               color: Colors.black.withValues(alpha: 0.04),
                blurRadius: 12,
                offset: const Offset(0, 4),
              ),
@@ -876,6 +1024,7 @@ class MadrassaOverviewView extends ConsumerWidget {
      // Determine grid layout
      return LayoutBuilder(
        builder: (context, constraints) {
+         final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(branchId);
          final width = constraints.maxWidth;
          final int crossAxisCount;
          final double childAspectRatio;
@@ -887,8 +1036,8 @@ class MadrassaOverviewView extends ConsumerWidget {
            crossAxisCount = 3;
            childAspectRatio = 1.3;
          } else {
-           crossAxisCount = 4;
-           childAspectRatio = 1.2;
+           crossAxisCount = isFeeEnabled ? 4 : 3;
+           childAspectRatio = 1.25;
          }
 
          final studentsAsync = ref.watch(madrassaStudentsProvider(branchId));
@@ -907,7 +1056,7 @@ class MadrassaOverviewView extends ConsumerWidget {
              // Students Card
              studentsAsync.when(
                loading: () => placeholderCard(context.l.totalStudents),
-               error: (_, __) => _statCard(context, context.l.totalStudents, '0', Icons.people_alt_rounded, 210),
+               error: (_, __) => _statCard(context, context.l.totalStudents, '0', Icons.people_alt_rounded, 210, badge: 'Active'),
                data: (students) {
                  final activeCount = students.where((d) {
                    final statusVal = d['status'];
@@ -921,13 +1070,14 @@ class MadrassaOverviewView extends ConsumerWidget {
                    '$activeCount',
                    Icons.people_alt_rounded,
                    210,
+                   badge: '$activeCount Enrolled',
                  );
                },
              ),
              // Attendance/Daily Log Card
              dailyLogAsync.when(
                loading: () => placeholderCard(context.l.dailyLogTitle),
-               error: (_, __) => _statCard(context, context.l.dailyLogTitle, '0 / 0', Icons.edit_calendar_rounded, 160),
+               error: (_, __) => _statCard(context, context.l.dailyLogTitle, '0 / 0', Icons.edit_calendar_rounded, 160, badge: 'Today'),
                data: (logData) {
                  final totalActive = studentsAsync.value?.where((d) {
                    final statusVal = d['status'];
@@ -940,48 +1090,71 @@ class MadrassaOverviewView extends ConsumerWidget {
                  logData.forEach((k, v) {
                    if (v is Map && v['attendance'] == 'present') present++;
                  });
-                 return _statCard(context, context.l.dailyLogTitle, '$present / $totalActive', Icons.edit_calendar_rounded, 160);
+                 final pct = totalActive > 0 ? ((present / totalActive) * 100).toInt() : 0;
+                 return _statCard(
+                   context,
+                   context.l.dailyLogTitle,
+                   '$present / $totalActive',
+                   Icons.edit_calendar_rounded,
+                   160,
+                   badge: '$pct% Present',
+                 );
                },
              ),
              // PTM Card
              configAsync.when(
                loading: () => placeholderCard(context.l.ptmDay),
-               error: (_, __) => _statCard(context, context.l.ptmDay, '-', Icons.event_available_rounded, 280),
-               data: (config) => _statCard(context, context.l.ptmDay, DateFormat('MMM d').format(config.getPtmDate()), Icons.event_available_rounded, 280),
+               error: (_, __) => _statCard(context, context.l.ptmDay, '-', Icons.event_available_rounded, 280, badge: 'Event'),
+               data: (config) => _statCard(
+                 context,
+                 context.l.ptmDay,
+                 DateFormat('MMM d').format(config.getPtmDate()),
+                 Icons.event_available_rounded,
+                 280,
+                 badge: 'Scheduled',
+               ),
              ),
-             // Fees Card
-             configAsync.when(
-               loading: () => placeholderCard(context.l.baseFeeLabel),
-               error: (_, __) => _statCard(context, context.l.baseFeeLabel, '-', Icons.account_balance_wallet_rounded, 35),
-               data: (config) => _statCard(context, context.l.baseFeeLabel, 'Rs. ${config.baseFee.toInt()}', Icons.account_balance_wallet_rounded, 35),
-             ),
+             // Fees Card (only shown when money factor is enabled)
+             if (isFeeEnabled)
+               configAsync.when(
+                 loading: () => placeholderCard(context.l.baseFeeLabel),
+                 error: (_, __) => _statCard(context, context.l.baseFeeLabel, '-', Icons.account_balance_wallet_rounded, 35, badge: 'Base'),
+                 data: (config) => _statCard(
+                   context,
+                   context.l.baseFeeLabel,
+                   'Rs. ${config.baseFee.toInt()}',
+                   Icons.account_balance_wallet_rounded,
+                   35,
+                   badge: 'Per Student',
+                 ),
+               ),
            ],
          );
        },
      );
    }
 
-  Widget _statCard(BuildContext context, String label, String value, IconData icon, double hue) {
+  Widget _statCard(BuildContext context, String label, String value, IconData icon, double hue, {String? badge}) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     // Derived HSL colors
-    final accentColor = HSLColor.fromAHSL(1.0, hue, 0.65, 0.45).toColor();
-    final bgTint = HSLColor.fromAHSL(1.0, hue, 0.65, 0.94).toColor();
+    final accentColor = HSLColor.fromAHSL(1.0, hue, 0.70, 0.45).toColor();
+    final bgTint = HSLColor.fromAHSL(1.0, hue, 0.70, 0.94).toColor();
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: theme.cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF1A1C1E).withOpacity(0.06),
-            blurRadius: 12,
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+            blurRadius: 14,
             offset: const Offset(0, 4),
           )
         ],
-        border: Border.all(color: Colors.grey.withOpacity(0.1), width: 1),
+        border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -991,17 +1164,32 @@ class MadrassaOverviewView extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: bgTint,
-                  borderRadius: BorderRadius.circular(12),
+                  color: isDark ? accentColor.withValues(alpha: 0.2) : bgTint,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                child: Icon(icon, color: accentColor, size: 20),
+                child: Icon(icon, color: accentColor, size: 22),
               ),
-              const SizedBox.shrink(),
+              if (badge != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white10 : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : const Color(0xFF64748B),
+                    ),
+                  ),
+                ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1012,9 +1200,9 @@ class MadrassaOverviewView extends ConsumerWidget {
                   child: Text(
                     value,
                     style: TextStyle(
-                      fontSize: 20,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : const Color(0xFF1A1C1E),
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
                     ),
                   ),
                 ),
@@ -1024,9 +1212,9 @@ class MadrassaOverviewView extends ConsumerWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.urduStyle(
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: Colors.grey,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : const Color(0xFF64748B),
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -1088,7 +1276,7 @@ class MadrassaOverviewView extends ConsumerWidget {
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.indigo.shade900,
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
             ),
           ),
         ),
@@ -1113,7 +1301,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                   crossAxisCount: 2,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  mainAxisExtent: 84,
+                  mainAxisExtent: 88,
                 ),
                 itemCount: actions.length,
                 itemBuilder: (context, idx) {
@@ -1131,25 +1319,25 @@ class MadrassaOverviewView extends ConsumerWidget {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final accentColor = HSLColor.fromAHSL(1.0, item.hue, 0.65, 0.45).toColor();
-    final bgTint = HSLColor.fromAHSL(1.0, item.hue, 0.65, 0.94).toColor();
+    final accentColor = HSLColor.fromAHSL(1.0, item.hue, 0.70, 0.45).toColor();
+    final bgTint = HSLColor.fromAHSL(1.0, item.hue, 0.70, 0.94).toColor();
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: item.onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           decoration: BoxDecoration(
             color: theme.cardColor,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.withOpacity(0.12), width: 1),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: isDark ? Colors.white10 : const Color(0xFFE2E8F0), width: 1),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF1A1C1E).withOpacity(0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
               ),
             ],
           ),
@@ -1159,7 +1347,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: bgTint,
+                  color: isDark ? accentColor.withValues(alpha: 0.2) : bgTint,
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(item.icon, color: accentColor, size: 24),
@@ -1176,7 +1364,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : const Color(0xFF1A1C1E),
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
                         ),
                       ),
                     ),
@@ -1188,7 +1376,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                       style: context.urduStyle(
                         style: TextStyle(
                           fontSize: 12,
-                          color: isDark ? Colors.white70 : Colors.grey.shade600,
+                          color: isDark ? Colors.white70 : const Color(0xFF64748B),
                         ),
                       ),
                     ),
@@ -1197,8 +1385,9 @@ class MadrassaOverviewView extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               Icon(
-                Icons.chevron_right_rounded,
-                color: isDark ? Colors.white.withOpacity(0.5) : Colors.grey.shade400,
+                Icons.arrow_forward_ios_rounded,
+                size: 14,
+                color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
               ),
             ],
           ),

@@ -14,12 +14,14 @@ import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/services/camp_session_service.dart';
+import 'package:gmwf/widgets/clock_skew_warning_banner.dart';
+import 'package:gmwf/utils/formatters.dart';
+import 'package:gmwf/utils/notification_deduper.dart';
 import '../user_settings_dialog.dart';
 import 'patient_queue.dart';
 import 'patient_info.dart';
 import 'doctor_right_panel.dart';
 import 'patient_history.dart';
-import 'package:gmwf/widgets/camp_selector_chip.dart';
 import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 
 class DoctorScreen extends StatefulWidget {
@@ -82,11 +84,17 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   late TabController _tabController;
 
+  bool get _isKarachi {
+    final b = widget.branchId.toLowerCase().trim();
+    return b.contains('karachi') || b.contains('haji') || b.contains('saddar') || b.contains('kapaya');
+  }
+
   // ── Queue-type resolver ────────────────────────────────────────────────────
-  static String resolveQueueType(String? raw) {
+  String resolveQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
         s == 'non_zakat' || s.startsWith('non')) {
+      if (_isKarachi) return 'zakat';
       return 'non-zakat';
     }
     if (s == 'gmwf' || s == 'gm wf' || s == 'gm-wf' || s == 'gm_wf') return 'gmwf';
@@ -132,21 +140,44 @@ class _DoctorScreenState extends State<DoctorScreen>
   Future<void> _fetchDoctorName() async {
     String? resolvedName;
 
-    // 1. Try local cache first (instant, no network needed).
+    // 1. Try local user cache
     final localUser = LocalStorageService.getLocalUserByUid(widget.doctorId);
-    resolvedName = (localUser?['username'] as String?)?.trim();
-    if (resolvedName?.isEmpty == true) resolvedName = null;
-    final localDegree = (localUser?['degree'] as String?)?.trim();
-    if (localDegree != null && localDegree.isNotEmpty) {
-      _doctorDegree = localDegree;
+    if (localUser != null) {
+      resolvedName = resolveUserDisplayName(localUser);
+      final localDegree = (localUser['degree'] as String?)?.trim();
+      if (localDegree != null && localDegree.isNotEmpty) {
+        _doctorDegree = localDegree;
+      }
     }
 
-    // 2. Fall back to the name passed as a widget param.
-    resolvedName ??= widget.doctorName.trim().isNotEmpty ? widget.doctorName.trim() : null;
+    // 2. Check active app_settings cache
+    if (resolvedName == null || resolvedName == 'User' || resolvedName == 'Doctor') {
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          final uData = box.get('user_data') ?? box.get('currentUser');
+          if (uData is Map) {
+            final n = resolveUserDisplayName(Map<String, dynamic>.from(uData));
+            if (n.isNotEmpty && n != 'User' && n != 'Doctor') {
+              resolvedName = n;
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
-    if (mounted) setState(() => _username = resolvedName);
+    // 3. Fall back to widget parameter
+    if (resolvedName == null || resolvedName == 'User' || resolvedName == 'Doctor') {
+      if (widget.doctorName.trim().isNotEmpty && widget.doctorName.trim().toLowerCase() != 'doctor') {
+        resolvedName = widget.doctorName.trim();
+      }
+    }
 
-    // 3. Start connection immediately with whatever name is available.
+    if (mounted && resolvedName != null && resolvedName.isNotEmpty) {
+      setState(() => _username = resolvedName);
+    }
+
+    // 4. Start connection immediately with resolved name
     if (!widget.isEmbedded) {
       ConnectionManager().start(
         role:     'doctor',
@@ -158,20 +189,16 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
     }
 
-    // 4. Fetch authoritative name from Firestore.
+    // 5. Fetch authoritative name from Firestore.
     try {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.doctorId)
           .get();
       if (!snap.exists) return;
-      final firestoreName =
-          (snap.data()?['username'] as String?)?.trim() ??
-          (snap.data()?['name']     as String?)?.trim() ?? '';
-      if (firestoreName.isNotEmpty) {
+      final firestoreName = resolveUserDisplayName(snap.data());
+      if (firestoreName.isNotEmpty && firestoreName != 'User' && firestoreName != 'Doctor') {
         if (mounted) setState(() => _username = firestoreName);
-        // [FIX-USERNAME] Push updated name into RealtimeManager so future
-        // messages carry the correct attribution.
         if (!widget.isEmbedded) {
           RealtimeManager().updateUsername(firestoreName);
         }
@@ -214,7 +241,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (senderId.isNotEmpty && myId != null && senderId == myId) return;
 
     if (type == 'token_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'waiting' || data['status'] == null) && data['prescriptions'] == null)) {
-      _handleNewToken(data);
+      _handleNewToken(data, event);
     } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'completed' || data['prescriptions'] != null))) {
       _handlePrescriptionUpdate(data);
     } else if (type == 'dispense_completed') {
@@ -222,15 +249,49 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
   }
 
-  void _handleNewToken(Map<String, dynamic> data) {
+  void _handleNewToken(Map<String, dynamic> data, [Map<String, dynamic>? fullEvent]) {
     final serial = data['serial']?.toString();
     if (serial != null && serial.isNotEmpty) {
       LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
     }
+
+    final isReplay = fullEvent?['_serverPush'] == true ||
+        fullEvent?['_resent'] == true ||
+        fullEvent?['isCatchUp'] == true ||
+        fullEvent?['_isReplay'] == true ||
+        data['_serverPush'] == true ||
+        data['_resent'] == true ||
+        data['isCatchUp'] == true ||
+        data['_isReplay'] == true;
+    if (isReplay) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final itemDateKey = (data['dateKey'] ?? fullEvent?['dateKey'])?.toString().trim();
+    final parts = (serial != null && serial.contains('-')) ? serial.split('-') : <String>[];
+    final serialDk = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
+        ? (parts.length > 1 ? parts[1] : '')
+        : (parts.isNotEmpty ? parts[0] : '');
+    final isToday = (itemDateKey == null || itemDateKey.isEmpty || itemDateKey == today) &&
+        (serialDk.length != 6 || serialDk == today);
+    if (!isToday) {
+      if (mounted) setState(() {});
+      return;
+    }
     
     // Ignore if not a waiting new token
     final status = (data['status'] ?? '').toString().toLowerCase();
-    if (status == 'completed' || status == 'prescribed' || data['prescriptions'] != null) {
+    if (status == 'completed' || status == 'prescribed' || status == 'dispensed' || data['dispenseStatus'] == 'dispensed' || data['prescriptions'] != null) {
+      if (mounted) setState(() {});
+      return;
+    }
+
+    final rawTime = data['createdAt'] ?? data['timestamp'];
+    final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
+    if (dt != null && DateTime.now().difference(dt).inMinutes > 3) {
+      if (mounted) setState(() {});
       return;
     }
 
@@ -245,18 +306,20 @@ class _DoctorScreenState extends State<DoctorScreen>
       );
       if (!matches) return;
     }
+
     if (mounted) {
       setState(() {});
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Flushbar(
-            message: '🎟️ New token: ${data['patientName'] ?? '#${data['serial']}'}',
+      final tokenKey = 'doc_token_${widget.branchId}_$serial';
+      if (NotificationDeduper.shouldShow(tokenKey, window: const Duration(minutes: 5))) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('🎟️ New token: ${data['patientName'] ?? '#${data['serial']}'}'),
             backgroundColor: Colors.green.shade700,
             duration: const Duration(seconds: 4),
-            icon: const Icon(Icons.person_add, color: Colors.white),
-          ).show(context);
-        }
-      });
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -280,15 +343,14 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (serial != null && serial == _selectedPatientData?['serial']) {
       if (mounted) {
         setState(() => _selectedPatientData?['dispenseStatus'] = 'dispensed');
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            Flushbar(
-              message: '💊 Patient #$serial has been dispensed',
-              backgroundColor: Colors.purple.shade700,
-              duration: const Duration(seconds: 3),
-            ).show(context);
-          }
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('💊 Patient #$serial has been dispensed'),
+            backgroundColor: Colors.purple.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     }
   }
@@ -317,39 +379,52 @@ class _DoctorScreenState extends State<DoctorScreen>
       final online = results.any((r) => r != ConnectivityResult.none);
       if (_online != online && mounted) {
         setState(() => _online = online);
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            Flushbar(
-              message: online ? 'Internet restored' : 'Offline (LAN still works)',
-              backgroundColor: online ? Colors.green.shade700 : Colors.orange.shade700,
-              duration: const Duration(seconds: 3),
-            ).show(context);
-          }
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(online ? 'Internet restored' : 'Offline (LAN still works)'),
+            backgroundColor: online ? Colors.green.shade700 : Colors.orange.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
     });
   }
 
   Future<void> _forceSync() async {
-    if (!_online || _isSyncing || !mounted) return;
+    if (_isSyncing || !mounted) return;
     setState(() => _isSyncing = true);
     try {
-      await SyncService().forceFullRefresh(widget.branchId);
-      await LocalStorageService.downloadTodayTokens(widget.branchId);
-      if (mounted) setState(() {});
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Flushbar(message: 'Sync completed', backgroundColor: Colors.green.shade700,
-              duration: const Duration(seconds: 3)).show(context);
-        }
-      });
+      // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
+      await RealtimeManager().forceFlushAndCatchUp();
+
+      // 2. If online, sync with cloud
+      if (_online) {
+        await SyncService().forceFullRefresh(widget.branchId);
+        await LocalStorageService.downloadTodayTokens(widget.branchId);
+      }
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_online ? 'Sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)'),
+            backgroundColor: Colors.green.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } catch (e) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700,
-              duration: const Duration(seconds: 3)).show(context);
-        }
-      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sync failed: $e'),
+            backgroundColor: Colors.red.shade700,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSyncing = false);
     }
@@ -369,6 +444,31 @@ class _DoctorScreenState extends State<DoctorScreen>
       _selectedPatientData = Map.from(rawEntry);
       final rawPresc = rawEntry['prescription'];
       final prescription = (rawPresc is Map) ? Map<String, dynamic>.from(rawPresc) : null;
+
+      final docName = _username ?? widget.doctorName;
+      final docId = widget.doctorId;
+      final serial = (rawEntry['serial'] ?? rawEntry['id'])?.toString();
+
+      // Track consultation status locally and broadcast so other doctors see it
+      if (serial != null && serial.isNotEmpty) {
+        final existing = LocalStorageService.getLocalEntry(widget.branchId, serial);
+        if (existing != null) {
+          final updated = Map<String, dynamic>.from(existing);
+          final status = (updated['status'] ?? '').toString().toLowerCase();
+          if (status == 'waiting' || status.isEmpty) {
+            updated['activeDoctor'] = docName;
+            updated['activeDoctorId'] = docId;
+            LocalStorageService.saveEntryLocal(widget.branchId, serial, updated);
+            try {
+              RealtimeManager().sendMessage(RealtimeEvents.payload(
+                type: RealtimeEvents.saveEntry,
+                branchId: widget.branchId,
+                data: updated,
+              ));
+            } catch (_) {}
+          }
+        }
+      }
 
       _prescriptions
         ..clear()
@@ -443,9 +543,16 @@ class _DoctorScreenState extends State<DoctorScreen>
       try {
         final dateKey = CampSessionService.getDateKeyFromSerial(serial);
         final queueType = resolveQueueType(patient['queueType']?.toString() ?? patient['status']?.toString());
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: widget.branchId,
+          dateKey: dateKey,
+          campId: patient['campId']?.toString() ?? patient['dispensaryId']?.toString(),
+          dispensaryTag: patient['dispensaryTag']?.toString(),
+          serial: serial,
+        );
         await FirebaseFirestore.instance
             .collection('branches').doc(widget.branchId)
-            .collection('serials').doc(dateKey)
+            .collection('serials').doc(campDocKey)
             .collection(queueType)
             .doc(serial)
             .set({
@@ -459,11 +566,14 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
 
       if (mounted) {
-        Flushbar(
-          message: '⏩ Patient #$serial skipped',
-          backgroundColor: Colors.orange.shade800,
-          duration: const Duration(seconds: 3),
-        ).show(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⏩ Patient #$serial skipped'),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
 
       // Clear current inputs
@@ -517,11 +627,14 @@ class _DoctorScreenState extends State<DoctorScreen>
       _rightPanelKey++;
     });
 
-    Flushbar(
-      message: '🔁 Repeated — ${_prescriptions.length} medicine(s), ${_labResults.length} lab test(s)',
-      backgroundColor: Colors.teal.shade700,
-      duration: const Duration(seconds: 3),
-    ).show(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🔁 Repeated — ${_prescriptions.length} medicine(s), ${_labResults.length} lab test(s)'),
+        backgroundColor: Colors.teal.shade700,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   void _openFullHistory() {
@@ -589,11 +702,6 @@ class _DoctorScreenState extends State<DoctorScreen>
       onSync: _forceSync,
       onLogout: _logout,
       extraActions: [
-        if (CampSessionService.hasCampsForBranch(widget.branchId))
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: CampSelectorChip(branchId: widget.branchId),
-          ),
         Tooltip(
           message: 'Medicine Inventory',
           child: Material(
@@ -775,7 +883,14 @@ class _DoctorScreenState extends State<DoctorScreen>
               : [const Color(0xFFE8F5E9), const Color(0xFFF1F8E9)],
         ),
       ),
-      child: isMobile ? _buildMobileBody(isDark) : _buildDesktopBody(isDark),
+      child: Column(
+        children: [
+          ClockSkewWarningBanner(branchId: widget.branchId),
+          Expanded(
+            child: isMobile ? _buildMobileBody(isDark) : _buildDesktopBody(isDark),
+          ),
+        ],
+      ),
     );
 
     if (widget.isEmbedded) return body;

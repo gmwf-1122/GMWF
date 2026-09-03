@@ -14,27 +14,30 @@ class GlobalAuditTrailScreen extends StatefulWidget {
 
 class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
-  String _filterAction = 'all'; 
-  Stream<QuerySnapshot>? _logsStream;
+  String _filterAction = 'all';
+  Future<QuerySnapshot>? _logsFuture;
   List<QueryDocumentSnapshot> _cachedDocs = []; // PERSISTENCE CACHE
 
   @override
   void initState() {
     super.initState();
-    _initStream();
+    _loadLogs();
   }
 
-  void _initStream() {
+  Future<void> _loadLogs() async {
     try {
-      Query query = _db.collection('global_audit_logs').orderBy('timestamp', descending: true).limit(100);
+      Query query = _db.collection('global_audit_logs').orderBy('timestamp', descending: true).limit(50);
       if (_filterAction != 'all') {
         query = query.where('action', isEqualTo: _filterAction);
       }
       setState(() {
-        _logsStream = query.snapshots();
+        _logsFuture = query.get();
       });
     } catch (e) {
-      debugPrint('Error initializing audit stream: $e');
+      debugPrint('Error loading audit logs: $e');
+      setState(() {
+        _logsFuture = Future.error(e);
+      });
     }
   }
 
@@ -42,8 +45,8 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
     if (_filterAction == action) return;
     setState(() {
       _filterAction = action;
-      _initStream();
     });
+    _loadLogs();
   }
 
   @override
@@ -177,15 +180,14 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
   }
 
   Widget _buildLogsList() {
-    if (_logsStream == null) {
+    if (_logsFuture == null) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: _logsStream,
+    return FutureBuilder<QuerySnapshot>(
+      future: _logsFuture,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          // If we have cached data, show it alongside the error
           if (_cachedDocs.isNotEmpty) {
             return Column(
               children: [

@@ -280,25 +280,46 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                          decoration: BoxDecoration(color: t.bgCardAlt, borderRadius: BorderRadius.circular(6)),
-                                          child: Text('$entity • $act', style: TextStyle(color: t.textSecondary, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(color: t.bgCardAlt, borderRadius: BorderRadius.circular(6)),
+                                              child: Text('$entity • $act', style: TextStyle(color: t.textSecondary, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                                            ),
+                                            if (log['serial'] != null && log['serial'].toString().isNotEmpty) ...[
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(color: const Color(0xFF6366F1).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                                                child: Text(log['serial'].toString(), style: const TextStyle(color: Color(0xFF6366F1), fontSize: 9, fontWeight: FontWeight.bold)),
+                                              ),
+                                            ],
+                                          ],
                                         ),
                                         Text(date, style: TextStyle(color: t.textTertiary, fontSize: 11)),
                                       ],
                                     ),
-                                    const SizedBox(height: 8),
+                                    if (log['patientName'] != null && log['patientName'].toString().isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text('Patient: ${log['patientName']}', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
+                                    ],
+                                    const SizedBox(height: 6),
                                     if (reason.toString().isNotEmpty) ...[
                                       Text(reason, style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.w600)),
                                       const SizedBox(height: 8),
                                     ],
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    Wrap(
+                                      spacing: 12,
+                                      runSpacing: 4,
                                       children: [
-                                        Text('User: ${log['performedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                        if (log['approvedBy'] != null)
-                                          Text('Approved: ${log['approvedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11, fontWeight: FontWeight.bold)),
+                                        Text('User: ${log['performedBy'] ?? "Staff"}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                                        if (log['requestedBy'] != null && log['requestedBy'].toString().isNotEmpty)
+                                          Text('Requested: ${log['requestedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                                        if (log['approvedBy'] != null && log['approvedBy'].toString().isNotEmpty)
+                                          Text('Approved: ${log['approvedBy']}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                                        if (log['rejectedBy'] != null && log['rejectedBy'].toString().isNotEmpty)
+                                          Text('Rejected: ${log['rejectedBy']}', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold)),
                                       ],
                                     ),
                                     if (log['fieldChanges'] != null && (log['fieldChanges'] as List).isNotEmpty) ...[

@@ -345,8 +345,6 @@ class ConnectionManager {
   }
 
   // ── Wait for 'identified' ──────────────────────────────────────────────────
-  // [BUG-10] The isConnected fast-path now waits 500 ms (was 250 ms) before
-  // completing, giving the server more time to echo 'identified'.
   Future<bool> _waitForIdentified({required int timeoutSeconds}) async {
     final completer = Completer<bool>();
 
@@ -358,15 +356,10 @@ class ConnectionManager {
       }
     });
 
-    // Fast-path: if already connected wait 500 ms for the echo then resolve.
-    if (RealtimeManager().isConnected) {
-      await Future.delayed(const Duration(milliseconds: 500));
-      if (!completer.isCompleted) completer.complete(true);
-    }
-
     Timer(Duration(seconds: timeoutSeconds), () {
       if (!completer.isCompleted) {
         sub.cancel();
+        // Only return true if actively connected and confirmed
         completer.complete(RealtimeManager().isConnected);
       }
     });
@@ -386,13 +379,14 @@ class ConnectionManager {
   void _startHeartbeat(String ip, int port) {
     _heartbeatTimer?.cancel();
     _heartbeatTimer =
-        Timer.periodic(const Duration(seconds: 4), (_) async {
+        Timer.periodic(const Duration(seconds: 10), (_) async {
       // [BUG-11] Explicit disposed guard.
       if (!_running || _disposed) return;
 
-      if (!RealtimeManager().isConnected) {
-        debugPrint('[ConnectionManager] Heartbeat: disconnect detected');
-        _heartbeatTimer?.cancel();
+      // When RealtimeManager is disconnected and no reconnect is actively scheduled,
+      // emit disconnected state and immediately schedule automatic reconnect.
+      if (!RealtimeManager().isConnected && _reconnectTimer == null) {
+        debugPrint('[ConnectionManager] Heartbeat: disconnect detected, scheduling auto-reconnect...');
         _emit(const ConnectionStatus(
           state: LanConnectionState.disconnected,
           message: 'Connection lost — reconnecting...',

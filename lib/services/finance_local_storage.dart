@@ -10,6 +10,10 @@ import 'local_storage_service.dart';
 import 'finance_loans_storage.dart';
 import 'finance_ledger_storage.dart';
 import 'finance_expenses_storage.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/zkteco_network_service.dart';
 
 
 class FinanceLocalStorage {
@@ -259,6 +263,24 @@ class FinanceLocalStorage {
       );
     }
 
+    // Register Biometric PIN if present
+    final empPin = (sanitized['biometricPin'] ?? sanitized['pin'])?.toString().trim() ?? '';
+    if (empPin.isNotEmpty && Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+      final isTeacher = (sanitized['role']?.toString().toLowerCase().contains('teacher') == true) ||
+          (sanitized['department']?.toString().toLowerCase().contains('teacher') == true);
+      final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+      await credBox.put(localId, {
+        'id': localId,
+        'biometricPin': empPin,
+        'entityId': localId,
+        'entityName': sanitized['name']?.toString() ?? 'Employee',
+        'entityType': isTeacher ? 'teacher' : 'employee',
+        'branchId': branchId,
+        'enrolledAt': DateTime.now().toIso8601String(),
+        'active': sanitized['isActive'] != false,
+      });
+    }
+
     // Queue Sync
     await LocalStorageService.enqueueSync({
       'type': 'save_employee',
@@ -266,6 +288,18 @@ class FinanceLocalStorage {
       'localId': localId,
       'data': sanitized,
     });
+
+    // Broadcast over LAN WebSocket so other local PCs update immediately
+    try {
+      RealtimeManager().sendMessage(RealtimeEvents.payload(
+        type: RealtimeEvents.saveEmployee,
+        branchId: branchId,
+        data: sanitized,
+      ));
+    } catch (_) {}
+
+    // Trigger cloud upload in background
+    SyncService().triggerUpload();
 
     return localId;
   }
@@ -389,15 +423,46 @@ class FinanceLocalStorage {
     for (final val in employeesBox.values) {
       if (val is! Map) continue;
       final record = Map<String, dynamic>.from(val);
+      final name = (record['name'] ?? record['employeeName'] ?? '').toString().toLowerCase().trim();
       final role = (record['role'] ?? record['linkedUserRole'] ?? record['designation'] ?? '').toString().toLowerCase().trim();
       final dept = (record['department'] ?? record['linkedDepartment'] ?? '').toString().toLowerCase().trim();
 
-      // Exclude Madrassa Guardians, Patients, and non-employee roles from Finance Payroll/Employee list
+      // Exclude Madrassa Guardians, Patients, System Servers, and non-employee roles from Finance Payroll/Employee list
       if (role.contains('guardian') ||
           role.contains('patient') ||
           dept.contains('guardian') ||
           dept.contains('patient') ||
-          record['isEmployee'] == false) {
+          role.contains('server') ||
+          dept.contains('server') ||
+          name.contains('server') ||
+          role.contains('terminal') ||
+          role.contains('bot') ||
+          name.startsWith('staff (pin') ||
+          name == 'employee' ||
+          name == '.' ||
+          record['isEmployee'] == false ||
+          record['isServerAccount'] == true) {
+        continue;
+      }
+
+      // Exclude offboarded, left, kicked, terminated, archived, or deleted employees
+      final isActive = record['isActive'] as bool? ?? true;
+      if (!isActive) continue;
+
+      if (record['isDeleted'] == true || record['deleted'] == true) continue;
+
+      final status = (record['status'] ?? record['employeeStatus'] ?? '').toString().trim().toLowerCase();
+      if (status == 'left' ||
+          status == 'offboarded' ||
+          status == 'kicked' ||
+          status == 'terminated' ||
+          status == 'archived' ||
+          status == 'inactive' ||
+          status == 'deleted' ||
+          status.contains('left') ||
+          status.contains('offboard') ||
+          status.contains('kick') ||
+          status.contains('terminat')) {
         continue;
       }
 
@@ -410,7 +475,23 @@ class FinanceLocalStorage {
         final matchClean = empBranch.replaceAll('branch_', '') == cleanBranch.replaceAll('branch_', '');
         final matchPrefix = empBranch.startsWith(cleanBranch) || cleanBranch.startsWith(empBranch);
 
-        if (!matchCanonical && !matchClean && !matchPrefix) {
+        // Support multi-branch staff (e.g. allowedBranches / branches or branchId == 'all')
+        bool matchMulti = empBranch == 'all' || empBranch == 'global';
+        if (!matchMulti) {
+          final allowed = record['allowedBranches'] ?? record['branches'];
+          final cleanTarget = cleanBranch.replaceAll('branch_', '');
+          if (allowed is List) {
+            matchMulti = allowed.any((b) {
+              final bStr = b.toString().toLowerCase().trim().replaceAll('branch_', '');
+              return bStr == cleanTarget || bStr == 'all' || bStr == 'global';
+            });
+          } else if (allowed is String && allowed.isNotEmpty) {
+            final bStr = allowed.toLowerCase().trim().replaceAll('branch_', '');
+            matchMulti = bStr.contains(cleanTarget) || bStr == 'all' || bStr == 'global';
+          }
+        }
+
+        if (!matchCanonical && !matchClean && !matchPrefix && !matchMulti) {
           continue;
         }
       }
@@ -430,13 +511,144 @@ class FinanceLocalStorage {
     return record;
   }
 
+  /// Retrieves comprehensive last recorded system data for an employee/user (last attendance punch, last app activity, loan balance, salary).
+  static Map<String, dynamic> getLastRecordedDataForEmployee({
+    String? employeeId,
+    String? cnic,
+    String? userId,
+  }) {
+    final cleanCnic = (cnic ?? '').replaceAll(RegExp(r'\D'), '');
+    Map<String, dynamic>? emp;
+    if (employeeId != null && employeeId.isNotEmpty) {
+      emp = getEmployee(employeeId);
+    }
+    if (emp == null && cleanCnic.isNotEmpty) {
+      for (final k in employeesBox.keys) {
+        final raw = employeesBox.get(k);
+        if (raw is Map) {
+          final eCnic = (raw['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          if (eCnic.isNotEmpty && eCnic == cleanCnic) {
+            emp = Map<String, dynamic>.from(raw);
+            break;
+          }
+        }
+      }
+    }
+
+    final empId = emp?['localId']?.toString() ?? emp?['employeeId']?.toString() ?? employeeId ?? '';
+    final empName = emp?['name']?.toString() ?? 'Employee';
+    final currentSalary = (emp?['currentSalary'] as num?)?.toDouble() ?? 0.0;
+    final loanBalance = empId.isNotEmpty ? getAdvanceBalance(empId) : 0.0;
+    final joiningDateStr = emp?['hireDate']?.toString() ?? emp?['joiningDate']?.toString() ?? emp?['createdAt']?.toString() ?? '';
+
+    // Last Attendance Punch Lookup
+    String lastAttendance = 'No attendance punches recorded yet';
+    DateTime? lastPunchTime;
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+        final box = Hive.box(LocalStorageService.attendanceBox);
+        for (final k in box.keys) {
+          final raw = box.get(k);
+          if (raw is Map) {
+            final recEmpId = (raw['employeeId'] ?? raw['entityId'])?.toString();
+            final recCnic = (raw['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+            final matches = (empId.isNotEmpty && recEmpId == empId) || (cleanCnic.isNotEmpty && recCnic == cleanCnic);
+            if (matches) {
+              final dStr = (raw['date'] ?? raw['timestamp'] ?? raw['createdAt'])?.toString();
+              DateTime? punchDt;
+              if (dStr != null) punchDt = DateTime.tryParse(dStr);
+
+              if (punchDt != null) {
+                if (lastPunchTime == null || punchDt.isAfter(lastPunchTime)) {
+                  lastPunchTime = punchDt;
+                  final inTime = raw['checkInTime'] ?? raw['morningCheckIn'] ?? raw['inTime'];
+                  final outTime = raw['checkOutTime'] ?? raw['eveningCheckOut'] ?? raw['outTime'];
+                  final status = raw['status'] ?? raw['attendance'] ?? 'Present';
+                  final punchType = outTime != null ? 'Check-Out ($outTime)' : (inTime != null ? 'Check-In ($inTime)' : 'Marked $status');
+                  lastAttendance = '${DateFormat('dd MMM yyyy').format(punchDt)} • $punchType';
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Last User / System Activity Lookup
+    String lastActivity = 'No app logins recorded';
+    String? uKey = userId ?? emp?['linkedUserId']?.toString();
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final uBox = Hive.box(LocalStorageService.usersBox);
+        Map? uMap;
+        if (uKey != null && uBox.containsKey(uKey)) {
+          final raw = uBox.get(uKey);
+          if (raw is Map) uMap = raw;
+        } else if (cleanCnic.isNotEmpty) {
+          for (final k in uBox.keys) {
+            final raw = uBox.get(k);
+            if (raw is Map) {
+              final uCnic = ((raw['cnic'] ?? raw['identification']) ?? '').toString().replaceAll(RegExp(r'\D'), '');
+              if (uCnic.isNotEmpty && uCnic == cleanCnic) {
+                uMap = raw;
+                break;
+              }
+            }
+          }
+        }
+        if (uMap != null) {
+          final lastSeen = uMap['lastSeen'] ?? uMap['lastLogin'] ?? uMap['updatedAt'];
+          if (lastSeen != null) {
+            final dt = DateTime.tryParse(lastSeen.toString());
+            if (dt != null) {
+              lastActivity = 'Active on ${DateFormat('dd MMM yyyy, hh:mm a').format(dt)} (@${uMap['username'] ?? 'User'})';
+            } else {
+              lastActivity = 'Last seen: $lastSeen';
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    return {
+      'employeeId': empId,
+      'name': empName,
+      'role': emp?['role']?.toString() ?? emp?['designation']?.toString() ?? 'Staff',
+      'branchId': emp?['branchId']?.toString() ?? 'Main Branch',
+      'currentSalary': currentSalary,
+      'loanBalance': loanBalance,
+      'joiningDate': joiningDateStr,
+      'lastAttendance': lastAttendance,
+      'lastAttendanceDateTime': lastPunchTime?.toIso8601String(),
+      'lastActivity': lastActivity,
+    };
+  }
+
   static Future<void> syncBiDirectionalOffboarding({
     String? employeeId,
     String? userId,
     String? cnic,
     required String performedBy,
+    String? reason,
+    String? detailedReason,
+    DateTime? effectiveDate,
+    String? effectiveTime,
+    String? shiftMilestone,
+    Map<String, dynamic>? lastRecordedData,
   }) async {
     final cleanCnic = (cnic ?? '').replaceAll(RegExp(r'\D'), '');
+    final nowStr = _nowIso();
+
+    final offboardingDetails = <String, dynamic>{
+      'reason': reason ?? 'Offboarded',
+      'detailedReason': detailedReason ?? '',
+      'effectiveDate': (effectiveDate ?? DateTime.now()).toIso8601String(),
+      'effectiveTime': effectiveTime ?? DateFormat('hh:mm a').format(DateTime.now()),
+      'shiftMilestone': shiftMilestone ?? 'Immediate',
+      'offboardedAt': nowStr,
+      'offboardedBy': performedBy,
+      'lastRecordedData': lastRecordedData ?? {},
+    };
 
     // 1. Offboard & stop salary on Employee record
     Map<String, dynamic>? emp;
@@ -462,12 +674,24 @@ class FinanceLocalStorage {
     if (emp != null && empKey != null) {
       emp['isActive'] = false;
       emp['status'] = 'Inactive';
+      emp['offboardingStatus'] = reason ?? 'Offboarded';
+      emp['offboardingDetails'] = offboardingDetails;
       emp['currentSalary'] = 0.0;
       emp['currentSalaryMinor'] = 0;
       emp['payrollStatus'] = 'Salary Stopped';
-      emp['updatedAt'] = _nowIso();
+      emp['updatedAt'] = nowStr;
       await employeesBox.put(empKey, _sanitize(emp));
       await employeesBox.flush();
+
+      // Log offboarding action
+      await logAction(
+        branchId: emp['branchId']?.toString() ?? 'main',
+        entityType: 'employee',
+        entityId: empKey,
+        action: 'offboard',
+        performedBy: performedBy,
+        reason: 'Offboarded ($reason): ${detailedReason ?? ''} | Effective: ${DateFormat('dd MMM yyyy').format(effectiveDate ?? DateTime.now())} ${effectiveTime ?? ''}',
+      );
     }
 
     // 2. Revoke App Access on System User Account
@@ -494,18 +718,26 @@ class FinanceLocalStorage {
         uMap['status'] = 'revoked';
         uMap['isRevoked'] = true;
         uMap['accessRevoked'] = true;
-        uMap['updatedAt'] = _nowIso();
+        uMap['offboardingDetails'] = offboardingDetails;
+        uMap['updatedAt'] = nowStr;
         await uBox.put(uKey, uMap);
       }
 
       try {
-        await FirebaseFirestore.instance.collection('users').doc(uKey).set({
+        FirebaseFirestore.instance.collection('users').doc(uKey).set({
           'status': 'revoked',
           'isRevoked': true,
           'accessRevoked': true,
+          'offboardingDetails': offboardingDetails,
           'updatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 2)).catchError((_) {});
       } catch (_) {}
+
+      await LocalStorageService.enqueueSync({
+        'type': 'revoke_user_access',
+        'userId': uKey,
+        'offboardingDetails': offboardingDetails,
+      });
     }
   }
 
@@ -521,6 +753,15 @@ class FinanceLocalStorage {
       performedBy: performedBy,
     );
 
+    try {
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(branchId)
+          .collection('employees')
+          .doc(employeeId)
+          .delete();
+    } catch (_) {}
+
     await employeesBox.delete(employeeId);
     await employeesBox.flush();
 
@@ -529,6 +770,16 @@ class FinanceLocalStorage {
       'branchId': branchId,
       'localId': employeeId,
     });
+
+    try {
+      RealtimeManager().sendMessage(RealtimeEvents.payload(
+        type: RealtimeEvents.deleteEmployee,
+        branchId: branchId,
+        data: {'localId': employeeId},
+      ));
+    } catch (_) {}
+
+    SyncService().triggerUpload();
 
     await logAction(
       branchId: branchId,
@@ -928,12 +1179,19 @@ class FinanceLocalStorage {
 
       if (att is Map) {
         final rec = Map<String, dynamic>.from(att);
-        // Ensure presence is inferred if punch times exist
+        // Ensure presence is recognized if ANY punch times or shifts exist
         final checkIn = rec['checkInTime']?.toString() ?? rec['arrivalTime']?.toString();
-        final rawStatus = (rec['status']?.toString() ?? '').toLowerCase();
-        if ((rawStatus.isEmpty || rawStatus == 'absent' || rawStatus == 'unmarked') &&
-            checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') {
+        final checkOut = rec['checkOutTime']?.toString() ?? rec['departureTime']?.toString();
+        final lastPunch = rec['lastPunchTime']?.toString();
+        final shifts = rec['shifts'] is Map ? (rec['shifts'] as Map) : null;
+        final hasPunch = (checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') ||
+            (checkOut != null && checkOut.isNotEmpty && checkOut != '--:--') ||
+            (lastPunch != null && lastPunch.isNotEmpty) ||
+            (shifts != null && shifts.isNotEmpty);
+
+        if (hasPunch) {
           rec['status'] = 'present';
+          rec['leaveType'] = null;
         }
         results.add(rec);
       } else {
@@ -1954,6 +2212,14 @@ class FinanceLocalStorage {
             match = name.contains(query) || cnic.contains(query);
           }
         }
+
+        // Match by patient name/CNIC/serial if entityType is patient
+        if (!match && (record['entityType'] == 'patient' || record['module'] == 'patient')) {
+          final pName = record['patientName']?.toString().toLowerCase() ?? '';
+          final cnic = (record['patientCnic'] ?? record['cnic'])?.toString().toLowerCase() ?? '';
+          final serial = record['serial']?.toString().toLowerCase() ?? '';
+          match = pName.contains(query) || cnic.contains(query) || serial.contains(query);
+        }
         
         if (!match) continue;
       }
@@ -2110,6 +2376,20 @@ class FinanceLocalStorage {
     return list;
   }
 
+  static List<String> _getKnownBranchIds(String branchId) {
+    if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
+      return [branchId.toLowerCase().trim()];
+    }
+    final empBranches = employeesBox.values
+        .whereType<Map>()
+        .map((m) => (m['branchId'] ?? '').toString().trim().toLowerCase())
+        .where((b) => b.isNotEmpty && b != 'all' && b != 'global')
+        .toSet()
+        .toList();
+    if (empBranches.isNotEmpty) return empBranches;
+    return ['gujrat', 'sialkot', 'rawalpindi', 'karachi'];
+  }
+
   // ── Firestore Download Operations ─────────────────────────────────────────
   static Future<void> downloadEmployees(String branchId, {bool force = false}) async {
     final key = 'employees_$branchId';
@@ -2118,20 +2398,22 @@ class FinanceLocalStorage {
       return;
     }
     try {
-      final QuerySnapshot<Map<String, dynamic>> snap;
-      if (branchId == 'all' || branchId.isEmpty) {
-        snap = await FirebaseFirestore.instance.collectionGroup('employees').get();
-      } else {
-        snap = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('employees')
-            .get();
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('employees')
+              .get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
 
       final box = employeesBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final data = doc.data();
         final localId = data['localId'] as String? ?? doc.id;
         final localRecord = box.get(localId);
@@ -2156,10 +2438,37 @@ class FinanceLocalStorage {
       }
       if (updates.isNotEmpty) {
         await box.putAll(updates);
+        // Simultaneously sync biometric PINs into credential cache
+        if (Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+          final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+          final credUpdates = <String, Map<String, dynamic>>{};
+          for (final entry in updates.entries) {
+            final emp = entry.value as Map;
+            final empPin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+            if (empPin.isNotEmpty) {
+              final empId = entry.key;
+              final isTeacher = (emp['role']?.toString().toLowerCase().contains('teacher') == true) ||
+                  (emp['department']?.toString().toLowerCase().contains('teacher') == true);
+              credUpdates[empId] = {
+                'id': empId,
+                'biometricPin': empPin,
+                'entityId': empId,
+                'entityName': emp['name']?.toString() ?? 'Employee',
+                'entityType': isTeacher ? 'teacher' : 'employee',
+                'branchId': emp['branchId']?.toString() ?? branchId,
+                'enrolledAt': emp['createdAt']?.toString() ?? DateTime.now().toIso8601String(),
+                'active': emp['isActive'] != false,
+              };
+            }
+          }
+          if (credUpdates.isNotEmpty) {
+            await credBox.putAll(credUpdates);
+          }
+        }
       }
       await box.flush();
       await _markRefreshed(key);
-      debugPrint('[FinanceLS] Downloaded ${snap.docs.length} employees');
+      debugPrint('[FinanceLS] Downloaded and unified ${docs.length} employees');
     } catch (e) {
       debugPrint('[FinanceLS] downloadEmployees error: $e');
     }
@@ -2172,45 +2481,46 @@ class FinanceLocalStorage {
       return;
     }
     try {
-      // NOTE: requires a Firestore composite index on (branchId) for this collectionGroup — create in Firebase console if query fails with FAILED_PRECONDITION.
-      Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collectionGroup('salary_history');
-      if (branchId != 'all' && branchId.isNotEmpty) {
-        q = q.where('branchId', isEqualTo: branchId);
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('salary_history')
+              .get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
-      final snap = await q.get();
       final box = salaryHistoryBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final pathSegments = doc.reference.path.split('/');
-        if (pathSegments.length >= 6) {
-          final docBranchId = pathSegments[1];
-          final employeeId = pathSegments[3];
-          final historyId = doc.id;
+        final docBranchId = pathSegments.length >= 2 ? pathSegments[1] : branchId;
+        final employeeId = doc.data()['employeeId']?.toString() ?? (pathSegments.length >= 4 ? pathSegments[3] : 'unknown');
+        final historyId = doc.id;
 
-          if (branchId != 'all' && branchId.isNotEmpty && docBranchId != branchId) {
-            continue;
-          }
-
-          final key = '${employeeId}_$historyId';
-          final localRecord = box.get(key);
-          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
-            continue;
-          }
-
-          final data = doc.data();
-          final record = Map<String, dynamic>.from(data);
-          record['id'] = historyId;
-          record['localId'] = historyId;
-          record['syncStatus'] = 'synced';
-
-          for (final field in ['effectiveDate', 'createdAt', 'updatedAt']) {
-            if (record[field] is Timestamp) {
-              record[field] = (record[field] as Timestamp).toDate().toIso8601String();
-            }
-          }
-
-          updates[key] = _sanitize(record);
+        final key = '${employeeId}_$historyId';
+        final localRecord = box.get(key);
+        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+          continue;
         }
+
+        final data = doc.data();
+        final record = Map<String, dynamic>.from(data);
+        record['id'] = historyId;
+        record['localId'] = historyId;
+        record['branchId'] = docBranchId;
+        record['syncStatus'] = 'synced';
+
+        for (final field in ['effectiveDate', 'createdAt', 'updatedAt']) {
+          if (record[field] is Timestamp) {
+            record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+          }
+        }
+
+        updates[key] = _sanitize(record);
       }
       if (updates.isNotEmpty) {
         await box.putAll(updates);
@@ -2232,18 +2542,7 @@ class FinanceLocalStorage {
     try {
       final box = attendanceBox;
       final Map<String, dynamic> updates = {};
-      final List<String> branches;
-      if (branchId == 'all' || branchId.isEmpty) {
-        final empBranches = employeesBox.values
-            .whereType<Map>()
-            .map((m) => (m['branchId'] ?? '').toString().trim())
-            .where((b) => b.isNotEmpty && b != 'all' && b != 'global')
-            .toSet()
-            .toList();
-        branches = empBranches.isNotEmpty ? empBranches : ['gujrat', 'sialkot', 'rawalpindi', 'karachi'];
-      } else {
-        branches = [branchId];
-      }
+      final List<String> branches = _getKnownBranchIds(branchId);
 
       for (final bId in branches) {
         try {
@@ -2324,20 +2623,22 @@ class FinanceLocalStorage {
       return;
     }
     try {
-      final QuerySnapshot<Map<String, dynamic>> snap;
-      if (branchId == 'all' || branchId.isEmpty) {
-        snap = await FirebaseFirestore.instance.collectionGroup('employee_salaries').get();
-      } else {
-        snap = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('employee_salaries')
-            .get();
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('employee_salaries')
+              .get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
 
       final box = salaryLedgerBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final data = doc.data();
         final recordId = data['localId'] as String? ?? doc.id;
         final localRecord = box.get(recordId);
@@ -2365,7 +2666,7 @@ class FinanceLocalStorage {
       }
       await box.flush();
       await _markRefreshed(key);
-      debugPrint('[FinanceLS] Downloaded ${snap.docs.length} ledger entries');
+      debugPrint('[FinanceLS] Downloaded ${docs.length} ledger entries');
     } catch (e) {
       debugPrint('[FinanceLS] downloadSalaryLedger error: $e');
     }
@@ -2380,34 +2681,23 @@ class FinanceLocalStorage {
     try {
       final box = settingsBox;
       final Map<String, dynamic> updates = {};
-      if (branchId == 'all' || branchId.isEmpty) {
-        final snap = await FirebaseFirestore.instance.collectionGroup('settings').get();
-        for (final doc in snap.docs) {
-          if (doc.id == 'workSchedule') {
-            final data = doc.data();
-            final docBranchId = doc.reference.parent.parent?.id;
-            if (docBranchId != null) {
-              final record = Map<String, dynamic>.from(data);
-              record['branchId'] = docBranchId;
-              record['syncStatus'] = 'synced';
-              updates[docBranchId] = _sanitize(record);
-            }
+      final branches = _getKnownBranchIds(branchId);
+      for (final bId in branches) {
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('settings')
+              .doc('workSchedule')
+              .get();
+          if (doc.exists) {
+            final data = doc.data()!;
+            final record = Map<String, dynamic>.from(data);
+            record['branchId'] = bId;
+            record['syncStatus'] = 'synced';
+            updates[bId] = _sanitize(record);
           }
-        }
-      } else {
-        final doc = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('settings')
-            .doc('workSchedule')
-            .get();
-        if (doc.exists) {
-          final data = doc.data()!;
-          final record = Map<String, dynamic>.from(data);
-          record['branchId'] = branchId;
-          record['syncStatus'] = 'synced';
-          updates[branchId] = _sanitize(record);
-        }
+        } catch (_) {}
       }
       if (updates.isNotEmpty) {
         await box.putAll(updates);
@@ -2427,43 +2717,44 @@ class FinanceLocalStorage {
       return;
     }
     try {
-      // NOTE: requires a Firestore composite index on (branchId) for this collectionGroup — create in Firebase console if query fails with FAILED_PRECONDITION.
-      Query<Map<String, dynamic>> q = FirebaseFirestore.instance.collectionGroup('branch_transfers');
-      if (branchId != 'all' && branchId.isNotEmpty) {
-        q = q.where('branchId', isEqualTo: branchId);
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('branch_transfers')
+              .get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
-      final snap = await q.get();
       final box = transfersBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final pathSegments = doc.reference.path.split('/');
-        if (pathSegments.length >= 6) {
-          final docBranchId = pathSegments[1];
-          final transferId = doc.id;
+        final docBranchId = pathSegments.length >= 2 ? pathSegments[1] : branchId;
+        final transferId = doc.id;
 
-          if (branchId != 'all' && branchId.isNotEmpty && docBranchId != branchId) {
-            continue;
-          }
-
-          final localRecord = box.get(transferId);
-          if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
-            continue;
-          }
-
-          final data = doc.data();
-          final record = Map<String, dynamic>.from(data);
-          record['id'] = transferId;
-          record['localId'] = transferId;
-          record['syncStatus'] = 'synced';
-
-          for (final field in ['effectiveDate', 'createdAt', 'updatedAt']) {
-            if (record[field] is Timestamp) {
-              record[field] = (record[field] as Timestamp).toDate().toIso8601String();
-            }
-          }
-
-          updates[transferId] = _sanitize(record);
+        final localRecord = box.get(transferId);
+        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
+          continue;
         }
+
+        final data = doc.data();
+        final record = Map<String, dynamic>.from(data);
+        record['id'] = transferId;
+        record['localId'] = transferId;
+        record['branchId'] = docBranchId;
+        record['syncStatus'] = 'synced';
+
+        for (final field in ['effectiveDate', 'createdAt', 'updatedAt']) {
+          if (record[field] is Timestamp) {
+            record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+          }
+        }
+
+        updates[transferId] = _sanitize(record);
       }
       if (updates.isNotEmpty) {
         await box.putAll(updates);
@@ -2491,24 +2782,22 @@ class FinanceLocalStorage {
         if (parsed != null) lastSyncTs = Timestamp.fromDate(parsed);
       }
 
-      final QuerySnapshot<Map<String, dynamic>> snap;
-      if (branchId == 'all' || branchId.isEmpty) {
-        var q = FirebaseFirestore.instance
-            .collectionGroup('audit_logs')
-            .where('module', isEqualTo: 'finance');
-        if (lastSyncTs != null) q = q.where('timestamp', isGreaterThan: lastSyncTs);
-        snap = await q.get();
-      } else {
-        var q = FirebaseFirestore.instance
-            .collection('branches').doc(branchId).collection('audit_logs')
-            .where('module', isEqualTo: 'finance');
-        if (lastSyncTs != null) q = q.where('timestamp', isGreaterThan: lastSyncTs);
-        snap = await q.get();
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          var q = FirebaseFirestore.instance
+              .collection('branches').doc(bId).collection('audit_logs')
+              .where('module', isEqualTo: 'finance');
+          if (lastSyncTs != null) q = q.where('timestamp', isGreaterThan: lastSyncTs);
+          final snap = await q.get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
 
       final box = auditLogsBox;
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final data = doc.data();
         if (data['module'] != 'finance') continue;
 
@@ -2529,7 +2818,7 @@ class FinanceLocalStorage {
 
         updates[logId] = _sanitize(record);
       }
-      if (snap.docs.isNotEmpty) {
+      if (docs.isNotEmpty) {
         await sBox.put('__audit_last_ts_$branchId', DateTime.now().toUtc().toIso8601String());
       }
       if (updates.isNotEmpty) {
@@ -2537,7 +2826,7 @@ class FinanceLocalStorage {
       }
       await box.flush();
       await _markRefreshed(ttlKey);
-      debugPrint('[FinanceLS] Downloaded ${snap.docs.length} audit logs (incremental)');
+      debugPrint('[FinanceLS] Downloaded ${docs.length} audit logs (incremental)');
     } catch (e) {
       debugPrint('[FinanceLS] downloadAuditLogs error: $e');
     }
@@ -2580,20 +2869,22 @@ class FinanceLocalStorage {
       return;
     }
     try {
-      final QuerySnapshot<Map<String, dynamic>> snap;
-      if (branchId == 'all' || branchId.isEmpty) {
-        snap = await FirebaseFirestore.instance.collectionGroup('finance_loans').get();
-      } else {
-        snap = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('finance_loans')
-            .get();
+      final branches = _getKnownBranchIds(branchId);
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+      for (final bId in branches) {
+        try {
+          final snap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('finance_loans')
+              .get();
+          docs.addAll(snap.docs);
+        } catch (_) {}
       }
 
       final box = Hive.box(LocalStorageService.financeLoansBox);
       final Map<String, dynamic> updates = {};
-      for (final doc in snap.docs) {
+      for (final doc in docs) {
         final data = doc.data();
         final loanId = data['localId'] as String? ?? doc.id;
         final localRecord = box.get(loanId);
@@ -2621,7 +2912,7 @@ class FinanceLocalStorage {
       }
       await box.flush();
       await _markRefreshed(key);
-      debugPrint('[FinanceLS] Downloaded ${snap.docs.length} loans');
+      debugPrint('[FinanceLS] Downloaded ${docs.length} loans');
     } catch (e) {
       debugPrint('[FinanceLS] downloadLoans error: $e');
     }
@@ -2855,6 +3146,259 @@ class FinanceLocalStorage {
     } catch (e) {
       debugPrint('[FinanceLS] Error creating unified employee profile: $e');
       return '';
+    }
+  }
+
+  /// Self-healing synchronizer: Scans usersBox, creates/links employee profiles
+  /// for staff users, and resolves unassigned ghost PIN records.
+  static Future<int> syncAllUsersToEmployees() async {
+    final retained = await purgeEmployeesExceptUsers();
+    return retained.length;
+  }
+
+  /// Removes all employees from local_employees EXCEPT those corresponding to actual users
+  /// in local_users. Also cleans and formats employee names properly (proper title casing).
+  /// Returns the list of retained, cleaned employee profiles.
+  static Future<List<Map<String, dynamic>>> purgeEmployeesExceptUsers() async {
+    final retainedList = <Map<String, dynamic>>[];
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        await LocalStorageService.openBoxSafe(LocalStorageService.usersBox);
+      }
+      if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        await LocalStorageService.openBoxSafe(LocalStorageService.employeesBox);
+      }
+
+      final uBox = Hive.box(LocalStorageService.usersBox);
+      final eBox = Hive.box(LocalStorageService.employeesBox);
+
+      // Collect all actual user records (excluding server or bot accounts)
+      final activeUsers = <Map<String, dynamic>>[];
+      for (final uKey in uBox.keys) {
+        final val = uBox.get(uKey);
+        if (val is! Map) continue;
+        final u = Map<String, dynamic>.from(val);
+        final role = (u['role'] ?? '').toString().toLowerCase();
+        if (role.contains('server') || role.contains('terminal') || u['isServerAccount'] == true) {
+          continue;
+        }
+        activeUsers.add(u);
+      }
+
+      final keepEmployeeKeys = <String>{};
+
+      for (final user in activeUsers) {
+        final uid = (user['uid'] ?? user['id'] ?? user['userId'] ?? '').toString().trim();
+        final rawName = (user['name'] ?? user['displayName'] ?? user['username'] ?? '').toString().trim();
+        final email = (user['email'] ?? '').toString().trim().toLowerCase();
+        final cleanName = formatCleanEmployeeName(rawName.isNotEmpty ? rawName : email);
+        final role = (user['role'] ?? 'Staff').toString().trim();
+        final branchId = (user['branchId'] ?? 'karachi').toString().trim();
+        final userPin = (user['biometricPin'] ?? user['pin'] ?? '').toString().trim();
+        final userDept = user['department']?.toString().trim();
+
+        // Find existing employee for this user (by userId, name, email, or PIN)
+        dynamic matchedKey;
+        Map<String, dynamic>? existingEmp;
+
+        for (final eKey in eBox.keys) {
+          final eVal = eBox.get(eKey);
+          if (eVal is! Map) continue;
+          final eMap = Map<String, dynamic>.from(eVal);
+          final eUserId = (eMap['userId'] ?? eMap['linkedUserId'] ?? '').toString().trim();
+          final eName = (eMap['name'] ?? eMap['employeeName'] ?? '').toString().trim().toLowerCase();
+          final eEmail = (eMap['email'] ?? '').toString().trim().toLowerCase();
+          final ePin = (eMap['biometricPin'] ?? eMap['pin'] ?? '').toString().trim();
+
+          if (uid.isNotEmpty && eUserId == uid) {
+            matchedKey = eKey;
+            existingEmp = eMap;
+            break;
+          } else if (email.isNotEmpty && eEmail == email) {
+            matchedKey = eKey;
+            existingEmp = eMap;
+            break;
+          } else if (cleanName.toLowerCase() == eName) {
+            matchedKey = eKey;
+            existingEmp = eMap;
+            break;
+          } else if (userPin.isNotEmpty && ePin == userPin) {
+            matchedKey = eKey;
+            existingEmp = eMap;
+            break;
+          }
+        }
+
+        // Determine department based on role if unassigned
+        String effectiveDept = (userDept != null && userDept.isNotEmpty && userDept.toLowerCase() != 'unassigned')
+            ? userDept
+            : (role.toLowerCase().contains('doc')
+                ? 'Dispensary'
+                : (role.toLowerCase().contains('dispens') || role.toLowerCase().contains('rec+dis')
+                    ? 'Dispensary'
+                    : 'Office'));
+
+        // Determine best PIN (preserve if employee had one or user had one)
+        final existingPin = (existingEmp?['biometricPin'] ?? existingEmp?['pin'] ?? '').toString().trim();
+        final bestPin = userPin.isNotEmpty ? userPin : existingPin;
+
+        final targetKey = matchedKey?.toString() ?? (uid.isNotEmpty ? 'emp_$uid' : 'emp_${DateTime.now().microsecondsSinceEpoch}');
+
+        final updatedProfile = <String, dynamic>{
+          if (existingEmp != null) ...existingEmp,
+          'localId': targetKey,
+          'id': targetKey,
+          'userId': uid,
+          'linkedUserId': uid,
+          'name': cleanName,
+          'employeeName': cleanName,
+          'email': email,
+          'role': role,
+          'department': effectiveDept,
+          'branchId': branchId,
+          'isActive': true,
+          'status': 'Active',
+          'isEmployee': true,
+          if (bestPin.isNotEmpty) 'biometricPin': bestPin,
+          if (bestPin.isNotEmpty) 'pin': bestPin,
+          'updatedAt': DateTime.now().toIso8601String(),
+        };
+
+        await eBox.put(targetKey, _sanitize(updatedProfile));
+        keepEmployeeKeys.add(targetKey);
+        retainedList.add(updatedProfile);
+
+        // Update ZKTeco credentials if PIN present
+        if (bestPin.isNotEmpty) {
+          try {
+            await ZkTecoNetworkService.assignPinToEntity(
+              entityId: targetKey,
+              entityName: cleanName,
+              entityType: 'employee',
+              branchId: branchId,
+              customPin: bestPin,
+            );
+          } catch (_) {}
+        }
+      }
+
+      // NOW REMOVE ALL OTHER EMPLOYEES
+      final keysToDelete = <dynamic>[];
+      final pinsToDelete = <String>{};
+      for (final key in eBox.keys) {
+        if (!keepEmployeeKeys.contains(key.toString())) {
+          keysToDelete.add(key);
+          final raw = eBox.get(key);
+          if (raw is Map) {
+            final p = (raw['biometricPin'] ?? raw['pin'] ?? '').toString().trim();
+            if (p.isNotEmpty) pinsToDelete.add(p);
+          }
+        }
+      }
+
+      for (final k in keysToDelete) {
+        await eBox.delete(k);
+      }
+      await eBox.flush();
+
+      // Clean up biometric credentials corresponding to deleted employees
+      try {
+        if (!Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+          await LocalStorageService.openBoxSafe(LocalStorageService.biometricCredentialsBox);
+        }
+        final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+        final credKeysToDelete = <dynamic>[];
+        for (final k in credBox.keys) {
+          final val = credBox.get(k);
+          if (val is Map) {
+            final entityType = (val['entityType'] ?? '').toString().toLowerCase();
+            final entityId = (val['entityId'] ?? k).toString().trim();
+            final pin = (val['biometricPin'] ?? '').toString().trim();
+            if (entityType == 'employee' && !keepEmployeeKeys.contains(entityId)) {
+              credKeysToDelete.add(k);
+            } else if (pinsToDelete.contains(pin) && !retainedList.any((r) => r['biometricPin'] == pin)) {
+              credKeysToDelete.add(k);
+            }
+          }
+        }
+        for (final ck in credKeysToDelete) {
+          await credBox.delete(ck);
+        }
+        await credBox.flush();
+        debugPrint('[FinanceLS] purgeEmployeesExceptUsers: Cleaned ${credKeysToDelete.length} unassigned biometric credentials.');
+      } catch (err) {
+        debugPrint('[FinanceLS] Error purging credentials: $err');
+      }
+
+      debugPrint('[FinanceLS] purgeEmployeesExceptUsers: Kept ${retainedList.length} user employees, deleted ${keysToDelete.length} dummy/orphan employees.');
+    } catch (e) {
+      debugPrint('[FinanceLS] purgeEmployeesExceptUsers error: $e');
+    }
+    return retainedList;
+  }
+
+  /// Helper to format a raw name or email into proper clean Title Case (e.g. 'iqra' -> 'Iqra', 'kashif' -> 'Kashif')
+  static String formatCleanEmployeeName(String raw) {
+    if (raw.trim().isEmpty) return 'Staff';
+    var clean = raw.trim();
+    if (clean.contains('@')) {
+      clean = clean.split('@').first;
+    }
+    clean = clean.replaceAll(RegExp(r'[_.-]'), ' ');
+    final words = clean.split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+    return words.map((w) {
+      final lower = w.toLowerCase();
+      if (lower == 'dr') return 'Dr.';
+      if (lower == 'ul' || lower == 'al') return 'ul';
+      return w[0].toUpperCase() + w.substring(1).toLowerCase();
+    }).join(' ');
+  }
+
+  /// Completely deletes an employee profile and their biometric credentials when a user is deleted.
+  static Future<void> purgeEmployeeForDeletedUser(String userId) async {
+    if (userId.trim().isEmpty) return;
+    try {
+      final keysToDelete = <dynamic>[];
+      final pinsToDelete = <String>{};
+
+      for (final key in employeesBox.keys) {
+        final val = employeesBox.get(key);
+        if (val is! Map) continue;
+        final eUserId = (val['userId'] ?? val['linkedUserId'] ?? '').toString().trim();
+        final localId = (val['localId'] ?? key).toString().trim();
+        if (eUserId == userId || localId == userId || localId == 'emp_$userId') {
+          keysToDelete.add(key);
+          final pin = (val['biometricPin'] ?? val['pin'] ?? '').toString().trim();
+          if (pin.isNotEmpty) pinsToDelete.add(pin);
+        }
+      }
+
+      for (final k in keysToDelete) {
+        await employeesBox.delete(k);
+      }
+      await employeesBox.flush();
+
+      // Clean up biometric credentials box
+      if (Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+        final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+        final credKeysToDelete = <dynamic>[];
+        for (final k in credBox.keys) {
+          final cVal = credBox.get(k);
+          if (cVal is Map) {
+            final entityId = (cVal['entityId'] ?? k).toString().trim();
+            final pin = (cVal['biometricPin'] ?? '').toString().trim();
+            if (entityId == userId || entityId == 'emp_$userId' || pinsToDelete.contains(pin)) {
+              credKeysToDelete.add(k);
+            }
+          }
+        }
+        for (final ck in credKeysToDelete) {
+          await credBox.delete(ck);
+        }
+        await credBox.flush();
+      }
+    } catch (e) {
+      debugPrint('[FinanceLS] purgeEmployeeForDeletedUser error: $e');
     }
   }
 }

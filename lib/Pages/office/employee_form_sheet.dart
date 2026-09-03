@@ -15,7 +15,7 @@ import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../services/zkteco_network_service.dart';
-
+import '../../services/local_storage_service.dart';
 import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
 import 'shared_widgets.dart';
@@ -1113,7 +1113,7 @@ void openEmployeeFormSheet(
                             try {
                               setSheetState(() { isSaving = true; });
 
-                              final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                              final curUser = LocalStorageService.getActiveUsername();
 
                               Map<String, dynamic>? scheduleOverride;
                               if (winterShiftController.text.isNotEmpty || summerShiftController.text.isNotEmpty) {
@@ -1224,16 +1224,6 @@ void openEmployeeFormSheet(
                                 performedBy: curUser,
                               );
 
-                              if (enteredPin.isNotEmpty) {
-                                await ZkTecoNetworkService.assignPinToEntity(
-                                  entityId: empLocalId,
-                                  entityName: nameController.text.trim(),
-                                  entityType: 'employee',
-                                  branchId: targetBranchId,
-                                  customPin: enteredPin,
-                                );
-                              }
-
                               if (!isEdit) {
                                 await FinanceLocalStorage.saveSalaryHistory(
                                   branchId: targetBranchId,
@@ -1256,11 +1246,17 @@ void openEmployeeFormSheet(
                                 );
                               }
 
-                              // Auto-assign biometric PIN & map credentials for hardware ZKTeco scanners
+                              // Assign or ensure biometric PIN & map credentials for hardware ZKTeco scanners
                               try {
-                                await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
+                                await ZkTecoNetworkService.assignPinToEntity(
+                                  entityId: empLocalId,
+                                  entityName: nameController.text.trim(),
+                                  entityType: 'employee',
+                                  branchId: targetBranchId,
+                                  customPin: enteredPin.isNotEmpty ? enteredPin : null,
+                                );
                               } catch (e) {
-                                debugPrint('[EmployeeForm] Auto-assign biometric PIN notice: $e');
+                                debugPrint('[EmployeeForm] Biometric PIN assignment notice: $e');
                               }
 
                               if (sheetCtx.mounted) {

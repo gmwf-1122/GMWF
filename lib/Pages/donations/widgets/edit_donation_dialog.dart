@@ -407,6 +407,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                       TextFormField(
                         controller: _phoneCtrl,
                         keyboardType: TextInputType.phone,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)],
                         decoration: _inputDecoration(
                           hint: 'Donor Phone (e.g. 03001234567)',
                           icon: Icons.phone_rounded,

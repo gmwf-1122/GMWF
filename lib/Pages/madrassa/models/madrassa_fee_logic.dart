@@ -72,18 +72,20 @@ class MadrassaFeeLogic {
       holidays: holidays,
     );
 
-    double proRatedBaseFee = totalWorkingDays > 0
+    final bool isFeeEnabled = config.enableFees;
+
+    double proRatedBaseFee = (isFeeEnabled && totalWorkingDays > 0)
         ? (activeWorkingDays / totalWorkingDays) * config.baseFee
         : 0;
 
-    double attSavings = totalWorkingDays > 0
+    double attSavings = (isFeeEnabled && totalWorkingDays > 0)
         ? ((presentDays + leaveDays) / totalWorkingDays) *
             config.attendanceMaxDeduction
         : 0;
-    double uniSavings = totalWorkingDays > 0
+    double uniSavings = (isFeeEnabled && totalWorkingDays > 0)
         ? (uniformDays / totalWorkingDays) * config.uniformMaxDeduction
         : 0;
-    double msgSavings = totalWorkingDays > 0
+    double msgSavings = (isFeeEnabled && totalWorkingDays > 0)
         ? (messageDays / totalWorkingDays) * config.messageTotalDeduction
         : 0;
 
@@ -96,10 +98,10 @@ class MadrassaFeeLogic {
     final ptmDateOnly = DateTime(ptmDate.year, ptmDate.month, ptmDate.day);
     final joinAfterPtm = joinDateOnly.isAfter(ptmDateOnly);
 
-    double ptmSavings = (ptmAttended || joinAfterPtm) ? config.ptmDeduction : 0;
+    double ptmSavings = (isFeeEnabled && (ptmAttended || joinAfterPtm)) ? config.ptmDeduction : 0;
 
-    double totalSavings = attSavings + uniSavings + msgSavings + ptmSavings;
-    double amountDue = (proRatedBaseFee - totalSavings).clamp(0, double.infinity);
+    double totalSavings = isFeeEnabled ? (attSavings + uniSavings + msgSavings + ptmSavings) : 0.0;
+    double amountDue = isFeeEnabled ? (proRatedBaseFee - totalSavings).clamp(0, double.infinity) : 0.0;
 
     return {
       'present': presentDays,
@@ -116,6 +118,7 @@ class MadrassaFeeLogic {
       'amountDue': amountDue,
       'activeWorkingDays': activeWorkingDays,
       'proRatedBaseFee': proRatedBaseFee,
+      'enableFees': isFeeEnabled,
     };
   }
 

@@ -3,9 +3,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dashboard_widgets.dart';
@@ -14,8 +14,10 @@ import 'branches.dart';
 import 'donations/donations_shared.dart' as don;
 import 'donations/global_audit_trail.dart';
 import '../services/donations_local_storage.dart';
+import '../services/local_storage_service.dart';
 import '../services/auth_service.dart';
 import 'donations/donations_screen.dart' show DonDS;
+import '../widgets/firestore_quota_monitor_widget.dart';
 
 class OverviewScreen extends StatefulWidget {
   final String username;
@@ -63,15 +65,6 @@ class _OverviewScreenState extends State<OverviewScreen>
   void dispose() {
     _fadeCtrl.dispose();
     super.dispose();
-  }
-
-  void _logout() async {
-    try {
-      await AuthService().signOut();
-    } catch (e) {
-      debugPrint('[OverviewScreen] Logout error: $e');
-    }
-    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (_) => false);
   }
 
   Future<void> _forceRefresh() async {
@@ -175,128 +168,120 @@ class _OverviewScreenState extends State<OverviewScreen>
     final content = ValueListenableBuilder<DashboardFilter>(
       valueListenable: dashboardController,
       builder: (context, filter, child) {
-        return StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance.collection('branches').snapshots(),
-          builder: (context, branchSnap) {
-            var branches = branchSnap.hasData
-                ? branchSnap.data!.docs.map((d) {
-                    final data = d.data() as Map<String, dynamic>;
-                    return <String, dynamic>{
-                      'id': d.id,
-                      'name': data['name'] as String? ?? d.id
-                    };
-                  }).toList()
-                : <Map<String, dynamic>>[];
+        final branches = LocalStorageService.getLocalBranchesList();
+        final filteredBranches = (isBranchManager ||
+                (widget.initialBranchId != null &&
+                    widget.initialBranchId != 'all' &&
+                    widget.initialBranchId != 'unknown'))
+            ? (() {
+                final targetB = widget.initialBranchId ?? filter.branchId;
+                if (targetB.isNotEmpty && targetB != 'all') {
+                  return branches.where((b) => b['id'] == targetB).toList();
+                }
+                return branches;
+              })()
+            : branches;
 
-            if (isBranchManager || (widget.initialBranchId != null && widget.initialBranchId != 'all' && widget.initialBranchId != 'unknown')) {
-              final targetB = widget.initialBranchId ?? filter.branchId;
-              if (targetB.isNotEmpty && targetB != 'all') {
-                branches = branches.where((b) => b['id'] == targetB).toList();
-              }
-            }
-
-            return SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: DS.s3, vertical: DS.s3),
-                child: FadeTransition(
-                  opacity: _fadeAnim,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _OverviewHeader(
-                          t: t,
-                          username: widget.username,
-                          roleName: role.name.toUpperCase()),
-                      const SizedBox(height: DS.s3),
-
-                      // Filter card integrated beautifully inside the scroll view
-                      GlobalFilterBar(controller: dashboardController, branches: branches),
-                      const SizedBox(height: DS.s3),
-
-                      // Tabs switcher for Clinical, Food, Donations, and Overall separation
-                      _buildTabSwitcher(t, showDonationsTab),
-                      const SizedBox(height: DS.s3),
-
-                      // -- Dynamic Tab Contents --
-                      if (_activeTab == 'overall') ...[
-                        if (!isBranchManager) ...[
-                          ExecutiveTopBranchFetcher(
-                            t: t,
-                            branches: branches,
-                            onGoToBranch: (id) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => Branches(
-                                    initialBranchId: id,
-                                    isManager: false,
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          const SizedBox(height: DS.s3),
-                        ],
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'dispensary') ...[
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'tokens') ...[
-                        _buildKPIOverview(branches, filter),
-                      ] else if (_activeTab == 'donations' && showDonationsTab) ...[
-                        _DonationIntelligenceSection(t: t, branches: branches, filter: filter),
-                        const SizedBox(height: DS.s2),
-                        _buildKPIOverview(branches, filter),
-                      ],
-
-                      if (!isBranchManager) ...[
-                        const SizedBox(height: DS.s4),
-
-                        // ── Dynamic Branch Performance Breakdown ─────────────────────────
-                        DashSectionHeader(
-                          title: _activeTab == 'overall'
-                              ? 'Branch Performance Breakdown'
-                              : _activeTab == 'dispensary'
-                                  ? 'Clinical Performance'
-                                  : _activeTab == 'tokens'
-                                      ? 'Food Service Performance'
-                                      : 'Donations Branch Breakdown',
-                          subtitle: _activeTab == 'overall'
-                              ? 'Detailed operational and financial metrics per branch'
-                              : _activeTab == 'dispensary'
-                                  ? 'Branch-wise patient traffic and dispensary revenues'
-                                  : _activeTab == 'tokens'
-                                      ? 'Dasterkhwaan meals issued vs served counts'
-                                      : 'Masjid and general donations share by branch',
-                        ),
-                        const SizedBox(height: DS.s2),
-                        ScrollReveal(
-                            delay: const Duration(milliseconds: 280),
-                            child: BranchPerformanceTable(
-                              t: t,
-                              branches: branches,
-                              selectedTab: _activeTab,
-                              onGoToBranch: (id) {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => Branches(
-                                      initialBranchId: id,
-                                      isManager: false,
-                                    ),
-                                  ),
-                                );
-                              },
-                            )),
-                      ],
-                      const SizedBox(height: DS.s4),
-                    ],
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: DS.s3, vertical: DS.s3),
+            child: FadeTransition(
+              opacity: _fadeAnim,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _OverviewHeader(
+                    t: t,
+                    username: widget.username,
+                    roleName: role.name.toUpperCase(),
                   ),
-                ),
+                  const SizedBox(height: DS.s3),
+                  GlobalFilterBar(controller: dashboardController, branches: branches),
+                  const SizedBox(height: DS.s3),
+                  _buildTabSwitcher(t, showDonationsTab),
+                  const SizedBox(height: DS.s3),
+
+                  if (_activeTab == 'overall') ...[
+                    if (!isBranchManager) ...[
+                      ExecutiveTopBranchFetcher(
+                        t: t,
+                        branches: filteredBranches,
+                        onGoToBranch: (id) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => Branches(
+                                initialBranchId: id,
+                                isManager: false,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: DS.s3),
+                    ],
+                    _buildKPIOverview(filteredBranches, filter),
+                    const SizedBox(height: DS.s3),
+                    const FirestoreQuotaMonitorWidget(),
+                  ] else if (_activeTab == 'dispensary') ...[
+                    _buildKPIOverview(filteredBranches, filter),
+                  ] else if (_activeTab == 'tokens') ...[
+                    _buildKPIOverview(filteredBranches, filter),
+                  ] else if (_activeTab == 'donations' && showDonationsTab) ...[
+                    _DonationIntelligenceSection(
+                      t: t,
+                      branches: filteredBranches,
+                      filter: filter,
+                    ),
+                    const SizedBox(height: DS.s2),
+                    _buildKPIOverview(filteredBranches, filter),
+                  ],
+
+                  if (!isBranchManager) ...[
+                    const SizedBox(height: DS.s4),
+                    DashSectionHeader(
+                      title: _activeTab == 'overall'
+                          ? 'Branch Performance Breakdown'
+                          : _activeTab == 'dispensary'
+                              ? 'Clinical Performance'
+                              : _activeTab == 'tokens'
+                                  ? 'Food Service Performance'
+                                  : 'Donations Branch Breakdown',
+                      subtitle: _activeTab == 'overall'
+                          ? 'Detailed operational and financial metrics per branch'
+                          : _activeTab == 'dispensary'
+                              ? 'Branch-wise patient traffic and dispensary revenues'
+                              : _activeTab == 'tokens'
+                                  ? 'Dasterkhwaan meals issued vs served counts'
+                                  : 'Masjid and general donations share by branch',
+                    ),
+                    const SizedBox(height: DS.s2),
+                    ScrollReveal(
+                      delay: const Duration(milliseconds: 280),
+                      child: BranchPerformanceTable(
+                        t: t,
+                        branches: filteredBranches,
+                        selectedTab: _activeTab,
+                        onGoToBranch: (id) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => Branches(
+                                initialBranchId: id,
+                                isManager: false,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: DS.s4),
+                ],
               ),
-            );
-          },
+            ),
+          ),
         );
       },
     );
@@ -344,10 +329,6 @@ class _OverviewScreenState extends State<OverviewScreen>
                   tooltip: 'Refresh dashboard',
                   onPressed: _forceRefresh,
                 ),
-          IconButton(
-            icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 22),
-            onPressed: _logout,
-          ),
         ],
         bottom: PreferredSize(
             preferredSize: const Size.fromHeight(1),

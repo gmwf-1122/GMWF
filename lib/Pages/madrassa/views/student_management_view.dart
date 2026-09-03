@@ -9,6 +9,7 @@ import 'package:excel/excel.dart' hide Border, BorderStyle, TextSpan;
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../services/local_storage_service.dart';
+import '../../../services/user_theme_service.dart';
 import '../../../services/image_upload_service.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../widgets/student_progress_dialog.dart';
@@ -523,7 +524,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     );
   }
 
-  Widget _buildStatusChip(BuildContext context, Map<String, dynamic> d) {
+  Widget _buildStatusChip(BuildContext context, Map<String, dynamic> d, {bool isDark = false}) {
     final status = d['status'] ?? 'active';
     String statusLabel;
     Color color;
@@ -601,65 +602,62 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       }
     }
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: color.withOpacity(0.25), width: 1),
-          ),
-          child: Text(
-            statusLabel,
-            style: context.urduStyle(
-              style: TextStyle(
-                color: color,
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.22 : 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.45 : 0.30), width: 1),
+      ),
+      child: Text(
+        statusLabel,
+        style: context.urduStyle(
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
           ),
         ),
-        if (reason.isNotEmpty && reason != statusLabel && reason != '$statusLabel:') ...[
-          const SizedBox(height: 4),
-          Tooltip(
-            message: reason,
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 130),
-              child: Text(
-                reason,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.urduStyle(
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 10,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ],
+      ),
     );
+
+    if (reason.isNotEmpty && reason != statusLabel && reason != '$statusLabel:') {
+      return Tooltip(
+        message: reason,
+        child: chip,
+      );
+    }
+    return chip;
   }
 
-  Widget _buildMobileStudentCard(dynamic s, Map<String, dynamic> d) {
+  Widget _buildMobileStudentCard(dynamic s, Map<String, dynamic> d, bool isDark) {
     final studentId = s is DocumentSnapshot ? s.id : s['id'].toString();
     final isExpanded = _expandedStudentIds.contains(studentId);
+    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
+
+    final rollVal = (d['rollNumber'] ?? d['rollNo'] ?? '?').toString();
+    final classValRaw = (d['class'] ?? 'Hifz').toString();
+    final classDisplay = context.isUrdu && (classValRaw.toLowerCase() == 'hifz' || classValRaw.isEmpty)
+        ? 'حفظ'
+        : classValRaw;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardBg,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE0E2E7)),
+        border: Border.all(color: borderColor),
       ),
       child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        data: Theme.of(context).copyWith(
+          dividerColor: Colors.transparent,
+          colorScheme: Theme.of(context).colorScheme.copyWith(
+            surface: cardBg,
+          ),
+        ),
         child: ExpansionTile(
           key: PageStorageKey<String>('std_tile_$studentId'),
           initiallyExpanded: isExpanded,
@@ -675,33 +673,70 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
           leading: GestureDetector(
             onTap: () => _pickAndUploadPhoto(studentId),
-            child: SizedBox(
-              width: 38,
-              height: 38,
-              child: _uploadStates[studentId] == PhotoUploadStatus.uploading
-                  ? const Padding(
-                      padding: EdgeInsets.all(6.0),
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
-                    )
-                  : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 38),
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                  width: 1.2,
+                ),
+              ),
+              child: ClipOval(
+                child: _uploadStates[studentId] == PhotoUploadStatus.uploading
+                    ? const Padding(
+                        padding: EdgeInsets.all(6.0),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
+                      )
+                    : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 40),
+              ),
             ),
           ),
           title: Text(
-            d['name'] ?? '',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            (d['name'] ?? '').toString().trim(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15.5,
+              color: textPrimary,
+              fontFamily: context.isUrdu ? 'Noori' : null,
+            ),
           ),
-          subtitle: Text(
-            '${context.l.rollNumber}: ${d['rollNumber'] ?? '?'} • Class: ${d['class'] ?? 'Hifz'}',
-            style: context.urduStyle(style: TextStyle(color: Colors.grey[600], fontSize: 11)),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 3.0),
+            child: Text(
+              '${context.isUrdu ? 'رول نمبر' : 'Roll'}: $rollVal  •  ${context.isUrdu ? 'کلاس' : 'Class'}: $classDisplay',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.urduStyle(
+                style: TextStyle(
+                  color: textMuted,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _buildStatusChip(context, d),
+              _buildStatusChip(context, d, isDark: isDark),
               const SizedBox(width: 4),
-              Icon(
-                isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
-                color: Colors.grey,
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF334155).withValues(alpha: 0.5) : const Color(0xFFF1F5F9),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                  color: textMuted,
+                  size: 18,
+                ),
               ),
             ],
           ),
@@ -711,7 +746,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Divider(height: 1, color: Color(0xFFE0E2E7)),
+                  Divider(height: 1, color: borderColor),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -719,23 +754,57 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
+                          Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontSize: 10, color: textMuted))),
                           const SizedBox(height: 2),
-                          Text(d['guardianName'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text(d['guardianName'] ?? '—', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textPrimary)),
                         ],
                       ),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontSize: 10, color: Colors.grey[500]))),
+                          Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontSize: 10, color: textMuted))),
                           const SizedBox(height: 2),
-                          Text(d['contactPhone'] ?? d['phone'] ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text(d['contactPhone'] ?? d['phone'] ?? '—', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textPrimary)),
                         ],
                       ),
                     ],
                   ),
+                  () {
+                    final rawAudit = d['auditLog'];
+                    if (rawAudit is List && rawAudit.isNotEmpty) {
+                      final latest = rawAudit.last;
+                      if (latest is Map && latest['reason'] != null && latest['reason'].toString().trim().isNotEmpty) {
+                        final reasonStr = latest['reason'].toString().trim();
+                        final isStatusMatch = latest['status'] == d['status'];
+                        if (isStatusMatch && reasonStr != d['status'] && reasonStr != '${d['status']}:') {
+                          return Container(
+                            margin: const EdgeInsets.only(top: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF334155).withValues(alpha: 0.35) : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: borderColor.withValues(alpha: 0.6)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.info_outline_rounded, size: 14, color: textMuted),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    reasonStr,
+                                    style: TextStyle(fontSize: 11, color: textMuted),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                      }
+                    }
+                    return const SizedBox.shrink();
+                  }(),
                   const SizedBox(height: 12),
-                  _buildProgressBar(context, d['currentLines'] ?? 0),
+                  _buildProgressBar(context, d['currentLines'] ?? 0, isDark),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -774,13 +843,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     );
   }
 
-
-  
-
-  Widget _buildProgressBar(BuildContext context, int currentLines) {
+  Widget _buildProgressBar(BuildContext context, int currentLines, bool isDark) {
     const int totalLines = 8640;
     final double pct = (currentLines / totalLines).clamp(0.0, 1.0);
     final pctText = (pct * 100).toStringAsFixed(1);
+    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -789,9 +856,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           children: [
             Text(
               '${context.l.memorizationProgress} ($currentLines ${context.l.lines})',
-              style: context.urduStyle(style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey[600])),
+              style: context.urduStyle(style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textMuted)),
             ),
-            Text('$pctText%', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF008080))),
+            Text('$pctText%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
           ],
         ),
         const SizedBox(height: 6),
@@ -799,8 +866,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: pct,
-            backgroundColor: const Color(0xFFF0F2F5),
-            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF008080)),
+            backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF0F2F5),
+            valueColor: AlwaysStoppedAnimation<Color>(isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
             minHeight: 8,
           ),
         ),
@@ -812,20 +879,30 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
-      floatingActionButton: null,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeader(context),
-          _buildPendingRejoinRequests(),
-          Expanded(
-            child: ref.watch(madrassaStudentsProvider(widget.branchId)).when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, st) => Center(child: Text('Error loading students: $e')),
-              data: (studentsList) {
-                final filteredStudents = studentsList.where((d) {
+    return ValueListenableBuilder(
+      valueListenable: UserThemeService.listenable(widget.username),
+      builder: (context, _, __) {
+        final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+        final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
+        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+
+        return Scaffold(
+          backgroundColor: scaffoldBg,
+          floatingActionButton: null,
+          body: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildHeader(context, isDark),
+              _buildPendingRejoinRequests(),
+              Expanded(
+                child: ref.watch(madrassaStudentsProvider(widget.branchId)).when(
+                  loading: () => const Center(child: CircularProgressIndicator()),
+                  error: (e, st) => Center(child: Text('Error loading students: $e')),
+                  data: (studentsList) {
+                    final filteredStudents = studentsList.where((d) {
                   final name = (d['name'] ?? '').toString().toLowerCase();
                   final roll = (d['rollNumber'] ?? '').toString().toLowerCase();
                   final query = _searchQuery.toLowerCase();
@@ -907,7 +984,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                         if (studentsByBatch.containsKey(batch))
                           ...[
                             _buildBatchHeader(context, batch),
-                            ...studentsByBatch[batch]!.map((s) => _buildMobileStudentCard(s, s)),
+                            ...studentsByBatch[batch]!.map((s) => _buildMobileStudentCard(s, s, isDark)),
                           ]
                     ],
                   );
@@ -927,28 +1004,28 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                               Container(
                                 width: double.infinity,
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: cardBg,
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: const Color(0xFFE0E2E7)),
+                                  border: Border.all(color: borderColor),
                                 ),
                                 child: SingleChildScrollView(
                                   scrollDirection: Axis.horizontal,
                                   child: DataTable(
                                   columnSpacing: 12,
                                   horizontalMargin: 12,
-                                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF1F4F9)),
+                                  headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F4F9)),
                                   dataRowMinHeight: 60,
                                   dataRowMaxHeight: 60,
                                   columns: [
-                                    const DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text(context.l.students, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
-                                    DataColumn(label: Text(context.l.rollNumber, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
-                                    const DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text(context.l.guardianFullName, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
-                                    DataColumn(label: Text(context.l.contactPhone, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
-                                    DataColumn(label: Text(context.l.overallProgress, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
-                                    const DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold))),
-                                    DataColumn(label: Text(context.l.todayActions, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)))),
+                                    DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
+                                    DataColumn(label: Text(context.l.students, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
+                                    DataColumn(label: Text(context.l.rollNumber, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
+                                    DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
+                                    DataColumn(label: Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
+                                    DataColumn(label: Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
+                                    DataColumn(label: Text(context.l.overallProgress, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
+                                    DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
+                                    DataColumn(label: Text(context.l.todayActions, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
                                   ],
                                   rows: List.generate(studentsByBatch[batch]!.length, (i) {
                                     final s = studentsByBatch[batch]![i];
@@ -960,7 +1037,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                     final pct = (totalL / 8640 * 100).clamp(0.0, 100.0).toStringAsFixed(1);
 
                                     return DataRow(cells: [
-                                      DataCell(Text('${i + 1}')),
+                                      DataCell(Text('${i + 1}', style: TextStyle(color: textPrimary))),
                                       DataCell(Row(
                                         children: [
                                           GestureDetector(
@@ -981,29 +1058,29 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                             onTap: () => _openStudentDetailPage(d),
                                             child: Text(
                                               d['name'] ?? '',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontWeight: FontWeight.bold,
-                                                color: Color(0xFF008080),
+                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
                                               ),
                                             ),
                                           ),
                                         ],
                                       )),
-                                      DataCell(Text(d['rollNumber']?.toString() ?? '?')),
-                                      DataCell(Text(d['class']?.toString() ?? 'Hifz')),
-                                      DataCell(Text(d['guardianName']?.toString() ?? '—')),
-                                      DataCell(Text(d['contactPhone']?.toString() ?? d['phone']?.toString() ?? '—')),
+                                      DataCell(Text(d['rollNumber']?.toString() ?? '?', style: TextStyle(color: textPrimary))),
+                                      DataCell(Text(d['class']?.toString() ?? 'Hifz', style: TextStyle(color: textPrimary))),
+                                      DataCell(Text(d['guardianName']?.toString() ?? '—', style: TextStyle(color: textPrimary))),
+                                      DataCell(Text(d['contactPhone']?.toString() ?? d['phone']?.toString() ?? '—', style: TextStyle(color: textPrimary))),
                                       DataCell(Row(
                                         children: [
-                                          Text('$totalL lines ($pct%)', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF008080))),
+                                          Text('$totalL lines ($pct%)', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
                                           IconButton(
-                                            icon: const Icon(Icons.info_outline, size: 14, color: Color(0xFF008080)),
+                                            icon: Icon(Icons.info_outline, size: 14, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
                                             tooltip: context.l.moreInfo,
                                             onPressed: () => _showStudentProgressDialog(context, d),
                                           ),
                                         ],
                                       )),
-                                      DataCell(_buildStatusChip(context, d)),
+                                      DataCell(_buildStatusChip(context, d, isDark: isDark)),
                                       DataCell(StatusActionMenu(
                                         student: s,
                                         branchId: widget.branchId,
@@ -1029,6 +1106,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         ],
       ),
     );
+  },
+);
   }
 
   Widget _buildBatchHeader(BuildContext context, String batch) {
@@ -1084,7 +1163,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, bool isDark) {
+    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       child: Column(
@@ -1099,7 +1183,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               Text(
                 context.l.studentRoster,
                 style: context.urduStyle(
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: textPrimary,
+                  ),
                 ),
               ),
               if (_canAddStudent)
@@ -1148,19 +1236,25 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             children: [
               Expanded(
                 child: TextField(
+                  style: TextStyle(color: textPrimary),
                   decoration: InputDecoration(
                     hintText: '${context.l.search}...',
-                    prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    hintStyle: TextStyle(color: textMuted),
+                    prefixIcon: Icon(Icons.search, color: textMuted),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF008080), width: 2),
                     ),
                   ),
                   onChanged: (val) {
@@ -1173,14 +1267,14 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               const SizedBox(width: 8),
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cardBg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE0E2E7)),
+                  border: Border.all(color: borderColor),
                 ),
                 child: IconButton(
                   icon: Icon(
                     Icons.tune,
-                    color: _showFilters ? const Color(0xFF008080) : Colors.grey,
+                    color: _showFilters ? const Color(0xFF008080) : textMuted,
                   ),
                   onPressed: () {
                     setState(() {
@@ -1201,21 +1295,21 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _statusFilter,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'حیثیت کے لحاظ سے فلٹر کریں' : 'Filter by Status',
-                    labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                   ),
-                  dropdownColor: Colors.white,
-                  style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
+                  dropdownColor: cardBg,
+                  style: context.urduStyle(style: TextStyle(color: textPrimary, fontSize: 13)),
                   items: [
                     DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? 'تمام' : 'All Statuses')),
                     DropdownMenuItem(value: 'active', child: Text(context.l.statusActive)),
@@ -1237,25 +1331,25 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _sortBy,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'ترتیب دیں' : 'Sort By',
-                    labelStyle: context.urduStyle(style: const TextStyle(fontSize: 12, color: Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFFE0E2E7)),
+                      borderSide: BorderSide(color: borderColor),
                     ),
                   ),
-                  dropdownColor: Colors.white,
-                  style: context.urduStyle(style: const TextStyle(color: Colors.black, fontSize: 13)),
+                  dropdownColor: cardBg,
+                  style: context.urduStyle(style: TextStyle(color: textPrimary, fontSize: 13)),
                   items: [
                     DropdownMenuItem(value: 'rollNumber', child: Text(context.isUrdu ? 'رول نمبر' : 'Roll Number')),
-                    DropdownMenuItem(value: 'progress', child: Text(context.isUrdu ? 'حفظ کی ترقی' : 'Progress')),
-                    DropdownMenuItem(value: 'joinDate', child: Text(context.isUrdu ? 'شمولیت کی تاریخ' : 'Joining Date')),
+                    DropdownMenuItem(value: 'progress', child: Text(context.isUrdu ? 'پیش رفت' : 'Progress')),
+                    DropdownMenuItem(value: 'joinDate', child: Text(context.isUrdu ? 'شمولیت کی تاریخ' : 'Join Date')),
                   ],
                   onChanged: (val) {
                     if (val != null) {

@@ -70,37 +70,43 @@ DEFAULT_CONFIG = {
             "name": "Office HQ Main Gate Scanner",
             "ip": "192.168.1.150",
             "port": 4370,
-            "location": "Office/Dasterkhwaan"
+            "location": "Office/Dasterkhwaan",
+            "branch": "karachi"
         },
         {
             "name": "Dispensary Medical Scanner",
             "ip": "192.168.1.151",
             "port": 4370,
-            "location": "Dispensary"
+            "location": "Dispensary",
+            "branch": "karachi"
         },
         {
             "name": "Madrassa Gate Scanner",
             "ip": "192.168.1.152",
             "port": 4370,
-            "location": "Madrassa"
+            "location": "Madrassa",
+            "branch": "karachi"
         },
         {
             "name": "GMWF Model School Scanner",
             "ip": "192.168.1.153",
             "port": 4370,
-            "location": "School"
+            "location": "School",
+            "branch": "karachi"
         },
         {
             "name": "Dasterkhwaan Kitchen Scanner",
             "ip": "192.168.1.154",
             "port": 4370,
-            "location": "Dasterkhwaan Kitchen"
+            "location": "Dasterkhwaan Kitchen",
+            "branch": "karachi"
         },
         {
             "name": "Auxiliary Staff Scanner",
             "ip": "192.168.1.155",
             "port": 4370,
-            "location": "Office/Dasterkhwaan"
+            "location": "Office/Dasterkhwaan",
+            "branch": "karachi"
         }
     ]
 }
@@ -362,8 +368,17 @@ def fetch_and_sync_device(device_cfg, db, synced_keys, clear_memory=False):
             timestamp_str = timestamp_dt.isoformat()
             timestamp_epoch = int(timestamp_dt.timestamp())
 
-            # Standardized epoch-based document ID & deduplication key
-            doc_id = f"{ip}_{pin}_{timestamp_epoch}"
+            # [FIX-3.3] Standardized branch-namespaced epoch document ID & deduplication key
+            branch = str(device_cfg.get("branch") or "").strip().lower()
+            if not branch:
+                if not hasattr(fetch_and_sync_device, "_warned_devices"):
+                    fetch_and_sync_device._warned_devices = set()
+                if ip not in fetch_and_sync_device._warned_devices:
+                    fetch_and_sync_device._warned_devices.add(ip)
+                    print(f"[CONFIG] Device '{name}' has no 'branch' set — doc IDs are not branch-namespaced and may collide across branches sharing the same private IP range. Add 'branch' to config.json.")
+                doc_id = f"{ip}_{pin}_{timestamp_epoch}"
+            else:
+                doc_id = f"{branch}_{ip}_{pin}_{timestamp_epoch}"
             dedup_key = doc_id
 
             if dedup_key in synced_keys:

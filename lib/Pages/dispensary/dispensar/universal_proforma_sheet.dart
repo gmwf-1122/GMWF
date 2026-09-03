@@ -79,6 +79,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
   }
 
   bool get _canManageProforma {
+    if (widget.isAdmin) return true;
     return MasterProformaService.canManageProformaCatalog(userData: _getUserData());
   }
 
@@ -1533,11 +1534,13 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           // ── Top Search & Filter Bar ───────────────────────────────────────
           _buildFilterHeader(),
 
-          // ── Excel Grid Sheet Data ──────────────────────────────────────────
           Expanded(
             child: _filteredList.isEmpty
                 ? _buildEmptyState()
-                : _buildExcelGridSheet(),
+                : LayoutBuilder(
+                    builder: (ctx, constraints) =>
+                        _buildExcelGridSheet(constraints.maxHeight),
+                  ),
           ),
 
           // ── Bottom Action Sticky Toolbar ──────────────────────────────────
@@ -1704,7 +1707,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     );
   }
 
-  Widget _buildExcelGridSheet() {
+  Widget _buildExcelGridSheet([double? availableHeight]) {
     final isDark = _isDark;
     const double tableWidth = 1360;
 
@@ -1732,6 +1735,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           scrollDirection: Axis.horizontal,
           child: SizedBox(
             width: tableWidth,
+            height: availableHeight != null ? (availableHeight - 24).clamp(100.0, double.infinity) : null,
             child: Column(
               children: [
                 // ── Header Row ──

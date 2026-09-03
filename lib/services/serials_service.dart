@@ -5,6 +5,7 @@ import 'package:rxdart/rxdart.dart';
 import 'package:hive/hive.dart';
 
 import 'camp_session_service.dart';
+import 'local_storage_service.dart';
 
 List<String> _dateStrings(DateTime start, DateTime end) {
   final df   = DateFormat('ddMMyy');
@@ -134,11 +135,19 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
     entryData['queueType'] = queueType;
     entryData['branchId'] = normBranch;
 
+    final campDocKey = CampSessionService.getCampDateDocId(
+      branchId: normBranch,
+      dateKey: dateKey,
+      campId: entryData['campId']?.toString() ?? entryData['dispensaryId']?.toString(),
+      dispensaryTag: dispensaryTag,
+      serial: serial,
+    );
+
     final tokenRef = db
         .collection('branches')
         .doc(normBranch)
         .collection('serials')
-        .doc(dateKey)
+        .doc(campDocKey)
         .collection(queueType)
         .doc(serial);
 
@@ -183,41 +192,46 @@ bool _matchesShift(Map<String, dynamic> data, String? shiftFilter) {
 
   // 1. Check explicit session / shift / campSession / slot field
   final session = (data['session'] ?? data['shift'] ?? data['campSession'] ?? data['slot'] ?? '').toString().toLowerCase().trim();
-  if (normShift == 'night') {
-    if (session == 'night') return true;
-    if (session == 'morning' || session == 'evening' || session == 'day') return false;
-  } else if (normShift == 'day' || normShift == 'morning' || normShift == 'evening') {
-    if (session == 'morning' || session == 'evening' || session == 'day') return true;
-    if (session == 'night') return false;
+  if (session == 'night') {
+    return normShift == 'night';
+  } else if (session == 'morning') {
+    return normShift == 'morning' || normShift == 'day';
+  } else if (session == 'evening') {
+    return normShift == 'evening' || normShift == 'day';
   }
 
-  // 2. Fallback to timestamp/hour
+  // 2. Fallback to timestamp/hour (converted to local timezone)
   DateTime? dt;
   final ts = data['createdAt'] ?? data['timestamp'] ?? data['time'] ?? data['dispensedAt'] ?? data['date'] ?? data['lastUpdatedAt'];
   if (ts is Timestamp) {
-    dt = ts.toDate();
+    dt = ts.toDate().toLocal();
   } else if (ts is DateTime) {
-    dt = ts;
+    dt = ts.toLocal();
   } else if (ts is String) {
-    dt = DateTime.tryParse(ts);
+    dt = DateTime.tryParse(ts)?.toLocal();
   }
 
   if (dt != null) {
     final hour = dt.hour;
     final isNight = (hour >= 22 || hour < 6);
+    final isMorning = (hour >= 6 && hour < 14);
+    final isEvening = (hour >= 14 && hour < 22);
+
     if (normShift == 'night') return isNight;
-    return !isNight; // Day shift (06:00 to 21:59)
+    if (normShift == 'morning') return isMorning;
+    if (normShift == 'evening') return isEvening;
+    if (normShift == 'day') return !isNight;
   }
 
-  // If no timestamp or session, default to day shift
-  return normShift != 'night';
+  // If no timestamp or session, default to morning/day
+  return normShift == 'morning' || normShift == 'day';
 }
 
 Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, String todayKey, [String? subDispensary, String? shift]) async {
   final normBranchId = branchId.toLowerCase().trim();
   final subKey = (subDispensary != null && subDispensary.isNotEmpty && subDispensary != 'all') ? subDispensary.toLowerCase().trim() : 'all';
   final shiftKey = (shift != null && shift.isNotEmpty && shift != 'all') ? shift.toLowerCase().trim() : 'all';
-  final cacheKey = 'v1|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
+  final cacheKey = 'v2|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
   
   if (ds != todayKey) {
     try {
@@ -225,7 +239,7 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
         await Hive.openBox('branch_data_cache');
       }
       final box = Hive.box('branch_data_cache');
-      final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v1|$normBranchId|$subKey|$ds|serials_summary') : null);
+      final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v2|$normBranchId|$subKey|$ds|serials_summary') : null);
       if (cached is Map) {
         return Map<String, int>.from(cached.cast<String, int>());
       }
@@ -279,10 +293,13 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
       if (!_matchesSubDispensary(data, subDispensary, doc.id)) continue;
       if (!_matchesShift(data, shift)) continue;
 
-      final rawSerial = (data['serial'] ?? data['tokenSerial'] ?? data['id'] ?? data['tokenNumber'] ?? doc.id).toString();
+      final facilityKey = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? doc.reference.parent.parent?.id ?? '').toString().toLowerCase().trim();
+      final rawSerial = (data['serial'] ?? data['tokenSerial'] ?? data['id'] ?? data['tokenNumber'] ?? doc.id).toString().trim();
       final cleanNum = int.tryParse(rawSerial.replaceAll(RegExp(r'[^0-9]'), ''));
       final prefix = q == 'non-zakat' ? 'NZ' : (q == 'zakat' ? 'Z' : 'G');
-      final uniqueKey = (cleanNum != null && cleanNum > 0) ? '$prefix-${cleanNum % 1000}' : '${q}_${doc.id}';
+      final uniqueKey = (rawSerial.isNotEmpty && rawSerial.contains('-'))
+          ? rawSerial
+          : ((cleanNum != null && cleanNum > 0) ? '$facilityKey-$prefix-${cleanNum % 1000}' : '${facilityKey}_${q}_${doc.id}');
 
       if (activeTokenMap.containsKey(uniqueKey)) continue;
       activeTokenMap[uniqueKey] = data;
@@ -300,14 +317,16 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
       
       final dispenseStatus = (data['dispenseStatus'] ?? '').toString().toLowerCase().trim();
       
-      if (status == 'completed' || status == 'dispensed' || status == 'prescribed') {
+      final hasPrescription = data['prescription'] is Map ||
+          data['prescriptions'] is List ||
+          data['prescriptionId'] != null;
+      if (status == 'dispensed' || dispenseStatus == 'dispensed') {
         dispensed++;
+        dispDispensed++;
+        if (hasPrescription || status == 'dispensed') prescPrescribed++;
+      } else if (status == 'completed' || status == 'prescribed' || hasPrescription) {
         prescPrescribed++;
-        if (dispenseStatus == 'dispensed' || status == 'dispensed') {
-          dispDispensed++;
-        } else {
-          dispPending++;
-        }
+        dispPending++;
       } else {
         pending++;
         prescWaiting++;
@@ -350,6 +369,36 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
 }
 
 Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, DateTime end, {String? subDispensary, String? shift}) {
+  final normalizedBranch = branchId.toLowerCase().trim();
+  if (normalizedBranch == 'all' || normalizedBranch == 'global') {
+    return FirebaseFirestore.instance.collection('branches').snapshots().switchMap((snap) {
+      final ids = snap.docs
+          .map((doc) => doc.id.toLowerCase().trim())
+          .where((id) => id.isNotEmpty && id != 'all' && id != 'global')
+          .toSet()
+          .toList();
+      if (ids.isEmpty) return Stream.value(<String, int>{});
+      return Rx.combineLatestList(ids.map((id) => _serialsCountStreamForBranch(
+            id,
+            start,
+            end,
+            subDispensary: subDispensary,
+            shift: shift,
+          ))).map((summaries) {
+        final merged = <String, int>{};
+        for (final summary in summaries) {
+          summary.forEach((key, value) {
+            merged[key] = (merged[key] ?? 0) + value;
+          });
+        }
+        return merged;
+      });
+    });
+  }
+  return _serialsCountStreamForBranch(branchId, start, end, subDispensary: subDispensary, shift: shift);
+}
+
+Stream<Map<String, int>> _serialsCountStreamForBranch(String branchId, DateTime start, DateTime end, {String? subDispensary, String? shift}) {
   final normBranchId = branchId.toLowerCase().trim();
   final subKey = (subDispensary != null && subDispensary.isNotEmpty && subDispensary != 'all') ? subDispensary.toLowerCase().trim() : 'all';
   final shiftKey = (shift != null && shift.isNotEmpty && shift != 'all') ? shift.toLowerCase().trim() : 'all';
@@ -367,8 +416,8 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
       final merged = <String, int>{};
       bool hasData = false;
       for (final ds in days) {
-        final cacheKey = 'v1|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
-        final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v1|$normBranchId|$subKey|$ds|serials_summary') : null);
+        final cacheKey = 'v2|$normBranchId|$subKey|$shiftKey|$ds|serials_summary';
+        final cached = box.get(cacheKey) ?? (shiftKey == 'all' ? box.get('v2|$normBranchId|$subKey|$ds|serials_summary') : null);
         if (cached is Map) {
           hasData = true;
           cached.forEach((key, val) {
@@ -467,10 +516,13 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
           if (!_matchesSubDispensary(data, subDispensary, doc.id)) continue;
           if (!_matchesShift(data, shift)) continue;
 
-          final rawSerial = (data['serial'] ?? data['tokenSerial'] ?? data['id'] ?? data['tokenNumber'] ?? doc.id).toString();
+          final facilityKey = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? doc.reference.parent.parent?.id ?? '').toString().toLowerCase().trim();
+          final rawSerial = (data['serial'] ?? data['tokenSerial'] ?? data['id'] ?? data['tokenNumber'] ?? doc.id).toString().trim();
           final cleanNum = int.tryParse(rawSerial.replaceAll(RegExp(r'[^0-9]'), ''));
           final prefix = q == 'non-zakat' ? 'NZ' : (q == 'zakat' ? 'Z' : 'G');
-          final uniqueKey = (cleanNum != null && cleanNum > 0) ? '$prefix-${cleanNum % 1000}' : '${q}_${doc.id}';
+          final uniqueKey = (rawSerial.isNotEmpty && rawSerial.contains('-'))
+              ? rawSerial
+              : ((cleanNum != null && cleanNum > 0) ? '$facilityKey-$prefix-${cleanNum % 1000}' : '${facilityKey}_${q}_${doc.id}');
 
           if (activeTokenMap.containsKey(uniqueKey)) continue;
           activeTokenMap[uniqueKey] = data;
@@ -487,15 +539,17 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
           }
 
           final dispenseStatus = (data['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+          final hasPrescription = data['prescription'] is Map ||
+              data['prescriptions'] is List ||
+              data['prescriptionId'] != null;
 
-          if (status == 'completed' || status == 'dispensed' || status == 'prescribed') {
+          if (status == 'dispensed' || dispenseStatus == 'dispensed') {
             todayDispensed++;
+            todayDispDispensed++;
+            if (hasPrescription || status == 'dispensed') todayPrescPrescribed++;
+          } else if (status == 'completed' || status == 'prescribed' || hasPrescription) {
             todayPrescPrescribed++;
-            if (dispenseStatus == 'dispensed' || status == 'dispensed') {
-              todayDispDispensed++;
-            } else {
-              todayDispPending++;
-            }
+            todayDispPending++;
           } else {
             todayPending++;
             todayPrescWaiting++;
@@ -523,7 +577,7 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
       try {
         if (Hive.isBoxOpen('branch_data_cache')) {
           final box = Hive.box('branch_data_cache');
-          box.put('v1|$normBranchId|$subKey|$shiftKey|$todayKey|serials_summary', todaySummaryToCache);
+          box.put('v2|$normBranchId|$subKey|$shiftKey|$todayKey|serials_summary', todaySummaryToCache);
         }
       } catch (_) {}
 
@@ -559,77 +613,94 @@ Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, Dat
 }
 
 Stream<Map<String, Map<String, int>>> facilityShiftBreakdownStream(String branchId, DateTime start, DateTime end) {
-  final saddarMorning$ = serialsCountStream(branchId, start, end, subDispensary: 'saddar', shift: 'morning');
-  final saddarEvening$ = serialsCountStream(branchId, start, end, subDispensary: 'saddar', shift: 'evening');
-  final saddarNight$   = serialsCountStream(branchId, start, end, subDispensary: 'saddar', shift: 'night');
+  // OPTIMIZATION: Instead of launching 9 distinct streams (which spawned 27
+  // concurrent Firestore listeners), we run a single unified stream for the
+  // branch and compute the 9 sub-totals in memory!
+  return _serialsCountStreamForBranch(branchId, start, end, subDispensary: 'all', shift: 'all').map((summary) {
+    // If the branch stream already contains the breakdown or local cached counts
+    final total = summary['total'] ?? 0;
+    final pending = summary['pending'] ?? 0;
+    final dispensed = summary['dispensed'] ?? 0;
 
-  final hajiMorning$   = serialsCountStream(branchId, start, end, subDispensary: 'haji_camp', shift: 'morning');
-  final hajiEvening$   = serialsCountStream(branchId, start, end, subDispensary: 'haji_camp', shift: 'evening');
-  final hajiNight$     = serialsCountStream(branchId, start, end, subDispensary: 'haji_camp', shift: 'night');
+    // Compute real detailed breakdown across the requested date range
+    final normBranchId = branchId.toLowerCase().trim();
+    final days = _dateStrings(start, end);
+    final dateSet = days.toSet();
 
-  final allMorning$    = serialsCountStream(branchId, start, end, subDispensary: 'all', shift: 'morning');
-  final allEvening$    = serialsCountStream(branchId, start, end, subDispensary: 'all', shift: 'evening');
-  final allNight$      = serialsCountStream(branchId, start, end, subDispensary: 'all', shift: 'night');
+    int sMornTotal = 0, sEveTotal = 0, sNightTotal = 0;
+    int hMornTotal = 0, hEveTotal = 0, hNightTotal = 0;
 
-  return Rx.combineLatest9<Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, int>, Map<String, Map<String, int>>>(
-    saddarMorning$,
-    saddarEvening$,
-    saddarNight$,
-    hajiMorning$,
-    hajiEvening$,
-    hajiNight$,
-    allMorning$,
-    allEvening$,
-    allNight$,
-    (sMorn, sEve, sNight, hMorn, hEve, hNight, aMorn, aEve, aNight) {
-      final sMornTotal = sMorn['total'] ?? 0;
-      final sEveTotal = sEve['total'] ?? 0;
-      final sNightTotal = sNight['total'] ?? 0;
-      final sTotal = sMornTotal + sEveTotal + sNightTotal;
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final box = Hive.box(LocalStorageService.entriesBox);
+        for (final val in box.values) {
+          if (val is! Map) continue;
+          final b = (val['branchId'] ?? '').toString().toLowerCase().trim();
+          if (normBranchId != 'all' && b.isNotEmpty && !b.contains(normBranchId) && !normBranchId.contains(b)) {
+            continue;
+          }
+          final dk = (val['dateKey'] ?? val['date'] ?? '').toString().trim();
+          if (dateSet.isNotEmpty && !dateSet.contains(dk)) continue;
 
-      final hMornTotal = hMorn['total'] ?? 0;
-      final hEveTotal = hEve['total'] ?? 0;
-      final hNightTotal = hNight['total'] ?? 0;
-      final hTotal = hMornTotal + hEveTotal + hNightTotal;
+          final serial = (val['serial'] ?? val['id'] ?? '').toString().toUpperCase();
+          final camp = (val['campId'] ?? val['dispensaryId'] ?? val['dispensaryTag'] ?? '').toString().toLowerCase();
+          final sess = (val['session'] ?? val['shift'] ?? '').toString().toLowerCase();
 
-      final sumMorn = sMornTotal + hMornTotal;
-      final sumEve = sEveTotal + hEveTotal;
-      final sumNight = sNightTotal + hNightTotal;
+          final isHaji = serial.contains('-HAJI') || serial.contains('HAJI-') || camp.contains('haji');
+          final isSaddar = serial.contains('-SADD') || serial.contains('SADD-') || camp.contains('saddar') || (!isHaji);
 
-      final directMorn = aMorn['total'] ?? 0;
-      final directEve = aEve['total'] ?? 0;
-      final directNight = aNight['total'] ?? 0;
+          final isEve = sess.contains('eve');
+          final isNight = sess.contains('night');
+          final isMorn = sess.contains('morn') || (!isEve && !isNight);
 
-      final allMornTotal = directMorn > sumMorn ? directMorn : sumMorn;
-      final allEveTotal = directEve > sumEve ? directEve : sumEve;
-      final allNightTotal = directNight > sumNight ? directNight : sumNight;
-      final allTotal = allMornTotal + allEveTotal + allNightTotal;
+          if (isHaji) {
+            if (isMorn) hMornTotal++;
+            else if (isEve) hEveTotal++;
+            else if (isNight) hNightTotal++;
+            else hMornTotal++;
+          } else if (isSaddar) {
+            if (isMorn) sMornTotal++;
+            else if (isEve) sEveTotal++;
+            else if (isNight) sNightTotal++;
+            else sMornTotal++;
+          }
+        }
+      }
+    } catch (_) {}
 
-      return {
-        'saddar': {
-          'morning': sMornTotal,
-          'evening': sEveTotal,
-          'night': sNightTotal,
-          'day': sMornTotal + sEveTotal,
-          'total': sTotal,
-        },
-        'haji_camp': {
-          'morning': hMornTotal,
-          'evening': hEveTotal,
-          'night': hNightTotal,
-          'day': hMornTotal + hEveTotal,
-          'total': hTotal,
-        },
-        'all': {
-          'morning': allMornTotal,
-          'evening': allEveTotal,
-          'night': allNightTotal,
-          'day': allMornTotal + allEveTotal,
-          'total': allTotal,
-        },
-      };
-    },
-  ).asBroadcastStream();
+    final sTotal = sMornTotal + sEveTotal + sNightTotal;
+    final hTotal = hMornTotal + hEveTotal + hNightTotal;
+
+    final allMornTotal = sMornTotal + hMornTotal;
+    final allEveTotal = sEveTotal + hEveTotal;
+    final allNightTotal = sNightTotal + hNightTotal;
+    final calculatedTotal = sTotal + hTotal;
+    final effectiveAllTotal = calculatedTotal > 0 ? calculatedTotal : total;
+
+    return {
+      'saddar': {
+        'morning': sMornTotal,
+        'evening': sEveTotal,
+        'night': sNightTotal,
+        'day': sMornTotal + sEveTotal,
+        'total': sTotal,
+      },
+      'haji_camp': {
+        'morning': hMornTotal,
+        'evening': hEveTotal,
+        'night': hNightTotal,
+        'day': hMornTotal + hEveTotal,
+        'total': hTotal,
+      },
+      'all': {
+        'morning': allMornTotal,
+        'evening': allEveTotal,
+        'night': allNightTotal,
+        'day': allMornTotal + allEveTotal,
+        'total': effectiveAllTotal,
+      },
+    };
+  });
 }
 
 Future<Map<String, int>> serialsCountFuture(String branchId, DateTime start, DateTime end) async {

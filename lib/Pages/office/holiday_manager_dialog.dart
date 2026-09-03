@@ -679,7 +679,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
 
     setState(() => _isSaving = true);
     try {
-      final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+      final curUser = LocalStorageService.getActiveUsername();
 
       for (final targetDate in targetDates) {
         await FinanceLocalStorage.saveHoliday(
@@ -726,7 +726,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
               onPressed: () async {
                 Navigator.pop(ctx);
                 try {
-                  final curUser = Hive.box('local_users').values.firstOrNull?['username']?.toString() ?? 'Admin';
+                  final curUser = LocalStorageService.getActiveUsername();
                   await FinanceLocalStorage.deleteHoliday(
                     holidayId: holidayId,
                     branches: branches,

@@ -93,6 +93,7 @@ class RealtimeManager {
   Timer? _reconnectTimer;
   Timer? _pingTimer;
   Timer? _ackFlushTimer;
+  Timer? _outboxSweepTimer;
 
   // [FIX-RC] No longer capped — tracks attempts only for back-off schedule.
   int _reconnectAttempts = 0;
@@ -134,6 +135,24 @@ class RealtimeManager {
   static Future<void> initOutbox() async {
     await LocalStorageService.openBoxSafe(_outboxBox);
     await LocalStorageService.openBoxSafe(_failedOutboxBox); // [FAIL-BOX]
+  }
+
+  /// Manually force-flushes the Hive outbox and requests catch-up from LAN server.
+  /// Used by UI Sync buttons to force any stuck token or prescription to the next user.
+  Future<void> forceFlushAndCatchUp() async {
+    try {
+      _retryFailedOutbox();
+      _sendPendingMessages();
+      await _flushOutbox();
+      if (_isConnected && _serverIdentified) {
+        sendMessage({
+          'event_type': 'request_catch_up',
+          'branchId': _branchId,
+        });
+      }
+    } catch (e) {
+      if (kDebugMode) print('[RealtimeManager] forceFlushAndCatchUp error: $e');
+    }
   }
 
   // ── Initialize ─────────────────────────────────────────────────────────────
@@ -250,10 +269,10 @@ class RealtimeManager {
   // ── Incoming message ───────────────────────────────────────────────────────
   void _onMessage(dynamic raw) {
     if (raw == null) return;
+    _lastPong = DateTime.now();
     final msg = raw as String;
 
     if (msg == 'pong' || msg == '{"type":"pong"}') {
-      _lastPong = DateTime.now();
       return;
     }
 
@@ -274,7 +293,6 @@ class RealtimeManager {
       }
 
       if (decoded['event_type'] == 'pong' || decoded['type'] == 'pong') {
-        _lastPong = DateTime.now();
         return;
       }
 
@@ -298,6 +316,17 @@ class RealtimeManager {
             _flushOutbox,
           );
         }
+
+        // Start periodic outbox sweep to catch stuck messages
+        _startOutboxSweepTimer();
+
+        // Request today's local records immediately. This fills a doctor or
+        // dispensary queue that missed a live broadcast without waiting for
+        // the periodic server catch-up timer.
+        sendMessage({
+          'event_type': 'request_catch_up',
+          'branchId': _branchId,
+        });
       }
 
       // [IMM-ACK] Handle ACK from server (server confirmed our message).
@@ -370,14 +399,21 @@ class RealtimeManager {
   void _startPingTimer() {
     _pingTimer?.cancel();
     _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (!_isConnected) return;
+      if (!_isConnected || _channel == null) return;
       if (_lastPong != null &&
           DateTime.now().difference(_lastPong!).inSeconds > 50) {
         if (kDebugMode) print('[RealtimeManager] Pong timeout → reconnecting');
         _handleDisconnect();
         return;
       }
-      sendMessage({'type': 'ping'});
+      try {
+        _channel!.sink.add(jsonEncode({
+          'type': 'ping',
+          'event_type': 'ping',
+          '_clientId': _clientId,
+          '_timestamp': DateTime.now().millisecondsSinceEpoch,
+        }));
+      } catch (_) {}
     });
   }
 
@@ -387,6 +423,28 @@ class RealtimeManager {
     _ackFlushTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!_isConnected || !_serverIdentified) return;
       _sendPendingAcks();
+    });
+  }
+
+  // [FIX-SWEEP] Periodic outbox sweep — catches tokens/prescriptions stuck in
+  // Hive outbox that were written but never delivered (silent WS drops,
+  // buffering issues, or send appeared to succeed but server never ACK'd).
+  // Also retries the failed outbox periodically instead of only on reconnect.
+  void _startOutboxSweepTimer() {
+    _outboxSweepTimer?.cancel();
+    _outboxSweepTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_isConnected || !_serverIdentified) return;
+      try {
+        final box = Hive.box(_outboxBox);
+        if (box.isNotEmpty) {
+          if (kDebugMode) {
+            print('[RealtimeManager] 🔄 Outbox sweep: ${box.length} stuck item(s)');
+          }
+          _flushOutbox();
+        }
+      } catch (_) {}
+      // Also retry failed outbox every sweep
+      _retryFailedOutbox();
     });
   }
 
@@ -423,6 +481,7 @@ class RealtimeManager {
     _flushedOnConnect = false;
     _pingTimer?.cancel();
     _ackFlushTimer?.cancel();
+    _outboxSweepTimer?.cancel();
     _channelSub?.cancel();
     _channel?.sink.close(ws_status.goingAway);
     _channelSub = null;
@@ -480,6 +539,7 @@ class RealtimeManager {
     final isAck  = normalized['event_type'] == 'ack_serials';
     final isHandshake = normalized['event_type'] == 'identify' ||
                         normalized['event_type'] == 'identified';
+    final isCatchUpRequest = normalized['event_type'] == 'request_catch_up';
     final isUnknown = normalized['event_type'] == 'unknown' && normalized['type'] == null;
 
     if (isUnknown) {
@@ -487,7 +547,7 @@ class RealtimeManager {
       return;
     }
 
-    if (!isPing && !isAck && !isHandshake) {
+    if (!isPing && !isAck && !isHandshake && !isCatchUpRequest) {
       try {
         _messageController.add(normalized);
       } catch (_) {}
@@ -495,7 +555,7 @@ class RealtimeManager {
 
     // [FIX-P1] Write to Hive outbox FIRST (skip ping/ack/handshake).
     String? outboxKey;
-    if (!isPing && !isAck && !isHandshake) {
+    if (!isPing && !isAck && !isHandshake && !isCatchUpRequest) {
 
       try {
         outboxKey = 'outbox_${DateTime.now().microsecondsSinceEpoch}';
@@ -514,7 +574,7 @@ class RealtimeManager {
       if (kDebugMode && !isPing) {
         print('[RealtimeManager] Queuing (${!_isConnected ? "not connected" : "not identified"}): ${normalized['event_type']}');
       }
-      if (!isPing && !isAck && !isHandshake) {
+      if (!isPing && !isAck && !isHandshake && !isCatchUpRequest) {
         _pendingMessages.add(normalized);
       }
       return;
@@ -522,11 +582,7 @@ class RealtimeManager {
 
     try {
       _channel!.sink.add(jsonEncode(normalized));
-      // [FIX-P1] Remove from outbox on successful send.
-      if (outboxKey != null) {
-        try { Hive.box(_outboxBox).delete(outboxKey); } catch (_) {}
-      }
-      if (kDebugMode) print('[RealtimeManager] → ${normalized['event_type']}');
+      if (kDebugMode) print('[RealtimeManager] → ${normalized['event_type']} (msgId=${normalized['_messageId']})');
     } catch (e) {
       if (kDebugMode) print('[RealtimeManager] Send failed: $e → queuing');
       // Message stays in outbox; _flushOutbox will resend on next reconnect.
@@ -547,12 +603,7 @@ class RealtimeManager {
 
       try {
         _channel!.sink.add(jsonEncode(msg));
-        // Remove outbox entry if one exists for this message.
-        final outboxKey = msg['_outboxKey']?.toString();
-        if (outboxKey != null) {
-          try { Hive.box(_outboxBox).delete(outboxKey); } catch (_) {}
-        }
-        if (kDebugMode) print('[RealtimeManager] pending→ ${msg['event_type']}');
+        if (kDebugMode) print('[RealtimeManager] pending→ ${msg['event_type']} (msgId=${msg['_messageId']})');
       } catch (e) {
         if (kDebugMode) print('[RealtimeManager] Pending send failed: $e');
         // Message is still in outbox; will be recovered on next reconnect.
@@ -568,7 +619,8 @@ class RealtimeManager {
       final box = Hive.box(_outboxBox);
       if (box.isEmpty) return;
 
-      final cutoff   = DateTime.now().subtract(const Duration(hours: 24));
+      final todayDateKey = CampSessionService.resolveShiftAndDateKey().dateKey;
+      final cutoff   = DateTime.now().subtract(const Duration(hours: 12));
       final toDelete = <dynamic>[];
 
       if (kDebugMode) print('[RealtimeManager] Flushing outbox: ${box.length} items');
@@ -579,10 +631,16 @@ class RealtimeManager {
 
         final item = Map<String, dynamic>.from(raw);
 
-        // Expire items older than 24 hours.
-        final tsStr    = item['_outboxTimestamp']?.toString();
+        // Expire items from previous days or older than 12 hours.
+        final itemDateKey = (item['dateKey'] ?? item['data']?['dateKey'])?.toString().trim();
+        final tsStr    = (item['_outboxTimestamp'] ?? item['createdAt'])?.toString();
         final itemTime = tsStr != null ? DateTime.tryParse(tsStr) : null;
-        if (itemTime != null && itemTime.isBefore(cutoff)) {
+
+        final isStale = (itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
+            (itemTime != null && (itemTime.isBefore(cutoff) || itemTime.day != DateTime.now().day));
+
+        if (isStale) {
+          if (kDebugMode) print('[RealtimeManager] 🗑️ Discarding stale/yesterday outbox item: key=$key dateKey=$itemDateKey');
           toDelete.add(key);
           continue;
         }
@@ -592,6 +650,7 @@ class RealtimeManager {
         msg.remove('_outboxTimestamp');
         final retryCount = (msg.remove('_outboxRetryCount') as int?) ?? 0;
         msg['_resent']    = true;
+        msg['_isReplay']  = true;
         msg['_timestamp'] = DateTime.now().millisecondsSinceEpoch;
 
         if (kDebugMode) {
@@ -658,7 +717,8 @@ class RealtimeManager {
       if (failedBox.isEmpty) return;
 
       final box     = Hive.box(_outboxBox);
-      final cutoff  = DateTime.now().subtract(const Duration(hours: 24));
+      final todayDateKey = CampSessionService.resolveShiftAndDateKey().dateKey;
+      final cutoff  = DateTime.now().subtract(const Duration(hours: 12));
       int moved = 0;
 
       for (final key in failedBox.keys.toList()) {
@@ -667,10 +727,14 @@ class RealtimeManager {
 
         final item = Map<String, dynamic>.from(raw);
 
-        // Expire entries older than 24 h (tokens/prescriptions are same-day only).
+        // Expire entries older than 12 h or from previous date
+        final itemDateKey = (item['dateKey'] ?? item['data']?['dateKey'])?.toString().trim();
         final tsStr = (item['_outboxTimestamp'] ?? item['_failedAt'])?.toString();
         final ts    = tsStr != null ? DateTime.tryParse(tsStr) : null;
-        if (ts != null && ts.isBefore(cutoff)) {
+        final isStale = (itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
+            (ts != null && (ts.isBefore(cutoff) || ts.day != DateTime.now().day));
+
+        if (isStale) {
           failedBox.delete(key);
           continue;
         }
@@ -790,6 +854,7 @@ class RealtimeManager {
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
     _ackFlushTimer?.cancel();
+    _outboxSweepTimer?.cancel();
     _channelSub?.cancel();
     await _channel?.sink.close(ws_status.normalClosure);
 
