@@ -1,251 +1,158 @@
 <p align="center">
-  <img src="assets/logo/gmwf-1.webp" alt="GMWF Logo" width="120" />
+  <img src="assets/logo/gmwf-1.webp" alt="GMWF Logo" width="110" />
 </p>
 
-# 🕌 Gulzar Madina Welfare Foundation (GMWF)
-### Integrated Enterprise Welfare, Medical & Institution Management Platform
+<h1 align="center">Gulzar Madina Welfare Foundation (GMWF)</h1>
 
-[![Flutter](https://img.shields.io/badge/Flutter-%2302569B.svg?style=for-the-badge&logo=Flutter&logoColor=white)](https://flutter.dev)
-[![Firebase](https://img.shields.io/badge/firebase-%23039BE5.svg?style=for-the-badge&logo=firebase)](https://firebase.google.com)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Web%20%7C%20Android%20%7C%20iOS-blue?style=for-the-badge)](https://flutter.dev/multi-platform)
-[![Release](https://img.shields.io/badge/Release-v1.3.5-brightgreen?style=for-the-badge)](https://github.com/gmwf-1122/GMWF)
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg?style=for-the-badge)](LICENSE)
+<p align="center">
+  <strong>Integrated Enterprise Welfare, Medical, Education & Operations Platform</strong>
+</p>
 
-A production-grade, multi-platform **Flutter application** purpose-built for the Gulzar Madina Welfare Foundation. GMWF digitally orchestrates the foundation's entire operational ecosystem—spanning **medical dispensaries**, **educational institutions (Madrassa & School)**, **community kitchens (Dasterkhwaan)**, **financial auditing**, **biometric attendance**, **pre-authentication security**, and **automated multi-device session tracking**—with offline-first reliability and real-time synchronization.
-
----
-
-## 🚀 Latest Updates & Bug Fixes in v1.3.5
-
-> [!IMPORTANT]
-> **v1.3.5 Production Maintenance & System Enhancements**
-> App version bumped to v1.3.5 across all platform targets. Includes performance optimizations, critical fixes in Quran progress tracking, Madrassa local storage, Dispensary queue reactivity, and multi-architecture split release packaging.
-
-- 📖 **Quran Progress & Madrassa Module Fixes**: Resolved Quran Juz/Para tracking calculations, daily progress log synchronization, and parent report card rendering.
-- 💊 **Dispensary & Inventory Performance Optimizations**: Resolved patient queue state reactivity bugs, inventory ledger stock calculations, and Proforma sheet generation speed.
-- ⚡ **ZKTeco & Biometric Device Connectivity**: Enhanced network connection resilience, automatic IP discovery, and punch log sync stability.
-- 🌐 **LAN Realtime Router & Multi-Server Handshake**: Fixed LAN client/server heartbeat timeouts, server discovery, and Firestore fallback routing.
-- 📦 **Split Release Packaging & Auto-Update Engine**: Updated build system to deliver optimized split ARM64 APKs (`app-arm64-v8a-release.apk`), Windows release binaries (`gmwf.exe`), and Web release bundles.
+<p align="center">
+  <a href="https://flutter.dev"><img src="https://img.shields.io/badge/Flutter-3.x-02569B.svg?style=flat-square&logo=Flutter&logoColor=white" alt="Flutter" /></a>
+  <a href="https://firebase.google.com"><img src="https://img.shields.io/badge/Firebase-Firestore-FFA611.svg?style=flat-square&logo=Firebase&logoColor=white" alt="Firebase" /></a>
+  <a href="https://hive.dev"><img src="https://img.shields.io/badge/Storage-Hive%20NoSQL-yellowgreen.svg?style=flat-square" alt="Hive DB" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Android%20%7C%20Web-blue.svg?style=flat-square" alt="Platforms" />
+  <img src="https://img.shields.io/badge/Version-v1.4.4-emerald.svg?style=flat-square" alt="Version" />
+  <img src="https://img.shields.io/badge/License-Proprietary-red.svg?style=flat-square" alt="License" />
+</p>
 
 ---
 
-## 🏛️ Architecture & System Design
+## ⚡ Overview
 
-GMWF uses an **Offline-First Hybrid Sync Architecture**. Local branches function seamlessly even during total internet blackouts, using local LAN WebSockets for zero-latency intra-clinic data transfer and Cloud Firestore for global multi-branch persistence.
+**GMWF** is a mission-critical, multi-platform enterprise ecosystem engineered for the **Gulzar Madina Welfare Foundation**. Built on an **offline-first hybrid architecture**, it unifies medical healthcare, schooling, community welfare, biometric attendance, and multi-tier financial auditing across distributed branch networks with sub-millisecond local latency and automatic cloud synchronization.
+
+> [!NOTE]
+> **Zero-Downtime Guarantee**: Facilities operate uninterrupted during internet outages using local LAN peer-to-peer WebSocket mesh and encrypted on-device Hive storage. When connectivity resumes, deltas sync seamlessly with Cloud Firestore.
+
+---
+
+## 🏛️ Core Modules at a Glance
+
+| Module | Purpose | Key Capabilities |
+|:---|:---|:---|
+| 🏥 **Dispensary & Pharmacy** | Clinical care & medicine distribution | Live token queue, electronic prescriptions (Rx), instant barcode/formula search, automated stock deduction, universal proforma catalog. |
+| 📖 **Madrassa & Education** | Hifz & academic management | Student registration, Islamic calendar support, Quran Juz/Para progress logs, guardian report cards, monthly grade sheets. |
+| 🏫 **Model School** | Primary/secondary education | Admissions, fee collection & concession logic, student/teacher biometric attendance, library book circulation, PDF report generation. |
+| 🍲 **Dasterkhwaan** | Community kitchen logistics | Meal token allocation, 60+ ingredient pantry inventory, daily cooking consumption logs, automated meal cost auditing. |
+| 💳 **Finance & Donations** | Institutional auditability | Multi-fund donation ledgers, 3-tier approval chain (Staff ➔ Manager ➔ Chairman), A5 WhatsApp/print receipts, Excel/CSV exports. |
+| ⏱️ **Biometric & Attendance** | Workforce administration | ZKTeco hardware integration, multi-branch punch synchronization, shift breakdown, automated payroll processing. |
+
+---
+
+## 🏗️ System Architecture
+
+### Offline-First Hybrid Topology
 
 ```mermaid
-flowchart TD
-    subgraph Branch_LAN["🏢 Local Branch Network (Offline Capable)"]
-        node1["💻 Receptionist PC\n(Local Host Server)"]
-        node2["👨‍⚕️ Doctor Workstation\n(Client Node)"]
-        node3["💊 Pharmacy Dispenser\n(Client Node)"]
-        
-        node1 <-->|"mDNS Discovery &\nWebSocket Stream"| node2
-        node1 <-->|"mDNS Discovery &\nWebSocket Stream"| node3
-        
-        hive1[("📦 Local Hive DB\n(Fast Key-Value Storage)")]
-        node1 <--> hive1
+flowchart TB
+    subgraph LAN["🏢 Branch Subnet (Zero-Latency Local Mesh)"]
+        ServerNode["💻 Host Reception Terminal\n(WebSocket Server :8080 + mDNS)"]
+        DoctorNode["👨‍⚕️ Doctor Workstation\n(LAN Client)"]
+        PharmaNode["💊 Pharmacy Dispenser\n(LAN Client)"]
+        LocalHive[("⚡ Hive NoSQL DB\n(<2ms Local Read/Write)")]
+
+        DoctorNode <-->|"WebSocket Stream"| ServerNode
+        PharmaNode <-->|"WebSocket Stream"| ServerNode
+        ServerNode <--> LocalHive
     end
 
-    subgraph Cloud_Backend["☁️ Cloud Source of Truth"]
-        firestore[("🔥 Firebase Firestore\n(Multi-Branch Global Storage)")]
-        storage["📁 Firebase Storage\n(Prescriptions & Audits)"]
-        auth["🔐 Firebase Auth"]
+    subgraph Cloud["☁️ Cloud Backend (Central Persistence)"]
+        Firestore[("🔥 Firebase Firestore\n(Global Multi-Branch Store)")]
+        Storage["📁 Cloud Storage\n(Prescriptions & Documents)"]
+        Auth["🔐 Firebase Auth\n(Identity & Roles)"]
     end
 
-    node1 <-->|"Queued Async Sync\n(sync_service.dart)"| firestore
-    node2 --> auth
-    node3 --> storage
+    ServerNode <-->|"Queued Async Delta Sync"| Firestore
+    DoctorNode -.-> Auth
+    PharmaNode -.-> Storage
 ```
 
 ---
 
-## 🖥️ Server & Network Architecture (`multi_server_service.dart` & `sync_service.dart`)
+## 🚀 Key Architectural Innovations
 
-The foundation operates across distributed physical branches. The system handles local communication and cloud synchronization through a 3-layer network architecture:
+### 1. Smart Multi-Tier Auto-Update
+Clients update smoothly without exceptions, rate-limit bottlenecks, or disrupted workflows:
+- **Multi-Tier Detection**: GitHub Releases API ➔ Firestore Remote Config (`app_config/version`) ➔ Raw GitHub CDN check.
+- **Responsive Layout**: Optimal card geometry (`max-height: 85vh`) with fixed header, stationary bottom action buttons, and scrollable release notes.
+- **Version-Aware Snooze**: Postpones minor notifications without suppressing critical or mandatory updates.
+- **Robust In-App Streaming**: Resilient HTTP chunk streaming with automatic Windows file-lock avoidance (OS Error 32 handling).
+
+### 2. Python Environment Preservation (Inno Setup)
+- Both 64-bit (`GMWFSetup.iss`) and 32-bit (`GMWFSetup_x86.iss`) installers automatically probe `{app}\python\python.exe`.
+- Existing Python runtimes, biometric drivers, and packages are **preserved without overwriting**, ensuring zero hardware driver disruption during updates.
+
+### 3. Pre-Authentication Security & Token Lifecycle
+- Device fingerprinting and activity logs recorded before credential verification.
+- Offline credentials securely hashed with local fallback authentication during branch blackouts.
+
+---
+
+## 👥 Role-Based Access Control
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Receptionist as Receptionist Node (Server)
-    actor Doctor as Doctor Node (Client)
-    participant Hive as Local Hive DB
-    participant Cloud as Firebase Firestore Cloud
-
-    Note over Receptionist,Doctor: Local LAN Peer-to-Peer Communication
-    Receptionist->>Receptionist: Starts WebSocket Server (Port 8080) & advertises mDNS service
-    Doctor->>Receptionist: Auto-discovers server via mDNS / mDNS Bonsoir
-    Doctor->>Receptionist: Establishes WebSocket Connection & authenticates node
-    
-    Doctor->>Receptionist: Send New Prescribed Prescription / Token Update
-    Receptionist->>Hive: Write to local Hive Database instantly (Zero-Downtime)
-    Receptionist-->>Doctor: Broadcast live update to all LAN client nodes
-
-    Note over Receptionist,Cloud: Background Cloud Synchronization
-    Receptionist->>Cloud: Check Internet Connectivity
-    alt Online
-        Receptionist->>Cloud: Process sync queue & push delta changes to Firestore
-        Cloud-->>Receptionist: Acknowledge sync & update timestamps
-    else Offline
-        Receptionist->>Hive: Queue delta transactions locally in Sync Queue
-        Note over Receptionist: Retries automatically when internet restores
+graph LR
+    subgraph Executive
+        CH[Chairman] & CEO[CEO] & HQM[HQ Operations Manager]
     end
+    subgraph Branch_Staff
+        BM[Branch Manager] --> DOC[Doctor]
+        BM --> REC[Receptionist]
+        BM --> DISP[Dispenser]
+        BM --> TCH[Teacher / Admin]
+        BM --> KIT[Kitchen Supervisor]
+    end
+    CH --> BM
 ```
 
-### Server & Network Features:
-1. **Local Server Host Engine** ([multi_server_service.dart](file:///e:/GMWF/gmwf/lib/services/multi_server_service.dart)): Designated branch terminals function as local WebSocket hubs broadcasting real-time updates to doctors and dispensers on the local subnet.
-2. **Offline-First Persistence**: All transactions (patients, tokens, prescriptions, inventory) write to local Hive storage ([local_storage_service.dart](file:///e:/GMWF/gmwf/lib/services/local_storage_service.dart)) in less than 2 milliseconds.
-3. **Background Sync Engine** ([sync_service.dart](file:///e:/GMWF/gmwf/lib/services/sync_service.dart)): Automatically queues pending offline operations and syncs them to Cloud Firestore when network connectivity returns.
+- **Executive (Chairman / CEO / HQ)**: Organization-wide financial oversight, multi-branch analytics, and final transaction approvals.
+- **Branch Management**: Branch stock requisition, local expense approvals, and staff scheduling.
+- **Clinical (Doctor / Dispenser / Receptionist)**: Patient queuing, diagnosis, electronic prescription issuance, and stock deduction.
+- **Educational (Teachers / Admin)**: Quranic recitation logs, student enrollments, exam grading, and parent communications.
 
 ---
 
-## 🏥 Dispensary Workflow & Clinical Lifecycle
+## 🛠️ Technology Stack
 
-The dispensary module manages the end-to-end patient journey across reception, consultation, and pharmacy fulfillment:
-
-```mermaid
-flowchart LR
-    A["👤 1. Patient Arrival\n& Registration"] --> B["🎫 2. Token Generation\n(Receptionist)"]
-    B --> C["📋 3. Live Token Queue\n(Waiting Room Display)"]
-    C --> D["👨‍⚕️ 4. Doctor Consultation\n(Clinical Notes & Rx)"]
-    D --> E["💊 5. Pharmacy Fulfillment\n(Dispenser Check)"]
-    E --> F["📦 6. Stock Auto-Deduction\n& Receipt Printed"]
-```
-
-### Dispensary Step-by-Step Details:
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Patient
-    actor Receptionist
-    actor Doctor
-    actor Dispenser
-    participant DB as System Database (Hive / Firestore)
-
-    Patient->>Receptionist: Arrives at Dispensary
-    Receptionist->>DB: Search/Create Patient Record & Generate Token
-    DB-->>Receptionist: Token # Assigned (e.g. Token-42)
-
-    Doctor->>DB: Fetch Next Waiting Patient from Live Queue
-    Doctor->>Patient: Perform Diagnosis & Clinical Examination
-    Doctor->>DB: Create Electronic Prescription (Medicines, Dosage, Instructions)
-    
-    Dispenser->>DB: Pull Electronic Prescription by Token #
-    Dispenser->>Dispenser: Verify Medicine Stock Availability
-    Dispenser->>DB: Confirm Medicine Dispensed
-    DB->>DB: Deduct Medicine Quantities from Inventory Ledger
-    Dispenser->>Patient: Hand over Medicines & Printed Prescription
-```
-
-1. **Receptionist**: Searches existing patient records by CNIC/Phone or registers new patients. Generates sequential daily tokens.
-2. **Doctor**: Views the live waiting list on the consultation dashboard, inputs vitals, selects diagnoses, and issues electronic prescriptions.
-3. **Dispenser**: Opens the patient prescription on the pharmacy terminal, verifies medicine items, fulfills the order, and automatically updates inventory stock counts.
+| Category | Components |
+|:---|:---|
+| **Framework** | Flutter 3.x • Dart `^3.10.1` |
+| **Local Database** | Hive NoSQL (Box-based key-value persistence) |
+| **Cloud Services** | Firebase Firestore • Auth • Cloud Storage |
+| **Networking** | WebSockets (TCP :8080) • mDNS (Bonsoir) • HttpClient |
+| **Hardware & Devices**| ZKTeco Python Sync Daemon • Windows Biometric APIs |
+| **Packaging & Installers** | Inno Setup 6 (x64 / x86) • Android Split ABI APKs • Web Deployments |
 
 ---
 
-## ⚡ Cross-Platform Auto-Updater Engine
+## 📦 Building from Source
 
-The application includes an automated multi-platform updater ([auto_update_service.dart](file:///e:/GMWF/gmwf/lib/services/auto_update_service.dart)) that keeps desktop and mobile clients updated with zero user friction:
-
-```mermaid
-flowchart TD
-    Start["🚀 App Startup / Settings Update Check"] --> CheckRepo["🌐 Fetch GitHub Release API / Firestore Config"]
-    CheckRepo --> CompareVer{"Compare Version\n(current vs latest)"}
-
-    CompareVer -- "Up to Date" --> NoAction["✅ App Running Latest Version"]
-    CompareVer -- "Update Available" --> PromptUser["📢 Show Update Dialog (update_dialog_widget.dart)"]
-
-    PromptUser --> UserChoice{"User Clicks\n'Update Now'"}
-    UserChoice -- "Download" --> StreamDownload["📥 Download Binary Stream with HttpClient"]
-
-    StreamDownload --> PlatformDetect{"Detect Target Platform"}
-
-    PlatformDetect -- "Windows (.exe)" --> WinExec["⚡ Execute Inno Setup Silent Installer\nProcess.start('/verysilent /norestart')"]
-    WinExec --> ExitWin["🚪 Close GMWF.exe to allow overwrite"]
-
-    PlatformDetect -- "Android (.apk)" --> AndroidExec["📱 Open Native PackageInstaller\nOpenFilex.open('GMWF_Update.apk')"]
-    AndroidExec --> PromptAndroid["📲 User confirms 'Install Update' prompt"]
-```
-
----
-
-## 🏛️ Foundation Modules & Capabilities
-
-### 🏫 School & Madrassa Management System
-- **Student Enrollment**: Complete demographic tracking (B-Form/CNIC, Guardian info, Branch assignment).
-- **Hifz & Academic Logs**: Daily Quran recitation tracking, academic evaluations, and monthly progress cards.
-- **Guardian Portal**: Parents view live attendance, academic progress, and fee statuses.
-
-### 🍲 Dasterkhwaan (Community Kitchen Logistics)
-- **Token Issuance**: Daily meal distribution tracking for community kitchens.
-- **Pantry Inventory**: Stock management for 60+ ingredients with leftover carry-over calculations.
-- **Daily Cooking Audits**: Audit trails linking meal counts to pantry stock usage.
-
-### 💰 Financials, Donations & Credit Chain
-- **Multi-Category Accounting**: Split tracking for Dispensary, Madrassa, Dasterkhwaan, and General Welfare funds.
-- **Approval Workflow**: 3-Tier authorization chain (Office Boy ➔ Manager ➔ Chairman).
-- **Branded Receipts**: A5 PDF receipt generation with instant WhatsApp sharing and Excel reporting.
-
----
-
-## 👥 Organizational Roles & Access Control
-
-| Role | Operational Scope & Permissions |
-|:--|:--|
-| **Chairman** | Global executive dashboard, financial audits, full multi-branch approval |
-| **CEO** | Aggregate branch performance metrics & strategic overview |
-| **HQ Manager** | Cross-branch credit ledgers, multi-branch operations, staff oversight |
-| **Branch Manager** | Local branch administration, localized inventory approvals, daily reports |
-| **Doctor** | Patient diagnosis, electronic prescriptions, medical history records |
-| **Receptionist** | Patient registration, token queue management, visitor logging |
-| **Dispenser** | Prescription fulfillment, medicine stock deduction, pharmacy audit |
-| **Teacher / Admin** | Student enrollment, daily Hifz logs, academic report generation |
-| **Kitchen Staff** | Meal token issuance, pantry stock logging, cooking session entry |
-
----
-
-## 🛠️ Tech Stack & Dependencies
-
-| Layer | Technology |
-|:--|:--|
-| **Framework** | Flutter 3.x (Dart `^3.10.1`) |
-| **Local Persistence** | Hive (NoSQL Key-Value Store) |
-| **State Management** | Flutter Riverpod + RxDart Streams + Provider |
-| **Cloud Backend** | Firebase (Firestore, Authentication, Storage) |
-| **Networking & LAN** | WebSockets (TCP Port 8080), mDNS (Bonsoir), HTTP Redirect Streamer |
-| **Auto-Updater** | `open_filex`, GitHub Releases API, Inno Setup Compiler (`GMWFSetup.iss`) |
-| **PDF & Printing** | `pdf` + `printing` package |
-| **Security & Devices** | `device_info_plus`, `connectivity_plus`, `network_info_plus` |
-
----
-
-## 📦 How to Build & Compile Releases
-
-### 1. Build Windows Application
 ```bash
+# 1. Fetch dependencies
+flutter pub get
+
+# 2. Compile Windows release executable
 flutter build windows --release
+
+# 3. Compile Android release (Split ABI for compact download size)
+flutter build apk --release --split-per-abi
+
+# 4. Compile Web release bundle
+flutter build web --release
 ```
 
-### 2. Compile Inno Setup Windows Installer
-Compile [GMWFSetup.iss](file:///e:/GMWF/gmwf/GMWFSetup.iss) using Inno Setup 6 to output:
+### Windows Installer Generation
+Compile `GMWFSetup.iss` (x64) or `GMWFSetup_x86.iss` (32-bit) with Inno Setup 6:
 ```text
-installer/GMWF-v1.2.9.exe
-```
-
-### 3. Build Android Release APK
-```bash
-flutter build apk --release
-```
-Output location:
-```text
-build/app/outputs/flutter-apk/app-release.apk
+installer/GMWF-v1.4.4-x64.exe
+installer/GMWF-v1.4.4-x86.exe
 ```
 
 ---
 
-## 📄 License
+## 📄 License & Ownership
 
-© 2026 **Gulzar Madina Welfare Foundation (GMWF)**. All rights reserved.
-
-This software is the exclusive property of GMWF. Unauthorized copying, distribution, or modification is strictly prohibited. See the [LICENSE](LICENSE) file for details.
+© 2026 **Gulzar Madina Welfare Foundation (GMWF)**. All rights reserved.  
+Proprietary software developed exclusively for GMWF operations. Unauthorized duplication or redistribution is strictly prohibited.
