@@ -1,12 +1,12 @@
 // lib/pages/register.dart
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:hive/hive.dart';
 
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
@@ -20,7 +20,6 @@ import '../widgets/media_upload_tile.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
 import '../services/sync_service.dart';
-import 'package:hive/hive.dart';
 
 class Register extends StatefulWidget {
   const Register({super.key});
@@ -33,59 +32,29 @@ class _RegisterState extends State<Register>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final AuthService _authService = AuthService();
+  final PageController _pageController = PageController();
+
+  int _currentStep = 0;
+  static const int _totalSteps = 3;
 
   String? _selectedDepartment;
   String? _selectedRole;
   String? _selectedBranch;
-  String? _selectedDispensary; // Legacy single dispensary selection ('saddar', 'haji_camp')
-  final Set<String> _selectedDispensaries = {}; // Multi-camp assignment
-  final Map<String, String> _campSessions = {}; // Camp to mandatory session mapping
-  String _selectedMadrassaSession = 'morning'; // Madrassa teaching shift
+  String? _selectedDispensary;
+  final Set<String> _selectedDispensaries = {};
+  final Map<String, String> _campSessions = {};
+  String _selectedMadrassaSession = 'morning';
   String? _selectedDegree;
 
-  final TextEditingController _usernameController       = TextEditingController();
-  final TextEditingController _emailController          = TextEditingController();
-  final TextEditingController _passwordController       = TextEditingController();
-  final TextEditingController _phoneController          = TextEditingController();
-  final TextEditingController _identificationController = TextEditingController();
-  final TextEditingController _addressController        = TextEditingController();
-  final TextEditingController _bankNameController       = TextEditingController();
-  final TextEditingController _bankAccountController    = TextEditingController();
-  final TextEditingController _biometricPinController   = TextEditingController();
-  final TextEditingController _customDegreeController   = TextEditingController();
-  final TextEditingController _salaryController         = TextEditingController();
+  final TextEditingController _usernameController     = TextEditingController();
+  final TextEditingController _emailController        = TextEditingController();
+  final TextEditingController _passwordController     = TextEditingController();
+  final TextEditingController _phoneController        = TextEditingController();
+  final TextEditingController _biometricPinController = TextEditingController();
+  final TextEditingController _customDegreeController = TextEditingController();
 
   String? _selectedStudentId;
   List<Map<String, dynamic>> _branchStudents = [];
-
-  String? _selectedLinkedEmployeeId;
-  String? _matchedReasonText;
-
-  void _autoDetectEmployeeMatch() {
-    final cnic = _identificationController.text.trim();
-    final email = _emailController.text.trim();
-    final name = _usernameController.text.trim();
-    final branchId = _getBranchId();
-
-    final match = FinanceLocalStorage.findMatchingEmployeeForUser(
-      branchId: branchId,
-      cnic: cnic,
-      email: email,
-      username: name,
-      department: _selectedDepartment,
-      role: _selectedRole,
-    );
-
-    if (match != null) {
-      setState(() {
-        _selectedLinkedEmployeeId = match['id']?.toString() ?? match['localId']?.toString();
-        _matchedReasonText = match['matchReason']?.toString();
-      });
-      _snack('✨ Auto-linked to Employee: ${match['name']} (${_matchedReasonText ?? ""})', success: true);
-    } else {
-      _snack('No automatic employee match found by CNIC, Email, or Name+Role', error: false);
-    }
-  }
 
   XFile?        _profileImageXFile;
   Uint8List?    _profileImageBytes;
@@ -104,6 +73,8 @@ class _RegisterState extends State<Register>
     {
       'name': 'Administration',
       'icon': Icons.admin_panel_settings_rounded,
+      'color': Color(0xFF6366F1),
+      'description': 'Executive leadership & central organization',
       'roles': [
         {'label': 'CEO',              'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'CEO'},
         {'label': 'Admin',            'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'Admin'},
@@ -114,6 +85,8 @@ class _RegisterState extends State<Register>
     {
       'name': 'Office',
       'icon': Icons.business_rounded,
+      'color': Color(0xFF0EA5E9),
+      'description': 'Branch management, logistics & operations',
       'roles': [
         {'label': 'Branch Manager',   'icon': Icons.manage_accounts_rounded,      'type': 'normal',   'value': 'Branch Manager'},
         {'label': 'Office Boy',       'icon': Icons.confirmation_number_outlined, 'type': 'normal',   'value': 'Office Boy'},
@@ -123,6 +96,8 @@ class _RegisterState extends State<Register>
     {
       'name': 'Dispensary',
       'icon': Icons.local_hospital_rounded,
+      'color': Color(0xFF10B981),
+      'description': 'Healthcare, medical staff & clinic reception',
       'roles': [
         {'label': 'Supervisor',       'icon': Icons.manage_accounts_outlined,     'type': 'normal',   'value': 'Supervisor'},
         {'label': 'Doctor',           'icon': Icons.medical_services_outlined,    'type': 'normal',   'value': 'Doctor'},
@@ -137,6 +112,8 @@ class _RegisterState extends State<Register>
     {
       'name': 'Dasterkhwaan',
       'icon': Icons.restaurant_rounded,
+      'color': Color(0xFFF59E0B),
+      'description': 'Food distribution & kitchen operations',
       'roles': [
         {'label': 'Kitchen',          'icon': Icons.restaurant_outlined,          'type': 'normal',   'value': 'Kitchen'},
       ],
@@ -144,16 +121,21 @@ class _RegisterState extends State<Register>
     {
       'name': 'Madrassa',
       'icon': Icons.menu_book_rounded,
+      'color': Color(0xFF8B5CF6),
+      'description': 'Religious education, teachers & administration',
       'roles': [
         {'label': 'Madrassa Principal / Admin', 'icon': Icons.menu_book_rounded, 'type': 'madrassa', 'value': 'Madrassa Admin'},
         {'label': 'Madrassa Teacher',           'icon': Icons.school_rounded,    'type': 'madrassa', 'value': 'Madrassa Teacher'},
+        {'label': 'Madrassa Parent',            'icon': Icons.family_restroom_rounded, 'type': 'madrassa', 'value': 'Madrassa Parent'},
       ],
     },
     {
       'name': 'School',
       'icon': Icons.school_rounded,
+      'color': Color(0xFFEC4899),
+      'description': 'Academic education, teachers & principals',
       'roles': [
-        {'label': 'School Principal',           'icon': Icons.stars_rounded,      'type': 'crown',    'value': 'School Principal'},
+        {'label': 'School Principal',           'icon': Icons.stars_rounded,      'type': 'school',   'value': 'School Principal'},
         {'label': 'School Admin',               'icon': Icons.school_rounded,     'type': 'school',   'value': 'School Admin'},
         {'label': 'School Teacher',             'icon': Icons.co_present_rounded, 'type': 'school',   'value': 'School Teacher'},
       ],
@@ -166,7 +148,7 @@ class _RegisterState extends State<Register>
   @override
   void initState() {
     super.initState();
-    _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 500));
+    _animController = AnimationController(vsync: this, duration: const Duration(milliseconds: 450));
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
     _loadBranches();
@@ -175,11 +157,10 @@ class _RegisterState extends State<Register>
   @override
   void dispose() {
     _animController.dispose();
+    _pageController.dispose();
     for (final c in [
       _usernameController, _emailController, _passwordController,
-      _phoneController, _identificationController, _addressController,
-      _bankNameController, _bankAccountController, _customDegreeController,
-      _salaryController,
+      _phoneController, _biometricPinController, _customDegreeController,
     ]) {
       c.dispose();
     }
@@ -187,7 +168,6 @@ class _RegisterState extends State<Register>
   }
 
   Future<void> _loadBranches() async {
-    // 1. Gather all locally cached branches instantly (Hive local_branches, branchesBox, FinanceLocalStorage)
     final List<Map<String, dynamic>> localList = [];
 
     void addBranchIfNew(String rawId, String rawName) {
@@ -234,7 +214,6 @@ class _RegisterState extends State<Register>
       }
     } catch (_) {}
 
-    // Fallback standard branches if local storage is completely empty
     if (localList.isEmpty) {
       for (final def in [
         {'id': 'main', 'name': 'Main Branch'},
@@ -286,7 +265,6 @@ class _RegisterState extends State<Register>
       });
     }
 
-    // 2. Background fresh sync from Firestore with timeout
     try {
       final snap = await FirebaseFirestore.instance
           .collection('branches')
@@ -392,7 +370,6 @@ class _RegisterState extends State<Register>
 
   bool _requiresBranch() {
     final r = _selectedRole?.toLowerCase();
-    // Global executive roles — no branch scoping needed.
     return r != 'ceo' && r != 'chairman' && r != 'admin' && r != 'hq manager';
   }
 
@@ -427,32 +404,89 @@ class _RegisterState extends State<Register>
   void _removeProfileImage() =>
       setState(() { _profileImageXFile = null; _profileImageBytes = null; _profilePictureBase64 = null; });
 
+  bool _validateStep(int step) {
+    if (step == 0) {
+      if (_selectedDepartment == null) {
+        _snack('Please select a Department to continue', error: true);
+        return false;
+      }
+      if (_selectedRole == null) {
+        _snack('Please select a Role to continue', error: true);
+        return false;
+      }
+      return true;
+    }
+    if (step == 1) {
+      if (_usernameController.text.trim().isEmpty) {
+        _snack('Please enter a username', error: true);
+        return false;
+      }
+      if (_emailController.text.trim().isEmpty) {
+        _snack('Please enter an email address', error: true);
+        return false;
+      }
+      if (_passwordController.text.trim().length < 6) {
+        _snack('Password must be at least 6 characters', error: true);
+        return false;
+      }
+      return true;
+    }
+    if (step == 2) {
+      if (_requiresBranch() && _selectedBranch == null) {
+        _snack('Please select a Branch for this role', error: true);
+        return false;
+      }
+      if (_selectedRole == 'Madrassa Parent' && _selectedStudentId == null) {
+        _snack('Please select the associated student for this parent', error: true);
+        return false;
+      }
+      final isDoctor = _selectedRole != null &&
+          (_selectedRole!.toLowerCase() == 'doctor' || _selectedRole!.toLowerCase().contains('doc'));
+      if (isDoctor && _selectedDegree == null) {
+        _snack('Please select medical degree for Doctor role', error: true);
+        return false;
+      }
+      return true;
+    }
+    return true;
+  }
+
+  void _goToStep(int targetStep) {
+    if (targetStep > _currentStep) {
+      for (int s = _currentStep; s < targetStep; s++) {
+        if (!_validateStep(s)) return;
+      }
+    }
+    setState(() => _currentStep = targetStep);
+    _pageController.animateToPage(
+      targetStep,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeInOutCubic,
+    );
+  }
+
   Future<void> _registerUser() async {
+    for (int s = 0; s < _totalSteps; s++) {
+      if (!_validateStep(s)) {
+        _goToStep(s);
+        return;
+      }
+    }
+
     if (!_formKey.currentState!.validate()) {
-      _snack('Please fill all required fields', error: true);
-      return;
-    }
-    if (_selectedRole == null) {
-      _snack('Please select a role', error: true);
-      return;
-    }
-    if (_requiresBranch() && _selectedBranch == null) {
-      _snack('Please select a branch for this role', error: true);
-      return;
-    }
-    if (_selectedRole == 'Madrassa Parent' && _selectedStudentId == null) {
-      _snack('Please select a student for this parent', error: true);
+      _snack('Please correct the highlighted errors in the form', error: true);
       return;
     }
 
     setState(() { _loading = true; });
 
     final email    = _emailController.text.trim().toLowerCase();
-    final username = _usernameController.text.trim(); // preserve original casing
+    final username = _usernameController.text.trim();
 
     try {
       if (await _usernameExists(username)) {
-        _snack('Username already exists', error: true);
+        _snack('Username "$username" already exists. Please choose another.', error: true);
+        _goToStep(1);
         return;
       }
 
@@ -460,21 +494,12 @@ class _RegisterState extends State<Register>
           ? _customDegreeController.text.trim()
           : (_selectedDegree ?? '');
 
-      double? salary;
-      final salaryText = _salaryController.text.trim();
-      if (salaryText.isNotEmpty) {
-        salary = double.tryParse(salaryText);
-        if (salary == null) {
-          _snack('Invalid salary format', error: true);
-          return;
-        }
-      }
-
       final enteredPin = _biometricPinController.text.trim();
       if (enteredPin.isNotEmpty) {
         final conflict = ZkTecoNetworkService.findPinConflict(enteredPin);
         if (conflict != null) {
-          _snack('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.', error: true);
+          _snack('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()}). Please choose a unique PIN.', error: true);
+          _goToStep(2);
           return;
         }
       }
@@ -486,22 +511,15 @@ class _RegisterState extends State<Register>
         password:           _passwordController.text.trim(),
         username:           username,
         name:               username,
-        cnic:               _identificationController.text.trim(),
         role:               _selectedRole!,
         branchId:           branchId,
         branchName:         _getBranchName(),
         phone:              _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
-        identification:     _identificationController.text.trim().isNotEmpty ? _identificationController.text.trim() : null,
-        address:            _addressController.text.trim().isNotEmpty ? _addressController.text.trim() : null,
-        bankName:           _bankNameController.text.trim().isNotEmpty ? _bankNameController.text.trim() : null,
-        bankAccount:        _bankAccountController.text.trim().isNotEmpty ? _bankAccountController.text.trim() : null,
         degree:             degree.isNotEmpty ? degree : null,
-        salary:             salary,
         biometricPin:       enteredPin.isNotEmpty ? enteredPin : null,
-        linkedEmployeeId:   _selectedLinkedEmployeeId,
-        studentId:          _selectedStudentId, // Pass the student ID
-        dispensaryId:       _selectedDispensary, // Pass dispensary sub-location ('kapayya', 'haji_camp')
-        dispensaryIds:      _selectedDispensaries.toList(), // Pass multi-camp assignments
+        studentId:          _selectedStudentId,
+        dispensaryId:       _selectedDispensary,
+        dispensaryIds:      _selectedDispensaries.toList(),
         campSchedule:       _selectedDispensaries.map((id) {
                               final sess = _campSessions[id] ?? 'morning';
                               String startTime = '08:00';
@@ -551,30 +569,30 @@ class _RegisterState extends State<Register>
       }
 
       final registeredName = _usernameController.text.trim();
-      // Reset the form so the admin can register another user without leaving the page.
       _formKey.currentState!.reset();
       _biometricPinController.clear();
       setState(() {
-        _selectedDepartment   = null;
-        _selectedRole         = null;
-        _profileImageBytes    = null;
-        _profileImageXFile    = null;
-        _degreeFile           = null;
-        _profilePictureBase64 = null;
-        _degreeBase64         = null;
-        _selectedBranch       = null;
-        _selectedDispensary   = null;
+        _selectedDepartment       = null;
+        _selectedRole             = null;
+        _profileImageBytes        = null;
+        _profileImageXFile        = null;
+        _degreeFile               = null;
+        _profilePictureBase64     = null;
+        _degreeBase64             = null;
+        _selectedBranch           = null;
+        _selectedDispensary       = null;
         _selectedDispensaries.clear();
-        _selectedDegree       = null;
-        _selectedStudentId    = null;
+        _selectedDegree           = null;
+        _selectedStudentId        = null;
+        _currentStep              = 0;
       });
+      _pageController.jumpToPage(0);
       for (final c in [
         _usernameController, _emailController, _passwordController,
-        _phoneController, _identificationController, _addressController,
-        _bankNameController, _bankAccountController,
-        _customDegreeController, _salaryController,
+        _phoneController, _customDegreeController, _biometricPinController,
       ]) { c.clear(); }
-      _snack('$registeredName registered successfully!', success: true);
+
+      _snack('🎉 $registeredName registered successfully as $_selectedRole!', success: true);
     } on Exception catch (e) {
       _snack(e.toString().replaceAll('Exception: ', ''), error: true);
     } catch (e) {
@@ -590,362 +608,17 @@ class _RegisterState extends State<Register>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
         Icon(
-            error ? Icons.error_outline : success ? Icons.check_circle_outline : Icons.info_outline,
-            color: Colors.white, size: 18),
-        const SizedBox(width: 10),
-        Expanded(child: Text(msg, style: const TextStyle(fontSize: 13))),
+          error ? Icons.error_outline_rounded : success ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
+          color: Colors.white, size: 20),
+        const SizedBox(width: 12),
+        Expanded(child: Text(msg, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
       ]),
-      backgroundColor: error ? t.danger : success ? t.accent : const Color(0xFF37474F),
+      backgroundColor: error ? t.danger : success ? const Color(0xFF10B981) : const Color(0xFF37474F),
       behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.all(16),
-      duration: const Duration(seconds: 3),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      duration: const Duration(seconds: 4),
     ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RoleThemeScope.dataOf(context);
-    final requiresBranch = _requiresBranch();
-    final isDoctor = _selectedRole != null &&
-        (_selectedRole!.toLowerCase() == 'doctor' || _selectedRole!.toLowerCase().contains('doc'));
-
-    return Scaffold(
-      backgroundColor: t.bg,
-      body: Stack(
-        children: [
-          Positioned(
-            top: 0, left: 0, right: 0,
-            child: Container(
-              height: 210,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [t.accent.withValues(alpha: 0.9), t.accentLight],
-                ),
-              ),
-            ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                // ── Header ──────────────────────────────────────────────
-                if (!GlobalModuleWrapper.isWrapped(context)) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 16, 0),
-                    child: Row(
-                      children: [
-                        const AppBackButton(color: Colors.white),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'Register New User',
-                            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ] else
-                  const SizedBox(height: 16),
-                Expanded(
-                  child: FadeTransition(
-                    opacity: _fadeAnim,
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 48),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _buildAvatarCard(t),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Role & Assignment',
-                              icon: Icons.badge_outlined,
-                              accent: const Color(0xFF6A1B9A),
-                              child: Column(children: [
-                                _buildDepartmentDropdown(t),
-                                const SizedBox(height: 14),
-                                _buildRoleDropdown(t),
-                                const SizedBox(height: 14),
-                                _buildBranchDropdown(t),
-                                _buildDispensaryDropdown(t),
-                                if (_selectedRole == 'Madrassa Teacher') ...[
-                                  const SizedBox(height: 14),
-                                  _buildMadrassaTeacherSessionSelector(t),
-                                ],
-                                if (_selectedRole == 'Madrassa Parent') ...[
-                                  const SizedBox(height: 14),
-                                  _buildChildDropdown(t),
-                                ],
-                                if (_selectedRole != null && !requiresBranch) ...[
-                                  const SizedBox(height: 14),
-                                  _buildGlobalBadge(t),
-                                ],
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Basic Information',
-                              icon: Icons.person_outline_rounded,
-                              accent: t.accentLight,
-                              child: Column(children: [
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _usernameController,
-                                      label: 'Username',
-                                      icon: Icons.alternate_email_rounded,
-                                      required: true,
-                                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                  _buildField(t,
-                                      controller: _emailController,
-                                      label: 'Email',
-                                      icon: Icons.mail_outline_rounded,
-                                      required: true,
-                                      keyboardType: TextInputType.emailAddress,
-                                      validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                ]),
-                                const SizedBox(height: 14),
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _passwordController,
-                                      label: 'Password',
-                                      icon: Icons.lock_outline_rounded,
-                                      isPassword: true,
-                                      required: true,
-                                      validator: (v) => (v?.length ?? 0) < 6 ? 'Min 6 chars' : null),
-                                  _buildField(t,
-                                      controller: _phoneController,
-                                      label: 'Phone (11 digits)',
-                                      icon: Icons.phone_outlined,
-                                      keyboardType: TextInputType.phone,
-                                      inputFormatters: [
-                                        FilteringTextInputFormatter.digitsOnly,
-                                        LengthLimitingTextInputFormatter(11),
-                                      ]),
-                                ]),
-                                const SizedBox(height: 14),
-                                _buildField(t,
-                                    controller: _biometricPinController,
-                                    label: 'Biometric Scanner PIN (Optional)',
-                                    icon: Icons.fingerprint_rounded,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildLinkedEmployeeCard(t),
-
-                            if (isDoctor) ...[
-                              const SizedBox(height: 16),
-                              _buildCard(t,
-                                title: 'Medical Qualifications',
-                                icon: Icons.local_hospital_outlined,
-                                accent: const Color(0xFF00695C),
-                                child: Column(children: [
-                                  _buildSimpleDropdown(t,
-                                    value: _selectedDegree,
-                                    items: _degrees,
-                                    hint: 'Select Degree *',
-                                    icon: Icons.school_outlined,
-                                    onChanged: (v) => setState(() {
-                                      _selectedDegree = v;
-                                      if (v != 'Other') _customDegreeController.clear();
-                                    }),
-                                    validator: (v) => v == null ? 'Required' : null,
-                                  ),
-                                  if (_selectedDegree == 'Other') ...[
-                                    const SizedBox(height: 14),
-                                    _buildField(t,
-                                        controller: _customDegreeController,
-                                        label: 'Specify Degree',
-                                        icon: Icons.edit_outlined,
-                                        required: true,
-                                        validator: (v) => v?.trim().isEmpty ?? true ? 'Required' : null),
-                                  ],
-                                ]),
-                              ),
-                            ],
-
-                            const SizedBox(height: 16),
-
-                            if (isDoctor)
-                              _buildCard(t,
-                                title: 'Degree & Qualifications',
-                                icon: Icons.school_outlined,
-                                accent: const Color(0xFF37474F),
-                                child: MediaUploadTile(
-                                  label: 'Degree Certificate / PMDC',
-                                  icon: Icons.school_outlined,
-                                  initialValue: _degreeBase64,
-                                  isDocument: true,
-                                  onChanged: (val) => setState(() => _degreeBase64 = val),
-                                ),
-                              ),
-
-                            const SizedBox(height: 32),
-                            _buildSubmitButton(t),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          if (_loading)
-            Container(
-              color: Colors.black54,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 36),
-                  decoration: BoxDecoration(
-                    color: t.bgCard,
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 30, offset: Offset(0, 10))],
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 52, height: 52,
-                        child: CircularProgressIndicator(
-                            color: t.accent, strokeWidth: 4, backgroundColor: t.accentMuted),
-                      ),
-                      const SizedBox(height: 20),
-                      Text('Creating Account', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: t.textPrimary)),
-                      const SizedBox(height: 6),
-                      Text('Please wait...', style: TextStyle(fontSize: 13, color: t.textTertiary)),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ── Widgets ───────────────────────────────────────────────────────────────
-
-  Widget _buildAvatarCard(RoleThemeData t) {
-    return Container(
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.07), blurRadius: 18, offset: const Offset(0, 4))],
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 24),
-      child: Column(children: [
-        GestureDetector(
-          onTap: _pickProfileImage,
-          child: Stack(children: [
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: _profileImageBytes != null ? t.accent : t.bgRule, width: 3),
-                boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 6))],
-              ),
-              child: Builder(
-                builder: (context) {
-                  final displayBytes = _profileImageBytes ?? ImageUploadService.decodeBase64ToBytes(_profilePictureBase64);
-                  return CircleAvatar(
-                    radius: 54,
-                    backgroundColor: t.accentMuted,
-                    backgroundImage: displayBytes != null ? MemoryImage(displayBytes) : null,
-                    child: displayBytes == null
-                        ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            Icon(Icons.person_outline_rounded, size: 38, color: t.accent.withValues(alpha: 0.4)),
-                            const SizedBox(height: 4),
-                            Text('Add Photo', style: TextStyle(fontSize: 11, color: t.textTertiary, fontWeight: FontWeight.w500)),
-                          ])
-                        : null,
-                  );
-                },
-              ),
-            ),
-            Positioned(
-              right: 2, bottom: 2,
-              child: GestureDetector(
-                onTap: _profileImageBytes != null ? _removeProfileImage : _pickProfileImage,
-                child: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: BoxDecoration(
-                    color: _profileImageBytes != null ? t.danger : t.accent,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: t.bgCard, width: 2.5),
-                  ),
-                  child: Icon(
-                    _profileImageBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
-                    color: Colors.white, size: 14,
-                  ),
-                ),
-              ),
-            ),
-          ]),
-        ),
-        const SizedBox(height: 10),
-        Text('Profile Picture', style: TextStyle(fontSize: 13, color: t.textTertiary, fontWeight: FontWeight.w500)),
-        const SizedBox(height: 3),
-        Text('Optional', style: TextStyle(fontSize: 11, color: t.textTertiary)),
-      ]),
-    );
-  }
-
-  Widget _buildDepartmentDropdown(RoleThemeData t) {
-    return DropdownButtonFormField<String>(
-      value: _selectedDepartment,
-      isExpanded: true,
-      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
-      dropdownColor: t.bgCard,
-      hint: Row(children: [
-        Icon(Icons.category_outlined, color: t.textTertiary, size: 20),
-        const SizedBox(width: 10),
-        Text('Select Department / Category *', style: TextStyle(color: t.textTertiary, fontSize: 13)),
-      ]),
-      decoration: InputDecoration(
-        filled: true,
-        fillColor: t.bgCardAlt,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
-        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
-        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
-        errorStyle: const TextStyle(fontSize: 11),
-      ),
-      items: _departments.map((dept) {
-        return DropdownMenuItem<String>(
-          value: dept['name'] as String,
-          child: Row(children: [
-            Icon(dept['icon'] as IconData, color: t.accent, size: 18),
-            const SizedBox(width: 10),
-            Text(dept['name'] as String,
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.textPrimary)),
-          ]),
-        );
-      }).toList(),
-      onChanged: (val) => setState(() {
-        _selectedDepartment = val;
-        _selectedRole = null;
-        _selectedDegree = null;
-        _customDegreeController.clear();
-        _degreeFile = null;
-        if (!_requiresBranch()) _selectedBranch = null;
-      }),
-      validator: (val) => val == null ? 'Please select a department' : null,
-    );
   }
 
   String _getCurrentUserRole() {
@@ -996,33 +669,1212 @@ class _RegisterState extends State<Register>
     }
   }
 
-  Widget _buildRoleDropdown(RoleThemeData t) {
-    List<Map<String, dynamic>> roles = _selectedDepartment == null
-        ? []
-        : List<Map<String, dynamic>>.from(_departments.firstWhere((d) => d['name'] == _selectedDepartment)['roles'] as List);
+  @override
+  Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
 
+    return Scaffold(
+      backgroundColor: t.bg,
+      body: Stack(
+        children: [
+          // Background ambient gradient
+          Positioned(
+            top: 0, left: 0, right: 0,
+            child: Container(
+              height: 220,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    t.accent.withValues(alpha: 0.88),
+                    t.accentLight.withValues(alpha: 0.95),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          SafeArea(
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  // Top Navigation Bar
+                  _buildTopBar(t),
+
+                  // Interactive Stepper (3-step wizard)
+                  _buildStepperHeader(t),
+
+                  // Main Page Flow
+                  Expanded(
+                    child: FadeTransition(
+                      opacity: _fadeAnim,
+                      child: PageView(
+                        controller: _pageController,
+                        physics: const NeverScrollableScrollPhysics(),
+                        onPageChanged: (page) => setState(() => _currentStep = page),
+                        children: [
+                          _buildStepWrapper(t, _buildStep0DepartmentAndRole(t)),
+                          _buildStepWrapper(t, _buildStep1PersonalAndAccount(t)),
+                          _buildStepWrapper(t, _buildStep2StationAndBiometrics(t)),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Sticky Bottom Action Bar
+                  _buildBottomActionBar(t),
+                ],
+              ),
+            ),
+          ),
+
+          // Loading overlay
+          if (_loading)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+                  decoration: BoxDecoration(
+                    color: t.bgCard,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 30, offset: Offset(0, 10))],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 50, height: 50,
+                        child: CircularProgressIndicator(
+                          color: t.accent,
+                          strokeWidth: 4,
+                          backgroundColor: t.accentMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Text(
+                        'Creating User Account...',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.textPrimary),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Securing credentials & configuring station access',
+                        style: TextStyle(fontSize: 12, color: t.textTertiary),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // ── Top Bar ────────────────────────────────────────────────────────────────
+  Widget _buildTopBar(RoleThemeData t) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Row(
+        children: [
+          if (!GlobalModuleWrapper.isWrapped(context)) ...[
+            const AppBackButton(color: Colors.white),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'USER REGISTRATION',
+                        style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Step ${_currentStep + 1} of $_totalSteps',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  'Register Staff User',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Clear / Reset Form',
+            icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  backgroundColor: t.bgCard,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  title: Text('Reset Form?', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold)),
+                  content: Text('All entered registration fields will be cleared.', style: TextStyle(color: t.textSecondary)),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: Colors.white),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _formKey.currentState?.reset();
+                        setState(() {
+                          _selectedDepartment   = null;
+                          _selectedRole         = null;
+                          _profileImageBytes    = null;
+                          _profileImageXFile    = null;
+                          _degreeFile           = null;
+                          _profilePictureBase64 = null;
+                          _degreeBase64         = null;
+                          _selectedBranch       = null;
+                          _selectedDispensary   = null;
+                          _selectedDispensaries.clear();
+                          _selectedDegree       = null;
+                          _selectedStudentId    = null;
+                          _currentStep          = 0;
+                        });
+                        _pageController.jumpToPage(0);
+                        for (final c in [
+                          _usernameController, _emailController, _passwordController,
+                          _phoneController, _customDegreeController, _biometricPinController,
+                        ]) { c.clear(); }
+                      },
+                      child: const Text('Reset'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Stepper Header ────────────────────────────────────────────────────────
+  Widget _buildStepperHeader(RoleThemeData t) {
+    final steps = [
+      {'title': 'Role & Dept', 'icon': Icons.category_rounded},
+      {'title': 'Credentials', 'icon': Icons.person_rounded},
+      {'title': 'Station & Biometrics', 'icon': Icons.location_city_rounded},
+    ];
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: t.bgCard.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        children: List.generate(steps.length, (index) {
+          final isCompleted = _currentStep > index;
+          final isActive = _currentStep == index;
+          final step = steps[index];
+
+          return Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () => _goToStep(index),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: isActive
+                      ? t.accent.withValues(alpha: 0.12)
+                      : isCompleted
+                          ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                          : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isActive
+                        ? t.accent
+                        : isCompleted
+                            ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                            : Colors.transparent,
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 24, height: 24,
+                      decoration: BoxDecoration(
+                        color: isCompleted
+                            ? const Color(0xFF10B981)
+                            : isActive
+                                ? t.accent
+                                : t.bgRule,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: isCompleted
+                            ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
+                            : Icon(step['icon'] as IconData, color: isActive ? Colors.white : t.textTertiary, size: 13),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        step['title'] as String,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                          color: isActive
+                              ? t.accent
+                              : isCompleted
+                                  ? const Color(0xFF10B981)
+                                  : t.textTertiary,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  // ── Step Wrapper with Responsive Scroll ──────────────────────────────────
+  Widget _buildStepWrapper(RoleThemeData t, Widget content) {
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: content,
+        ),
+      ),
+    );
+  }
+
+  // ── Available Roles Helper ───────────────────────────────────────────────
+  List<Map<String, dynamic>> _getAvailableRolesForDept(Map<String, dynamic> dept) {
+    var roles = List<Map<String, dynamic>>.from(dept['roles'] as List);
     if (_getCurrentUserRole() != 'chairman') {
       roles = roles.where((r) => (r['value'] as String).toLowerCase().trim() != 'chairman').toList();
     }
+    return roles;
+  }
 
-    return DropdownButtonFormField<String>(
-      key: ValueKey(_selectedDepartment),
-      value: _selectedRole,
-      isExpanded: true,
-      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
-      dropdownColor: t.bgCard,
-      hint: Row(children: [
-        Icon(Icons.badge_outlined, color: t.textTertiary, size: 20),
-        const SizedBox(width: 10),
-        Text(
-          _selectedDepartment == null ? 'Select Department first *' : 'Select Role *',
-          style: TextStyle(color: t.textTertiary, fontSize: 13),
+  // ── Step 0: Department & Role ─────────────────────────────────────────────
+  Widget _buildStep0DepartmentAndRole(RoleThemeData t) {
+    final selectedDeptData = _selectedDepartment != null
+        ? _departments.firstWhere((d) => d['name'] == _selectedDepartment, orElse: () => _departments.first)
+        : null;
+
+    final List<Map<String, dynamic>> roles = selectedDeptData != null
+        ? _getAvailableRolesForDept(selectedDeptData)
+        : [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionTitle(
+          t,
+          title: 'Department & Operational Role',
+          subtitle: 'Select the operational department to choose the staff role and system permissions.',
+          icon: Icons.hub_rounded,
         ),
-      ]),
+        const SizedBox(height: 16),
+
+        // Department Selection Cards
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final isWide = constraints.maxWidth >= 600;
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: isWide ? 3 : 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                mainAxisExtent: 96,
+              ),
+              itemCount: _departments.length,
+              itemBuilder: (context, index) {
+                final dept = _departments[index];
+                final isSelected = _selectedDepartment == dept['name'];
+                final deptColor = dept['color'] as Color;
+                final availableRoles = _getAvailableRolesForDept(dept);
+                final roleCount = availableRoles.length;
+
+                return InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    setState(() {
+                      _selectedDepartment = dept['name'] as String;
+                      _selectedRole = null;
+                      _selectedDegree = null;
+                      _customDegreeController.clear();
+                      _degreeFile = null;
+                      if (!_requiresBranch()) _selectedBranch = null;
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected ? deptColor.withValues(alpha: 0.12) : t.bgCard,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isSelected ? deptColor : t.bgRule,
+                        width: isSelected ? 2 : 1,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: isSelected ? deptColor.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.04),
+                          blurRadius: isSelected ? 12 : 6,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44, height: 44,
+                          decoration: BoxDecoration(
+                            color: isSelected ? deptColor : deptColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            dept['icon'] as IconData,
+                            color: isSelected ? Colors.white : deptColor,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                dept['name'] as String,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: isSelected ? deptColor : t.textPrimary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                roleCount == 1 ? '1 Role' : '$roleCount Roles',
+                                style: TextStyle(fontSize: 11, color: t.textTertiary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isSelected)
+                          Icon(Icons.check_circle_rounded, color: deptColor, size: 18),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
+
+        const SizedBox(height: 24),
+
+        // Roles Section
+        if (_selectedDepartment == null)
+          Container(
+            padding: const EdgeInsets.all(28),
+            decoration: BoxDecoration(
+              color: t.bgCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: t.bgRule),
+            ),
+            child: Column(
+              children: [
+                Icon(Icons.touch_app_rounded, size: 40, color: t.textTertiary.withValues(alpha: 0.6)),
+                const SizedBox(height: 10),
+                Text(
+                  'Select a Department Above',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: t.textSecondary),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Available roles for that department will appear here.',
+                  style: TextStyle(fontSize: 12, color: t.textTertiary),
+                ),
+              ],
+            ),
+          )
+        else ...[
+          Row(
+            children: [
+              Icon(Icons.badge_rounded, color: t.accent, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Available Roles for ${_selectedDepartment!}',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary),
+              ),
+              const Spacer(),
+              if (_selectedRole != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Selected: $_selectedRole',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.accent),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isWide = constraints.maxWidth >= 600;
+              return GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: isWide ? 2 : 1,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  mainAxisExtent: 70,
+                ),
+                itemCount: roles.length,
+                itemBuilder: (context, index) {
+                  final role = roles[index];
+                  final isRoleSelected = _selectedRole == role['value'];
+                  final type = role['type'] as String;
+
+                  Color badgeColor = t.textSecondary;
+                  String badgeLabel = 'Staff';
+                  if (type == 'crown') {
+                    badgeColor = const Color(0xFFEAB308);
+                    badgeLabel = 'Executive';
+                  } else if (type == 'shield') {
+                    badgeColor = const Color(0xFF0EA5E9);
+                    badgeLabel = 'System';
+                  } else if (type == 'hybrid') {
+                    badgeColor = const Color(0xFF10B981);
+                    badgeLabel = 'Hybrid Multi-Duty';
+                  } else if (type == 'madrassa') {
+                    badgeColor = const Color(0xFF8B5CF6);
+                    badgeLabel = 'Faculty';
+                  } else if (type == 'school') {
+                    badgeColor = const Color(0xFFEC4899);
+                    badgeLabel = 'Faculty';
+                  }
+
+                  return InkWell(
+                    borderRadius: BorderRadius.circular(14),
+                    onTap: () {
+                      setState(() {
+                        _selectedRole = role['value'] as String;
+                        if (_selectedRole != 'Doctor' && _selectedRole != 'doc+rec' && _selectedRole != 'doc+dis' && _selectedRole != 'doc+rec+dis') {
+                          _selectedDegree = null;
+                          _customDegreeController.clear();
+                          _degreeFile = null;
+                        }
+                        if (!_requiresBranch()) _selectedBranch = null;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isRoleSelected ? t.accent.withValues(alpha: 0.12) : t.bgCard,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isRoleSelected ? t.accent : t.bgRule,
+                          width: isRoleSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isRoleSelected ? t.accent : badgeColor.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              role['icon'] as IconData,
+                              color: isRoleSelected ? Colors.white : badgeColor,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  role['label'] as String,
+                                  style: TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: isRoleSelected ? FontWeight.w700 : FontWeight.w600,
+                                    color: isRoleSelected ? t.accent : t.textPrimary,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  badgeLabel,
+                                  style: TextStyle(fontSize: 10, color: badgeColor, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isRoleSelected)
+                            Icon(Icons.check_circle_rounded, color: t.accent, size: 20)
+                          else
+                            Icon(Icons.radio_button_unchecked_rounded, color: t.bgRule, size: 18),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Step 1: User Account & Credentials ────────────────────────────────────
+  Widget _buildStep1PersonalAndAccount(RoleThemeData t) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionTitle(
+          t,
+          title: 'User Identity & Login Credentials',
+          subtitle: 'Set up login username, authentication password, and contact telephone number.',
+          icon: Icons.person_outline_rounded,
+        ),
+        const SizedBox(height: 16),
+
+        // Profile Avatar Card
+        _buildAvatarUploader(t),
+        const SizedBox(height: 16),
+
+        // Credential Details Card
+        _buildCard(
+          t,
+          title: 'Account Credentials',
+          icon: Icons.lock_outline_rounded,
+          accent: t.accent,
+          child: Column(
+            children: [
+              _buildResponsiveFieldPair([
+                _buildField(
+                  t,
+                  controller: _usernameController,
+                  label: 'Username / Display Name',
+                  hint: 'e.g. dr_tariq or ahmad_khan',
+                  icon: Icons.alternate_email_rounded,
+                  required: true,
+                  validator: (v) => v?.trim().isEmpty ?? true ? 'Username is required' : null,
+                ),
+                _buildField(
+                  t,
+                  controller: _emailController,
+                  label: 'Official Email Address',
+                  hint: 'staff@gmwf.org',
+                  icon: Icons.mail_outline_rounded,
+                  required: true,
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Email is required';
+                    if (!v.contains('@') || !v.contains('.')) return 'Enter a valid email address';
+                    return null;
+                  },
+                ),
+              ]),
+              const SizedBox(height: 14),
+              _buildResponsiveFieldPair([
+                _buildField(
+                  t,
+                  controller: _passwordController,
+                  label: 'Initial Password',
+                  hint: 'Minimum 6 characters',
+                  icon: Icons.lock_outline_rounded,
+                  isPassword: true,
+                  required: true,
+                  validator: (v) => (v?.length ?? 0) < 6 ? 'Password must be at least 6 characters' : null,
+                ),
+                _buildField(
+                  t,
+                  controller: _phoneController,
+                  label: 'Contact Phone Number (Optional)',
+                  hint: '03001234567',
+                  icon: Icons.phone_android_rounded,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(11),
+                  ],
+                ),
+              ]),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Step 2: Station, Facilities & Biometrics ──────────────────────────────
+  Widget _buildStep2StationAndBiometrics(RoleThemeData t) {
+    final requiresBranch = _requiresBranch();
+    final isDoctor = _selectedRole != null &&
+        (_selectedRole!.toLowerCase() == 'doctor' || _selectedRole!.toLowerCase().contains('doc'));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionTitle(
+          t,
+          title: 'Station Assignment & Access Control',
+          subtitle: 'Assign branch location, facility shift schedule, and biometric clock-in PIN.',
+          icon: Icons.location_on_outlined,
+        ),
+        const SizedBox(height: 16),
+
+        // Branch Card
+        _buildCard(
+          t,
+          title: 'Branch Station Assignment',
+          icon: Icons.business_outlined,
+          accent: const Color(0xFF6366F1),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!requiresBranch) ...[
+                _buildGlobalBadge(t),
+              ] else ...[
+                Text(
+                  'Select the primary operating branch station for this staff user:',
+                  style: TextStyle(fontSize: 12.5, color: t.textSecondary),
+                ),
+                const SizedBox(height: 10),
+                _buildBranchDropdown(t),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Dispensary Multi-Camp & Shifts
+        _buildDispensaryDropdown(t),
+
+        // Madrassa Teacher Session
+        if (_selectedRole == 'Madrassa Teacher') ...[
+          const SizedBox(height: 16),
+          _buildMadrassaTeacherSessionSelector(t),
+        ],
+
+        // Madrassa Parent Child Selector
+        if (_selectedRole == 'Madrassa Parent') ...[
+          const SizedBox(height: 16),
+          _buildCard(
+            t,
+            title: 'Associated Student Profile',
+            icon: Icons.child_care_rounded,
+            accent: const Color(0xFF8B5CF6),
+            child: _buildChildDropdown(t),
+          ),
+        ],
+
+        const SizedBox(height: 16),
+
+        // Biometric Clock-in PIN
+        _buildCard(
+          t,
+          title: 'ZKTeco Biometric Terminal Attendance',
+          icon: Icons.fingerprint_rounded,
+          accent: const Color(0xFF10B981),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Assign an optional numerical PIN for biometric terminal attendance punch-in:',
+                style: TextStyle(fontSize: 12.5, color: t.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              _buildField(
+                t,
+                controller: _biometricPinController,
+                label: 'Biometric Clock-in PIN (Optional)',
+                hint: 'e.g. 1045',
+                icon: Icons.pin_outlined,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ],
+          ),
+        ),
+
+        // Doctor Qualifications Card
+        if (isDoctor) ...[
+          const SizedBox(height: 16),
+          _buildCard(
+            t,
+            title: 'Medical Degree & Licensing',
+            icon: Icons.medical_services_outlined,
+            accent: const Color(0xFF00897B),
+            child: Column(
+              children: [
+                _buildSimpleDropdown(
+                  t,
+                  initialValue: _selectedDegree,
+                  items: _degrees,
+                  hint: 'Select Medical Degree *',
+                  icon: Icons.school_outlined,
+                  onChanged: (v) => setState(() {
+                    _selectedDegree = v;
+                    if (v != 'Other') _customDegreeController.clear();
+                  }),
+                  validator: (v) => isDoctor && v == null ? 'Medical degree is required' : null,
+                ),
+                if (_selectedDegree == 'Other') ...[
+                  const SizedBox(height: 14),
+                  _buildField(
+                    t,
+                    controller: _customDegreeController,
+                    label: 'Specify Degree Name',
+                    hint: 'e.g. FCPS Surgery',
+                    icon: Icons.edit_note_rounded,
+                    required: true,
+                    validator: (v) => v?.trim().isEmpty ?? true ? 'Degree name is required' : null,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                MediaUploadTile(
+                  label: 'PMDC License / Degree Certificate (PDF or Image)',
+                  icon: Icons.verified_user_outlined,
+                  initialValue: _degreeBase64,
+                  isDocument: true,
+                  onChanged: (val) => setState(() => _degreeBase64 = val),
+                ),
+              ],
+            ),
+          ),
+        ],
+
+        const SizedBox(height: 20),
+
+        // Summary Preview Card
+        _buildSummaryCard(t),
+      ],
+    );
+  }
+
+  // ── Summary Card ──────────────────────────────────────────────────────────
+  Widget _buildSummaryCard(RoleThemeData t) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: t.accent.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.accent.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.fact_check_rounded, color: t.accent, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'User Registration Summary Preview',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.accent),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _summaryRow('Department:', _selectedDepartment ?? 'Not chosen'),
+          _summaryRow('Role:', _selectedRole ?? 'Not chosen'),
+          _summaryRow('Branch / Station:', _requiresBranch() ? (_selectedBranch ?? 'Not assigned') : 'Global Executive (All)'),
+          _summaryRow('Account Username:', _usernameController.text.trim().isNotEmpty ? _usernameController.text.trim() : 'None'),
+          _summaryRow('Email:', _emailController.text.trim().isNotEmpty ? _emailController.text.trim() : 'None'),
+          if (_phoneController.text.trim().isNotEmpty)
+            _summaryRow('Phone:', _phoneController.text.trim()),
+          if (_biometricPinController.text.trim().isNotEmpty)
+            _summaryRow('Biometric PIN:', _biometricPinController.text.trim()),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryRow(String label, String value) {
+    final t = RoleThemeScope.dataOf(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(label, style: TextStyle(fontSize: 12, color: t.textSecondary, fontWeight: FontWeight.w600)),
+          ),
+          Expanded(
+            child: Text(value, style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Bottom Action Bar ─────────────────────────────────────────────────────
+  Widget _buildBottomActionBar(RoleThemeData t) {
+    final isLastStep = _currentStep == _totalSteps - 1;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        border: Border(top: BorderSide(color: t.bgRule)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -3)),
+        ],
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 960),
+          child: Row(
+            children: [
+              // Back Button (hidden on first step)
+              if (_currentStep > 0)
+                OutlinedButton.icon(
+                  onPressed: _loading ? null : () => _goToStep(_currentStep - 1),
+                  icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                  label: const Text('Back'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: t.textPrimary,
+                    side: BorderSide(color: t.bgRule),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                )
+              else
+                const SizedBox.shrink(),
+
+              const Spacer(),
+
+              // Next or Register Button
+              if (!isLastStep)
+                ElevatedButton.icon(
+                  onPressed: () => _goToStep(_currentStep + 1),
+                  icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+                  label: const Text('Next Step'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: t.accent,
+                    foregroundColor: Colors.white,
+                    elevation: 3,
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                )
+              else
+                ElevatedButton.icon(
+                  onPressed: _loading ? null : _registerUser,
+                  icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
+                  label: const Text('Create User Account'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Avatar Uploader ───────────────────────────────────────────────────────
+  Widget _buildAvatarUploader(RoleThemeData t) {
+    return Container(
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: t.bgRule),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _pickProfileImage,
+            child: Stack(
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: _profileImageBytes != null ? t.accent : t.bgRule, width: 3),
+                    boxShadow: [
+                      BoxShadow(color: t.accent.withValues(alpha: 0.15), blurRadius: 16, offset: const Offset(0, 4)),
+                    ],
+                  ),
+                  child: Builder(
+                    builder: (context) {
+                      final displayBytes = _profileImageBytes ?? ImageUploadService.decodeBase64ToBytes(_profilePictureBase64);
+                      return CircleAvatar(
+                        radius: 44,
+                        backgroundColor: t.accentMuted,
+                        backgroundImage: displayBytes != null ? MemoryImage(displayBytes) : null,
+                        child: displayBytes == null
+                            ? Icon(Icons.person_outline_rounded, size: 36, color: t.accent.withValues(alpha: 0.5))
+                            : null,
+                      );
+                    },
+                  ),
+                ),
+                Positioned(
+                  right: 0, bottom: 0,
+                  child: GestureDetector(
+                    onTap: _profileImageBytes != null ? _removeProfileImage : _pickProfileImage,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: _profileImageBytes != null ? t.danger : t.accent,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: t.bgCard, width: 2),
+                      ),
+                      child: Icon(
+                        _profileImageBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
+                        color: Colors.white, size: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 18),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Profile Photo (Optional)',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: t.textPrimary),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Upload a clear passport-style staff photo for badge printing and ID verification.',
+                  style: TextStyle(fontSize: 11.5, color: t.textTertiary),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: _pickProfileImage,
+                      icon: const Icon(Icons.upload_rounded, size: 16),
+                      label: Text(_profileImageBytes == null ? 'Upload Photo' : 'Change Photo'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: t.accent,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                    if (_profileImageBytes != null) ...[
+                      const SizedBox(width: 12),
+                      TextButton.icon(
+                        onPressed: _removeProfileImage,
+                        icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                        label: const Text('Remove'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: t.danger,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Helper UI Components ─────────────────────────────────────────────────
+  Widget _buildSectionTitle(RoleThemeData t, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: t.bgRule),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: t.accent.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: t.accent, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.textPrimary)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: TextStyle(fontSize: 12, color: t.textTertiary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard(RoleThemeData t, {
+    required String title,
+    required IconData icon,
+    required Color accent,
+    required Widget child,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.bgRule),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.bgRule))),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(color: accent.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(9)),
+                  child: Icon(icon, color: accent, size: 17),
+                ),
+                const SizedBox(width: 10),
+                Text(title, style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: t.textPrimary)),
+              ],
+            ),
+          ),
+          Padding(padding: const EdgeInsets.all(16), child: child),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResponsiveFieldPair(List<Widget> children) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 600) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: children
+                .expand((w) => [Expanded(child: w), const SizedBox(width: 14)])
+                .toList()
+              ..removeLast(),
+          );
+        } else {
+          return Column(
+            children: children
+                .expand((w) => [w, const SizedBox(height: 14)])
+                .toList()
+              ..removeLast(),
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildField(RoleThemeData t, {
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    String? hint,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
+    bool isPassword = false,
+    bool required   = false,
+    int maxLines    = 1,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      obscureText: isPassword && _obscurePassword,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      maxLines: maxLines,
+      style: TextStyle(fontSize: 13.5, color: t.textPrimary, fontWeight: FontWeight.w500),
       decoration: InputDecoration(
+        labelText: required ? '$label *' : label,
+        hintText: hint,
+        hintStyle: TextStyle(fontSize: 12, color: t.textTertiary.withValues(alpha: 0.7)),
+        labelStyle: TextStyle(fontSize: 13, color: t.textTertiary),
+        floatingLabelStyle: TextStyle(fontSize: 12, color: t.accent, fontWeight: FontWeight.w600),
+        prefixIcon: Icon(icon, color: t.textTertiary, size: 19),
+        suffixIcon: isPassword
+            ? IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: t.textTertiary, size: 19,
+                ),
+                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              )
+            : null,
         filled: true,
         fillColor: t.bgCardAlt,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: maxLines > 1 ? 14 : 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
@@ -1030,119 +1882,58 @@ class _RegisterState extends State<Register>
         focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
         errorStyle: const TextStyle(fontSize: 11),
       ),
-      selectedItemBuilder: (context) => roles.map((role) {
-        final type = role['type'] as String;
-        final Color iconColor = type == 'crown'
-            ? t.accent
-            : type == 'shield'
-                ? t.accentLight
-                : type == 'madrassa'
-                    ? const Color(0xFF5C6BC0)
-                    : type == 'hybrid'
-                        ? const Color(0xFF00796B)
-                        : t.textSecondary;
-        return Row(children: [
-          Icon(role['icon'] as IconData, color: iconColor, size: 18),
-          const SizedBox(width: 10),
-          Text(role['label'] as String,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: t.textPrimary)),
-        ]);
-      }).toList(),
-      items: roles.map((role) {
-        final type = role['type'] as String;
-        final isCrown    = type == 'crown';
-        final isShield   = type == 'shield';
-        final isMadrassa = type == 'madrassa';
-        final isHybrid   = type == 'hybrid';
-        const madrassaColor = Color(0xFF5C6BC0);
-        const hybridColor = Color(0xFF00796B);
-        final Color iconColor = isCrown
-            ? t.accent
-            : isShield
-                ? t.accentLight
-                : isMadrassa
-                    ? madrassaColor
-                    : isHybrid
-                        ? hybridColor
-                        : t.textSecondary;
-        final Color textColor = isCrown
-            ? t.accent
-            : isShield
-                ? t.accentLight
-                : isMadrassa
-                    ? madrassaColor
-                    : isHybrid
-                        ? hybridColor
-                        : t.textPrimary;
-        final Color bgColor = (isCrown || isShield)
-            ? t.accentMuted
-            : isMadrassa
-                ? madrassaColor.withValues(alpha: 0.07)
-                : isHybrid
-                    ? hybridColor.withValues(alpha: 0.07)
-                    : t.bgCardAlt;
-
-        return DropdownMenuItem<String>(
-          value: role['value'] as String,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(color: iconColor.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(8)),
-                child: Icon(role['icon'] as IconData, color: iconColor, size: 17),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(role['label'] as String,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: (isCrown || isShield || isMadrassa || isHybrid) ? FontWeight.w700 : FontWeight.w500,
-                        color: textColor)),
-              ),
-              if (isCrown)    _roleBadge('Authority', t.accent),
-              if (isShield)   _roleBadge('Server', t.accentLight),
-              if (isMadrassa) _roleBadge('Madrassa', madrassaColor),
-              if (isHybrid)   _roleBadge('Hybrid', hybridColor),
-            ]),
-          ),
-        );
-      }).toList(),
-      onChanged: roles.isEmpty
-          ? null
-          : (val) => setState(() {
-                _selectedRole = val;
-                if (val != 'Doctor' && val != 'doc+rec' && val != 'doc+dis' && val != 'doc+rec+dis') {
-                  _selectedDegree = null;
-                  _customDegreeController.clear();
-                  _degreeFile = null;
-                }
-                if (!_requiresBranch()) _selectedBranch = null;
-              }),
-      validator: (val) => val == null ? 'Role is mandatory' : null,
+      validator: validator,
     );
   }
 
-  Widget _roleBadge(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.13), borderRadius: BorderRadius.circular(20)),
-        child: Text(text, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.9), fontWeight: FontWeight.w700)),
-      );
+  Widget _buildSimpleDropdown(RoleThemeData t, {
+    required String? initialValue,
+    required List<String> items,
+    required String hint,
+    required IconData icon,
+    required Function(String?)? onChanged,
+    String? Function(String?)? validator,
+    String Function(String)? itemLabel,
+  }) {
+    return DropdownButtonFormField<String>(
+      initialValue: initialValue,
+      hint: Text(hint, style: TextStyle(color: t.textTertiary, fontSize: 13)),
+      isExpanded: true,
+      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
+      dropdownColor: t.bgCard,
+      decoration: InputDecoration(
+        prefixIcon: Icon(icon, color: t.textTertiary, size: 19),
+        filled: true,
+        fillColor: t.bgCardAlt,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
+        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
+        errorStyle: const TextStyle(fontSize: 11),
+      ),
+      items: items.map((e) => DropdownMenuItem(
+        value: e,
+        child: Text(itemLabel != null ? itemLabel(e) : e, style: TextStyle(fontSize: 13.5, color: t.textPrimary)),
+      )).toList(),
+      onChanged: onChanged,
+      validator: validator,
+    );
+  }
 
   Widget _buildBranchDropdown(RoleThemeData t) {
     final requiresBranch = _requiresBranch();
     final isBranchLoading = _branches.isEmpty;
     final hintText = !requiresBranch
         ? 'Global Access (No branch required)'
-        : (isBranchLoading ? 'Loading branches...' : 'Select Branch *');
+        : (isBranchLoading ? 'Loading branches...' : 'Select Station Branch *');
 
     final bool branchExists = _selectedBranch != null && _branches.any((b) => b['name'] == _selectedBranch);
     final String? effectiveValue = branchExists ? _selectedBranch : null;
 
     return DropdownButtonFormField<String>(
       key: ValueKey('branch_${requiresBranch}_${effectiveValue}_${_branches.length}'),
-      value: effectiveValue,
+      initialValue: effectiveValue,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
@@ -1150,8 +1941,7 @@ class _RegisterState extends State<Register>
         prefixIcon: Icon(Icons.location_city_rounded, color: t.textTertiary, size: 20),
         suffixIcon: isBranchLoading && requiresBranch
             ? SizedBox(
-                width: 24,
-                height: 24,
+                width: 24, height: 24,
                 child: IconButton(
                   padding: EdgeInsets.zero,
                   icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -1162,7 +1952,7 @@ class _RegisterState extends State<Register>
             : null,
         filled: true,
         fillColor: t.bgCardAlt,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
@@ -1177,7 +1967,7 @@ class _RegisterState extends State<Register>
               final name = b['name'] as String;
               return DropdownMenuItem(
                 value: name,
-                child: Text(name, style: TextStyle(fontSize: 14, color: t.textPrimary)),
+                child: Text(name, style: TextStyle(fontSize: 13.5, color: t.textPrimary)),
               );
             }).toList(),
       onChanged: !requiresBranch
@@ -1211,147 +2001,129 @@ class _RegisterState extends State<Register>
     try { bId = _getBranchId().toLowerCase().trim(); } catch (_) {}
 
     List<Map<String, dynamic>> rawDispensaries = CampSessionService.getCampsForBranch(bId, includeClosed: false);
-
     if (rawDispensaries.isEmpty) return const SizedBox.shrink();
 
     final isAllSelected = _selectedDispensaries.isEmpty;
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 14.0),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: t.bgCardAlt,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: t.bgRule),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.local_hospital_rounded, color: t.accent, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Assigned Camp Facilities & Mandatory Shift Schedule',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: t.textPrimary,
-                  ),
+    return _buildCard(
+      t,
+      title: 'Dispensary Camps & Operating Shift Schedule',
+      icon: Icons.local_hospital_rounded,
+      accent: const Color(0xFF10B981),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select which facility camp(s) this healthcare staff user operates at:',
+            style: TextStyle(fontSize: 12.5, color: t.textSecondary),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilterChip(
+                label: const Text('All Dispensaries (Central)'),
+                selected: isAllSelected,
+                selectedColor: t.accent.withValues(alpha: 0.18),
+                checkmarkColor: t.accent,
+                labelStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: isAllSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isAllSelected ? t.accent : t.textSecondary,
                 ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilterChip(
-                  label: const Text('All Dispensaries (Central)'),
-                  selected: isAllSelected,
-                  selectedColor: t.accent.withValues(alpha: 0.2),
+                onSelected: (selected) {
+                  setState(() {
+                    _selectedDispensaries.clear();
+                    _selectedDispensary = null;
+                    _campSessions.clear();
+                  });
+                },
+              ),
+              ...rawDispensaries.map((d) {
+                final id = (d['id'] ?? '').toString().toLowerCase().trim();
+                final label = (d['name'] ?? d['id'] ?? '').toString();
+                final isSelected = _selectedDispensaries.contains(id);
+
+                return FilterChip(
+                  label: Text(label),
+                  selected: isSelected,
+                  selectedColor: t.accent.withValues(alpha: 0.18),
                   checkmarkColor: t.accent,
                   labelStyle: TextStyle(
                     fontSize: 12,
-                    fontWeight: isAllSelected ? FontWeight.bold : FontWeight.normal,
-                    color: isAllSelected ? t.accent : t.textSecondary,
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    color: isSelected ? t.accent : t.textSecondary,
                   ),
                   onSelected: (selected) {
                     setState(() {
-                      _selectedDispensaries.clear();
-                      _selectedDispensary = null;
-                      _campSessions.clear();
+                      if (selected) {
+                        _selectedDispensaries.add(id);
+                        _campSessions[id] ??= 'morning';
+                      } else {
+                        _selectedDispensaries.remove(id);
+                        _campSessions.remove(id);
+                      }
+                      _selectedDispensary = _selectedDispensaries.isNotEmpty ? _selectedDispensaries.first : null;
                     });
                   },
-                ),
-                ...rawDispensaries.map((d) {
-                  final id = (d['id'] ?? '').toString().toLowerCase().trim();
-                  final label = (d['name'] ?? d['id'] ?? '').toString();
-                  final isSelected = _selectedDispensaries.contains(id);
-
-                  return FilterChip(
-                    label: Text(label),
-                    selected: isSelected,
-                    selectedColor: t.accent.withValues(alpha: 0.2),
-                    checkmarkColor: t.accent,
-                    labelStyle: TextStyle(
-                      fontSize: 12,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? t.accent : t.textSecondary,
-                    ),
-                    onSelected: (selected) {
-                      setState(() {
-                        if (selected) {
-                          _selectedDispensaries.add(id);
-                          _campSessions[id] ??= 'morning';
-                        } else {
-                          _selectedDispensaries.remove(id);
-                          _campSessions.remove(id);
-                        }
-                        _selectedDispensary = _selectedDispensaries.isNotEmpty ? _selectedDispensaries.first : null;
-                      });
-                    },
-                  );
-                }),
-              ],
-            ),
-            if (_selectedDispensaries.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              const Text(
-                'Mandatory Session per Selected Facility:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
-              ),
-              const SizedBox(height: 8),
-              ..._selectedDispensaries.map((campId) {
-                final match = rawDispensaries.where(
-                  (d) => (d['id'] ?? '').toString().toLowerCase().trim() == campId,
-                );
-                final campLabel = (match.isNotEmpty ? match.first['name'] : campId)?.toString() ?? campId;
-                final currentSession = _campSessions[campId] ?? 'morning';
-
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.shade50.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.teal.shade200),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.location_on, size: 16, color: Colors.teal.shade800),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          campLabel,
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.teal.shade900),
-                        ),
-                      ),
-                      const Text('Shift: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
-                      DropdownButton<String>(
-                        value: currentSession,
-                        underline: const SizedBox.shrink(),
-                        isDense: true,
-                        items: const [
-                          DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
-                          DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
-                          DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
-                          DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
-                        ],
-                        onChanged: (val) {
-                          if (val != null) {
-                            setState(() => _campSessions[campId] = val);
-                          }
-                        },
-                      ),
-                    ],
-                  ),
                 );
               }),
             ],
+          ),
+          if (_selectedDispensaries.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Mandatory Shift per Facility:',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+            ),
+            const SizedBox(height: 8),
+            ..._selectedDispensaries.map((campId) {
+              final match = rawDispensaries.where((d) => (d['id'] ?? '').toString().toLowerCase().trim() == campId);
+              final campLabel = (match.isNotEmpty ? match.first['name'] : campId)?.toString() ?? campId;
+              final currentSession = _campSessions[campId] ?? 'morning';
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF0FDFA),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFCCFBF1)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_on, size: 16, color: Color(0xFF0F766E)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        campLabel,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF134E4A)),
+                      ),
+                    ),
+                    const Text('Shift: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+                    DropdownButton<String>(
+                      value: currentSession,
+                      underline: const SizedBox.shrink(),
+                      isDense: true,
+                      items: const [
+                        DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
+                        DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
+                        DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
+                        DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() => _campSessions[campId] = val);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1361,50 +2133,32 @@ class _RegisterState extends State<Register>
 
     String bId = '';
     try { bId = _getBranchId().toLowerCase().trim(); } catch (_) {}
-
     final List<String> availableSessions = CampSessionService.getMadrassaSessions(bId);
 
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: t.bgCardAlt,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: t.bgRule),
-      ),
+    return _buildCard(
+      t,
+      title: 'Madrassa Teaching Shift / Session *',
+      icon: Icons.schedule_rounded,
+      accent: const Color(0xFF8B5CF6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Icon(Icons.schedule_rounded, color: Color(0xFF5C6BC0), size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'Madrassa Teaching Shift / Session *',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: t.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
           Text(
-            'Select which shift or session this teacher teaches (Morning, Evening, Night, or All)',
-            style: TextStyle(fontSize: 11, color: t.textTertiary),
+            'Select which teaching shift this instructor teaches:',
+            style: TextStyle(fontSize: 12, color: t.textSecondary),
           ),
           const SizedBox(height: 10),
           DropdownButtonFormField<String>(
-            value: _selectedMadrassaSession,
+            initialValue: _selectedMadrassaSession,
             isExpanded: true,
             dropdownColor: t.bgCard,
             decoration: InputDecoration(
               filled: true,
-              fillColor: t.bgCard,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              fillColor: t.bgCardAlt,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF5C6BC0), width: 2)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 2)),
             ),
             items: [
               const DropdownMenuItem(value: 'morning', child: Text('☀️ Morning Shift (صبح کا سیشن)')),
@@ -1429,14 +2183,14 @@ class _RegisterState extends State<Register>
     final hasBranch = _selectedBranch != null;
     final hintText = !hasBranch
         ? 'Select Branch first *'
-        : (_branchStudents.isEmpty ? 'No students found' : 'Select Child (Student) *');
+        : (_branchStudents.isEmpty ? 'No students found' : 'Select Associated Child (Student) *');
 
     final studentExists = _branchStudents.any((s) => s['id'] == _selectedStudentId);
     final selectedId = studentExists ? _selectedStudentId : null;
 
     return DropdownButtonFormField<String>(
       key: ValueKey('child_${_selectedBranch}_$selectedId'),
-      value: selectedId,
+      initialValue: selectedId,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
@@ -1444,7 +2198,7 @@ class _RegisterState extends State<Register>
         prefixIcon: Icon(Icons.child_care_rounded, color: t.textTertiary, size: 20),
         filled: true,
         fillColor: t.bgCardAlt,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
@@ -1461,7 +2215,7 @@ class _RegisterState extends State<Register>
               final roll = s['rollNumber'] as String? ?? '';
               return DropdownMenuItem(
                 value: id,
-                child: Text('$name (Roll: $roll)', style: TextStyle(fontSize: 14, color: t.textPrimary)),
+                child: Text('$name (Roll: $roll)', style: TextStyle(fontSize: 13.5, color: t.textPrimary)),
               );
             }).toList(),
       onChanged: !hasBranch
@@ -1475,264 +2229,28 @@ class _RegisterState extends State<Register>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [t.accent.withValues(alpha: 0.10), t.accent.withValues(alpha: 0.04)]),
+        gradient: LinearGradient(colors: [t.accent.withValues(alpha: 0.12), t.accent.withValues(alpha: 0.04)]),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: t.accent.withValues(alpha: 0.35), width: 1.5),
       ),
-      child: Row(children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(10)),
-          child: Icon(Icons.workspace_premium_rounded, color: t.accent, size: 22),
-        ),
-        const SizedBox(width: 14),
-        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Global Access Granted', style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 14)),
-          const SizedBox(height: 2),
-          Text('Full access to all branches', style: TextStyle(color: t.textSecondary, fontSize: 12)),
-        ]),
-      ]),
-    );
-  }
-
-  Widget _buildCard(RoleThemeData t, {
-    required String title,
-    required IconData icon,
-    required Color accent,
-    required Widget child,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 16, offset: const Offset(0, 4))],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Container(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.bgRule))),
-          child: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: accent.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(10)),
-              child: Icon(icon, color: accent, size: 18),
-            ),
-            const SizedBox(width: 12),
-            Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.textPrimary, letterSpacing: 0.1)),
-          ]),
-        ),
-        Padding(padding: const EdgeInsets.all(18), child: child),
-      ]),
-    );
-  }
-
-  Widget _buildRow(List<Widget> children) {
-    return Row(
-      children: children
-          .expand((w) => [Expanded(child: w), const SizedBox(width: 12)])
-          .toList()
-        ..removeLast(),
-    );
-  }
-
-  Widget _buildField(RoleThemeData t, {
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    TextInputType? keyboardType,
-    List<TextInputFormatter>? inputFormatters,
-    bool isPassword = false,
-    bool required   = false,
-    int maxLines    = 1,
-    String? Function(String?)? validator,
-  }) {
-    return TextFormField(
-      controller: controller,
-      obscureText: isPassword && _obscurePassword,
-      keyboardType: keyboardType,
-      inputFormatters: inputFormatters,
-      maxLines: maxLines,
-      style: TextStyle(fontSize: 14, color: t.textPrimary, fontWeight: FontWeight.w500),
-      decoration: InputDecoration(
-        labelText: required ? '$label *' : label,
-        labelStyle: TextStyle(fontSize: 13, color: t.textTertiary),
-        floatingLabelStyle: TextStyle(fontSize: 12, color: t.accent, fontWeight: FontWeight.w600),
-        prefixIcon: Icon(icon, color: t.textTertiary, size: 20),
-        suffixIcon: isPassword
-            ? IconButton(
-                icon: Icon(
-                    _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                    color: t.textTertiary, size: 20),
-                onPressed: () => setState(() => _obscurePassword = !_obscurePassword))
-            : null,
-        filled: true,
-        fillColor: t.bgCardAlt,
-        contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: maxLines > 1 ? 14 : 0),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
-        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
-        focusedErrorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger, width: 2)),
-        errorStyle: const TextStyle(fontSize: 11),
-      ),
-      validator: validator,
-    );
-  }
-
-  Widget _buildSimpleDropdown(RoleThemeData t, {
-    required String? value,
-    required List<String> items,
-    required String hint,
-    required IconData icon,
-    required Function(String?)? onChanged,
-    String? Function(String?)? validator,
-    String Function(String)? itemLabel,
-  }) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      hint: Text(hint, style: TextStyle(color: t.textTertiary, fontSize: 13)),
-      isExpanded: true,
-      icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
-      dropdownColor: t.bgCard,
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: t.textTertiary, size: 20),
-        filled: true,
-        fillColor: t.bgCardAlt,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.bgRule)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.accent, width: 2)),
-        errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.danger)),
-        errorStyle: const TextStyle(fontSize: 11),
-      ),
-      items: items.map((e) => DropdownMenuItem(
-          value: e,
-          child: Text(
-            itemLabel != null ? itemLabel(e) : e,
-            style: TextStyle(fontSize: 14, color: t.textPrimary),
-          ))).toList(),
-      onChanged: onChanged,
-      validator: validator,
-    );
-  }
-
-  Widget _buildSubmitButton(RoleThemeData t) {
-    return GestureDetector(
-      onTap: _loading ? null : _registerUser,
-      child: Container(
-        height: 58,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-              colors: [t.accent, t.accentLight],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight),
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [BoxShadow(color: t.accent.withValues(alpha: 0.4), blurRadius: 16, offset: const Offset(0, 6))],
-        ),
-        child: _loading
-            ? const Center(child: SizedBox(width: 24, height: 24,
-                child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white)))
-            : const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.person_add_alt_1_rounded, color: Colors.white, size: 22),
-                  SizedBox(width: 12),
-                  Text('Create Account', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                ],
-              ),
-      ),
-    );
-  }
-
-  Widget _buildLinkedEmployeeCard(RoleThemeData t) {
-    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return const SizedBox.shrink();
-    final empBox = Hive.box(LocalStorageService.employeesBox);
-    final employees = empBox.values
-        .whereType<Map>()
-        .map((e) => Map<String, dynamic>.from(e))
-        .toList();
-
-    return _buildCard(t,
-      title: 'Linked Employee Profile',
-      icon: Icons.badge_outlined,
-      accent: const Color(0xFF6366F1),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String?>(
-                  value: _selectedLinkedEmployeeId,
-                  decoration: roleInputDecoration(
-                    context,
-                    label: 'Select Employee Profile',
-                    icon: Icons.person_search_rounded,
-                  ),
-                  items: [
-                    const DropdownMenuItem<String?>(
-                      value: null,
-                      child: Text('No Employee Linked (Standalone Account)'),
-                    ),
-                    ...employees.map((emp) {
-                      final empId = emp['id']?.toString() ?? emp['localId']?.toString() ?? '';
-                      final empName = emp['name']?.toString() ?? 'Employee';
-                      final empDept = emp['department']?.toString() ?? '';
-                      final empCnic = emp['cnic']?.toString() ?? '';
-                      return DropdownMenuItem<String?>(
-                        value: empId,
-                        child: Text('$empName ${empDept.isNotEmpty ? "($empDept)" : ""} ${empCnic.isNotEmpty ? "- $empCnic" : ""}'),
-                      );
-                    }),
-                  ],
-                  onChanged: (val) {
-                    setState(() {
-                      _selectedLinkedEmployeeId = val;
-                      _matchedReasonText = 'Manually Linked by Admin';
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              Tooltip(
-                message: 'Auto-Match by CNIC, Email, Name & Role',
-                child: ElevatedButton.icon(
-                  onPressed: _autoDetectEmployeeMatch,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 16),
-                  label: const Text('Auto-Match'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF6366F1),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ),
-            ],
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: t.accentMuted, borderRadius: BorderRadius.circular(10)),
+            child: Icon(Icons.workspace_premium_rounded, color: t.accent, size: 22),
           ),
-          if (_matchedReasonText != null) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEEF2FF),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle_rounded, color: Color(0xFF4F46E5), size: 16),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'Status: $_matchedReasonText',
-                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF3730A3)),
-                    ),
-                  ),
-                ],
-              ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Global Access Granted', style: TextStyle(color: t.accent, fontWeight: FontWeight.w700, fontSize: 14)),
+                const SizedBox(height: 2),
+                Text('This executive role has cross-branch access privileges across all operations.', style: TextStyle(color: t.textSecondary, fontSize: 12)),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
